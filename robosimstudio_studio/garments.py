@@ -577,12 +577,17 @@ def garment_visuals(scene, doc=None) -> list[GarmentVisual]:
         spec = getattr(entity, "spec", None)
         material = getattr(spec, "material", None)
         cells = getattr(spec, "cells", None) if getattr(spec, "mesh", "") == "grid" else None
+        # A particle body's spec says ``color=None`` for "the material's", so the
+        # material is the second place to look before the default grey.
+        color = getattr(spec, "color", None)
+        if color is None:
+            color = getattr(getattr(entity, "material", None), "color", None)
         visuals.append(
             GarmentVisual(
                 name=name,
                 particles=handle.particles,
                 triangles=handle.triangles,
-                color=tuple(float(v) for v in getattr(spec, "color", (0.85, 0.85, 0.88))),
+                color=tuple(float(v) for v in (color if color is not None else (0.85, 0.85, 0.88))),
                 opacity=float(getattr(spec, "opacity", 1.0)),
                 # The compiler's resolved table rather than `spec.finish`: it
                 # fills one in for every deformable, stated or not, by role.

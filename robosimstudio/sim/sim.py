@@ -469,11 +469,19 @@ class Sim(EnvBase):
         }
 
     def _deformable_colors(self) -> dict[str, tuple[float, float, float]]:
-        """``deformable name -> display RGB``, off each spec's own ``color``."""
+        """``deformable name -> display RGB``, off each spec's own ``color``, else its material's.
+
+        A particle body's spec says ``color=None`` for "the material's" (rice is
+        rice-coloured unless the scene says otherwise), so the entity's resolved
+        material is the second place to look; a body with neither is left out
+        and the renderer's default applies.
+        """
         out: dict[str, tuple[float, float, float]] = {}
         for name in self.scene.handles.deformables:
             entity = self.scene.by_name.get(name)
             color = getattr(getattr(entity, "spec", None), "color", None)
+            if color is None:
+                color = getattr(getattr(entity, "material", None), "color", None)
             if color is not None:
                 out[name] = tuple(float(v) for v in color)
         return out
