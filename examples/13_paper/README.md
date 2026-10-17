@@ -29,14 +29,19 @@ Source: [`00_fold_paper.py`](00_fold_paper.py)
 
 ## Close a cardboard flap
 
-A carton-board flap hinged on the rim of an open box: push it over with a hand and it creases at the hinge and stays shut.
+![Close a cardboard flap](media/01_box_flap.webp)
 
-The box is four slabs; the flap is a strip of CARDBOARD whose bound edge is `pinned` along
-the far rim, standing out level over the bench. Drag a hand onto its free end and push it down
-over the opening: the hinge row bends past the yield and keeps it, so the flap stays down when
-the hand leaves. Board this stiff needs a better-converged solve than the default: VBD runs 20
-iterations here instead of 5 (on the drape bench a 100 mm flap sags 19 % of its length under
-its own weight at 5 iterations and 5 % at 20). The **Hinge** readout is `crease_angle` there.
+A carton-board flap standing open on the rim of a box and the left hand pointing down beside it: press **Close**, drag the hand toward the box to push the flap over, down to press it into the box, and up again, and it stays shut.
+
+The box is four slabs; the flap is a strip of CARDBOARD `pinned` on the far rim, standing up
+and leaning out 15 degrees as an opened carton's does, because a hand cannot lift one lying out
+level: the YAM's closed fingers stand 100 mm over their tips, the height of the box. Pushed over
+and pressed down near the hinge until its free edge is 74 mm under the rim, the hinge rows bend
+past the yield and keep 1.9 rad, so the flap comes back level when the hand lifts (5 mm under);
+pressed near its free end the board bends along its length instead, the hinge keeps 1.3 rad
+and the flap springs back up 26 degrees (`flapdrive.py`, GPU 7, RTX PRO 6000). Board this stiff
+needs VBD at 20 iterations instead of 5 (on the drape bench a 100 mm flap sags 19 % of its
+length at 5 and 5 % at 20), 40 ms per control step. The **Hinge** readout is `crease_angle`.
 
 ```bash
 uv run examples/13_paper/01_box_flap.py

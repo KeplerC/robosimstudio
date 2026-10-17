@@ -182,6 +182,27 @@ def _kept_bend(film) -> tuple[bool, str]:
     return straightness < 0.9, f"straightness {straightness:.3f} after release (need under 0.9)"
 
 
+def _flap_shut(film) -> tuple[bool, str]:
+    """The box flap's hinge kept 1.8 rad once the hand had gone, and its free edge rests no higher than the rim."""
+    import math
+
+    import numpy as np
+
+    from robosimstudio.assetlib.semantics.snapshot import Snapshot
+    from robosimstudio_materials.paper import crease_angle
+
+    sim, flap = film.sim, film.sim["flap"]
+    line = {"crease": {"axis": 2, "at": 0.103 + 0.02 * math.cos(math.radians(15.0))}}  # the example's hinge rows
+    flap.entity.update_probe(sim.state, sim.step_count)
+    angle = float(crease_angle(Snapshot(sim.make_context()), "flap", line)["angle"])
+    rest = np.asarray(flap.entity.rest["particle_q"], dtype=np.float64)[flap.particles]
+    edge = np.asarray(flap.particle_q, dtype=np.float64)[rest[:, 2] > rest[:, 2].max() - 0.003].mean(axis=0)
+    above = float(edge[2]) - (0.728 + 0.10)
+    return angle >= 1.8 and above < 0.015, (
+        f"the hinge kept {angle:.2f} rad (need 1.8) and the free edge is {above * 1000:+.0f} mm off the rim (need under 15)"
+    )
+
+
 def _succeeded(film) -> tuple[bool, str]:
     """The task's own verdict on the scene as the take left it."""
     result = film.sim.evaluate()[-1]
@@ -616,15 +637,25 @@ DRAFTS = (
         pending="a fold is a carry, a press and a release, which the one-handle beat does not do: "
         "the take needs a second click on the standing loop and a drag down before Release all",
     ),
-    handle(
+    # The hand, closed and pointing down, pushes the standing flap over and presses it into the box;
+    # tests/test_fold_paper_robot.py drives the same path through the panel.
+    Take(
         "examples/13_paper/01_box_flap.py",
-        "flap",
-        Corner("flap", sx=0, sy=1, inset=0.02),
-        camera=Orbit(At("flap", dz=0.05), distance=0.7, azimuth=-30.0, elevation=30.0),
-        lift=0.04,
-        across=("y", -0.14),
-        pending="the flap is closed by a hand pushing it over the box, not by a handle lifting a corner: "
-        "the take wants a Drag of the left gizmo onto the free end and down",
+        camera=Orbit(Bench(-0.05, 0.03, 0.11), distance=0.85, azimuth=30.0, elevation=30.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: right")),
+        beats=(
+            Wait(seconds=0.5, label="the flap stands open, the left hand beside it"),
+            Press(text="Close", within="Arm: left", label="Close"),
+            Wait(seconds=0.6),
+            Drag("left", "z", to=Bench(z=0.162), seconds=0.8, label="down, level with the flap"),
+            Drag("left", "y", to=Bench(y=-0.01), seconds=1.8, label="across: the hand pushes it over"),
+            Drag("left", "z", to=Bench(z=0.062), seconds=1.2, label="down: it presses the flap into the box"),
+            Wait(seconds=0.5, mark="pressed"),
+            Drag("left", "z", to=Bench(z=0.162), seconds=1.0, label="up: the hand leaves"),
+            Wait(seconds=2.5, label="the flap stays shut"),
+        ),
+        expect=(Check(_flap_shut, needs=("flap",)),),
     ),
     Take(
         "examples/09_teleop/01_force_feedback.py",
