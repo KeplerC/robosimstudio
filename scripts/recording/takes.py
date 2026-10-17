@@ -52,6 +52,7 @@ from .beats import (
     Slider,
     Toggle,
     Top,
+    Turn,
     Wait,
 )
 
@@ -186,6 +187,18 @@ def _succeeded(film) -> tuple[bool, str]:
     """The task's own verdict on the scene as the take left it."""
     result = film.sim.evaluate()[-1]
     return bool(result["success"]), f"the task says success={result['success']}"
+
+
+def _poured(film) -> tuple[bool, str]:
+    """The pour example's readout at the end: the share of the honey inside the bowl, 90% or more."""
+    import numpy as np
+
+    from robosimstudio_materials.mpm.measures import fill_fraction
+
+    # The bowl's inside as the example states it: 140 mm square about bench (0.12, -0.16), from 5 mm under the top.
+    lo, hi = np.array(film.bench((0.05, -0.23, -0.005))), np.array(film.bench((0.19, -0.09, 0.04)))
+    share = fill_fraction(np.asarray(film.sim["honey"].particle_q, dtype=np.float64), lo, hi)
+    return share >= 0.9, f"{share:.3f} of the honey in the bowl (need 0.9)"
 
 
 RIGHT = "Arm: right"
@@ -710,8 +723,8 @@ DRAFTS = (
     ),
 )
 
-# The particle kinds: a tool on the page's handle, dragged through what it works on. Drafts:
-# none has been filmed, and each take says what it would show.
+# The particle kinds. The pour is the hand's own, through the arm panel, and final; the rest are
+# a tool on the page's handle, dragged through what it works on: drafts, each saying what it would show.
 RICE_VIEW = Orbit(At("rice"), distance=0.9, azimuth=-50.0, elevation=35.0)
 PARTICLE_DRAFTS = (
     handle(
@@ -725,15 +738,38 @@ PARTICLE_DRAFTS = (
         pending="the pusher rides the handle into the tray; the clip should show the hand's sweep, the gesture "
         "tests/test_sweep_rice drives, once it is written as beats",
     ),
-    handle(
+    Take(
         "examples/11_liquid/00_pour_honey.py",
-        "cup",
-        (0.600, -0.310, 0.790),
-        camera=Orbit(At("cup"), distance=0.9, azimuth=-40.0, elevation=30.0),
-        lift=0.10,
-        across=("y", 0.22),
-        expect=(Rose("cup", 0.05, at="lifted"),),
-        pending="the handle carries the cup over the bowl; the tip is the gizmo's rotation ring, which no beat turns yet",
+        camera=Orbit(Bench(0.12, -0.235, 0.12), distance=0.8, azimuth=-25.0, elevation=24.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the hand, open, over the cup"),
+            Drag(
+                "right",
+                "z",
+                to=At("cup", dz=0.055),
+                seconds=1.4,
+                label="drag the gizmo down: the jaws straddle the cup",
+            ),
+            Wait(seconds=0.3),
+            Press(text="Close", within=RIGHT, label="Close"),
+            Wait(seconds=1.0, mark="closed", label="the pads on its walls"),
+            Drag("right", "z", 0.095, seconds=1.4, label="drag it up"),
+            Drag("right", "y", 0.14, seconds=1.6, label="and over the bowl"),
+            Wait(seconds=0.5, mark="carried"),
+            Turn("right", "z", 40.0, seconds=1.0, label="turn the gizmo 40 degrees about the vertical"),
+            Turn("right", "x", -140.0, seconds=2.0, label="and 140 about x: the wrist tips the cup"),
+            Wait(seconds=1.6, mark="poured", label="the honey pours into the bowl"),
+            Turn("right", "x", 140.0, seconds=2.0, label="back upright"),
+            Wait(seconds=0.6),
+        ),
+        expect=(
+            Rose("cup", 0.05, since="closed", at="carried"),
+            Held("cup", since="closed", at="carried"),
+            Check(_poured),
+        ),
+        budget=1_300_000,  # 19 s of a moving arm: 1,008 KB at the ladder's last quality, over the default 900
     ),
     handle(
         "examples/11_liquid/01_wipe_spill.py",

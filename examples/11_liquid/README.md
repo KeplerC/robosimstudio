@@ -12,19 +12,20 @@ walls leak without a margin), and the shared implementation is
 
 ## Pour honey into a bowl
 
-A cup of honey standing beside a bowl: click the cup, drag it over the bowl and tip it with the gizmo's rotation ring.
+![Pour honey into a bowl](media/00_pour_honey.webp)
 
-Honey rather than water, because Newton 1.6's water preset loses volume at
-tabletop scale (see `robosimstudio_materials.liquid`). The cup is one rigid
-body with 8 mm walls -- two voxels -- and is named in the honey's `containers`,
-which gives its shapes the half-voxel margin a liquid needs to stay inside under
-graph capture; `rss.LIQUID_120HZ` keeps the cup on the robot's island, turns
-the granular projection off and steps the MPM twice per control step, because
-honey falling from the lip to the bowl is faster after 7 mm than a 60 Hz step
-can catch at a floor (poured from 100 mm, 60 Hz lost 85 of these 8,000
-particles through the bowl and the bench and put 4% in the bowl; 120 Hz lost
-none and put 42%). The panel counts the honey in the bowl. 30.0 ms per
-control step for 8,000 particles on an RTX PRO 6000, graph-captured.
+A cup of honey under the right hand and a bowl beside it: drag the hand down until its open jaws straddle the cup, close on it, drag it up and across over the bowl, then turn the gizmo 40 degrees about the vertical and 140 degrees about the axis pointing away from the robot.
+
+The jaws open 94 mm and the cup is 66 mm across, so they close on its outside walls; it is a rigid body on
+the arm's island (`rss.LIQUID_120HZ`), held by friction, its 8 mm walls named in the honey's `containers`
+for the margin a liquid needs. The arm sags about 30 mm under 0.48 kg of cup and honey: lift the gizmo
+150 mm over the bench to clear the bowl's 40 mm walls. The wrist's last joint stops at 120 degrees, and a
+roll alone tipped the cup 117: the honey crept along the wall and 17% was in the bowl after 12 s held
+(`robot_pour`, GPU 1). The turn about the vertical first lets the arm reach 140, where the honey leaves
+the cup in one mass within a second: 99% or more in the bowl, 0 to 8 of the 8,000 particles through the
+bench where it lands, the cup 7 mm along the pads (`tests/test_pour_honey`, GPU 1, RTX PRO 6000). Honey,
+because Newton 1.6's water preset loses volume (`robosimstudio_materials.liquid`). The panel counts the
+honey in the bowl. 29.8 ms per control step, graph-captured.
 
 ```bash
 uv run examples/11_liquid/00_pour_honey.py
