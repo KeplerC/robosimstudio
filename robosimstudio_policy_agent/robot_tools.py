@@ -223,7 +223,7 @@ class RobotTools:
             # From the hand's own declaration, not inferred from how many joints
             # it drives or which signs they run on: two of these hands are
             # parallel jaws that satisfy neither of those heuristics.
-            "kind": "geared" if hand.geared else "prismatic",
+            "kind": "suction" if hand.suction_pad else "geared" if hand.geared else "prismatic",
             "dof": len(handle.gripper_coords),
             "span_m": span,
             "open_footprint_m": 2.0 * float(hand.pad_half_span) if hand.pad_half_span else span,
