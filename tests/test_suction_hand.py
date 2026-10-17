@@ -9,7 +9,7 @@ for the whole two-root robot with the reason. :func:`face_on_box` reads gap,
 tilt and cover off synthetic poses, :meth:`Suction.seal` turns them into the
 sentences the page shows, and ``sim.vacuum`` appears only on a robot with a cup,
 is tagged privileged, and maps its arguments onto :meth:`Suction.hold` and
-:meth:`Suction.release`.
+:meth:`Suction.release`. Only a robot carrying a cup is kept to one world.
 """
 
 from __future__ import annotations
@@ -86,6 +86,22 @@ class TestThePairing(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("ArmSpec.gripper", why)
         self.assertEqual((True, ""), _admits_gripper(get_embodiment("panda"), "suction"))
+
+
+class TestOnlyACupKeepsARobotToOneWorld(unittest.TestCase):
+    """The compiler refuses to replicate an entity that puts kernels in the substep.
+
+    A cup's wrench is such a kernel and addresses world 0 alone; a robot with
+    jaws has none and replicates, as every robot did before cups existed.
+    """
+
+    def test_jaws_replicate_and_a_cup_is_refused(self) -> None:
+        from robosimstudio.robots.entity import EntityEmbodiment
+        from robosimstudio.robots.registry import get_embodiment
+        from robosimstudio.scene.compiler import _adds_substep_kernels
+
+        self.assertFalse(_adds_substep_kernels(EntityEmbodiment(get_embodiment("yam_bimanual"))))
+        self.assertTrue(_adds_substep_kernels(EntityEmbodiment(get_embodiment("yam_bimanual_suction"))))
 
 
 class TestTheSealGeometry(unittest.TestCase):

@@ -974,12 +974,27 @@ def _run_ready(pipeline, lifecycle) -> None:
             capture()
 
 
+def _adds_substep_kernels(entity: Any) -> bool:
+    """Whether ``entity`` puts kernels in the substep block.
+
+    Its class overriding ``contribute_hooks`` is what says so, unless the
+    instance answers ``adds_substep_kernels = False``: a class whose kernels
+    belong to only some of its instances says which ones. A robot is that case,
+    because only a vacuum cup's wrench is a kernel, and a robot with jaws must
+    replicate as it did before cups existed.
+    """
+    if type(entity).contribute_hooks is Entity.contribute_hooks:
+        return False
+    return bool(getattr(entity, "adds_substep_kernels", True))
+
+
 def _replication_refusal(base: _BaseBuild, request: SceneRequest) -> str:
     """Why this scene must not be replicated yet, or empty when it may be.
 
     Refusing by *capability* rather than by a list of task names, and the
     capability is narrow: an entity that contributes **substep kernels** with
-    world-0 particle and body indices baked into them. Replicated, every world's
+    world-0 particle and body indices baked into them (its ``contribute_hooks``,
+    as :func:`_adds_substep_kernels` reads it). Replicated, every world's
     physics would run against world 0's arrays -- plausible motion in the wrong
     place, which is the failure worth refusing where it can still be named. An
     entity whose kernels are written per world says so with
@@ -995,7 +1010,7 @@ def _replication_refusal(base: _BaseBuild, request: SceneRequest) -> str:
     contributors = sorted(
         entity.name
         for entity in base.entities
-        if type(entity).contribute_hooks is not Entity.contribute_hooks and not getattr(entity, "world_aware", False)
+        if _adds_substep_kernels(entity) and not getattr(entity, "world_aware", False)
     )
     if contributors:
         return f"these entities contribute substep physics written for one world: {', '.join(contributors)}"

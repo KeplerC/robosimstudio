@@ -1305,6 +1305,16 @@ class EntityEmbodiment(Entity):
         self._home_target = self.home_target_q()
 
     # -------------------------------------------------------------- phase 3
+    @property
+    def adds_substep_kernels(self) -> bool:
+        """Whether this robot puts a kernel in the substep: only a vacuum cup's wrench does.
+
+        The compiler's replication refusal reads it, so a robot without a cup
+        replicates and one with a cup is refused by name: the cup's wrench and
+        weld rows address world 0 alone.
+        """
+        return any(hand is not None and hand.suction_pad for hand in self.hands.values())
+
     def contribute_hooks(self, hooks) -> None:
         """Each vacuum cup's wrench kernel, so it is in the graph from the first capture."""
         for suction in self.suctions.values():
