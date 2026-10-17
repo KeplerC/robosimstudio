@@ -12,14 +12,20 @@ through a line.
 
 ## Fold a sheet of paper
 
-An A4 sheet of copy paper on the bench between two YAM arms: carry a corner over, press the fold flat, let go, and it stays folded.
+![Fold a sheet of paper](media/00_fold_paper.webp)
 
-Click the sheet to pin a patch to a handle and carry it over the far half; click the standing
-loop for a second handle and press it flat, or push it down with a hand. Press **Release all**:
-the hinges bent past the yield keep their angle, so the flap stays where it was pressed instead
-of springing open. The **Crease** folder reads `crease_angle` through the sheet's centreline
-(how far the sheet stays turned there, in radians) and `fold_extent` (its span across that
-line over its flat span). Set `yield_angle` to 0 under **Material** and the same fold springs open.
+An A4 sheet of copy paper between two YAM arms: close both hands, press the left one down on the far end, put the right one on the near edge and tick **Edge on the right hand**, carry the edge up, across and down onto the middle, stamp the fold flat with the left hand, untick, and the sheet stays folded in thirds.
+
+The carry is an attachment grasp and the page says so: ticked, the row along the near edge is
+pinned at the right hand's frame, because the YAM's pads cannot pinch a sheet lying flat, nor
+one hanging over the bench's edge, where the inner finger cannot get under the drape. The rest
+is contact. Unheld, the sheet slides 0.29 m along the bench ahead of its own fold; the left hand
+pressing the far end keeps it within 2 mm. The crease is the left hand's: the flat underside of
+its closed fingers stamps the loop at three places along the fold while the right hand still holds
+the edge down, and the hinges bent past the yield keep 2.3 to 3.1 rad over three drives
+(`foldletter.py`, GPU 7); pressed after the edge is let go, the loop rolls open instead (1.4). The
+**Crease** folder reads `crease_angle` through the fold line and `fold_extent` (the sheet's span
+over its flat span). Set `yield_angle` to 0 under **Material** and the same fold springs open.
 
 ```bash
 uv run examples/13_paper/00_fold_paper.py
