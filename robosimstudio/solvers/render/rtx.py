@@ -77,7 +77,10 @@ the stage before OVRTX opens it:
 * **One mesh per deformable.** Newton logs every cloth triangle in the model as
   one ``/model/triangles`` prim, so a film and a sponge in one scene would share
   a material. Each :class:`~robosimstudio.scene.handles.DeformableHandle` is
-  logged as its own mesh, with smooth normals and planar UVs.
+  logged as its own mesh, with smooth normals and planar UVs. A particle body
+  (:mod:`robosimstudio.core.render.particles`) is logged as the surface its
+  handle regrows each frame -- a ``dynamic`` mesh whose counts change -- or,
+  without one, as a point instancer of spheres at its particle radius.
 * **A lighting preset and a backdrop.** ``"lab"`` is a neutral dome (optionally
   an HDR image) under one large panel light, and a
   :func:`~robosimstudio.core.render.scenery.register_scenery` builder may add
@@ -114,6 +117,7 @@ from robosimstudio.core.cameras import CameraSpec
 from robosimstudio.core.render.base import FrameSet, RendererBase
 from robosimstudio.core.render.finish import Finish, finish_for, texture_path
 from robosimstudio.core.render.palette import srgb_to_linear
+from robosimstudio.core.render.particles import draws_points, surface_mesh
 from robosimstudio.core.render.scenery import box_mesh, get_scenery
 from robosimstudio.core.render.spec import put
 from robosimstudio.core.render.uv import box_projected_uvs, planar_uvs
@@ -275,6 +279,8 @@ def _viewer_class():
             self._decorate = decorate
             self._deformables = dict(deformables or {})
             self._deformable_cache: dict[str, tuple] | None = None
+            self._surfaces: dict[str, dict] = {}
+            self._points: dict[str, dict] = {}
             self.live_paths: dict[int, str] = {}
             super().__init__(**kwargs)
 
@@ -378,6 +384,21 @@ def _viewer_class():
             if self._deformable_cache is None:
                 self._deformable_cache = self._build_deformable_cache(state)
             hidden = not self.show_triangles or self._layer_force_hidden()
+            if self._surfaces or self._points:
+                # One readback for every particle body; each is a host-side
+                # draw (a surface regrown on the host's say-so, a point batch
+                # the viewer packs on the host) whatever is done here.
+                particle_q = state.particle_q.numpy()
+                for name, surface in self._surfaces.items():
+                    self._log_surface(name, surface, particle_q[surface["particles"]], hidden)
+                for name, batch in self._points.items():
+                    self.log_points(
+                        self._qualify(f"/model/deformables/{name}/points"),
+                        particle_q[batch["particles"]],
+                        radii=batch["radius"],
+                        colors=_deformable_color(self, name),
+                        hidden=hidden,
+                    )
             for name, (idx, tris, tris_np, out, uvs) in self._deformable_cache.items():
                 tube = self._tubes.get(name)
                 if tube is not None:
@@ -408,14 +429,60 @@ def _viewer_class():
                     backface_culling=False,
                 )
 
+        def _log_surface(self, name: str, surface: dict, positions: np.ndarray, hidden: bool) -> None:
+            """A particle body's surface, regrown from this frame's positions and re-logged whole.
+
+            ``dynamic=True`` is Newton's own channel for a mesh whose vertex
+            and face counts change between frames: in the build phase the prim
+            is authored with time-sampled topology, and afterwards points,
+            normals, ``faceVertexCounts`` and ``faceVertexIndices`` are all
+            rewritten through the attribute API, which is how Newton's
+            dam-break example draws its water under this same viewer. A
+            surface that comes back empty logs as an empty, hidden mesh rather
+            than being skipped, so the prim never shows a stale frame.
+            """
+            verts, tris, normals = surface_mesh(surface["handle"].surface, positions)
+            path = self._qualify(f"/model/deformables/{name}")
+            if not len(verts):
+                self.log_mesh(path, *surface["empty"], hidden=True, backface_culling=False, dynamic=True)
+                return
+            if normals is None:
+                normals = _vertex_normals(verts, tris)
+            self.log_mesh(
+                path,
+                wp.array(verts, dtype=wp.vec3, device=self.device),
+                wp.array(tris.reshape(-1), dtype=wp.int32, device=self.device),
+                wp.array(np.asarray(normals, dtype=np.float32), dtype=wp.vec3, device=self.device),
+                hidden=hidden,
+                backface_culling=False,
+                dynamic=True,
+            )
+
         def _build_deformable_cache(self, state) -> dict[str, tuple]:
             cache: dict[str, tuple] = {}
             self._tubes: dict[str, dict] = {}
+            self._surfaces: dict[str, dict] = {}
+            self._points: dict[str, dict] = {}
             rest = state.particle_q.numpy()
             for name, handle in self._deformables.items():
                 particles = np.asarray(handle.particles, dtype=np.int32)
                 tris_np = np.asarray(handle.triangles, dtype=np.int32).reshape(-1, 3)
                 radius = float(getattr(handle, "tube_radius", 0.0) or 0.0)
+                if len(particles) and draws_points(handle):
+                    # A particle body: the surface its handle offers, regrown
+                    # each frame, else one sphere instance per particle at its
+                    # radius -- a PointInstancer, which is one prototype and an
+                    # array of positions, not a prim per grain.
+                    if getattr(handle, "surface", None) is not None:
+                        empty = (
+                            wp.empty(0, dtype=wp.vec3, device=self.device),
+                            wp.empty(0, dtype=wp.int32, device=self.device),
+                            wp.empty(0, dtype=wp.vec3, device=self.device),
+                        )
+                        self._surfaces[name] = {"handle": handle, "particles": particles, "empty": empty}
+                    else:
+                        self._points[name] = {"particles": particles, "radius": float(handle.point_radius)}
+                    continue
                 if len(particles) >= 2 and len(tris_np) == 0 and radius > 0.0:
                     # A centerline: a tube swept along it, rebuilt every frame.
                     sides = TUBE_SIDES
@@ -978,13 +1045,13 @@ def decorate_stage(
     viewer.live_paths = live_paths
 
     for name, finish in (deformable_finishes or {}).items():
-        prim = stage.GetPrimAtPath(viewer._get_path(viewer._qualify(f"/model/deformables/{name}")))
-        if not prim:
-            continue
-        color = None
-        handle_color = getattr(finish, "_color", None)
-        del handle_color
-        library.bind(prim, finish, _deformable_color(viewer, name))
+        # The mesh a sheet, a tube or a particle surface is logged as, and the
+        # point instancer a particle body without a surface is logged as; a
+        # scene has one or the other under each name.
+        for suffix in ("", "/points"):
+            prim = stage.GetPrimAtPath(viewer._get_path(viewer._qualify(f"/model/deformables/{name}{suffix}")))
+            if prim:
+                library.bind(prim, finish, _deformable_color(viewer, name))
 
     center = (0.0, 0.0)
     if cell is not None:

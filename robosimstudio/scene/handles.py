@@ -267,17 +267,22 @@ class DeformableHandle:
     surface: Any = None
     """For a particle body, a callable a renderer *may* call to get a surface
     mesh over the particles in their current positions -- ``surface(positions)
-    -> (vertices, triangles, normals)`` with ``positions`` the handle's
-    particles' ``[n, 3]`` world coordinates (a host array or a device one),
-    and the three results device arrays: ``vertices`` ``[m]`` of ``vec3``,
-    ``triangles`` ``[k, 3]`` of ``int32`` into them, ``normals`` ``[m]`` of
-    ``vec3``; all three empty when the reconstruction finds no triangles. Or
-    ``None`` when the body offers no surfacing. The mesh's vertex count varies
-    from frame to frame, which is why it is a callable here rather than a fixed
-    ``triangles`` array: a renderer that can re-log a varying mesh per frame
-    (the path tracer) calls it, and one that cannot (the studio page) draws the
-    points. The particle kinds install it when their spec says
-    ``render="surface"`` (``robosimstudio_materials.mpm.EntityParticleBody.surface_mesh``)."""
+    -> (vertices, triangles)`` or ``(vertices, triangles, normals)``, with
+    ``positions`` the handle's particles' ``[n, 3]`` world coordinates -- or
+    ``None`` when the body offers no surfacing. The arrays may be warp or numpy
+    and the triangles flat or ``[k, 3]``; ``None`` for the vertices means
+    nothing to draw this frame
+    (:func:`~robosimstudio.core.render.particles.surface_mesh` reads all of
+    those). The mesh's vertex count varies from frame to frame, which is why it
+    is a callable here rather than a fixed ``triangles`` array: the path tracer
+    re-logs the varying mesh, and the studio page re-adds its mesh node when the
+    counts change and rewrites the vertices in place when they do not. Both
+    prefer it to the points when it is set. It must be a function of
+    ``positions`` and nothing else -- never of a solver's own state -- so that
+    an offline replay of a recorded ``particle_q`` regrows the same surface;
+    :class:`~robosimstudio.core.render.particles.ParticleSurfacer` is one, and the
+    particle kinds install one when their spec says ``render="surface"``
+    (``robosimstudio_materials.mpm.EntityParticleBody.surface_mesh``)."""
 
 
 @dataclass

@@ -57,6 +57,18 @@ its handle says it is: a tube of
 the nodes, the same tube the path tracer draws (one mesh, its faces fixed, its
 vertices rewritten each frame). Never fluffy: a cable has no pile.
 
+A **particle body** -- a heap of rice, a pool, a lump of dough: particles with
+no triangle, no tube and no order, which the handle marks with a positive
+:attr:`~robosimstudio.scene.handles.DeformableHandle.point_radius` -- is drawn
+as one point cloud, each particle a disc of its own diameter in the entity's
+colour, the positions rewritten each frame into the one node. When the handle
+also offers a :attr:`~robosimstudio.scene.handles.DeformableHandle.surface`,
+the page prefers it: a mesh regrown from the live positions every frame, whose
+vertex count changes as the body moves, so the node is re-added when the counts
+change and its vertices rewritten in place when they do not. The same two rules
+the path tracer applies, read through the same functions
+(:mod:`robosimstudio.core.render.particles`). Never fluffy, never shelled.
+
 What decides thickness is the material, not this module:
 ``ClothMaterialSpec.thickness`` is real fabric data (5 mm terry, 3 mm fleece)
 that a membrane records even though its solver geometry cannot carry it. A
@@ -76,6 +88,7 @@ import numpy as np
 
 from robosimstudio.core.profile import NULL as NULL_PROFILE
 from robosimstudio.core.render.finish import DEFAULT as DEFAULT_FINISH
+from robosimstudio.core.render.particles import draws_points, surface_mesh
 from robosimstudio.core.render.uv import box_projected_uvs
 from robosimstudio.core.render.visual import TUBE_SIDES, tube_points, tube_triangles
 from robosimstudio.core.shell import shell_faces
@@ -263,6 +276,13 @@ class GarmentVisual:
             :data:`~robosimstudio.core.render.visual.TUBE_SIDES` vertices per
             node, and :meth:`surface` sweeps the vertices. Ignored by anything
             that has triangles of its own.
+        point_radius: The handle's own: for a particle body -- no triangles,
+            no tube -- the radius each particle is drawn at, as a disc of twice
+            it. Then :attr:`is_points` is set and nothing here is shelled,
+            banded or fuzzed.
+        surfacer: The handle's ``surface`` callable, or ``None``. Set, a
+            particle body draws as the mesh it returns over the live positions
+            instead of as points.
     """
 
     name: str
@@ -277,8 +297,11 @@ class GarmentVisual:
     crease_axis: int = 1
     finish: Any = None
     tube_radius: float = 0.0
+    point_radius: float = 0.0
+    surfacer: Any = field(default=None, repr=False)
 
     is_tube: bool = field(default=False, init=False)
+    is_points: bool = field(default=False, init=False)
     shell_triangles: np.ndarray | None = field(default=None, repr=False)
     band_drawn: np.ndarray | None = field(default=None, repr=False)
     band_mid: np.ndarray | None = field(default=None, repr=False)
@@ -288,6 +311,12 @@ class GarmentVisual:
     def __post_init__(self) -> None:
         self.particles = np.asarray(self.particles, dtype=np.int64).reshape(-1)
         self.triangles = np.asarray(self.triangles, dtype=np.int64).reshape(-1, 3)
+        if draws_points(self) and len(self.particles):
+            # The renderers' shared rule: a particle body is points, or the
+            # surface its handle offers. No shell and no bands: there is no
+            # fabric here to be thick about.
+            self.is_points = True
+            return
         if self.tube_radius > 0.0 and not len(self.triangles) and len(self.particles) >= 2:
             # The path tracer's rule (``rtx._build_deformable_cache``), so the
             # page and a render agree about which deformables are curves.
@@ -564,6 +593,8 @@ def garment_visuals(scene, doc=None) -> list[GarmentVisual]:
                 grid_cells=tuple(int(c) for c in cells) if cells is not None else None,
                 crease_axis=_declared_crease_axis(doc, name),
                 tube_radius=float(getattr(handle, "tube_radius", 0.0) or 0.0),
+                point_radius=float(getattr(handle, "point_radius", 0.0) or 0.0),
+                surfacer=getattr(handle, "surface", None),
             )
         )
     return visuals
@@ -604,6 +635,7 @@ class ViewerStudio(newton.viewer.ViewerViser):
         self._garments: list[GarmentVisual] = []
         self._sheets: list[GarmentVisual] = []
         self._tubes: list[GarmentVisual] = []
+        self._points: list[GarmentVisual] = []
         self._garment_style: str = "fluffy"
         self._garment_nodes: dict[str, Any] = {}
         self._garment_hidden: dict[str, bool] = {}
@@ -641,13 +673,14 @@ class ViewerStudio(newton.viewer.ViewerViser):
         garments -- the tape film, or everything when nothing was declared --
         keep the viewer's own single-mesh draw, so a scene this module has
         never heard of looks exactly as it always did. A centerline is drawn
-        as its tube in every style: it has no triangles for the flat draw to
-        fall back on.
+        as its tube in every style, and a particle body as its points or its
+        surface: neither has triangles for the flat draw to fall back on.
         """
         self._retire_garment_nodes()
         self._garments = list(garments)
-        self._sheets = [g for g in self._garments if not g.is_tube]
+        self._sheets = [g for g in self._garments if not (g.is_tube or g.is_points)]
         self._tubes = [g for g in self._garments if g.is_tube]
+        self._points = [g for g in self._garments if g.is_points]
         self._leftover_faces = None
         if self.model is None or not self.model.tri_count or not self._garments:
             return
@@ -688,7 +721,7 @@ class ViewerStudio(newton.viewer.ViewerViser):
         self._retire_pbr_nodes()
         clear_glb_cache()
         self._retire_garment_nodes()
-        self._garments, self._sheets, self._tubes = [], [], []
+        self._garments, self._sheets, self._tubes, self._points = [], [], [], []
         self._leftover_faces = None
         self._host_shape_color = None
         super().clear_model()
@@ -1026,14 +1059,17 @@ class ViewerStudio(newton.viewer.ViewerViser):
     # ------------------------------------------------------------------- draw
     def _log_triangles(self, state) -> None:
         model = self.model
-        if model is None or not (model.tri_count or self._tubes):
+        if model is None or not (model.tri_count or self._tubes or self._points):
             return
         hidden = not self.show_triangles or self._layer_force_hidden()
         # The sheets on the viewer's own single mesh: nothing declared, or asked for.
         flat = not self._sheets or self._garment_style == "flat"
         if flat and model.tri_count:
             self._log_triangles_flat(state, hidden)
-        if flat and not self._tubes:
+        # A tube and a particle body have no triangles in the model, so the
+        # flat draw cannot stand in for them: they are drawn in every style.
+        own = self._tubes + self._points
+        if flat and not own:
             return
 
         if not flat:
@@ -1041,7 +1077,7 @@ class ViewerStudio(newton.viewer.ViewerViser):
         with self.profile.phase("iter.draw.garments"):
             with self.profile.phase("iter.draw.garments.readback"):
                 points = self._to_numpy(self._apply_layer_transform_to_points(state.particle_q)).astype(np.float64)
-            for garment in self._tubes if flat else self._garments:
+            for garment in own if flat else self._garments:
                 self._draw_garment(garment, points, hidden)
             if not flat and self._leftover_faces is not None and len(self._leftover_faces):
                 self._draw_mesh_node("/model/garments/other", points, self._leftover_faces, CLOTH_COLOR, hidden)
@@ -1063,9 +1099,12 @@ class ViewerStudio(newton.viewer.ViewerViser):
         base = f"/model/garments/{garment.name}"
         fluffy = self._garment_style == "fluffy" and garment.has_body
         if hidden:
-            for suffix in ("", "/band", "/fur0", "/fur1", "/fuzz", "/tufts"):
+            for suffix in ("", "/band", "/fur0", "/fur1", "/fuzz", "/tufts", "/points", "/surface"):
                 key = self._qualify(base + suffix)
                 self._set_hidden(key, self._garment_nodes.get(key), True)
+            return
+        if garment.is_points:
+            self._draw_particles(garment, base, points, hidden)
             return
 
         prof = self.profile
@@ -1243,6 +1282,103 @@ class ViewerStudio(newton.viewer.ViewerViser):
             # Center-to-edge falloff: the soft dot that reads as a tuft.
             point_shading="gradient",
             precision="float16",
+            visible=not hidden,
+        )
+        self._garment_nodes[name] = handle
+        self._garment_hidden[name] = hidden
+
+    # -------------------------------------------------------- particle bodies
+    def _draw_particles(self, garment: GarmentVisual, base: str, points: np.ndarray, hidden: bool) -> None:
+        """A particle body: the surface its handle offers, else its points.
+
+        Either way one node under the garment's base, the other kept hidden
+        rather than removed, so a surface that comes back empty for a frame
+        (a few grains too scattered to wrap) leaves the points showing and
+        nothing flickers in and out of the scene graph.
+        """
+        prof = self.profile
+        color = tuple(int(round(255 * c)) for c in garment.color)
+        positions = points[garment.particles]
+        if garment.surfacer is not None:
+            with prof.phase("iter.draw.garments.surface"):
+                verts, faces, normals = surface_mesh(garment.surfacer, positions)
+            del normals  # viser lights its own
+            if len(verts):
+                self._draw_surface_node(f"{base}/surface", verts, faces, color, hidden, opacity=garment.opacity)
+                self._set_hidden(*self._node(f"{base}/points"), True)
+                return
+            self._set_hidden(*self._node(f"{base}/surface"), True)
+        with prof.phase("iter.draw.garments.points"):
+            self._draw_points_node(f"{base}/points", positions, color, 2.0 * garment.point_radius, hidden)
+
+    def _node(self, name: str) -> tuple[str, Any]:
+        name = self._qualify(name)
+        return name, self._garment_nodes.get(name)
+
+    def _draw_surface_node(
+        self,
+        name: str,
+        vertices: np.ndarray,
+        faces: np.ndarray,
+        color: tuple[int, int, int],
+        hidden: bool,
+        *,
+        opacity: float = 1.0,
+    ) -> None:
+        """A mesh whose vertex count may change: rewritten in place while the counts hold, re-added when they move.
+
+        viser's mesh handle takes new ``vertices`` and new ``faces`` as two
+        separate messages, and between them the client would hold faces that
+        index vertices it does not have; one ``add_mesh_simple`` under the same
+        name replaces the node whole.
+        """
+        name, handle = self._node(name)
+        if handle is not None and not hidden:
+            try:
+                if len(handle.vertices) == len(vertices) and len(handle.faces) == len(faces):
+                    handle.vertices = vertices.astype(np.float32)
+                    self._set_hidden(name, handle, False)
+                    return
+            except Exception:
+                pass
+        if handle is not None and hidden:
+            self._set_hidden(name, handle, True)
+            return
+        handle = self._server.scene.add_mesh_simple(
+            name,
+            vertices=vertices.astype(np.float32),
+            faces=np.asarray(faces, dtype=np.uint32),
+            color=color,
+            opacity=None if opacity >= 1.0 else float(opacity),
+            flat_shading=False,
+            side="double",
+            cast_shadow=opacity >= 1.0,
+            receive_shadow=opacity >= 1.0,
+            visible=not hidden,
+        )
+        self._garment_nodes[name] = handle
+        self._garment_hidden[name] = hidden
+
+    def _draw_points_node(
+        self, name: str, points: np.ndarray, color: tuple[int, int, int], size: float, hidden: bool
+    ) -> None:
+        """One disc per particle, its diameter the particle's, in the entity's colour."""
+        name, handle = self._node(name)
+        if handle is not None:
+            try:
+                if not hidden:
+                    handle.points = points.astype(np.float32)
+                self._set_hidden(name, handle, hidden)
+                return
+            except Exception:
+                handle = None
+        handle = self._server.scene.add_point_cloud(
+            name,
+            points=points.astype(np.float32),
+            colors=np.asarray(color, dtype=np.uint8),
+            point_size=float(size),
+            point_shape="circle",
+            point_shading="gradient",
             visible=not hidden,
         )
         self._garment_nodes[name] = handle
