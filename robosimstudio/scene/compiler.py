@@ -46,6 +46,7 @@ from robosimstudio.core.lifecycle import TaskSchedule, steps_of
 from robosimstudio.core.pipeline import ScenePipeline
 from robosimstudio.core.render.finish import Finish
 from robosimstudio.core.render.palette import FLOOR
+from robosimstudio.core.streams import quiet_gc
 from robosimstudio.core.worlds import WorldMap
 from robosimstudio.scene.physics.world import REPLICATED_HOSTS
 from robosimstudio.specs import IDENTITY, Binding, CellSpec, EmbodimentSpec, Episode, Xform, replace
@@ -315,7 +316,7 @@ def compile_scene(
         # varies nothing and should not have to say so.
         episode = Episode(episode_id=0, seed=0)
 
-    with wp.ScopedDevice(device) if device else _null_scope():
+    with quiet_gc(), wp.ScopedDevice(device) if device else _null_scope():
         if num_worlds == 1:
             return _compile(
                 request,

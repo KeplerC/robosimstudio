@@ -17,9 +17,11 @@ the lock a capture takes.
 
 from __future__ import annotations
 
+import gc
 import threading
 import unittest
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest import mock
 
 from robosimstudio.core import streams
@@ -101,3 +103,52 @@ class TestSerialization(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _Finalised:
+    """An object in a reference cycle whose finaliser records when it ran."""
+
+    log: ClassVar[list[str]] = []
+
+    def __init__(self):
+        self.me = self
+
+    def __del__(self):
+        _Finalised.log.append("finalised")
+
+
+class TestQuietGc(unittest.TestCase):
+    """A dropped cycle is finalised on the way in, never inside the block."""
+
+    def setUp(self):
+        _Finalised.log = []
+        gc.collect()
+
+    def test_what_was_dropped_dies_before_the_block_and_nothing_dies_inside_it(self):
+        _Finalised()  # dropped at once, but it is a cycle: it waits for the collector
+        self.assertEqual([], _Finalised.log)
+        with streams.quiet_gc():
+            self.assertEqual(["finalised"], _Finalised.log, "collected on the way in")
+            _Finalised()
+            churn = [[[]] * 10 for _ in range(5000)]  # allocation that would normally let a collection fire
+            del churn
+            self.assertEqual(["finalised"], _Finalised.log, "the collector is off inside the block")
+            self.assertFalse(gc.isenabled())
+        self.assertEqual(["finalised", "finalised"], _Finalised.log, "the block's own garbage goes on the way out")
+        self.assertTrue(gc.isenabled())
+
+    def test_nesting_leaves_the_collector_as_the_outermost_block_found_it(self):
+        with streams.quiet_gc():
+            with streams.quiet_gc():
+                self.assertFalse(gc.isenabled())
+            self.assertFalse(gc.isenabled(), "the inner block does not turn it back on")
+        self.assertTrue(gc.isenabled())
+
+    def test_a_disabled_collector_stays_disabled(self):
+        gc.disable()
+        try:
+            with streams.quiet_gc():
+                pass
+            self.assertFalse(gc.isenabled())
+        finally:
+            gc.enable()
