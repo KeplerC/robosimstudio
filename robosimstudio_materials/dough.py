@@ -8,7 +8,7 @@ module is the domain, the entity that names it, the constructor and the presets.
 
 A plastic solid here is a finite Young's modulus (5e6 Pa), a tensile yield
 ratio of 1 so it holds together, and a deviatoric yield stress that decides how
-it flows under a press. Measured in the Phase 0 press probe (``probe_c_dough``:
+it flows under a press. Measured in a press probe (``probe_c_dough``:
 an 80x80x30 mm block, a 100 mm plate pressed 15 mm in, held, released; Newton
 1.6.0, RTX PRO 6000): at 1e3 Pa the block spreads to 1.15x its footprint under
 the plate, 1.21x after release, and keeps 83% of the compression -- the dough;

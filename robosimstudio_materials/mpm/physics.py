@@ -14,7 +14,7 @@ reason).
 
 The rate is ``GENERIC``'s: sixteen substeps at 60 Hz. The heap and the lump
 step the MPM once per control step (``step_hz=60``, the registered default),
-the pool twice (``step_hz=120``). Measured by the core agent on an RTX PRO 6000
+the pool twice (``step_hz=120``). Measured on an RTX PRO 6000
 with Newton 1.6.0, graph-captured: a 28,812-particle rice bed beside the YAM
 bimanual on ``bench_075`` costs 15.6 ms per control step at 60 Hz and 25.9 ms
 at 120 Hz (the robot alone is 4.2 ms). What the rate buys is travel per MPM
@@ -104,8 +104,8 @@ DOUGH_ITERATIONS = 150
 
 A soft solid (E 5e6) is not converged at 50 iterations and 1e-4, and what an
 unconverged step loses is volume: a 60 mm by 40 mm puck of the dough preset at
-rest on the bench, nothing touching it, lost 17% of its height in 1.7 s and
-28% in 4.2 s at 50 iterations (``probe2``/``probe5``, RTX PRO 6000, Newton
+rest on the bench, nothing touching it, lost 17% of its height half a second
+after settling and 24% after 2 s at 50 iterations (``probe5``, RTX PRO 6000, Newton
 1.6.0, graph-captured, beside the YAM). 100 iterations: 2.7% in 2 s at 19.5 ms
 per control step; 150: 1.1% at 23.4 ms; 250: 0.2% at 31.1 ms; 50 cost 15.7 ms.
 150 is the last rung inside the 25 ms the GENERIC scene was budgeted. A

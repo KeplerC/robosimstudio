@@ -7,12 +7,12 @@ with the granular and dough kinds in :mod:`robosimstudio_materials.mpm`; this
 module is the domain, the entity that names it, the constructor and the presets.
 
 Three facts about liquids in Newton 1.6.0 shape everything here, the first two
-measured in the Phase 0 cup probe (``probe_c_water``, RTX PRO 6000), the third
+measured in a cup probe (``probe_c_water``, RTX PRO 6000), the third
 in the pour example's own scene (``pour_probe``):
 
 * **The water preset loses volume.** A 60 mm column in a thick-walled tank at
   4 mm voxels is 34% of its volume after 2 s at rest (69% with the ``P1d``
-  strain basis at twice the cost; iterations do not help; 240 Hz gives 52%).
+  strain basis at 1.6x the cost; 250 iterations give 41%; 240 Hz gives 52%).
   So the measures of a liquid are **counts** -- ``fill_fraction`` of a bowl --
   and a height or a volume is not a measurement of it. Honey (viscosity 50)
   holds its shape plausibly and is what the first example pours.

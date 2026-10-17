@@ -12,7 +12,7 @@ Where the numbers come from, in two groups. **Newton's own**: rice is the
 shipped granular example's defaults (E 1e15, nu 0.3, friction 0.68, yield
 pressure 1e12); water, honey and ketchup are the water-like, viscous and
 multi-material examples' (friction 0, tensile ratio 1; viscosity 50; yield
-stress 3e2 with viscosity 100). **Measured here**, in the Phase 0 probes on an
+stress 3e2 with viscosity 100). **Measured here**, in the probes on an
 RTX PRO 6000 with Newton 1.6.0 (``probe_c_dough``, an 80x80x30 mm block pressed
 15 mm by a plate): the dough's yield stress of 1e3 Pa at E 5e6 spreads to 1.15x
 its footprint at the peak of the press and keeps 83% of the compression after
@@ -62,7 +62,7 @@ RICE = register_material(
         ),
         notes=(
             "Newton's shipped granular example, as written: rigid grains, friction 0.68, no cohesion. "
-            "The Phase 0 probes' bed; a 12x12x3 cm heap of it at 2.5 mm spacing is 27,648 particles."
+            "The probes' bed; a 12x12x3 cm heap of it at 2.5 mm spacing is 27,648 particles."
         ),
     )
 )

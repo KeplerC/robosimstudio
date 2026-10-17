@@ -22,7 +22,7 @@ What is particular to this backend, and why each piece is here:
   particles were back where they started and the material was not.
 * **Container margins are written at build.** A liquid leaks through a wall
   thinner than about two voxels under the graph-capturable collider basis;
-  the Phase 0 cup probe measured a 3 mm wall losing 60% of its water in 2 s at
+  the cup probe measured a 3 mm wall losing 60% of its water in 2 s at
   rest and 5% once every shape the liquid touches carried a signed-distance
   margin of half a voxel. The margin is a per-shape builder field the solver
   reads at construction, so it is written here, onto the shapes of the

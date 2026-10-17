@@ -35,7 +35,7 @@ NEWTON_MPM_STRESS_SCALE = 1.0
 1.0 for Newton 1.6.0, whose implicit MPM takes ``young_modulus``,
 ``yield_pressure`` and ``yield_stress`` as written. Newton 1.7 renormalised the
 stress inside the solver, so the same material needs half the value: the pin
-bump (Phase 4 of the materials plan) sets this to 0.5 and leaves every preset
+bump sets this to 0.5 and leaves every preset
 below reading as the pascals it names."""
 
 MPM_KEYS: tuple[str, ...] = (
@@ -219,7 +219,7 @@ class ParticleBodySpec:
         quat: Orientation, xyzw, about the bottom-face centre.
         material: The matter, a :class:`ParticleMaterialSpec`.
         particle_spacing: Lattice spacing [m]. 2.5 mm is 1.6 samples per axis
-            of the backend's registered 4 mm voxel, which is what the Phase 0
+            of the backend's registered 4 mm voxel, which is what the
             probes ran (their 29k-particle rice bed); Newton's own examples put
             2-3 per axis. Fewer than 1.5 per voxel leaves cells with no sample
             and the surface tears; more than 4 costs memory for no change in
@@ -244,7 +244,7 @@ class ParticleBodySpec:
             into or rests in. Each of their collision shapes gets a signed
             distance ``margin`` of :attr:`container_margin`, which is what
             keeps a liquid inside a thin wall under graph capture: measured in
-            the Phase 0 cup probe (``probe_c_water``), a 3 mm wall at 4 mm
+            the cup probe (``probe_c_water``), a 3 mm wall at 4 mm
             voxels lost 60% of the water through its walls in 2 s at rest and
             5% with a 1.5 mm margin. The margin also offsets those shapes'
             rigid contacts by the same distance, so it is for containers, not
