@@ -25,9 +25,9 @@ jobs:
       - name: Build
         run: uv build
       - name: Verify wheel contents
-        # Robot assets and the cloth, soft and rope kinds sit outside the usual
-        # Python-file packaging path; a wheel without them imports and then
-        # cannot build a scene.
+        # Robot assets sit outside the usual Python-file packaging path, and
+        # the cloth, soft and rope kinds are a package of their own; a wheel
+        # without either imports and then cannot build a scene.
         run: |
           python3 - <<'PY'
           import glob
@@ -37,9 +37,9 @@ jobs:
           names = set(zipfile.ZipFile(wheel).namelist())
           needed = [
               "robosimstudio/assets/embodiments/panda/panda_standalone.xml",
-              "robosimstudio/_domain_packs/cloth.py",
-              "robosimstudio/_domain_packs/soft.py",
-              "robosimstudio/_domain_packs/rod/__init__.py",
+              "robosimstudio_materials/cloth.py",
+              "robosimstudio_materials/soft.py",
+              "robosimstudio_materials/rod/__init__.py",
           ]
           missing = [path for path in needed if path not in names]
           assert not missing, f"Missing from {wheel}: {missing}"

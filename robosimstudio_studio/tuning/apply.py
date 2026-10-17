@@ -38,10 +38,10 @@ from dataclasses import fields
 from typing import Any
 
 import numpy as np
-from robosimstudio.domains.cloth import ClothMaterialSpec
 
 from robosimstudio.scene.tuning import ClothTarget, LiveMaterial, locate_cloth
 from robosimstudio.specs.params import LIVE, RECAPTURE, param_ui
+from robosimstudio_materials.cloth import ClothMaterialSpec
 
 __all__ = ["ClothTarget", "LiveMaterial", "apply_contact", "contact_differs", "locate_cloth", "rebuild_fields"]
 

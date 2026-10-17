@@ -517,9 +517,8 @@ def _declared_crease_axis(doc, name: str) -> int:
     """
     if doc is None:
         return 1
-    from robosimstudio.domains.cloth import crease_of
-
     from robosimstudio.assetlib.registry import ASSETS
+    from robosimstudio_materials.cloth import crease_of
 
     types = {o.name: o.type for o in doc.objects}
     try:

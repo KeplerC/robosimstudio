@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from robosimstudio.registry import Registry, same_source
+from robosimstudio.roots import DOMAIN_PACKAGES
 from robosimstudio.specs import CellSpec
 
 __all__ = [
@@ -55,7 +56,7 @@ benchmark tier -- the package beside the library -- installs a
 populator with :meth:`~robosimstudio.registry.Registry.add_discover` when its
 ``taskbuild`` is imported -- which is what keeps ``get_cell("bench_075")``, a
 question about a library bench, from executing every task on disk to answer it."""
-ENTITIES: Registry[type] = Registry("entity", ("robosimstudio.domains",), same=same_source)
+ENTITIES: Registry[type] = Registry("entity", DOMAIN_PACKAGES, same=same_source)
 """Entity classes, by the name a spec asks for them by.
 
 Scans ``robosimstudio.domains`` so the library's own -- ``static``, ``arena``,

@@ -19,7 +19,7 @@ time -- are the studio's, in :mod:`robosimstudio_studio.tuning.apply`, which
 re-exports what is here so a panel sees one surface.
 
 **It sits in ``scene`` because that is the lowest layer that can express it.**
-:func:`locate_cloth` takes a built :class:`~robosimstudio.domains.cloth`
+:func:`locate_cloth` takes a built :class:`~robosimstudio_materials.cloth`
 entity and reads its build range; ``core`` may not name the IR these fields are
 declared in, and ``studio`` is above the entity that has to answer for its own
 tunables. Living here is what lets ``EntityCloth.tunables`` delegate rather than
@@ -86,7 +86,7 @@ def locate_cloth(model: Any, entity: Any) -> ClothTarget:
 
     Args:
         model: The finalized model.
-        entity: A built :class:`~robosimstudio.domains.cloth.EntityCloth`.
+        entity: A built :class:`~robosimstudio_materials.cloth.EntityCloth`.
     """
     span = entity.range.particles
     tri_lo, tri_hi = entity.range.tris

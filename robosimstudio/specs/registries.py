@@ -39,6 +39,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 
 from .params import REBUILD, RECAPTURE, ParamUI, ui
 
@@ -277,7 +278,7 @@ belongs to none of them, and hanging it off whichever domain happened to need it
 first is how a registry acquires a wrong shape it then keeps.
 """
 
-DOMAINS: Registry[DomainInfo] = Registry("domain", ("robosimstudio.domains",), same=operator.eq)
+DOMAINS: Registry[DomainInfo] = Registry("domain", DOMAIN_PACKAGES, same=operator.eq)
 """Registered domains, by name.
 
 Scanned rather than listed. Each built-in used to register here, next to the type

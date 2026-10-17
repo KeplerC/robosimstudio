@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Constructors for a 1-D deformable: free functions that return a spec.
 
-Beside :mod:`~robosimstudio.domains.rod.declare`, which builds the
+Beside :mod:`~robosimstudio_materials.rod.declare`, which builds the
 :class:`~robosimstudio.assetlib.record.AssetRecord` that says what a rod *is*.
-This builds the :class:`~robosimstudio.domains.rod.RodSpec` that puts one in a
+This builds the :class:`~robosimstudio_materials.rod.RodSpec` that puts one in a
 scene.
 """
 

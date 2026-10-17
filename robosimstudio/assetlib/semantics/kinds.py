@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 
 __all__ = [
     "KINDS",
@@ -114,7 +115,7 @@ class FeatureKind:
         return sorted(set(payload) - set(self.payload) - set(self.optional))
 
 
-KINDS: Registry[FeatureKind] = Registry("feature kind", ("robosimstudio.domains",))
+KINDS: Registry[FeatureKind] = Registry("feature kind", DOMAIN_PACKAGES)
 """Every registered kind.
 
 The general ones register from :mod:`.library`, which the asset library imports.

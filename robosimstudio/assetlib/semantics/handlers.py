@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 from robosimstudio.specs.physics import layout_chain
 
 __all__ = [
@@ -126,7 +127,7 @@ class HandlerSpec:
         return sum(1 for k in self.kinds if k) + sum(1 for s in self.substrates if s)
 
 
-HANDLERS: Registry[HandlerSpec] = Registry("handler", ("robosimstudio.domains",))
+HANDLERS: Registry[HandlerSpec] = Registry("handler", DOMAIN_PACKAGES)
 """Every registered handler, keyed by :attr:`HandlerSpec.key`.
 
 **Scans the domains**, because that is where a measurement lives: a handler

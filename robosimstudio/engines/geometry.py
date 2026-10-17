@@ -32,6 +32,7 @@ from newton import GeoType
 
 from robosimstudio.core.math import young_poisson_from_lame
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 from robosimstudio.specs.physics import actor_consumes, declare_consumes, engine_consumes
 
 __all__ = [
@@ -274,7 +275,7 @@ positions and the declared params -- everything derivable without knowing what
 kind of thing it is. A reader adds the rest: the connectivity cut out of the
 model's global tables, and whatever material the model itself states."""
 
-ACTOR_KINDS: Registry[ActorReader] = Registry("actor kind", ("robosimstudio.domains",))
+ACTOR_KINDS: Registry[ActorReader] = Registry("actor kind", DOMAIN_PACKAGES)
 """How each kind of deformable actor is read off the model.
 
 **Open, and that is the whole point of it existing.** This was an ``if kind ==
@@ -294,7 +295,7 @@ import one before asking. The scan is a string and runs inside a lookup, so
 importing this module still names nothing above it."""
 
 
-ACTOR_BUILDERS: Registry[Callable[..., Any]] = Registry("actor builder", ("robosimstudio.domains",))
+ACTOR_BUILDERS: Registry[Callable[..., Any]] = Registry("actor builder", DOMAIN_PACKAGES)
 """``"<engine>:<kind>"`` -> how that engine builds that kind of actor.
 
 The other half of :data:`ACTOR_KINDS`. Reading a kind off the Newton model was

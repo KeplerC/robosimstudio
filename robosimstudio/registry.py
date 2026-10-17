@@ -38,7 +38,11 @@ class Registry[T]:
     Args:
         kind: What it holds, used in error messages.
         packages: Modules to import on :meth:`load`, each a package whose
-            submodules register on import.
+            submodules register on import. A package that is not installed is
+            skipped: the kinds the library ships as a sibling package
+            (:data:`robosimstudio.roots.DOMAIN_PACKAGES`) may be left out of a
+            tree, and a scan that raised on their absence would make every
+            lookup fail instead of only the names they provide.
         hint: What to add to a lookup miss, for a registry whose entries do not
             all arrive from the same place. ``CELLS`` holds four benches the
             library ships and a handful a task directory declares, and the
@@ -163,9 +167,17 @@ class Registry[T]:
         self._loading = True
         try:
             for package_name in self.packages:
-                package = importlib.import_module(package_name)
+                try:
+                    package = importlib.import_module(package_name)
+                except ModuleNotFoundError as error:
+                    # A scanned package a tree may leave out (``robosimstudio_materials``): its
+                    # registrations are simply not there. A module *inside* a package that is
+                    # there, failing to import, is a real error and is not caught here.
+                    if error.name == package_name:
+                        continue
+                    raise
                 for info in pkgutil.iter_modules(package.__path__):
-                    # A kind's folder also holds numbered examples (``00_towel.py``): scripts, not registering modules.
+                    # A domain root may be an example folder (``00_pour.py`` beside ``granular.py``): scripts, not registering modules.
                     if not info.name.isidentifier():
                         continue
                     importlib.import_module(f"{package_name}.{info.name}")

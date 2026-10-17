@@ -4,7 +4,7 @@
 A deformable feature cannot be a world-frame box. "The hem" is a fact about the
 *fabric*, so it is stated against the sheet's rest layout and carried through
 whatever the cloth does afterwards. That is not a new idea here -- it is what
-:meth:`~robosimstudio.domains.cloth.EntityCloth.resolve_sets` already
+:meth:`~robosimstudio_materials.cloth.EntityCloth.resolve_sets` already
 does, and its reason is worth repeating: a set recorded from the settled drape
 "would follow whatever the drape did, and 'the tab' would stop being the tab the
 moment the cloth moved".

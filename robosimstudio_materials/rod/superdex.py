@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The same cable, simulated as a Cosserat rod by a foreign engine.
 
-:class:`~robosimstudio.domains.rod.entity.EntityRod` builds a rod as
+:class:`~robosimstudio_materials.rod.entity.EntityRod` builds a rod as
 twenty-eight overlapping capsules on cable joints, integrated by VBD in maximal
 coordinates. This builds the same cable as a **centerline**: one particle per
 node, flagged inactive so no Newton solver touches them, integrated by
@@ -59,7 +59,7 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
     """One cable, as a centerline of inactive particles.
 
     Args:
-        spec: The same :class:`~robosimstudio.domains.rod.entity.RodSpec` the
+        spec: The same :class:`~robosimstudio_materials.rod.entity.RodSpec` the
             Newton implementation takes.
         world: Which world.
     """
@@ -200,7 +200,7 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
         """The centerline now, ``[n, 3]``, in order along the cable.
 
         Same name and shape as
-        :meth:`~robosimstudio.domains.rod.entity.EntityRod.positions`. Pass the
+        :meth:`~robosimstudio_materials.rod.entity.EntityRod.positions`. Pass the
         instant; the model's array is the as-built layout (see
         :meth:`Centerline.centerline`).
 
@@ -227,7 +227,7 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
     ) -> int:
         """Pin the node nearest ``arm``'s jaws through the engine, riding the hand.
 
-        The particle answer to :meth:`~robosimstudio.domains.rod.centerline.Centerline.hold`.
+        The particle answer to :meth:`~robosimstudio_materials.rod.centerline.Centerline.hold`.
         Where the capsule chain's latch is a kernel pinning a *body* to a
         gripper frame, this asks the foreign engine for a compliant node
         constraint and has the engine carry it on the hand's body

@@ -73,7 +73,7 @@ __all__ = [
 # Old path, still named as a string by cable_route's
 # ReproHooksSpec(module="robosimstudio.solvers.grasp.latch"); the bundle exporter
 # imports it to find the file it copies. setdefault, so a real module of that
-# name wins. Drop when the suite names robosimstudio.domains.rod.latch.
+# name wins. Drop when the suite names robosimstudio_materials.rod.latch.
 _sys.modules.setdefault("robosimstudio.solvers.grasp.latch", _latch)
 
 DOMAIN = register_domain(

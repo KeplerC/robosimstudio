@@ -56,6 +56,7 @@ __all__ = [
     "DEFAULT_DOMAIN_ROOT_NAMES",
     "DEFAULT_ENGINE_ROOT_NAME",
     "DEFAULT_ROOT_NAME",
+    "DOMAIN_PACKAGES",
     "DOMAIN_ROOTS_ENV",
     "ENGINE_ROOTS_ENV",
     "ROOTS_ENV",
@@ -92,9 +93,11 @@ DOMAIN_ROOTS_ENV = "ROBOSIMSTUDIO_DOMAIN_ROOTS"
 
 A **domain root** is a directory of packs, each declaring a kind of thing --
 what it is, what builds it, what may be measured of it -- as a package or as one
-module. The library's own live in ``robosimstudio/domains/``; a root here
-contributes more, under the same import name, because that package extends its
-``__path__`` from this list.
+module. The kinds the library is made of live in ``robosimstudio/domains/`` and
+the deformable kinds it ships in ``robosimstudio_materials`` (the two packages
+of :data:`DOMAIN_PACKAGES`); a root here contributes more, reached as
+``robosimstudio.domains.<name>``, because that package extends its ``__path__``
+from this list.
 
 The same shape as the task roots and for the same reason: where content lives is
 a deployment fact rather than a library one. It is a *separate* variable rather
@@ -103,22 +106,31 @@ are different things -- ``is_task_dir`` wants a ``.task`` document, which a
 domain package has no reason to carry, and scanning one list for both would mean
 every domain needed a task to be found."""
 
-DEFAULT_DOMAIN_ROOT_NAMES = ("examples/01_cloth", "examples/02_soft", "examples/03_rope")
-"""Where this repository keeps the kinds that are content, in scan order.
+DOMAIN_PACKAGES = ("robosimstudio.domains", "robosimstudio_materials")
+"""The packages whose modules declare kinds of thing, in scan order.
 
-Three example folders, relative to the checkout, and each is a root only if it
-is there. Each holds one implementation beside the numbered scripts that run
-it: ``examples/01_cloth/cloth.py`` and ``examples/02_soft/soft.py`` are one
-module each, read top to bottom, and the rope in ``examples/03_rope`` is a
-package. A tree that leaves a folder out simply has one root fewer.
+Every registry a kind writes to on import -- domains, entities, materials,
+atoms, handlers, feature kinds, actor kinds, capabilities -- scans exactly these,
+so one list is what keeps twelve scans the same. ``robosimstudio.domains`` holds
+the kinds the library is made of (``rigid``, ``static``, ``articulated``) and,
+through its ``__path__``, every pack on a domain root; ``robosimstudio_materials``
+is the sibling package holding the deformable kinds the repository ships
+(``cloth``, ``soft``, ``rod``). The library names it here as a string and
+nowhere imports it: a tree may leave the sibling out, the scan skips a package
+that is not installed (:meth:`~robosimstudio.registry.Registry.load`), and the
+flat names it would have provided say so (``robosimstudio._PACKS``)."""
 
-**Only a name that is a Python identifier is a pack.** ``00_towel.py`` is a
-script a reader runs, not a kind, and nothing imports it under this package:
-:func:`extend_path` leaves it out of the duplicate rule and the registries' scan
-skips it, so a kind's folder may hold as many numbered examples as it likes.
+DEFAULT_DOMAIN_ROOT_NAMES: tuple[str, ...] = ()
+"""Where this repository keeps domain roots of its own: nowhere.
 
-In the folders' reading order, which is otherwise immaterial: a name two roots
-both hold is refused by :func:`extend_path` rather than resolved by position."""
+The shipped kinds are packages (:data:`DOMAIN_PACKAGES`), not directories on a
+root: ``cloth``, ``soft`` and ``rod`` are modules of ``robosimstudio_materials``
+and are found by the registries' package scan, in a checkout and in a wheel
+alike. They used to be three example folders listed here, each spliced onto
+``robosimstudio.domains.__path__``; nothing of that mechanism is needed for a
+kind the repository itself ships. It stays for everybody else's:
+:data:`DOMAIN_ROOTS_ENV` and :func:`add_domain_root` still put a third party's
+pack under ``robosimstudio.domains.<name>``."""
 
 ENGINE_ROOTS_ENV = "ROBOSIMSTUDIO_ENGINE_ROOTS"
 """Environment variable holding an ``os.pathsep``-separated list of engine roots.
@@ -162,46 +174,24 @@ class _Roots:
     Args:
         env: The environment variable holding an ``os.pathsep``-separated list.
         default_name: The directory this repository keeps its own in, relative
-            to the checkout -- or several, in scan order, for a kind of content
-            the checkout keeps in more than one place (the domain packs: see
-            :data:`DEFAULT_DOMAIN_ROOT_NAMES`). Each is a root only if it is
-            there. Absent -- which is the case for an installed wheel, and for a
-            checkout that has not moved any content out yet -- there is simply
-            no default root.
-        packaged: Where a *wheel* carries this kind of content, relative to the
-            package, or empty for a kind no wheel ships.
+            to the checkout -- or several, in scan order, or none at all for a
+            kind of content the repository ships as a package rather than on a
+            root (the domain packs: :data:`DEFAULT_DOMAIN_ROOT_NAMES` is empty).
+            Each is a root only if it is there. Absent -- which is the case for
+            an installed wheel, and for a checkout that has not moved any content
+            out yet -- there is simply no default root.
 
-            A wheel has no repo root to climb to, and force-including the content
-            at ``<site-packages>/<default_name>`` would put a bare top-level
-            package beside every other installed distribution -- not a filing
-            preference but a name collision waiting for somebody else's. So an
-            install carries it *inside* the package, under a name no import
-            resolves, and it is looked at last: a checkout has no such directory
-            and an install has nothing else, so neither pays for the other.
-
-            **One packaged directory, however many the checkout keeps.** The
-            wheel maps every pack onto this one target (``pyproject.toml``'s
-            ``force-include``): the implementation out of each example folder,
-            pack by pack, so the numbered scripts beside it stay behind. The
-            roots of a checkout arrive in an install as one:
-            ``_domain_packs/cloth.py`` and ``_domain_packs/soft.py`` beside the
-            rope's package. Merging is safe for the reason several roots
-            are -- one name is one thing, and :func:`extend_path` has already
-            refused a tree where it is not.
-
-            The same shape ``paths._candidate_roots`` uses for the vendored
-            assets, and for the same reason -- including the reason it is
-            *stated*: that one was omitted when the file grew its second root, so
-            the wheel shipped a copy of every mesh to a path nothing looked in,
-            and every scene built from an install failed to resolve its geometry.
+            There is no wheel-side counterpart. The one kind of content that
+            used to need one (the domain packs, force-included into a directory
+            inside the package) is a package of its own now, and a wheel ships a
+            package the ordinary way.
     """
 
-    __slots__ = ("added", "default_names", "env", "packaged")
+    __slots__ = ("added", "default_names", "env")
 
-    def __init__(self, env: str, default_name: str | tuple[str, ...], *, packaged: str = "") -> None:
+    def __init__(self, env: str, default_name: str | tuple[str, ...]) -> None:
         self.env = env
         self.default_names: tuple[str, ...] = (default_name,) if isinstance(default_name, str) else tuple(default_name)
-        self.packaged = packaged
         self.added: list[Path] = []
 
     def _checkouts(self) -> list[Path]:
@@ -227,12 +217,6 @@ class _Roots:
                     out.append(nested)
         return out
 
-    def _packaged(self) -> Path | None:
-        if not self.packaged:
-            return None
-        candidate = Path(__file__).resolve().parent / self.packaged
-        return candidate if candidate.is_dir() else None
-
     def _from_environment(self) -> list[Path]:
         raw = os.environ.get(self.env, "")
         return [Path(part).expanduser() for part in raw.split(os.pathsep) if part.strip()]
@@ -240,15 +224,15 @@ class _Roots:
     def all(self) -> list[Path]:
         """Every root to scan, de-duplicated by real path, in declaration order.
 
-        ``<env>_ONLY=1`` drops the checkout's and the wheel's own roots, so a
-        copy of a shipped suite can be loaded under another root without
-        colliding with the original -- which is how a converted suite is
-        verified against the one it replaces.
+        ``<env>_ONLY=1`` drops the checkout's own roots, so a copy of a shipped
+        suite can be loaded under another root without colliding with the
+        original -- which is how a converted suite is verified against the one
+        it replaces.
         """
         out: list[Path] = []
         seen: set[str] = set()
         only = os.environ.get(f"{self.env}_ONLY", "") not in ("", "0")
-        built_in = [] if only else [*self._checkouts(), *(e for e in (self._packaged(),) if e is not None)]
+        built_in = [] if only else self._checkouts()
         for candidate in [*built_in, *self._from_environment(), *self.added]:
             try:
                 key = str(candidate.resolve())
@@ -309,8 +293,12 @@ class _Roots:
 TASKS = _Roots(ROOTS_ENV, DEFAULT_ROOT_NAME)
 """Where task directories come from."""
 
-DOMAINS = _Roots(DOMAIN_ROOTS_ENV, DEFAULT_DOMAIN_ROOT_NAMES, packaged="_domain_packs")
-"""Where domain packs come from -- kinds of thing, out of tree."""
+DOMAINS = _Roots(DOMAIN_ROOTS_ENV, DEFAULT_DOMAIN_ROOT_NAMES)
+"""Where domain packs come from -- kinds of thing, out of tree.
+
+No default root: the kinds this repository ships are the packages of
+:data:`DOMAIN_PACKAGES`, so what arrives here is the environment's list and
+whatever :func:`add_domain_root` was given."""
 
 ENGINES = _Roots(ENGINE_ROOTS_ENV, DEFAULT_ENGINE_ROOT_NAME)
 """Where engine bundles come from -- foreign simulators, out of tree."""
@@ -381,11 +369,11 @@ def extend_path(existing, roots, *, kind: str) -> list[str]:
     """A package's ``__path__``, plus every root that holds packs for it.
 
     What makes a library package extensible: ``robosimstudio.domains`` keeps the
-    kinds this repository ships, and every root here contributes more, reached by
-    the same import name. So ``robosimstudio.domains.cloth`` resolves whether
-    cloth is in the library or on somebody's own root, and the registries'
-    package scans -- which walk exactly this ``__path__`` -- find both in one
-    sweep with no registry change at all.
+    kinds the library is made of, and every root here contributes more, reached by
+    the same import name. So ``robosimstudio.domains.granular`` resolves for a
+    kind on somebody's own root exactly as ``robosimstudio.domains.rigid`` does
+    for the library's, and the registries' package scans -- which walk exactly
+    this ``__path__`` -- find both in one sweep with no registry change at all.
 
     **A pack is a package or one module.** ``cloth/`` with an ``__init__.py`` and
     a single ``cloth.py`` are the same thing to the import system and to
@@ -395,9 +383,9 @@ def extend_path(existing, roots, *, kind: str) -> list[str]:
     still holding its ``__pycache__``) is not mistaken for a second copy.
 
     **A name that is not an identifier is not a pack.** A root may be an example
-    folder -- ``examples/01_cloth`` holds ``cloth.py`` beside ``00_towel.py`` --
+    folder -- a folder of yours holding ``granular.py`` beside ``00_pour.py`` --
     and a numbered script is something a reader runs, not a kind: no ``import``
-    statement can spell ``robosimstudio.domains.00_towel``, and the registries'
+    statement can spell ``robosimstudio.domains.00_pour``, and the registries'
     scan skips the name. So it is left out of the rule below, and two folders
     that each hold a ``00_...`` script of the same name are not a clash.
 

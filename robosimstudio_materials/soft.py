@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Soft bodies in one file: a tetrahedral body, from its spec to its registration.
 
-This file is what ``rss.sponge`` builds, imported as ``robosimstudio.domains.soft``.
-Run ``00_sponge.py`` beside it first. Copy this file to write a kind of your own.
+This file is what ``rss.sponge`` builds, imported as ``robosimstudio_materials.soft``.
+Run ``examples/02_soft/00_sponge.py`` first. Copy this file to write a kind of your own.
 """
 
 from __future__ import annotations
@@ -52,8 +52,8 @@ __all__ = [
 # =============================================================================
 # 1. What this file is, and how it is found
 # =============================================================================
-# Importing this file registers soft bodies. The library finds it on the search path of
-# ``robosimstudio.domains``, as it does a folder of yours named in ``ROBOSIMSTUDIO_DOMAIN_ROOTS``.
+# Importing this file registers soft bodies. The library finds it by scanning this package,
+# ``robosimstudio_materials``, as it does a folder of yours named in ``ROBOSIMSTUDIO_DOMAIN_ROOTS``.
 # Import it by that name, never by file path, or it registers twice. It imports no engine, no cloth.
 
 
@@ -579,9 +579,9 @@ def sponge(
         cells: Lattice cells per axis, five tetrahedra each. The default is 440 particles.
         at: Where the **bottom-face centre** goes, in the cell's work-surface frame: ``at=(0, 0, 0)``
             stands the sponge on the middle of the bench.
-        material: A :class:`~robosimstudio.domains.soft.SoftMaterialSpec` such as ``SOFT_FOAM`` or
+        material: A :class:`~robosimstudio_materials.soft.SoftMaterialSpec` such as ``SOFT_FOAM`` or
             ``FIRM_FOAM``. ``None`` is the spec's default, the soft one.
-        **kwargs: Any other :class:`~robosimstudio.domains.soft.SoftSpec` field.
+        **kwargs: Any other :class:`~robosimstudio_materials.soft.SoftSpec` field.
     """
     extra = {} if material is None else {"material": material}
     return SoftSpec(name=name, size=size, cells=cells, pose=at, **extra, **kwargs)

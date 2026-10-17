@@ -67,7 +67,7 @@ __all__ = [
 
 
 CableDriveSpec = RodMaterialSpec
-"""Alias of :class:`~robosimstudio.domains.rod.spec.RodMaterialSpec`, under the name ``cable_route`` imports."""
+"""Alias of :class:`~robosimstudio_materials.rod.spec.RodMaterialSpec`, under the name ``cable_route`` imports."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1090,7 +1090,7 @@ class EntityRod(Centerline, Entity):
     def hold(
         self, on: bool, state=None, *, arm: str = "right", slot: int = 0, at: int | None = None, world: int = 0
     ) -> int:
-        """The body-latch answer to :meth:`~robosimstudio.domains.rod.centerline.Centerline.hold`."""
+        """The body-latch answer to :meth:`~robosimstudio_materials.rod.centerline.Centerline.hold`."""
         return self.hold_segment(on, state, arm=arm, slot=slot, at=at, world=world)
 
     def hold_segment(

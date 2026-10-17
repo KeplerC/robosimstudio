@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """What a rod *is*, as data: the cable and the matter it is made of.
 
-Both names re-export from :mod:`robosimstudio.domains.rod` and as
+Both names re-export from :mod:`robosimstudio_materials.rod` and as
 ``rss.RodSpec`` / ``rss.RodMaterialSpec``.
 """
 
