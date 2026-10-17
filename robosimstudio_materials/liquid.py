@@ -8,7 +8,7 @@ module is the domain, the entity that names it, the constructor and the presets.
 
 Three facts about liquids in Newton 1.6.0 shape everything here, the first two
 measured in a cup probe (``probe_c_water``, RTX PRO 6000), the third
-in the pour example's own scene (``pour_probe``):
+in the pour example's first scene, its cup on the page's drag handle (``pour_probe``):
 
 * **The water preset loses volume.** A 60 mm column in a thick-walled tank at
   4 mm voxels is 34% of its volume after 2 s at rest (69% with the ``P1d``
@@ -47,6 +47,15 @@ stiffer yield stress made that repeatable. The same wiper pinched by the hand
 pointing down, whose pads span the wiper's whole height, moved 96-98% in three
 runs, and 98% of a 6 mm puddle, which is thinner than the collider band. The
 grid does not see a thin puddle badly; a tilted face lets it under.
+
+A fifth, about pouring from a hand, measured in the pour example's scene with
+the YAM holding the cup (``robot_pour`` and ``tests/test_pour_honey``, GPU 1,
+RTX PRO 6000): **honey pours past a tilt, not gradually.** Tipped 117 degrees,
+all the YAM's wrist roll gives, it crept along the cup's wall and 17% was in
+the bowl after 12 s; at 130, 71% after 6 s; at 140 it left the cup in one mass
+within a second, 99% into the bowl. That mass lands from the lip at ~1.3 m/s,
+past what a 120 Hz step's collider band catches, and 0 to 8 of the 8,000
+particles of its leading edge went through the bench in seven pours.
 """
 
 from __future__ import annotations

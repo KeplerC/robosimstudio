@@ -390,6 +390,58 @@ class Grasp(Beat):
         return {"arm": arm, "drags": done}
 
 
+def _quat_about(axis, radians: float) -> tuple[float, float, float, float]:
+    """The xyzw quaternion of a turn of ``radians`` about the unit ``axis``."""
+    s = math.sin(0.5 * radians)
+    return (axis[0] * s, axis[1] * s, axis[2] * s, math.cos(0.5 * radians))
+
+
+def _quat_mul(a, b) -> tuple[float, float, float, float]:
+    """``a`` after ``b``, both xyzw."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+@dataclass(frozen=True)
+class Turn(Beat):
+    """Turn an arm's gizmo ``degrees`` about the world ``axis`` through its centre, over ``seconds``.
+
+    What a drag of one of the gizmo's rings writes to the arm panel's cursor --
+    its orientation, its position kept -- written from code a film frame at a
+    time, so the pointer does not move: the rings are drei rotators, and no beat
+    grabs one through the browser yet. The hand follows through the panel's own
+    setpoint law and IK, as it follows an arrow; nothing is written to a joint.
+    Positive ``degrees`` turn counter-clockwise looking down ``axis``. First lets
+    the hand catch up with its gizmo, like :class:`Drag`.
+    """
+
+    gizmo: str = "right"
+    axis: Any = "z"
+    degrees: float = 0.0
+    seconds: float = 1.0
+
+    def play(self, film):
+        panel = film.session.arms[self.gizmo]
+        film.settle(self.gizmo)
+        unit = _axis(self.axis)
+        norm = math.sqrt(sum(v * v for v in unit))
+        unit = tuple(v / norm for v in unit)
+        position = tuple(float(v) for v in panel.cursor_pos)
+        start = tuple(float(v) for v in panel.cursor_quat)
+        frames = max(1, round(self.seconds * film.take.fps))
+        for k in range(1, frames + 1):
+            turned = _quat_mul(_quat_about(unit, math.radians(self.degrees) * k / frames), start)
+            panel.aim(position, turned, moving=k < frames)
+            film.advance()
+        return {"axis": [round(v, 4) for v in unit], "degrees": self.degrees, "from_xyzw": [round(v, 4) for v in start]}
+
+
 @dataclass(frozen=True)
 class Press(Beat):
     """Click the button reading ``text``, inside the folder whose title starts with ``within``."""
