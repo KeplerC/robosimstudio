@@ -109,7 +109,7 @@ on it.
 | --- | --- |
 | `robot.*` | `go_to_pose`, `move_to_joints`, `execute_trajectory`, `go_home`, `set_grip`, `open_gripper`, `close_gripper`, `get_gripper`, `get_ee_pose`, `get_observation`, `get_camera_pose`, `grasp_frame`, `describe_arm`, `describe_gripper`, `describe_workspace`, `wait_steps` |
 | `motion.*` | `plan_linear`, `plan_joint`, `describe_planner`; with a collision-aware planner (`motion="curobo"`), also `plan_to_pose` and `solve_ik_batch` |
-| `sim.*` | `get_object_pose`, `get_object_obb`, `get_region_obb`, `check_grasp`, `check_success`, `query` and more: the simulator's own answers |
+| `sim.*` | `get_object_pose`, `get_object_obb`, `get_region_obb`, `check_grasp`, `check_success`, `query` and more: the simulator's own answers; `attach` on a scene with a deformable, `vacuum` on a robot with a suction hand |
 
 ## Privilege
 

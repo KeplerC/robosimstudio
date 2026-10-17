@@ -88,6 +88,11 @@
 | [Scrub a patch clean](14_brush/00_scrub_the_bench.py) | [Scrub a patch, scored](14_brush/01_scrub_scored.py) |
 |---|---|
 
+## [15 Suction](15_suction/README.md)
+
+| [Pick up a plate](15_suction/00_pick_a_plate.py) | [Pick up a plate, scored](15_suction/01_pick_scored.py) |
+|---|---|
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |

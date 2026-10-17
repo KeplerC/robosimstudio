@@ -123,8 +123,10 @@ def _admits_gripper(spec: EmbodimentSpec, gripper: str) -> tuple[bool, str]:
     * a robot that arrives inside its task's scene export is never imported here,
       so there is no wrist for a weld to bolt onto;
     * a robot whose asset declares two arms as two articulation roots cannot take
-      a weld at all -- Newton accepts only the most recently added articulation
-      as a parent, so one arm would get its hand and the other would not.
+      a weld on *both* -- Newton accepts only the most recently added articulation
+      as a parent, so one arm would get its hand and the other would not. One arm
+      can, named on its own :attr:`~robosimstudio.specs.ArmSpec.gripper`, and such
+      a pairing is admitted above because the hand is then one of the robot's own.
     """
     if not gripper:
         return True, ""
@@ -137,7 +139,10 @@ def _admits_gripper(spec: EmbodimentSpec, gripper: str) -> tuple[bool, str]:
     if spec.asset is None:
         return False, f"{spec.name!r} arrives inside its scene's import; there is no wrist to weld {gripper!r} onto"
     if len(spec.arms) > 1:
-        return False, f"{spec.name!r} is two articulations in one asset; a hand cannot be welded onto one of them"
+        return False, (
+            f"{spec.name!r} is two articulations in one asset; a hand named for the whole robot cannot be welded "
+            "onto both. Name it on one arm's ArmSpec.gripper instead -- the arm the asset declares last takes it"
+        )
     wrists = {a.ee_body_name for a in spec.arms if a.ee_body_name}
     if hand.mount_body and hand.mount_body not in wrists:
         # A mount transform is measured against one flange, and naming the body

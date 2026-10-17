@@ -993,6 +993,13 @@ class Sim(EnvBase):
             raise RuntimeError(f"scene {self.request.full_name!r} has no grippers")
         return grippers[name] if name else next(iter(grippers.values()))
 
+    def suction(self, name: str = ""):
+        """One arm's vacuum cup (:class:`~robosimstudio.core.suction.Suction`), defaulting to the first."""
+        suctions = self.scene.embodiment.suctions if self.scene.embodiment else {}
+        if not suctions:
+            raise RuntimeError(f"scene {self.request.full_name!r} has no suction hand")
+        return suctions[name] if name else next(iter(suctions.values()))
+
     def __getitem__(self, name: str) -> Ref:
         """The ref for one thing, by name.
 
