@@ -12,7 +12,7 @@ two islands a written pose reaches the cable only through the kinematic path
 why), and the drive the verifier used, a massless tip teleported each step,
 read 0.000 turns here while passing on the one-island scene.
 
-Measured on this scene (``fix3/twist/probe6.py``, RTX PRO 6000, newton 1.6.0):
+Measured on this scene (``probe6.py``, RTX PRO 6000, newton 1.6.0):
 both cables straight and untwisted at rest; after the turn 0.348 turns in the
 middle third of each (8 of the 23 joints' share of one turn, 0.3478) with
 straightness 1.000 throughout the roll; released, the stiff cable reads 0.244

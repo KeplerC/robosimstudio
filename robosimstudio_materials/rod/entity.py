@@ -196,7 +196,7 @@ ROLL_STEP = 0.1
 a full turn in 63 control steps at 60 Hz. The rate is not what the cable
 feels -- 0.26 rad (15 degrees) per step puts the same uniform 0.348 turns into
 the middle third of the twist example's cables with straightness 1.000
-throughout, as 0.05 does (``fix3/twist/probe6.py``, GPU 1) -- it is what a hand
+throughout, as 0.05 does (``probe6.py``, GPU 1) -- it is what a hand
 turning a cable end looks like on the page, and it keeps a slider yanked
 across its range from being a jump the joint never sees."""
 
@@ -1276,7 +1276,7 @@ class EntityRod(Centerline, Entity):
         roll a capsule (its torque is bounded by the capsule's own inertia,
         3.2e-6 N*m on this chain's 6 mm capsules, against the 1e-3 to 1e-1
         N*m a turn of twist takes; lifting the bound whips both cables into
-        loops -- ``fix3/twist/probe4.py``, GPU 1).
+        loops -- ``probe4.py``, GPU 1).
 
         Args:
             segment: Which capsule, chain-indexed; ``-1`` is the free end of a

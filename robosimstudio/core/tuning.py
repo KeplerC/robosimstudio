@@ -140,7 +140,7 @@ def set_kinematic(pipeline: Any, bodies: Iterable[int], on: bool) -> dict[int, i
     puts the old pose back (``vbd_coupling_kernels._update_vbd_body_input_state_kernel``),
     so a massless tip held by pose alone stays where it was and every roll written
     into it is dropped: measured on the two-cable twist example with its robot
-    (``fix3/twist/probe3.py``, GPU 1), 120 tip poses written, none kept, where the
+    (``probe3.py``, GPU 1), 120 tip poses written, none kept, where the
     same drive on a one-island scene keeps them all. The island reads the flag
     off its ``ModelView``, whose ``body_flags`` is a copy-on-write override the
     parent model never refreshes, so the flag is written into each island's
@@ -149,7 +149,7 @@ def set_kinematic(pipeline: Any, bodies: Iterable[int], on: bool) -> dict[int, i
     inertia and calls :func:`notify` with ``BODY_INERTIAL_PROPERTIES``, which
     is what makes the hold rigid (the flag alone bent a rolled cable to 0.68
     straightness and twisted it unevenly; with the mass gone too it stays at
-    1.000 and twists uniformly, ``fix3/twist/probe5.py``).
+    1.000 and twists uniformly, ``probe5.py``).
 
     Args:
         pipeline: The scene's pipeline (``model`` and, in a coupled scene, ``solver``).

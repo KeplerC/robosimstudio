@@ -101,6 +101,7 @@ class TestTheRegistration(unittest.TestCase):
         self.assertEqual("S2", defaults["collider_basis"])
         self.assertEqual("forward", defaults["collider_velocity_mode"])
         self.assertTrue(defaults["project_outside"])
+        self.assertEqual(0.03, defaults["project_gap"])
         self.assertEqual(60.0, defaults["step_hz"])
 
     def test_the_max_iterations_and_tolerance_are_plain_attributes_of_the_solver(self) -> None:

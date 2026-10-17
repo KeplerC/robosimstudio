@@ -134,7 +134,8 @@ MPM_SCHEMA: dict[str, ParamRule] = {
         range=(0.0, 0.1),
         group="contact",
         doc="Query distance of the projection; None is voxel*sqrt(3). 30 mm stopped a 2.4 m/s pour passing "
-        "through a 10 cm slab at 120 Hz.",
+        "through a 10 cm slab at 120 Hz, and a rice block let go 80 mm over the bench lost 10,183 of 27,648 "
+        "grains through it at the default gap and none at 30 mm, for the same step time (probe_drop).",
     ),
     "step_hz": rule(
         unit="Hz",
@@ -247,6 +248,7 @@ MPM = register_backend(
         "collider_basis": "S2",
         "collider_velocity_mode": "forward",
         "project_outside": True,
+        "project_gap": 0.03,
         "step_hz": 60.0,
     },
 )
