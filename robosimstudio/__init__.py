@@ -148,9 +148,9 @@ here: the set of flat names becomes whatever four packages happen to export
 today, and a typo resolves to something plausible from the wrong layer instead of
 raising. This is also the list a reader scans to answer "what is the core tier",
 which is a question the tier split exists to have an answer to. The deformable
-kinds' names -- ``sheet``, ``sponge``, ``rod`` and their specs -- are not here
-but in :data:`_PACKS`: they come from ``robosimstudio_materials``, which a tree
-may leave out.
+kinds' names -- ``sheet``, ``sponge``, ``rod``, ``heap``, ``liquid``, ``dough``
+and their specs -- are not here but in :data:`_PACKS`: they come from
+``robosimstudio_materials``, which a tree may leave out.
 
 There are no aliases: a physics arrangement is ``rss.ArrangementSpec(control_hz=60,
 substeps=16)``, under the one name its module gives it (see :data:`_ALIASES`).
@@ -174,6 +174,18 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
     "robosimstudio_materials.rod": (
         "the rope (the `rod` kind: cables, ropes, cords)",
         ("RodMaterialSpec", "RodSpec", "rod"),
+    ),
+    "robosimstudio_materials.granular": (
+        "grains (the `granular` kind: rice, sand, beans, flour on the implicit MPM)",
+        ("GRANULAR_60HZ", "ParticleBodySpec", "ParticleMaterialSpec", "heap"),
+    ),
+    "robosimstudio_materials.liquid": (
+        "liquids (the `liquid` kind: water, honey, ketchup on the implicit MPM)",
+        ("LIQUID_60HZ", "liquid"),
+    ),
+    "robosimstudio_materials.dough": (
+        "plastic solids (the `dough` kind: dough, plasticine, clay, butter on the implicit MPM)",
+        ("DOUGH_60HZ", "dough"),
     ),
 }
 """Kind -> what it is, in words, and the flat names it provides.
