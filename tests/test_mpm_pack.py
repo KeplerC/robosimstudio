@@ -312,6 +312,9 @@ class TestTheRecords(unittest.TestCase):
         self.assertEqual(
             0.25, spill_fraction(pts, lo, hi, floor=0.0, band=0.005), "the one lying outside, not the one in the air"
         )
+        self.assertEqual(0.5, spill_fraction(pts, lo, hi), "without a band, both that are outside, at any height")
+        with self.assertRaises(TypeError):
+            spill_fraction(pts, lo, hi, band=0.005)
         self.assertAlmostEqual(0.2 - 0.001, heap_height(pts, 0.001, quantile=1.0))
         self.assertAlmostEqual(4.0, spread(np.array([[0, 0, 0], [2, 2, 0]]), np.array([[0, 0, 0], [1, 1, 0]])))
 

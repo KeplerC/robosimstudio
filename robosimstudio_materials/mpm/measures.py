@@ -54,19 +54,30 @@ def fill_fraction(points: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> float:
     return containment(points, lo, hi)
 
 
-def spill_fraction(points: np.ndarray, lo: np.ndarray, hi: np.ndarray, *, floor: float, band: float) -> float:
-    """What share of ``points`` lies outside the box's footprint and on the surface.
+def spill_fraction(
+    points: np.ndarray, lo: np.ndarray, hi: np.ndarray, *, floor: float | None = None, band: float | None = None
+) -> float:
+    """What share of ``points`` lies outside the box's footprint, at any height unless a band is given.
 
-    Outside in x or y, and within ``band`` of ``floor`` in z: the material that
-    missed the tray and is lying on the bench, as against the material still
-    in the air or in the heap. A particle above the band is not a spill yet.
+    Outside in x or y, whatever its z: what has left the patch it was placed
+    on, whether it lies flat or stands in the ridge a wiper piles it into (the
+    wipe example's 6 mm puddle, pushed 180 mm by the hand, ends as a 10 mm
+    ridge, and a reading that wanted it within 5 mm of the bench counted 77%
+    of a 98% push; ``session_wipe``, RTX PRO 6000, Newton 1.6.0). With
+    ``band`` and ``floor``, only what lies within ``band`` of ``floor`` in z
+    counts: the material that missed the tray and is on the bench, as against
+    what is still falling -- a particle above the band is not a spill yet. One
+    is given with the other.
     """
     array = np.atleast_2d(np.asarray(points, dtype=np.float64))
     if not len(array):
         return 0.0
+    if (floor is None) != (band is None):
+        raise TypeError("spill_fraction: floor and band go together; give both or neither")
     outside = (array[:, 0] < lo[0]) | (array[:, 0] > hi[0]) | (array[:, 1] < lo[1]) | (array[:, 1] > hi[1])
-    low = array[:, 2] <= float(floor) + float(band)
-    return float((outside & low).mean())
+    if band is not None:
+        outside &= array[:, 2] <= float(floor) + float(band)
+    return float(outside.mean())
 
 
 def heap_height(points: np.ndarray, floor: float, *, quantile: float = HEIGHT_QUANTILE) -> float:
@@ -78,7 +89,13 @@ def heap_height(points: np.ndarray, floor: float, *, quantile: float = HEIGHT_QU
 
 
 def spread(points: np.ndarray, baseline: np.ndarray) -> float:
-    """Footprint area over the settled footprint area: 1 as settled, more once pressed or poured out."""
+    """Bounding-box footprint area over the settled one: 1 as settled, more once pressed or poured out.
+
+    The axis-aligned box round every particle, so a trail, a ridge or one
+    stray grain widens it as much as a true spread does; a reading of it says
+    how far the body reaches, not how much of it moved. A count
+    (:func:`fill_fraction`, :func:`spill_fraction`) says that.
+    """
     now = np.atleast_2d(np.asarray(points, dtype=np.float64))
     then = np.atleast_2d(np.asarray(baseline, dtype=np.float64))
     if not len(now) or not len(then):
@@ -179,7 +196,8 @@ register_atom(
         provenance=(
             "Designed here. Outside the region in x or y and within two particle spacings of the surface "
             "the body was placed on: what missed the tray and is lying on the bench, as against what is "
-            "still in the air or in the heap."
+            "still in the air or in the heap. The function behind it counts at any height unless given "
+            "the band, which is how a wipe reads the ridge its wiper piles up."
         ),
         calibration=AtomCalibration(
             positives="A puddle poured on the bench beside its region reads close to 1.0.",

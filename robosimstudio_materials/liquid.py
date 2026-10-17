@@ -35,6 +35,18 @@ in the pour example's own scene (``pour_probe``):
   :data:`LIQUID_120HZ`, two MPM steps per control step: the first rate at
   which a pour from a hand's height lands, not one at which nothing tunnels. A
   puddle that is only pushed would be fine at 60.
+
+A fourth, about pushing a puddle rather than pouring one, measured in the wipe
+example's scene (``wipe_probe`` and ``session_wipe``, RTX PRO 6000): **what
+moves a puddle is a tool held upright.** A 20 mm wiper standing on its edge
+and pushed at mid-height by the page's drag handle, whose rotational spring is
+soft, pitched over under the puddle's resistance and rode across it, and three
+identical runs moved 22%, 24% and 51% of a 12 mm puddle off its patch; neither
+a 3 mm voxel, a deeper puddle, the projection, more solver iterations nor a
+stiffer yield stress made that repeatable. The same wiper pinched by the hand
+pointing down, whose pads span the wiper's whole height, moved 96-98% in three
+runs, and 98% of a 6 mm puddle, which is thinner than the collider band. The
+grid does not see a thin puddle badly; a tilted face lets it under.
 """
 
 from __future__ import annotations

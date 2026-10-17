@@ -743,12 +743,13 @@ PARTICLE_DRAFTS = (
     handle(
         "examples/11_liquid/01_wipe_spill.py",
         "wiper",
-        (0.720, -0.310, 0.765),
+        (0.625, -0.310, 0.765),
         camera=Orbit(At("ketchup"), distance=0.8, azimuth=-50.0, elevation=40.0),
         lift=0.005,
-        across=("x", -0.20),
+        across=("y", 0.18),
         expect=(Rose("wiper", 0.002, at="lifted"),),
-        pending="the wiper is dragged across the puddle on the handle; the readout's rise is what the clip should show",
+        pending="the handle tips the wiper over the puddle (it holds tilt with a soft spring; tests/test_wipe_spill "
+        "pushes 96% off the patch with the hand); the clip wants the grasp gesture, not the handle",
     ),
     handle(
         "examples/12_dough/00_roll_dough.py",
