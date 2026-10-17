@@ -914,7 +914,8 @@ class PanelCloth(Panel):
     def grab_set(self, set_name: str) -> int:
         """Take hold of one declared set. Main thread. Returns particles held.
 
-        Aimed at the set's own centroid and restricted to its own indices, with
+        Aimed at the set's own centroid (or at the hand its slot is pinned to)
+        and restricted to its own indices, with
         the seize radius widened to reach the furthest of them -- so what is held
         is the strip the garment declares, not whatever happened to be within
         3 cm of a cursor. The dragger's ``max_particles`` still caps it, keeping
@@ -934,23 +935,29 @@ class PanelCloth(Panel):
         if indices is None or not len(indices):
             return 0
         points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
-        centre = points.mean(axis=0)
+        slot = self._acquire()
+        # A slot pinned to a hand takes the set in that hand's frame, so the strip keeps the place it
+        # has relative to the fingers. Taken in the identity frame at its centroid, the first step that
+        # follows the hand would turn every offset by the hand's orientation: a YAM pointing down holds
+        # its strip mirrored end for end.
+        arm = self.follow_arm[slot.index]
+        centre, quat = self.env.arm(arm).ee_pose(self.env.state) if arm else (points.mean(axis=0), IDENTITY_QUAT)
+        centre, quat = np.asarray(centre, dtype=np.float64), np.asarray(quat, dtype=np.float64)
         reach = float(np.linalg.norm(points - centre, axis=1).max())
 
-        slot = self._acquire()
         dragger = self.draggers[slot.index]
         was = dragger.radius
         dragger.radius = reach + 1e-6
         try:
-            taken = dragger.grab(self.env.state, centre, IDENTITY_QUAT, candidates=indices, fallback_nearest=False)
+            taken = dragger.grab(self.env.state, centre, quat, candidates=indices, fallback_nearest=False)
         finally:
             dragger.radius = was
         if not taken:
             self._release(slot)
             return 0
         self.miss = 0.0
-        self._hand_over(slot, self.selected, dragger, centre, IDENTITY_QUAT)
-        slot.place(centre, IDENTITY_QUAT, key=("cloth", self.selected), label=f"{set_name} ({taken})")
+        self._hand_over(slot, self.selected, dragger, centre, quat)
+        slot.place(centre, quat, key=("cloth", self.selected), label=f"{set_name} ({taken})")
         if hasattr(cloth, "release_handle"):
             cloth.release_handle()
         return int(taken)
