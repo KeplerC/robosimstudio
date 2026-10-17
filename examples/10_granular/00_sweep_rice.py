@@ -1,13 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Scoop rice into the tray
+"""Sweep rice into the tray
 
-A heap of rice under the right hand, a paddle beside it and a tray of four slabs: drag the hand down onto the paddle, close on it, and push the rice into the tray.
+A heap of rice under the right hand, a pusher standing on its edge beyond it and a three-walled tray on the near side: turn the hand to point down, drag it onto the pusher, close on it, and sweep the heap into the tray at a walking pace.
 
-The rice is 27,648 particles on Newton's implicit MPM, stepped once per 60 Hz
-control step beside the YAM (``rss.GRANULAR_60HZ``: 16.6 ms per control step on
-an RTX PRO 6000, graph-captured, measured with this script). The paddle is
-12 mm thick because a tool thinner than two 4 mm voxels keeps rice inside it as
-it pushes. The panel reads the share of the rice inside the tray's box.
+The rice is 16,000 particles on Newton's implicit MPM, stepped once per 60 Hz
+control step beside the YAM (``rss.GRANULAR_60HZ``: 16.5 ms per control step on
+an RTX PRO 6000, GPU 3, graph-captured, measured by ``tests/test_sweep_rice``
+on this scene). The pusher is 20 mm thick and 40 mm tall so the jaws close on
+it from above, and the heap names it in ``containers`` so the grid sees it one
+voxel fatter than the hand does; without that the bottom voxel of rice passes
+under it. The tray's walls are five voxels thick and its open side faces the
+heap, so the sweep ends inside it. Swept at 0.15 m/s as the test sweeps it,
+93% of the rice is in the tray and no grain is through the bench; a tool
+faster than ~0.36 m/s outruns the grid. The panel reads the share of the rice
+inside the tray.
 """
 
 import numpy as np
@@ -19,29 +25,33 @@ from robosimstudio_materials.mpm.measures import fill_fraction
 def main():
     cell = "bench_075"
     heap_at = (0.0, -0.31, 0.0)  # under the right hand's home tool centre, in the bench's frame [m]
-    tray_at = (0.0, -0.09, 0.0)  # 220 mm toward the middle of the bench
-    tray_inside = 0.16  # [m], square; walls 8 mm thick (two voxels) and 30 mm high
-    paddle_at = (-0.13, -0.31, 0.006)  # lying flat beside the heap, 12 mm thick
-    wall, height = 0.004, 0.015  # half-thickness and half-height of a tray wall [m]
+    heap_size = (0.10, 0.10, 0.025)  # [m]; 16,000 particles at the default 2.5 mm spacing
+    pusher_at = (0.0, -0.45, 0.02)  # standing on its edge beyond the heap: 160 mm wide, 20 mm thick, 40 mm tall
+    tray_at = (0.0, -0.12)  # the centre of the tray's inside, 190 mm toward the middle of the bench
+    tray_inside = (0.28, 0.20)  # [m], x by y; the side toward the heap is open
+    wall, height = 0.01, 0.015  # half-thickness (20 mm, five voxels) and half-height (30 mm) of a wall [m]
 
-    scene = rss.Scene(cell=cell, name="scoop_rice", physics=rss.GRANULAR_60HZ)
+    scene = rss.Scene(cell=cell, name="sweep_rice", physics=rss.GRANULAR_60HZ)
     scene.add(rss.robot("yam_bimanual"))
-    rice = scene.add(rss.heap(name="rice", size=(0.12, 0.12, 0.03), at=heap_at, material="rice"))
-    scene.add(rss.box(name="paddle", half=(0.04, 0.06, 0.006), at=paddle_at, color=(0.25, 0.25, 0.28)))
-    half = tray_inside / 2 + wall
-    for name, (dx, dy, hx, hy) in {
-        "wall_near": (-half, 0.0, wall, half),
-        "wall_far": (half, 0.0, wall, half),
-        "wall_right": (0.0, -half, half, wall),
-        "wall_left": (0.0, half, half, wall),
+    rice = scene.add(
+        rss.heap(
+            name="rice", size=heap_size, at=heap_at, material="rice", containers=("pusher",), container_margin=0.004
+        )
+    )
+    scene.add(rss.box(name="pusher", half=(0.08, 0.01, 0.02), at=pusher_at, friction=0.3, color=(0.15, 0.15, 0.17)))
+    hx, hy = tray_inside[0] / 2, tray_inside[1] / 2
+    for name, (dx, dy, half_x, half_y) in {
+        "wall_back": (0.0, hy + wall, hx + 2 * wall, wall),
+        "wall_left": (-(hx + wall), wall, wall, hy + wall),
+        "wall_right": (hx + wall, wall, wall, hy + wall),
     }.items():
-        scene.add(rss.slab(name=name, half=(hx, hy, height), at=(tray_at[0] + dx, tray_at[1] + dy, height)))
+        scene.add(rss.slab(name=name, half=(half_x, half_y, height), at=(tray_at[0] + dx, tray_at[1] + dy, height)))
     sim = scene.build(control_mode="joint_position")
 
-    # The tray's inside as a world box, from the bench's surface frame.
+    # The tray's inside as a world box, from the bench's surface frame; 5 mm under the top, where the bottom layer rests.
     origin = np.asarray(rss.get_cell(cell).surface_frame[:3])
-    lo = origin + np.array((tray_at[0] - tray_inside / 2, tray_at[1] - tray_inside / 2, 0.0))
-    hi = origin + np.array((tray_at[0] + tray_inside / 2, tray_at[1] + tray_inside / 2, 2 * height))
+    lo = origin + np.array((tray_at[0] - hx, tray_at[1] - hy, -0.005))
+    hi = origin + np.array((tray_at[0] + hx, tray_at[1] + hy, 2 * height))
 
     def page(studio):
         fill = studio.gui.add_number("rice in the tray (%)", 0.0, disabled=True)

@@ -332,8 +332,8 @@ class TestTheExamplesLoad(unittest.TestCase):
     """Each numbered script under the stub studio: it builds, opens one page and steps finite."""
 
     SCRIPTS = (
-        "10_granular/00_scoop_rice.py",
-        "10_granular/01_scoop_rice_scored.py",
+        "10_granular/00_sweep_rice.py",
+        "10_granular/01_sweep_rice_scored.py",
         "11_liquid/00_pour_honey.py",
         "11_liquid/01_wipe_spill.py",
         "12_dough/00_roll_dough.py",
