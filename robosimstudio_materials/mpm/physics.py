@@ -57,12 +57,13 @@ The implicit MPM moves its colliders inside its own step by the impulse the
 particles put on them, divided by the collider's effective mass -- which for a
 free rigid body is that body's own mass, and nothing holds it. Measured with a
 50 mm cube of honey (0.175 kg) on an 8 mm free plate and in a free cup, both
-resting on the bench (``probe4``, RTX PRO 6000, Newton 1.6.0, 2 s at rest):
-at the coupler's default scale 3,545 of 8,000 particles were through the plate
-by the end of the settle and 6,682 after 2 s; at 20x, the same; with the plate
-weighing 2 kg, the same; at 1000x the plate kept 7,056 after 2 s and the cup
-7,970 of 8,000. World-fixed slabs, which the MPM holds as immovable, kept
-7,702. The arm's hand needs none of this (its effective mass through the
+resting on the bench, the MPM at 60 Hz (``probe4``, re-run with its output
+archived, RTX PRO 6000, Newton 1.6.0, 2 s at rest): at the coupler's default
+scale 4,757 of 8,000 particles were through the plate by the end of the settle
+and 7,863 after 2 s; at 20x, 3,544 and 6,682; with the plate weighing 2 kg at
+the default scale, 1,860 and 6,613; at 1000x the plate kept 7,055 after 2 s
+and the cup 7,969 of 8,000. World-fixed slabs, which the MPM holds as
+immovable, kept 7,702. The arm's hand needs none of this (its effective mass through the
 chain is 5 kg), and the scale changes only what the MPM assumes while it
 solves: the wrench the rigid solver receives is the harvested impulse either
 way (``probe_b``: identical particle outcomes and wrenches at 1 and 1e6 for a
