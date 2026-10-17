@@ -259,45 +259,17 @@ def _roll_scene():
     return scene.build()
 
 
-def _hold_tips(sim, rods, held: bool, rest_inverse: tuple[np.ndarray, np.ndarray]) -> None:
-    """Make each cable's tip capsule kinematic (``held``) or give it its mass back.
+def _roll_tips(sim, rods, angle: float, *, max_step: float) -> None:
+    """Turn each cable's tip capsule about its own axis to ``angle``, through the entity's kinematic hold.
 
-    Kinematic, as a hand with the end in a hard latch: the pose written before
-    each step is where the tip stays through every substep. Teleporting a
-    dynamic tip each step instead injects a twist impulse at a capsule whose
-    polar inertia is 1e-8 kg*m^2, and both cables whipped into loops within a
-    quarter turn (measured straightness 0.78 at 30 steps).
+    :meth:`EntityRod.roll` pins the tip -- inverse mass to zero and the kinematic
+    flag in the model and every island -- and writes its pose before each step.
+    A dynamic tip teleported each step instead injects a twist impulse at a
+    capsule whose polar inertia is 1e-8 kg*m^2, and both cables whipped into
+    loops within a quarter turn (measured straightness 0.78 at 30 steps).
     """
-    import newton
-
-    from robosimstudio.core.tuning import notify
-
-    model = sim.model
-    inv_mass, inv_inertia = model.body_inv_mass.numpy(), model.body_inv_inertia.numpy()
     for rod in rods:
-        tip = int(rod.bodies[-1])
-        inv_mass[tip] = 0.0 if held else rest_inverse[0][tip]
-        inv_inertia[tip] = 0.0 if held else rest_inverse[1][tip]
-    model.body_inv_mass.assign(inv_mass)
-    model.body_inv_inertia.assign(inv_inertia)
-    notify(sim.pipeline, int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES))
-
-
-def _roll_tip(sim, rods, rest: np.ndarray, angle: float) -> None:
-    """Turn each cable's tip capsule about its own rest axis by ``angle``, in place."""
-    from robosimstudio.core.math import quat_from_axis_angle, quat_multiply, quat_to_mat
-
-    for state in (sim.pipeline.state_0, sim.pipeline.state_1):
-        q = state.body_q.numpy()
-        qd = state.body_qd.numpy()
-        for rod in rods:
-            tip = int(rod.bodies[-1])
-            axis = quat_to_mat(rest[tip, 3:7])[:, 2]
-            q[tip, :3] = rest[tip, :3]
-            q[tip, 3:7] = quat_multiply(quat_from_axis_angle(axis, angle), rest[tip, 3:7])
-            qd[tip] = 0.0
-        state.body_q.assign(q)
-        state.body_qd.assign(qd)
+        rod.roll(sim.pipeline, angle, max_step=max_step)
 
 
 def _middle_turns(sim, rod) -> float:
@@ -316,18 +288,16 @@ class TestARollTravelsAndAStiffTwistSpringsItOut(unittest.TestCase):
         cls.sim = _roll_scene()
         cls.rods = [cls.sim.scene.by_name[n] for n in ("soft_twist", "stiff_twist")]
         cls.sim.run(60).sync()
-        rest = cls.sim.pipeline.state_0.body_q.numpy().copy()
-        rest_inverse = (cls.sim.model.body_inv_mass.numpy().copy(), cls.sim.model.body_inv_inertia.numpy().copy())
         cls.before = [_middle_turns(cls.sim, r) for r in cls.rods]
-        _hold_tips(cls.sim, cls.rods, True, rest_inverse)
-        for i in range(ROLL_STEPS):
-            _roll_tip(cls.sim, cls.rods, rest, 2.0 * np.pi * (i + 1) / ROLL_STEPS)
+        for _ in range(ROLL_STEPS):
+            _roll_tips(cls.sim, cls.rods, 2.0 * np.pi, max_step=2.0 * np.pi / ROLL_STEPS)
             cls.sim.run(1)
         cls.sim.sync()
         body_q = cls.sim.pipeline.state_0.body_q.numpy()
         cls.rolled = [_middle_turns(cls.sim, r) for r in cls.rods]
         cls.straight_rolled = [straightness(r.positions(body_q)) for r in cls.rods]
-        _hold_tips(cls.sim, cls.rods, False, rest_inverse)
+        for rod in cls.rods:
+            rod.pin(cls.sim.pipeline, on=False)
         cls.sim.run(RELEASE_STEPS).sync()
         body_q = cls.sim.pipeline.state_0.body_q.numpy()
         cls.released = [_middle_turns(cls.sim, r) for r in cls.rods]
