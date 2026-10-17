@@ -34,15 +34,21 @@ Source: [`00_pour_honey.py`](00_pour_honey.py)
 
 ## Wipe a spill
 
-A ketchup puddle under the right hand and a rubber-faced wiper beside it: drag the hand down onto the wiper, close on it, and push the puddle off its patch.
+A ketchup puddle in front of the right hand and a rubber-faced wiper standing under it: drag the hand down onto the wiper, close on it, and push the puddle toward the middle of the bench.
 
 Ketchup is a Bingham fluid here (a 300 Pa yield stress, viscosity 100), so the
-puddle holds its edge until the wiper moves it. The panel reads how much of it
-has been pushed off the patch it started on and lies on the bench
-(`spill_fraction`), and how far it has spread. A deformable sponge in place
-of the rigid wiper is a later phase. The puddle is only pushed, never dropped,
-so it would hold at 60 Hz; it runs on the one liquid table, `rss.LIQUID_120HZ`,
-at 26.0 ms per control step on an RTX PRO 6000, graph-captured.
+puddle holds its edge until the wiper moves it. The hand starts 100 mm over the
+wiper pointing down, its jaws across the wiper's 20 mm faces, so the pads cover
+the wiper's whole height and the push cannot tip it: the same wiper on the
+page's drag handle, which holds a body's tilt with a soft spring, pitched over
+under the puddle's resistance and rode across it, moving 22-51% of a 12 mm
+puddle off its patch in three identical runs; held by the hand it moved 96-98%
+of that puddle in three, and 98% of this 6 mm one (`wipe_probe` and
+`session_wipe`, RTX PRO 6000, Newton 1.6.0). The panel counts the
+ketchup that has left the patch it settled on, at any height, because the
+wiper piles it into a ridge, and reads the ridge's height. The puddle is only
+pushed, never dropped, so it would hold at 60 Hz; it runs on the one liquid
+table, `rss.LIQUID_120HZ`, at 25.9 ms per control step, graph-captured.
 
 ```bash
 uv run examples/11_liquid/01_wipe_spill.py
