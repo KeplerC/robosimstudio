@@ -17,6 +17,7 @@ Dataclasses only, and no import of the library or a browser:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from .beats import (
     Check,
     Click,
     Corner,
+    Do,
     Drag,
     DragTo,
     Expectation,
@@ -50,6 +52,7 @@ from .beats import (
     Segment,
     Select,
     Slider,
+    Squashed,
     Toggle,
     Top,
     Wait,
@@ -710,21 +713,252 @@ DRAFTS = (
     ),
 )
 
-# The particle kinds: a tool on the page's handle, dragged through what it works on. Drafts:
-# none has been filmed, and each take says what it would show.
-RICE_VIEW = Orbit(At("rice"), distance=0.9, azimuth=-50.0, elevation=35.0)
-PARTICLE_DRAFTS = (
-    handle(
+# =============================================================================
+# The particle kinds, worked by the robot's hand
+# =============================================================================
+#
+# Each take is the gesture its example's medium test drives through the arm panel,
+# played on the page at the test's speeds: the right arm's gizmo dragged, Close
+# pressed. Nothing is clicked onto a handle, so what moves the rice, the ketchup
+# and the dough is the hand.
+
+TOOL_DOWN = (0.0, 1.0, 0.0, 0.0)
+"""The YAM's tool pointing down, its jaws closing along world y (xyzw). Its home points the tool along +x."""
+
+
+def _turn(arm: str, quat, seconds: float, label: str) -> Do:
+    """The arm's gizmo turned to ``quat`` over ``seconds`` of clip, filmed, and the hand turning after it.
+
+    What a drag of the gizmo's rotation ring writes, written through the panel's
+    own ``aim``: no beat drags a ring, so the clip shows the gizmo turning with
+    the pointer off it.
+    """
+
+    def turn(film):
+        import numpy as np
+
+        from .page import ease
+
+        panel = film.session.arms[arm]
+        a = np.asarray(panel.cursor_quat, dtype=np.float64)
+        b = np.asarray(quat, dtype=np.float64)
+        b = -b if float(a @ b) < 0.0 else b
+        half = math.acos(min(1.0, float(a @ b)))
+        frames = max(1, round(seconds * film.take.fps))
+        for k in range(1, frames + 1):
+            t = ease(k / frames)
+            q = b if half < 1e-6 else (math.sin((1.0 - t) * half) * a + math.sin(t * half) * b) / math.sin(half)
+            panel.aim(panel.cursor_pos, q / np.linalg.norm(q), moving=k < frames)
+            film.advance()
+        return {"turned_deg": round(math.degrees(2.0 * half), 1)}
+
+    return Do(fn=turn, label=label)
+
+
+def _dolly(camera: Orbit | Camera, seconds: float, label: str) -> Do:
+    """The view moved to ``camera`` over ``seconds`` of clip, filmed: what a person's scroll and orbit do.
+
+    For a take whose first drag needs the hand in view at its home, far over
+    what it then works on: the page opens wide and closes in once the hand is down.
+    """
+
+    def dolly(film):
+        from .page import ease
+
+        eye1, at1, fov1 = camera.resolve(film)
+        now = film.page.js("camera")
+        eye0, at0, fov0 = now["eye"], now["at"], float(now["fov"])
+        frames = max(1, round(seconds * film.take.fps))
+        for k in range(1, frames + 1):
+            t = ease(k / frames)
+            film.aim(
+                [a + (b - a) * t for a, b in zip(eye0, eye1, strict=True)],
+                [a + (b - a) * t for a, b in zip(at0, at1, strict=True)],
+                fov0 + (fov1 - fov0) * t,
+            )
+            film.advance()
+        return {"camera_to": {"eye": [round(v, 3) for v in eye1], "at": [round(v, 3) for v in at1]}}
+
+    return Do(fn=dolly, label=label)
+
+
+def _note(key: str, read, label: str) -> Do:
+    """Read something off the scene between two frames and keep it in the timeline under ``key``."""
+    return Do(fn=lambda film: {key: read(film)}, label=label)
+
+
+def _noted(film, key: str):
+    """What a :func:`_note` kept."""
+    for span in film.spans:
+        if key in span:
+            return span[key]
+    raise KeyError(key)
+
+
+def _jaws(film) -> float:
+    """The right hand's jaw opening [mm]."""
+    return round(1000.0 * float(film.sim.gripper("right").width(film.sim.state)), 1)
+
+
+def _jaws_on(width_mm: float, within_mm: float):
+    """The jaws closed on a tool's faces: the opening noted after Close is the tool's own width."""
+
+    def check(film):
+        width = _noted(film, "jaws_mm")
+        return abs(width - width_mm) <= within_mm, (
+            f"the jaws closed to {width:.1f} mm on its {width_mm:.0f} mm faces (need within {within_mm:.0f})"
+        )
+
+    return check
+
+
+def _carried(name: str, along_y: float, *, upright: float, at: str = "end"):
+    """``name`` went at least ``along_y`` [m] toward +y from Close to mark ``at``, and kept its height within ``upright``."""
+
+    def check(film):
+        a, b = film.marks["closed"]["things"][name], film.marks[at]["things"][name]
+        dy, dz = b[1] - a[1], b[2] - a[2]
+        return dy >= along_y and abs(dz) <= upright, (
+            f"the {name} went {dy * 1000:.0f} mm with the hand (need {along_y * 1000:.0f}) and "
+            f"{dz * 1000:+.1f} mm in height (need within {upright * 1000:.0f})"
+        )
+
+    return check
+
+
+def _rice_in_tray(film) -> tuple[bool, str]:
+    """``00_sweep_rice``'s readout: the share of the rice inside the tray, boxed as the example boxes it."""
+    import numpy as np
+
+    from robosimstudio_materials.mpm.measures import fill_fraction
+
+    lo, hi = np.asarray(film.bench((-0.14, -0.22, -0.005))), np.asarray(film.bench((0.14, -0.02, 0.03)))
+    fill = fill_fraction(np.asarray(film.sim["rice"].particle_q, dtype=np.float64), lo, hi)
+    return fill >= 0.5, f"{100.0 * fill:.1f}% of the rice is in the tray (tests/test_sweep_rice asks half)"
+
+
+def _ketchup_off(film) -> tuple[bool, str]:
+    """``01_wipe_spill``'s readout: the share of the ketchup off the patch it settled on, at any height."""
+    import numpy as np
+
+    from robosimstudio_materials.mpm.measures import spill_fraction
+
+    sauce = film.sim["ketchup"]
+    rest = sauce.entity.rest["particle_q"][sauce.particles]
+    pad = 0.5 * float(sauce.spec.particle_spacing)
+    lo, hi = rest.min(axis=0) - np.array((pad, pad, 0.0)), rest.max(axis=0) + np.array((pad, pad, 0.03))
+    off = spill_fraction(np.asarray(sauce.particle_q, dtype=np.float64), lo, hi)
+    return off >= 0.5, f"{100.0 * off:.1f}% of the ketchup is off its patch (tests/test_wipe_spill asks half)"
+
+
+def _dough_height(film) -> float:
+    """``01_press_dough``'s readout: the puck's height as a share of the height it settled at [%]."""
+    from robosimstudio_materials.mpm.measures import heap_height
+
+    lump = film.sim["dough"]
+    rest, floor = lump.entity.rest["particle_q"][lump.particles], lump.entity.floor_z
+    return round(100.0 * heap_height(lump.particle_q, floor) / heap_height(rest, floor), 1)
+
+
+def _dent_kept(film) -> tuple[bool, str]:
+    """The hand took the puck down, and most of the dent stayed once it lifted (tests/test_mpm_kinds asks 0.6)."""
+    pressed, after = _noted(film, "height_pct"), _dough_height(film)
+    kept = (100.0 - after) / max(1e-6, 100.0 - pressed)
+    return pressed <= 90.0 and kept >= 0.6, (
+        f"height {pressed:.1f}% of settled under the hand (need 90 or less) and {after:.1f}% after it lifted: "
+        f"{kept:.2f} of the dent kept (need 0.6)"
+    )
+
+
+ROBOT_PARTICLES = (
+    Take(
         "examples/10_granular/00_sweep_rice.py",
-        "pusher",
-        (0.600, -0.450, 0.770),
-        camera=RICE_VIEW,
-        lift=0.005,
-        across=("y", 0.25),
-        expect=(Rose("pusher", 0.002, at="lifted"),),
-        pending="the pusher rides the handle into the tray; the clip should show the hand's sweep, the gesture "
-        "tests/test_sweep_rice drives, once it is written as beats",
+        # From the front and the tray's side: the heap comes toward the lens into the tray, and the arm stays behind it.
+        camera=Orbit(Bench(0.0, -0.25, 0.03), distance=0.9, azimuth=45.0, elevation=45.0),
+        warmup=1.0,  # the heap settles before the first frame
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        budget=1_800_000,  # nine gestures and a sweep: 18 s of clip
+        beats=(
+            Wait(seconds=0.5, label="the right hand over the heap, pointing forward"),
+            DragTo("right", Bench(0.0, -0.45, 0.12), seconds_per_m=4.5, label="over the pusher"),
+            _turn("right", TOOL_DOWN, 1.0, "turn the gizmo: the hand points down"),
+            Drag("right", "z", to=At("pusher"), seconds=1.6, label="down onto the pusher"),
+            Press(text="Close", within=RIGHT, label="Close: the jaws take its 20 mm faces"),
+            Wait(seconds=1.0, mark="closed"),
+            _note("jaws_mm", _jaws, "the jaw opening"),
+            # tests/test_sweep_rice walks the hand at 0.15 m/s; eased over 3 s, these 290 mm peak at 0.145.
+            Drag("right", "y", to=Bench(0.0, -0.16, 0.02), seconds=3.0, label="sweep into the tray at a walking pace"),
+            Wait(seconds=1.5, mark="swept", label="the panel reads the share in the tray"),
+            Press(text="Open", within=RIGHT, label="Open"),
+            Drag("right", "z", 0.10, seconds=1.0, label="lift away"),
+            Drag("right", "y", -0.15, seconds=1.0, label="and back out of the tray"),
+            # From above, where a thin layer of points still shows against the bench: under the push the
+            # rice packs into a strip a few millimetres high along the pusher's face, and a tenth of it
+            # runs round the pusher's ends (sweep_where.py, GPU 0).
+            _dolly(Orbit(Bench(0.0, -0.17, 0.0), distance=0.75, azimuth=0.0, elevation=80.0), 1.2, "from above"),
+            Wait(seconds=1.2, label="the strip along the pusher's face, and what ran round its ends"),
+        ),
+        expect=(
+            Check(_jaws_on(20.0, 4.0)),
+            Check(_carried("pusher", 0.20, upright=0.006, at="swept"), needs=("pusher",)),
+            Check(_rice_in_tray),
+        ),
     ),
+    Take(
+        "examples/11_liquid/01_wipe_spill.py",
+        # From in front of the arms: the push runs left to right, and the hand backs away at the end.
+        camera=Orbit(Bench(0.025, -0.21, 0.02), distance=0.75, azimuth=15.0, elevation=42.0),
+        warmup=1.0,  # the puddle settles before the first frame
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        budget=1_200_000,
+        beats=(
+            Wait(seconds=0.5, label="the right hand over the wiper, pointing down"),
+            # The pads' tips on the bench, where tests/test_wipe_spill closes: the tool centre 16.5 mm up.
+            Drag("right", "z", to=At("wiper", dz=0.0015), seconds=1.4, label="drag the gizmo down onto the wiper"),
+            Press(text="Close", within=RIGHT, label="Close: the jaws take its 20 mm faces"),
+            Wait(seconds=0.8, mark="closed"),
+            _note("jaws_mm", _jaws, "the jaw opening"),
+            # The test walks the cursor at 0.09 m/s; eased over 3 s, these 180 mm peak at 0.09.
+            Drag("right", "y", 0.18, seconds=3.0, label="push the puddle toward the middle of the bench"),
+            Wait(seconds=0.8, mark="pushed", label="the ketchup is off its patch"),
+            Press(text="Open", within=RIGHT, label="Open"),
+            Drag("right", "z", 0.08, seconds=1.0, label="lift away"),
+            Drag("right", "x", -0.10, seconds=1.0, label="and back: the ridge stays where the wiper left it"),
+            Wait(seconds=1.0),
+        ),
+        expect=(
+            Check(_jaws_on(20.0, 3.0)),
+            Check(_carried("wiper", 0.15, upright=0.01, at="pushed"), needs=("wiper",)),
+            Check(_ketchup_off),
+        ),
+    ),
+    Take(
+        "examples/12_dough/01_press_dough.py",
+        # Wide enough for the hand at its home, 330 mm over the puck; the view closes in once the hand is down.
+        camera=Orbit(Bench(0.0, -0.31, 0.17), distance=0.75, azimuth=5.0, elevation=20.0),
+        warmup=1.0,  # the puck settles before the first frame
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the right hand, open, over the puck"),
+            Press(text="Close", within=RIGHT, label="Close: the fingers make one blade"),
+            Drag("right", "z", to=Bench(0.0, -0.31, 0.08), seconds=1.2, label="drag the gizmo down to the puck"),
+            # Low and along the blade: the particles are drawn unlit, so a dent shows only as a notch in the outline.
+            _dolly(Orbit(At("dough", dz=0.015), distance=0.35, azimuth=5.0, elevation=12.0), 1.0, "closer"),
+            # 15 mm under the settled top, as tests/test_mpm_kinds presses it.
+            Drag("right", "z", to=Top("dough", dz=-0.015), seconds=1.5, label="and 15 mm into it"),
+            Wait(seconds=0.5, mark="pressed"),
+            _note("height_pct", _dough_height, "the puck's height under the hand"),
+            Drag("right", "z", 0.12, seconds=1.4, label="lift away"),
+            Drag("right", "y", -0.12, seconds=1.0, label="and aside"),
+            Wait(seconds=1.5, label="the dent stays"),
+        ),
+        expect=(Check(_dent_kept), Squashed("dough", 0.003, at="pressed")),
+    ),
+)
+
+# The rest of the particle kinds: a tool on the page's handle, dragged through what it works on.
+# Drafts: each take says what the hand's version would show.
+PARTICLE_DRAFTS = (
     handle(
         "examples/11_liquid/00_pour_honey.py",
         "cup",
@@ -736,17 +970,6 @@ PARTICLE_DRAFTS = (
         pending="the handle carries the cup over the bowl; the tip is the gizmo's rotation ring, which no beat turns yet",
     ),
     handle(
-        "examples/11_liquid/01_wipe_spill.py",
-        "wiper",
-        (0.625, -0.310, 0.765),
-        camera=Orbit(At("ketchup"), distance=0.8, azimuth=-50.0, elevation=40.0),
-        lift=0.005,
-        across=("y", 0.18),
-        expect=(Rose("wiper", 0.002, at="lifted"),),
-        pending="the handle tips the wiper over the puddle (it holds tilt with a soft spring; tests/test_wipe_spill "
-        "pushes 96% off the patch with the hand); the clip wants the grasp gesture, not the handle",
-    ),
-    handle(
         "examples/12_dough/00_roll_dough.py",
         "pin",
         (0.730, -0.310, 0.765),
@@ -756,25 +979,9 @@ PARTICLE_DRAFTS = (
         expect=(Rose("pin", 0.005, at="lifted"),),
         pending="the pin is dragged across the block on the handle; a roll that flattens it needs the pin held at a height",
     ),
-    Take(
-        "examples/12_dough/01_press_dough.py",
-        camera=Orbit(At("dough"), distance=0.7, azimuth=-50.0, elevation=30.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        beats=(
-            Wait(seconds=0.5, label="the right hand, open, over the puck"),
-            Press(text="Close", within=RIGHT, label="Close: one blade"),
-            Drag("right", "z", to=(0.600, -0.310, 0.830), seconds=1.2, label="drag the gizmo down to the puck"),
-            Drag("right", "z", to=(0.600, -0.310, 0.775), seconds=1.0, label="and 15 mm into it"),
-            Wait(seconds=0.5, mark="pressed"),
-            Drag("right", "z", to=(0.600, -0.310, 0.850), seconds=1.2, label="lift away: the dent stays"),
-            Wait(seconds=1.5, mark="lifted"),
-        ),
-        pending="the press gesture, to be filmed once the gizmo path over the puck is measured on the page",
-    ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS)
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES, *PARTICLE_DRAFTS)
 
 KEPT: dict[str, str] = {
     "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
