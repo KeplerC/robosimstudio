@@ -684,6 +684,14 @@ def _build_base(
         entity.build_into(builder, episode)
         entities.append(entity)
 
+    # --- 4. what the robot needs the whole scene for ----------------------
+    # A vacuum cup couples to the parts it may hold with weld rows the builder
+    # has to carry before it finalizes, and the parts build after the robot
+    # (step 3), so the robot's own after_build is too early to name them.
+    after_scene_built = getattr(embodiment, "after_scene_built", None)
+    if callable(after_scene_built):
+        after_scene_built(builder, entities)
+
     # --- 5. finalize ------------------------------------------------------
     # Scene-wide, and after every entity has built: a texture bound by one
     # import must not be tinted by a colour another import happened to leave on
