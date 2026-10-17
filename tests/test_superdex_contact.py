@@ -87,9 +87,8 @@ class TestACableCanTouchASoftBody(unittest.TestCase):
     """A cable dropped across a soft block lies on it; it used to fall through it."""
 
     def test_the_cable_lies_on_the_block(self):
-        from robosimstudio.domains.soft import SoftMaterialSpec, SoftSpec
-
         import robosimstudio as rss
+        from robosimstudio_materials.soft import SoftMaterialSpec, SoftSpec
 
         block = SoftSpec(
             name="block",
@@ -115,7 +114,7 @@ class TestACableCanTouchASoftBody(unittest.TestCase):
 
 def _hanging_cable(*, nodes: int, name: str = "cable", at: tuple[float, float] = (0.0, 0.0), **kw):
     """A 3 mm cable hung straight down from 400 mm over ``at``, ``nodes - 1`` legs of 10 mm."""
-    from robosimstudio.domains.rod.spec import RodSpec
+    from robosimstudio_materials.rod.spec import RodSpec
 
     top = np.array([at[0], at[1], 0.40])
     return RodSpec(
@@ -144,9 +143,8 @@ class TestAnchorsAndJoins(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from robosimstudio.domains.soft import SoftMaterialSpec, SoftSpec
-
         import robosimstudio as rss
+        from robosimstudio_materials.soft import SoftMaterialSpec, SoftSpec
 
         weight = SoftSpec(
             name="weight",
@@ -198,9 +196,8 @@ class TestAJoinWhoseNodesDoNotMeet(unittest.TestCase):
     """
 
     def _scene(self, *, rigid: bool):
-        from robosimstudio.domains.soft import SoftMaterialSpec, SoftSpec
-
         import robosimstudio as rss
+        from robosimstudio_materials.soft import SoftMaterialSpec, SoftSpec
 
         material = (
             SoftMaterialSpec(young=1.0e9, density=1200.0) if rigid else SoftMaterialSpec(young=1.0e6, density=300.0)
@@ -267,9 +264,8 @@ class TestAStiffBodyOnARigidCore(unittest.TestCase):
     """
 
     def test_it_falls_and_its_free_layer_stays_on_it(self):
-        from robosimstudio.domains.soft import SoftMaterialSpec, SoftSpec
-
         import robosimstudio as rss
+        from robosimstudio_materials.soft import SoftMaterialSpec, SoftSpec
 
         drop = 0.05
         brick = SoftSpec(
@@ -314,9 +310,8 @@ class TestARigidCoreHasNoCollider(unittest.TestCase):
     """
 
     def _scene(self, collider: str):
-        from robosimstudio.domains.soft import SoftMaterialSpec, SoftSpec
-
         import robosimstudio as rss
+        from robosimstudio_materials.soft import SoftMaterialSpec, SoftSpec
 
         brick = SoftSpec(
             name="brick",
@@ -370,9 +365,8 @@ class TestAStressFreeShape(unittest.TestCase):
     """
 
     def _hang(self, stress_free) -> float:
-        from robosimstudio.domains.rod.spec import RodSpec
-
         import robosimstudio as rss
+        from robosimstudio_materials.rod.spec import RodSpec
 
         top = np.array([0.0, 0.0, 0.40])
         down = [top + np.array([0.0, 0.0, -0.005 * i]) for i in range(21)]  # 100 mm down
@@ -405,9 +399,8 @@ class TestAStressFreeShape(unittest.TestCase):
         self.assertLess(abs(straight), 0.02, f"the stress-free straight cable's end is {straight * 1e3:.0f} mm out")
 
     def test_a_polyline_of_other_legs_is_refused(self):
-        from robosimstudio.domains.rod.spec import RodSpec
-
         import robosimstudio as rss
+        from robosimstudio_materials.rod.spec import RodSpec
 
         nodes = tuple((0.0, 0.0, 0.3 - 0.01 * i) for i in range(5))
         wrong = tuple((0.0, 0.0, 0.3 - 0.02 * i) for i in range(5))
@@ -424,10 +417,9 @@ def _cantilever(engine: str, **matter) -> dict:
     (largest and at the end) and how far the anchor node moved [m], read every
     30 steps.
     """
-    from robosimstudio.domains.rod.spec import RodSpec
-
     import robosimstudio as rss
     from robosimstudio.specs.physics import backend
+    from robosimstudio_materials.rod.spec import RodSpec
 
     rod = backend("superdex", substeps=2) if engine == "superdex" else backend("vbd")
     soft = rod if engine == "superdex" else backend("vbd")
@@ -482,9 +474,8 @@ def _twisted(anchor: str) -> dict:
     the clamp's twist hold resists. Returns the free tip's largest drop [m] and
     how far the anchor node moved [m], read every 30 steps.
     """
-    from robosimstudio.domains.rod.spec import RodSpec
-
     import robosimstudio as rss
+    from robosimstudio_materials.rod.spec import RodSpec
 
     held = [(0.0, -0.10 + 0.01 * i, 0.30) for i in range(11)]
     nodes = held + [(0.01 * i, 0.0, 0.30) for i in range(1, 11)]
@@ -565,10 +556,10 @@ class TestATetFileIsInactiveToNewton(unittest.TestCase):
         from pathlib import Path
 
         import newton
-        from robosimstudio.domains.soft import SoftSpec
 
         import robosimstudio as rss
         from robosimstudio.specs import AssetSpec
+        from robosimstudio_materials.soft import SoftSpec
 
         v = np.array([[0, 0, 0], [0.02, 0, 0], [0, 0.02, 0], [0, 0, 0.02]], dtype=np.float64)
         t = np.array([[0, 1, 2, 3]], dtype=np.int64)

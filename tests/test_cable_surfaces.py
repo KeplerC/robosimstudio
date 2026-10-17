@@ -30,7 +30,7 @@ def _l_shaped(step: float = 0.005) -> np.ndarray:
 
 class TestTheSkinFramesAreTransported(unittest.TestCase):
     def test_every_axis_is_a_unit_normal_to_its_element(self):
-        from robosimstudio.domains.rod.actor import transported_frames
+        from robosimstudio_materials.rod.actor import transported_frames
 
         nodes = _l_shaped()
         axes = transported_frames(nodes)
@@ -42,7 +42,7 @@ class TestTheSkinFramesAreTransported(unittest.TestCase):
 
     def test_no_axis_flips_through_the_turn(self):
         """A per-element rule flipped 90 degrees at the corner; the engine read that as rest twist and diverged."""
-        from robosimstudio.domains.rod.actor import transported_frames
+        from robosimstudio_materials.rod.actor import transported_frames
 
         axes = transported_frames(_l_shaped())
         turn = np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", axes[:-1], axes[1:]), -1.0, 1.0)))
@@ -76,8 +76,8 @@ class TestTheRenderedTube(unittest.TestCase):
 class TestTheCenterlineReadsEitherSnapshot(unittest.TestCase):
     def test_a_host_snapshot_answers(self):
         """``HostSnapshot`` carries ``particle_q`` and no ``particles``; reading one raised."""
-        from robosimstudio.domains.rod import RodSpec
-        from robosimstudio.domains.rod.superdex import EntityRodSuperdex
+        from robosimstudio_materials.rod import RodSpec
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
 
         entity = EntityRodSuperdex(RodSpec(name="cable"))
         entity.particles = np.arange(2, 7, dtype=np.int32)
@@ -93,10 +93,9 @@ class TestAStatedModulusIsNotReportedLost(unittest.TestCase):
         """A clip's E goes to SuperDex through ``tet_materials``; the composer said it never arrived."""
         from types import SimpleNamespace
 
-        from robosimstudio.domains.soft import SoftMaterialSpec, SoftSpec
-
         from robosimstudio.scene.physics.compose import _warn_lost_material
         from robosimstudio.specs.physics import HostActor
+        from robosimstudio_materials.soft import SoftMaterialSpec, SoftSpec
 
         spec = SoftSpec(name="clip", material=SoftMaterialSpec(young=3.0e8, poisson=0.38))
         node = SimpleNamespace(name="clip", entity=SimpleNamespace(spec=spec))

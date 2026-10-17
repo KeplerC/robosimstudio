@@ -19,11 +19,10 @@ from __future__ import annotations
 
 import unittest
 
-from robosimstudio.domains.rod import Rod
-
 from robosimstudio.assetlib.semantics.features import FeatureSpec
 from robosimstudio.domains.rigid import Body
 from robosimstudio.domains.rigid.declare import TOUCHES
+from robosimstudio_materials.rod import Rod
 
 TIER = "fast"
 """No GPU. Gates every commit."""

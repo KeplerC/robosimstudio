@@ -60,10 +60,10 @@ class TestOnlyAHostedBodyIsInactiveToNewton(unittest.TestCase):
 
     def _flags(self, solver):
         import newton
-        from robosimstudio.domains.soft import SoftSpec
 
         from robosimstudio.scene.registry import resolve_entity_class
         from robosimstudio.specs.arrangement import ArrangementSpec, backend
+        from robosimstudio_materials.soft import SoftSpec
 
         spec = SoftSpec(name="b", size=(0.04, 0.02, 0.01), cells=(4, 2, 2), settle_frames=0)
         cls = resolve_entity_class(

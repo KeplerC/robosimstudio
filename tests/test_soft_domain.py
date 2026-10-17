@@ -152,7 +152,7 @@ def _register_stub(alias="probe_host"):
 # --------------------------------------------------------------------------- specs
 class TestSoftSpecs(unittest.TestCase):
     def test_lame_round_trips(self):
-        from robosimstudio.domains.soft import lame_from_young_poisson, young_poisson_from_lame
+        from robosimstudio_materials.soft import lame_from_young_poisson, young_poisson_from_lame
 
         for young, poisson in ((2.0e4, 0.25), (8.0e4, 0.0), (1.0e6, 0.45)):
             mu, lam = lame_from_young_poisson(young, poisson)
@@ -161,7 +161,7 @@ class TestSoftSpecs(unittest.TestCase):
             self.assertAlmostEqual(back[1], poisson, delta=1e-9)
 
     def test_the_incompressible_limit_is_refused(self):
-        from robosimstudio.domains.soft import lame_from_young_poisson
+        from robosimstudio_materials.soft import lame_from_young_poisson
 
         with self.assertRaises(ValueError):
             lame_from_young_poisson(1.0e4, 0.5)
@@ -169,7 +169,7 @@ class TestSoftSpecs(unittest.TestCase):
             lame_from_young_poisson(-1.0, 0.3)
 
     def test_sponge_validates_and_counts(self):
-        from robosimstudio.domains.soft import SoftSpec, sponge
+        from robosimstudio_materials.soft import SoftSpec, sponge
 
         spec = sponge(name="s", size=(0.1, 0.08, 0.04), cells=(4, 3, 2), at=(0.0, 0.0, 0.0))
         self.assertEqual(spec.particle_count, 5 * 4 * 3)
@@ -181,7 +181,7 @@ class TestSoftSpecs(unittest.TestCase):
             SoftSpec(name="bad", cells=(0, 1, 1))
 
     def test_actor_params_are_json_scalars(self):
-        from robosimstudio.domains.soft import SOFT_FOAM
+        from robosimstudio_materials.soft import SOFT_FOAM
 
         params = SOFT_FOAM.actor_params()
         json.dumps(params)
@@ -193,7 +193,7 @@ class TestSoftSpecs(unittest.TestCase):
         """``render_parts`` branches on ``material.is_slab``; a volumetric body
         answers True -- its thickness is geometry -- so the shared line needs no
         special case."""
-        from robosimstudio.domains.soft import SOFT_FOAM
+        from robosimstudio_materials.soft import SOFT_FOAM
 
         self.assertTrue(SOFT_FOAM.is_slab)
 
@@ -208,7 +208,7 @@ class TestNodeSelectors(unittest.TestCase):
 
     @staticmethod
     def _build(**selectors):
-        from robosimstudio.domains.soft import EntitySoft, SoftSpec
+        from robosimstudio_materials.soft import EntitySoft, SoftSpec
 
         entity = EntitySoft(SoftSpec(name="b", size=(0.04, 0.02, 0.01), cells=(4, 2, 2), settle_frames=0, **selectors))
         entity.build(newton.ModelBuilder(), None)
@@ -235,8 +235,7 @@ class TestNodeSelectors(unittest.TestCase):
 # --------------------------------------------------------------------- registration
 class TestRegistration(unittest.TestCase):
     def test_the_bundle_registers_domain_backend_entity(self):
-        import robosimstudio.domains.soft as soft
-
+        import robosimstudio_materials.soft as soft
         from robosimstudio.scene.registry import ENTITIES
 
         self.assertEqual(soft.DOMAIN.reads, ("volume", "cloth"))

@@ -47,6 +47,7 @@ from pathlib import Path
 from textwrap import dedent
 
 from tests.fixtures.examples import DEMOS, EXAMPLES, HAS_ROPE, NUMBERED, ROOT, SCRIPTS, _load, _run
+from tests.fixtures.packs import PYTHON_FLAGS, env_without
 
 TIER = "medium"
 """Builds and steps real scenes on a GPU."""
@@ -374,9 +375,11 @@ class TestTheShape(unittest.TestCase):
                 self.assertTrue(len(lines) == 1 or not lines[1].strip(), "line 2 is blank")
 
     def test_no_numbered_script_is_a_pack(self) -> None:
-        """A kind's folder is on ``robosimstudio.domains``'s path, and what keeps
-        its examples from being scanned as kinds is their name: it starts with a
-        digit, so it is not an identifier (``tests/test_domain_packs.py``)."""
+        """An example folder may be put on ``robosimstudio.domains``'s path as a
+        domain root of somebody's own, and what keeps its scripts from being
+        scanned as kinds is their name: it starts with a digit, so it is not an
+        identifier (``tests/test_registry_discovery.py``). The shipped folders
+        are on no path; the rule still holds for every one of them."""
         for name in _numbered_scripts():
             with self.subTest(example=name):
                 self.assertFalse(Path(name).stem.isidentifier())
@@ -392,7 +395,7 @@ ALONE = dedent(
     runpy.run_path(sys.argv[1], run_name="__main__")
     (sim,) = opened
     sim.run(20).sync()
-    other = "robosimstudio.domains." + sys.argv[2]
+    other = "robosimstudio_materials." + sys.argv[2]
     print(json.dumps({
         "finite": bool(sim.state_is_finite()),
         "particles": int(sim.model.particle_count),
@@ -404,51 +407,50 @@ ALONE = dedent(
 
 
 class TestEachKindsFolderStandsAlone(unittest.TestCase):
-    """Each kind is its own folder and an independent example: one runs with the others gone.
+    """Each kind's examples are independent of the other kinds: one runs with another gone.
 
-    The cloth, soft and rope folders are each a root of
-    ``robosimstudio.domains``. Here a fresh process is given *one* of them as its
-    only root -- so the other kind is not merely unimported but not there to
-    import -- and runs an example out of that folder exactly as a reader would,
-    by path, through to twenty steps. ``soft.py`` once reached into ``cloth.py``
-    for a helper inside two of its methods, which no import-time check could
-    see and the first build did.
+    The cloth, soft and rope kinds are each one module of
+    ``robosimstudio_materials``. Here a fresh process is given a copy of that
+    package with another kind left out -- so the other kind is not merely
+    unimported but not there to import -- and runs an example out of a folder
+    exactly as a reader would, by path, through to twenty steps. ``soft.py``
+    once reached into ``cloth.py`` for a helper inside two of its methods, which
+    no import-time check could see and the first build did.
     """
 
     def _alone(self, example: str, other: str) -> dict:
-        from robosimstudio import roots
+        from contextlib import ExitStack
 
-        folder = (EXAMPLES / example).parent
-        env = {**os.environ, roots.DOMAIN_ROOTS_ENV: str(folder), f"{roots.DOMAIN_ROOTS_ENV}_ONLY": "1"}
-        proc = subprocess.run(
-            [sys.executable, "-c", ALONE, str(EXAMPLES / example), other],
-            cwd=ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=900,
-            check=False,
-        )
+        with ExitStack() as stack:
+            proc = subprocess.run(
+                [sys.executable, *PYTHON_FLAGS, "-c", ALONE, str(EXAMPLES / example), other],
+                cwd=ROOT,
+                env={**env_without(stack, other), "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES", "")},
+                capture_output=True,
+                text=True,
+                timeout=900,
+                check=False,
+            )
         self.assertEqual(0, proc.returncode, proc.stderr[-3000:])
         return json.loads([line for line in proc.stdout.splitlines() if line.startswith("{")][-1])
 
     def test_a_soft_example_builds_and_steps_with_no_cloth(self) -> None:
         got = self._alone("02_soft/01_tet_mesh.py", "cloth")
-        self.assertFalse(got["other_findable"], "the cloth folder was meant to be off the path")
+        self.assertFalse(got["other_findable"], "the cloth kind was meant to be left out of the package")
         self.assertFalse(got["other_loaded"])
         self.assertEqual(112, got["particles"])
         self.assertTrue(got["finite"])
 
     def test_a_cloth_example_builds_and_steps_with_no_soft(self) -> None:
         got = self._alone("01_cloth/00_towel.py", "soft")
-        self.assertFalse(got["other_findable"], "the soft folder was meant to be off the path")
+        self.assertFalse(got["other_findable"], "the soft kind was meant to be left out of the package")
         self.assertFalse(got["other_loaded"])
         self.assertGreater(got["particles"], 500)
         self.assertTrue(got["finite"])
 
     def test_a_rope_example_builds_and_steps_with_no_cloth(self) -> None:
         got = self._alone("03_rope/00_cable.py", "cloth")
-        self.assertFalse(got["other_findable"], "the cloth folder was meant to be off the path")
+        self.assertFalse(got["other_findable"], "the cloth kind was meant to be left out of the package")
         self.assertFalse(got["other_loaded"])
         self.assertEqual(0, got["particles"], "a capsule chain is bodies, not particles")
         self.assertTrue(got["finite"])

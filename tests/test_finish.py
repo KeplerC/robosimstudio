@@ -17,7 +17,6 @@ import unittest
 from dataclasses import replace
 
 import numpy as np
-from robosimstudio.domains.cloth import ClothSpec
 
 from robosimstudio.core.render import finish as finish_mod
 from robosimstudio.core.render.finish import (
@@ -37,6 +36,7 @@ from robosimstudio.core.render.scenery import SCENERY, get_scenery, register_sce
 from robosimstudio.core.render.spec import RenderSpec
 from robosimstudio.solvers.render import look_kwargs
 from robosimstudio.specs import EmbodimentSpec, ObjectSpec, StaticSpec
+from robosimstudio_materials.cloth import ClothSpec
 
 TIER = "fast"
 """No GPU. Gates every commit."""

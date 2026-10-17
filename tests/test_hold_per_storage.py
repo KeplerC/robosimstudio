@@ -55,7 +55,7 @@ class TestTheContractIsOneMethod(unittest.TestCase):
     def test_both_implementations_answer_hold(self) -> None:
         import inspect
 
-        from robosimstudio.domains.rod import Centerline, EntityRod, EntityRodSuperdex
+        from robosimstudio_materials.rod import Centerline, EntityRod, EntityRodSuperdex
 
         for cls in (EntityRod, EntityRodSuperdex):
             with self.subTest(cls=cls.__name__):

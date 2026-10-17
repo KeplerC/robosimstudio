@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """The composer knows no domain by name.
 
-``domains/`` ships six kinds of thing, and for a long time the composer knew all
-six by name. Eleven sites across four modules matched a *string*: ``static`` is
+The library ships six kinds of thing (three in ``domains/``, three in
+``robosimstudio_materials``), and for a long time the composer knew all six by
+name. Eleven sites across four modules matched a *string*: ``static`` is
 scenery and owns no dynamics, ``articulated`` is the robot and may have hands,
 ``cloth`` or ``soft`` or ``rod`` is a deformable, anything else is an object,
 and a table of six enumerated what each touches by default.

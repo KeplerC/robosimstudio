@@ -69,7 +69,7 @@ class _Array:
 
 def _pose(*, allow_grasp_latch: bool, arm: str = "right"):
     """``EntityRod._pose_anchor`` against a stand-in rod; returns the ``hold_segment`` mock."""
-    from robosimstudio.domains.rod import entity as rod
+    from robosimstudio_materials.rod import entity as rod
 
     ik = SimpleNamespace(
         solve_q=lambda seed, target, approach: np.zeros(4),

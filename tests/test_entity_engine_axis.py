@@ -206,7 +206,7 @@ class TestTheShippedCableHasTwo(unittest.TestCase):
         self.assertEqual("EntityRodSuperdex", get_entity("rod", engine="superdex").__name__)
 
     def test_both_are_reached_from_one_spec_by_the_arrangement_alone(self) -> None:
-        from robosimstudio.domains.rod import RodSpec
+        from robosimstudio_materials.rod import RodSpec
 
         spec = RodSpec(name="cable")
         newton_side = resolve_entity_class(spec, _arrangement(("rod", backend("vbd"))))
@@ -225,10 +225,9 @@ class TestTheShippedCableHasTwo(unittest.TestCase):
 
     def test_the_foreign_one_declares_a_rod_actor(self) -> None:
         """And the kind it declares is one something knows how to read."""
-        from robosimstudio.domains.rod import RodSpec
-        from robosimstudio.domains.rod.superdex import EntityRodSuperdex
-
         from robosimstudio.engines.geometry import ACTOR_KINDS
+        from robosimstudio_materials.rod import RodSpec
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
 
         actor = EntityRodSuperdex(RodSpec(name="cable")).host_actor()
         self.assertEqual("rod", actor.kind)
@@ -244,8 +243,8 @@ class TestTheShippedCableHasTwo(unittest.TestCase):
         """An A/B between them is a comparison rather than two different cables."""
         import math
 
-        from robosimstudio.domains.rod import RodSpec
-        from robosimstudio.domains.rod.superdex import EntityRodSuperdex
+        from robosimstudio_materials.rod import RodSpec
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
 
         spec = RodSpec(name="cable", length=0.5, radius=0.008, density=350.0)
         linear = EntityRodSuperdex(spec).host_actor().params["linear_density"]
@@ -281,7 +280,8 @@ class TestTheAxisReachesMeasurement(unittest.TestCase):
         ``scripts/engine_ab.py`` showed for as long as it existed.
         """
         import numpy as np
-        from robosimstudio.domains.rod import EntityRod, RodSpec
+
+        from robosimstudio_materials.rod import EntityRod, RodSpec
 
         entity = EntityRod(RodSpec(name="cable"))
         # ``bodies`` is resolved at bind, not derived from the build range --
@@ -303,7 +303,8 @@ class TestTheAxisReachesMeasurement(unittest.TestCase):
 
     def test_a_rod_assigned_bodies_by_hand_refuses_to_guess_its_endpoints(self) -> None:
         import numpy as np
-        from robosimstudio.domains.rod import EntityRod, RodSpec
+
+        from robosimstudio_materials.rod import EntityRod, RodSpec
 
         entity = EntityRod(RodSpec(name="cable"))
         entity.bodies = np.arange(2, 6, dtype=np.int32)
@@ -319,8 +320,9 @@ class TestTheAxisReachesMeasurement(unittest.TestCase):
         as-built layout and a cable that has fallen reports itself where it was
         declared -- a plausible number, confidently wrong."""
         import numpy as np
-        from robosimstudio.domains.rod import RodSpec
-        from robosimstudio.domains.rod.superdex import EntityRodSuperdex
+
+        from robosimstudio_materials.rod import RodSpec
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
 
         entity = EntityRodSuperdex(RodSpec(name="cable"))
         # Resolved at bind. The probe holds the **whole model's** particle
@@ -348,10 +350,9 @@ class TestTheAxisReachesMeasurement(unittest.TestCase):
 
     def test_both_implementations_answer_the_same_question(self) -> None:
         """The property that makes them two implementations of *one* kind."""
-        from robosimstudio.domains.rod import EntityRod
-        from robosimstudio.domains.rod.superdex import EntityRodSuperdex
-
         from robosimstudio.scene.entity import Entity
+        from robosimstudio_materials.rod import EntityRod
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
 
         for cls in (EntityRod, EntityRodSuperdex):
             self.assertIsNot(cls.substrate_points, Entity.substrate_points, f"{cls.__name__} must declare it")

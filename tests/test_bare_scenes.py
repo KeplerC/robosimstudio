@@ -28,13 +28,12 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from robosimstudio.domains.cloth import ClothSpec
-from robosimstudio.domains.rod import RodSpec
-
 from robosimstudio.scene import BuildRequest, compile_scene
 from robosimstudio.scene.state import WorldState
 from robosimstudio.specs import GENERIC, ArrangementSpec, ObjectSpec, StaticSpec
 from robosimstudio.specs.asset import ShapeSpec
+from robosimstudio_materials.cloth import ClothSpec
+from robosimstudio_materials.rod import RodSpec
 
 TIER = "medium"
 """Builds and steps real scenes on a GPU."""
@@ -283,7 +282,7 @@ class TestTheBenchmarkIsNeverImported(unittest.TestCase):
         script = textwrap.dedent(
             f"""
             import sys
-            from robosimstudio.domains.rod import RodSpec
+            from robosimstudio_materials.rod import RodSpec
             from robosimstudio.scene import BuildRequest, compile_scene
             from robosimstudio.specs import GENERIC, ObjectSpec
             from robosimstudio.specs.asset import ShapeSpec
@@ -380,9 +379,8 @@ class TestEveryCombinationLands(unittest.TestCase):
     """
 
     def _cube_z(self, *, rope: bool, robot: bool) -> float:
-        from robosimstudio.domains.rod import RodSpec
-
         from robosimstudio.sim import Scene
+        from robosimstudio_materials.rod import RodSpec
 
         scene = Scene(cell="bench_075")
         cube = scene.add(ObjectSpec(name="cube", shape=ShapeSpec(half_extents=(0.025,) * 3), pose=(0.0, 0.0, 0.20)))

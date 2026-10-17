@@ -36,7 +36,7 @@ class TestTheSpawnRangesAreIndependent(unittest.TestCase):
     """``rod/entity.py::_bow_cable``: a shift or a yaw needs no bow to happen."""
 
     def test_a_shift_without_a_bow_moves_the_rod(self) -> None:
-        from robosimstudio.domains.rod.entity import _bow_cable
+        from robosimstudio_materials.rod.entity import _bow_cable
 
         points, quats = _straight()
         spec = _spec(shift_range=(-0.02, 0.02))
@@ -46,7 +46,7 @@ class TestTheSpawnRangesAreIndependent(unittest.TestCase):
         np.testing.assert_allclose(moved, np.tile([-0.02, 0.0, 0.0], (len(points), 1)), atol=1e-9)
 
     def test_a_yaw_without_a_bow_turns_the_rod(self) -> None:
-        from robosimstudio.domains.rod.entity import _bow_cable
+        from robosimstudio_materials.rod.entity import _bow_cable
 
         points, quats = _straight()
         spec = _spec(yaw_range=(0.0, 20.0))
@@ -56,7 +56,7 @@ class TestTheSpawnRangesAreIndependent(unittest.TestCase):
         self.assertAlmostEqual(math.degrees(math.atan2(-chord[0], chord[1])), 20.0, places=4)
 
     def test_a_bow_drawn_at_zero_keeps_the_shift(self) -> None:
-        from robosimstudio.domains.rod.entity import _bow_cable
+        from robosimstudio_materials.rod.entity import _bow_cable
 
         points, quats = _straight()
         spec = _spec(bow_range=(-0.02, 0.02), shift_range=(0.0, 0.03))
@@ -65,7 +65,7 @@ class TestTheSpawnRangesAreIndependent(unittest.TestCase):
         self.assertAlmostEqual(float(got[3][0]) - float(points[3][0]), -0.03, places=6)
 
     def test_nothing_drawn_is_the_same_objects(self) -> None:
-        from robosimstudio.domains.rod.entity import _bow_cable
+        from robosimstudio_materials.rod.entity import _bow_cable
 
         points, quats = _straight()
         spec = _spec(shift_range=(-0.02, 0.02), yaw_range=(-5.0, 5.0))
@@ -79,7 +79,7 @@ class _Rod:
 
     @staticmethod
     def make(n_bodies: int, n_half: int):
-        from robosimstudio.domains.rod.entity import EntityRod
+        from robosimstudio_materials.rod.entity import EntityRod
 
         class Rod(EntityRod):
             name = "cable"
@@ -119,7 +119,7 @@ class TestTheBladesAreReadOnce(unittest.TestCase):
     """``rod/entity.py::_blade_shapes``: one host copy of ``shape_body``, not one per shape."""
 
     def test_shape_body_is_copied_once(self) -> None:
-        from robosimstudio.domains.rod.entity import EntityRod
+        from robosimstudio_materials.rod.entity import EntityRod
 
         calls = []
 
@@ -150,7 +150,7 @@ class TestWindingIsAboutTheDeclaredAxis(unittest.TestCase):
     """``rod/measures.py``: a horizontal axis (a hook's) counts its turns."""
 
     def test_a_horizontal_axis(self) -> None:
-        from robosimstudio.domains.rod import measures
+        from robosimstudio_materials.rod import measures
 
         origin = np.array([0.3, -0.1, 0.2])
         wrap = _helix(origin, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0]))
@@ -161,7 +161,7 @@ class TestWindingIsAboutTheDeclaredAxis(unittest.TestCase):
         self.assertAlmostEqual(measures._winding_about_rod(wrap, {"axis": ends})["turns"], 2.0, delta=0.05)
 
     def test_a_vertical_axis_reads_as_before(self) -> None:
-        from robosimstudio.domains.rod import measures
+        from robosimstudio_materials.rod import measures
 
         origin = np.array([0.1, 0.2, 0.05])
         wrap = _helix(origin, np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]))

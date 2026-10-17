@@ -2,14 +2,14 @@
 """Scenes build and step with the rod pack left out.
 
 ``tests/test_rod_is_a_pack.py`` asks the registries; this asks the simulator.
-A tree without ``examples/03_rope/`` still has to put a robot, rigid bodies, a
+A tree without ``robosimstudio_materials/rod/`` still has to put a robot, rigid bodies, a
 post, a sheet and a sponge on a bench and step them -- and the post is the one
 that used to be impossible: ``rss.post`` named an entity only the rod domain
 registered, so the constructor was public and the thing it built was not.
 
-One subprocess, with the domain roots rebuilt without the pack (the same
-mechanism the registry test uses) and the task roots switched off, so nothing a
-task directory imports can put the pack back. Each scene reports a number that
+One subprocess, with ``robosimstudio_materials`` copied without the rod (the
+same mechanism the registry test uses) and the task roots switched off, so
+nothing a task directory imports can put the pack back. Each scene reports a number that
 is only right if the thing is really there:
 
 * the **post**: a plate dropped onto it comes to rest one post-height above a
@@ -33,7 +33,7 @@ import unittest
 from contextlib import ExitStack
 from pathlib import Path
 
-from tests.test_rod_is_a_pack import roots_without_the_pack
+from tests.fixtures.packs import PYTHON_FLAGS, env_without
 
 TIER = "medium"
 """A GPU and four small scenes."""
@@ -47,7 +47,7 @@ import numpy as np
 import robosimstudio as rss
 from robosimstudio.specs import CollisionSpec, coupler
 
-assert importlib.util.find_spec("robosimstudio.domains.rod") is None, "the rod pack is importable; this proves nothing"
+assert importlib.util.find_spec("robosimstudio_materials.rod") is None, "the rod pack is importable; this proves nothing"
 assert not hasattr(rss, "rod")
 WITH_SPONGE = __SPONGE__
 out = {}
@@ -115,9 +115,13 @@ class TestScenesBuildWithoutTheRodPack(unittest.TestCase):
         from robosimstudio import roots
 
         with ExitStack() as stack:
-            env = {**os.environ, **roots_without_the_pack(stack), f"{roots.ROOTS_ENV}_ONLY": "1"}
+            env = {
+                **env_without(stack, "rod"),
+                "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+                f"{roots.ROOTS_ENV}_ONLY": "1",
+            }
             proc = subprocess.run(
-                [sys.executable, "-c", SCENES.replace("__SPONGE__", repr(HAS_SUPERDEX))],
+                [sys.executable, *PYTHON_FLAGS, "-c", SCENES.replace("__SPONGE__", repr(HAS_SUPERDEX))],
                 cwd=REPO,
                 env=env,
                 capture_output=True,

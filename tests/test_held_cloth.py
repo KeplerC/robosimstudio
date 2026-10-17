@@ -20,9 +20,8 @@ def _edge(rest):
 
 class TestTheHeldSheetSpec(unittest.TestCase):
     def test_held_by_is_what_makes_a_sheet_held(self) -> None:
-        from robosimstudio.domains.cloth import HeldClothSpec
-
         import robosimstudio as rss
+        from robosimstudio_materials.cloth import HeldClothSpec
 
         free = rss.sheet(name="towel")
         self.assertNotIsInstance(free, HeldClothSpec)
@@ -33,7 +32,7 @@ class TestTheHeldSheetSpec(unittest.TestCase):
         self.assertEqual(("held_cloth", "left_link_6"), (held.entity, held.held_by))
 
     def test_a_held_sheet_names_its_holder_and_its_patch(self) -> None:
-        from robosimstudio.domains.cloth import HeldClothSpec
+        from robosimstudio_materials.cloth import HeldClothSpec
 
         with self.assertRaisesRegex(ValueError, "no 'held' particle set"):
             HeldClothSpec(name="towel", held_by="left_link_6", particle_sets=(("edge", _edge),))
@@ -45,10 +44,9 @@ class TestOnlyAHeldSheetAddsAKernel(unittest.TestCase):
     """A substep kernel written for one world is what refuses a replicated build, so a free sheet has none."""
 
     def test_the_held_entity_is_registered_and_the_free_one_stays_hookless(self) -> None:
-        from robosimstudio.domains.cloth import EntityCloth, EntityHeldCloth
-
         from robosimstudio.scene.entity import Entity
         from robosimstudio.scene.registry import get_entity
+        from robosimstudio_materials.cloth import EntityCloth, EntityHeldCloth
 
         self.assertIs(EntityHeldCloth, get_entity("held_cloth"))
         self.assertTrue(issubclass(EntityHeldCloth, EntityCloth))

@@ -18,9 +18,8 @@ from __future__ import annotations
 
 import unittest
 
-from robosimstudio.domains.cloth import ClothMaterialSpec
-
 from robosimstudio.specs import ArrangementSpec, backend
+from robosimstudio_materials.cloth import ClothMaterialSpec
 from tests.fixtures.viser_stubs import _StubGui
 
 TIER = "fast"
@@ -70,7 +69,7 @@ class TestADeformableThatIsNotCloth(unittest.TestCase):
         return panel, gui
 
     def _sponge(self):
-        from robosimstudio.domains.soft import SoftMaterialSpec
+        from robosimstudio_materials.soft import SoftMaterialSpec
 
         return self._panel(SoftMaterialSpec())
 
