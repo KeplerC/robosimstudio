@@ -595,6 +595,26 @@ DRAFTS = (
         lift=0.12,
         radius=0.012,  # the one link the handle took: the links are loose, and the rest stay in the heap
     ),
+    handle(
+        "examples/13_paper/00_fold_paper.py",
+        "paper",
+        Corner("paper", sx=1, sy=1, inset=0.02),
+        camera=Orbit(At("paper", dz=0.05), distance=0.8, azimuth=-25.0, elevation=35.0),
+        lift=0.08,
+        across=("y", -0.25),
+        pending="a fold is a carry, a press and a release, which the one-handle beat does not do: "
+        "the take needs a second click on the standing loop and a drag down before Release all",
+    ),
+    handle(
+        "examples/13_paper/01_box_flap.py",
+        "flap",
+        Corner("flap", sx=0, sy=1, inset=0.02),
+        camera=Orbit(At("flap", dz=0.05), distance=0.7, azimuth=-30.0, elevation=30.0),
+        lift=0.04,
+        across=("y", -0.14),
+        pending="the flap is closed by a hand pushing it over the box, not by a handle lifting a corner: "
+        "the take wants a Drag of the left gizmo onto the free end and down",
+    ),
     Take(
         "examples/09_teleop/01_force_feedback.py",
         argv=("--simulate",),

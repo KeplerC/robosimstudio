@@ -60,6 +60,11 @@
 |---|---|
 | <img src="09_teleop/media/00_leader_arm.webp" width="240"> | <img src="09_teleop/media/01_force_feedback.webp" width="240"> |
 
+## [13 Paper](13_paper/README.md)
+
+| [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
+|---|---|
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |
