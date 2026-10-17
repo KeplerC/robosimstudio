@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Measures over 1-D bodies: winding, straightness.
+"""Measures over 1-D bodies: winding, straightness, twist.
 
 :func:`winding_turns` sums the signed angle that consecutive near-axis segments
 subtend about an axis, so a hank dumped beside it scores 0 and a figure-eight
@@ -11,15 +11,16 @@ non-wrap) is in the atom's :class:`AtomCalibration`.
 
 from __future__ import annotations
 
+import itertools
 from typing import Any
 
 import numpy as np
 
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
-from robosimstudio.core.math import transform_point
+from robosimstudio.core.math import quat_inverse, quat_multiply, quat_to_mat, transform_point
 
-__all__ = ["NEAR_RADIUS", "WRAP_GATE_TURNS", "curl_retained", "straightness", "winding_turns"]
+__all__ = ["NEAR_RADIUS", "WRAP_GATE_TURNS", "curl_retained", "straightness", "twist_turns", "winding_turns"]
 
 NEAR_RADIUS = 0.10
 """A segment takes part in the winding while within this of the axis, in the
@@ -90,6 +91,44 @@ def curl_retained(positions: np.ndarray) -> float:
     what ``tests/test_rod_dahl_memory.py`` does.
     """
     return 1.0 - straightness(positions)
+
+
+def twist_turns(quaternions: np.ndarray) -> float:
+    """Net twist along a chain of capsule frames, in turns: signed, right-handed about the tangent.
+
+    Each frame's local ``+Z`` is its capsule's axis, as ``add_rod`` builds them.
+    Between consecutive frames the bend is removed first -- the minimal rotation
+    that carries one axis onto the next is applied to the first frame, which is
+    the parallel transport an untwisted cable follows -- and what the second
+    frame still differs by is a rotation about its own axis: the twist at that
+    joint. Summed over the joints and divided by ``2*pi``. A frame given raw
+    (the capsule's full orientation) would count the bend as twist; this does
+    not, which is why a cable looped into a circle with no roll reads 0.
+
+    Args:
+        quaternions: ``[n, 4]`` frames, ``xyzw``, in chain order.
+    """
+    q = np.asarray(quaternions, dtype=np.float64).reshape(-1, 4)
+    if len(q) < 2:
+        return 0.0
+    total = 0.0
+    for a, b in itertools.pairwise(q):
+        axis_a = quat_to_mat(a)[:, 2]
+        axis_b = quat_to_mat(b)[:, 2]
+        cross = np.cross(axis_a, axis_b)
+        sin_t = float(np.linalg.norm(cross))
+        cos_t = float(np.clip(np.dot(axis_a, axis_b), -1.0, 1.0))
+        if sin_t > 1e-12:
+            half = 0.5 * np.arctan2(sin_t, cos_t)
+            transport = np.array([*(cross / sin_t * np.sin(half)), np.cos(half)])
+            carried = quat_multiply(transport, a)
+        else:
+            carried = a
+        rel = quat_multiply(b, quat_inverse(carried))
+        # ``rel`` is a rotation about ``axis_b``; its signed angle about that axis.
+        angle = 2.0 * np.arctan2(float(np.dot(rel[:3], axis_b)), float(rel[3]))
+        total += float(np.arctan2(np.sin(angle), np.cos(angle)))  # wrapped to (-pi, pi]
+    return total / (2.0 * np.pi)
 
 
 # ----------------------------------------------------------------- catalogue
@@ -224,6 +263,24 @@ register_atom(
 )
 
 
+register_atom(
+    AtomSpec(
+        name="twist_turns",
+        summary="Net roll along a 1-D body about its own axis, bend removed, in turns.",
+        fn=twist_turns,
+        args=(ArgSpec(name="body", substrates=("rod",), reads="handle"),),
+        directions=("check", "observe"),
+        returns=("turns", "frames"),
+        unit="turns",
+        reads_scene=True,
+        provenance=(
+            "Designed here for the rod's twist stiffness (RodSpec.twist_ke); read off the capsule frames, "
+            "which is why it takes the scene and the body's name rather than points."
+        ),
+    )
+)
+
+
 @handler("straightness", substrates=("rod",), summary="End-to-end over path length.")
 def _straightness(positions: np.ndarray) -> dict:
     return {"straightness": straightness(positions)}
@@ -232,6 +289,22 @@ def _straightness(positions: np.ndarray) -> dict:
 @handler("curl_retained", substrates=("rod",), summary="One minus end-to-end over path length.")
 def _curl_retained(positions: np.ndarray) -> dict:
     return {"curl_retained": curl_retained(positions)}
+
+
+@handler("twist_turns", substrates=("rod",), summary="The roll between consecutive capsule frames, summed.")
+def _twist_turns(snapshot, name: str) -> dict:
+    """The capsule chain's frames, from the scene by name.
+
+    A chain with no bodies -- the Cosserat rod, whose twist lives in its engine
+    -- reads 0 turns over 0 frames rather than raising, so a goal over a rod on
+    either engine binds; ``frames`` says whether the number means anything.
+    """
+    handle = snapshot.handles.find(name)
+    bodies = list(getattr(handle, "bodies", ()) or ())
+    if len(bodies) < 2:
+        return {"turns": 0.0, "frames": len(bodies)}
+    frames = np.asarray(snapshot.body_q)[bodies, 3:7]
+    return {"turns": twist_turns(frames), "frames": len(bodies)}
 
 
 # ------------------------------------------------- the generic three, for a rod

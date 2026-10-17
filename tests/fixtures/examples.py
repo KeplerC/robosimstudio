@@ -56,6 +56,7 @@ NUMBERED = (
     "03_rope/00_cable.py",
     "03_rope/01_between_posts.py",
     "03_rope/03_cable_memory.py",
+    "03_rope/04_twist.py",
 )
 """The numbered scripts that run on a base checkout: no flags, every parameter a
 local, two arms, one call to the studio. ``02_engines`` is here because its one

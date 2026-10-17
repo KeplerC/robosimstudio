@@ -79,4 +79,26 @@ uv run examples/03_rope/03_cable_memory.py
 
 Source: [`03_cable_memory.py`](03_cable_memory.py)
 
+## A cable that carries a twist
+
+Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: roll a free end a turn and let go, and the stiff one springs the roll back out while the soft one keeps it.
+
+`twist_ke` splits Newton's rod joint from its bend: left at `None` a cable
+twists as stiffly as it bends, which is the isotropic pairing the builder
+makes. A data cable's jacket rolls far more easily than it bends; a stranded
+steel cable the other way round. The page reads each cable's `twist_turns`
+over its middle third -- the roll between consecutive capsule frames with the
+bend taken out, so a cable bent into a hook with no roll reads 0. Rolled a
+full turn at the tip, both carry the same twist in the middle (a clamped cable
+twists uniformly); let go, the stiff one unwinds in a fraction of a second and
+the soft one over seconds, the time being `twist_kd / twist_ke`. They hang
+because a level cantilever at this bend stiffness droops to the bench. Click a
+capsule near a free end and drag its handle round to roll it.
+
+```bash
+uv run examples/03_rope/04_twist.py
+```
+
+Source: [`04_twist.py`](04_twist.py)
+
 <!-- examples:end -->

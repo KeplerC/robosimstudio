@@ -44,6 +44,24 @@ class RodSpec:
     stretch_kd: float = 1.0
     bend_ke: float = 0.04
     bend_kd: float = 0.06
+    shear_ke: float | None = None
+    """Per-joint transverse shear stiffness [N/m], or ``None`` for :attr:`stretch_ke`.
+
+    Newton's rod joint has four slots -- stretch, shear, bend, twist -- and the
+    capsule chain used to state two numbers and let the builder pair them
+    (shear from stretch, twist from bend). ``None`` keeps that pairing, so a
+    spec that says nothing builds the model it always built; a number splits
+    the pair. See :meth:`drive_gains` for the eight resolved values."""
+    shear_kd: float | None = None
+    """Shear damping [N*s/m], or ``None`` for :attr:`stretch_kd`."""
+    twist_ke: float | None = None
+    """Per-joint twist stiffness [N*m/rad], or ``None`` for :attr:`bend_ke`.
+
+    The number that decides whether a roll put into one end reaches the other:
+    a data cable's jacket twists far more easily than it bends, a stranded
+    steel cable the other way round."""
+    twist_kd: float | None = None
+    """Twist damping [N*m*s/rad], or ``None`` for :attr:`bend_kd`."""
     dahl_eps_max: float = 0.0
     """How much bend the cable may keep, as the Dahl hysteresis envelope [rad]:
     the bending (and twisting) moment friction can hold at a joint is
@@ -245,6 +263,26 @@ class RodSpec:
         object.__setattr__(self, "start", tuple(float(v) for v in pts[0]))
         object.__setattr__(self, "direction", tuple(float(v) for v in legs[0] / norms[0]))
 
+    def drive_gains(self) -> dict[str, float]:
+        """The eight numbers the cable joints are built with, the ``None`` pairs resolved.
+
+        Keyed as :class:`RodMaterialSpec` names them (``stretch_ke`` ...
+        ``twist_kd``), so the spec, the builder call and the tuning view agree
+        on one spelling.
+        """
+        stretch_ke, stretch_kd = float(self.stretch_ke), float(self.stretch_kd)
+        bend_ke, bend_kd = float(self.bend_ke), float(self.bend_kd)
+        return {
+            "stretch_ke": stretch_ke,
+            "stretch_kd": stretch_kd,
+            "shear_ke": stretch_ke if self.shear_ke is None else float(self.shear_ke),
+            "shear_kd": stretch_kd if self.shear_kd is None else float(self.shear_kd),
+            "bend_ke": bend_ke,
+            "bend_kd": bend_kd,
+            "twist_ke": bend_ke if self.twist_ke is None else float(self.twist_ke),
+            "twist_kd": bend_kd if self.twist_kd is None else float(self.twist_kd),
+        }
+
     def rest_polyline(self) -> np.ndarray:
         """``(segments + 1, 3)`` rest nodes in the work-surface frame: :attr:`nodes`, or the straight line."""
         if self.nodes is not None:
@@ -265,9 +303,10 @@ class RodMaterialSpec:
     """A rod's constitutive stiffness, as the built model holds it.
 
     A view of ``joint_target_ke``/``kd`` over the cable joints' four dof rows --
-    stretch and shear linear, bend and twist angular. Shear tracks stretch and
-    twist tracks bend, the isotropy ``ModelBuilder.add_rod`` builds with, so the
-    four numbers a person wants are these two pairs rather than eight rows.
+    stretch and shear linear, bend and twist angular -- one pair of fields per
+    slot. A :class:`RodSpec` that leaves ``shear_*``/``twist_*`` at ``None``
+    builds shear equal to stretch and twist equal to bend, and this view then
+    shows the pairs equal; sliding one row moves that row alone.
 
     RECAPTURE rather than LIVE: the assignment is live, but the rod solves inside
     the coupled solver's *view* of the model and the write reaches it through
@@ -280,11 +319,16 @@ class RodMaterialSpec:
     number nothing reads (see :attr:`RodSpec.dahl_eps_max`).
 
     Attributes:
-        bend_ke: Per-joint bend (and twist) stiffness [N*m]. The number that
-            answers "why is this cable so stiff".
-        bend_kd: Bend (and twist) damping [N*m*s].
-        stretch_ke: Per-joint stretch (and shear) stiffness [N/m].
-        stretch_kd: Stretch (and shear) damping [N*s/m].
+        bend_ke: Per-joint bend stiffness [N*m/rad]. The number that answers
+            "why is this cable so stiff".
+        bend_kd: Bend damping [N*m*s/rad].
+        stretch_ke: Per-joint stretch stiffness [N/m].
+        stretch_kd: Stretch damping [N*s/m].
+        shear_ke: Per-joint transverse shear stiffness [N/m].
+        shear_kd: Shear damping [N*s/m].
+        twist_ke: Per-joint twist stiffness [N*m/rad]: whether a roll at one
+            end reaches the other.
+        twist_kd: Twist damping [N*m*s/rad].
         dahl_eps_max: The bend the cable keeps, as a curvature [rad];
             :attr:`RodSpec.dahl_eps_max`.
         dahl_tau: The curvature change the friction builds up over [rad];
@@ -302,6 +346,18 @@ class RodMaterialSpec:
     )
     stretch_kd: float = field(
         default=1.0, metadata=ui(tier=RECAPTURE, unit="N*s/m", range=(1e-2, 1e3), log=True, group="stretch")
+    )
+    shear_ke: float = field(
+        default=2.0e5, metadata=ui(tier=RECAPTURE, unit="N/m", range=(1e3, 1e7), log=True, group="shear")
+    )
+    shear_kd: float = field(
+        default=1.0, metadata=ui(tier=RECAPTURE, unit="N*s/m", range=(1e-2, 1e3), log=True, group="shear")
+    )
+    twist_ke: float = field(
+        default=0.04, metadata=ui(tier=RECAPTURE, unit="N*m", range=(1e-4, 10.0), log=True, group="twist")
+    )
+    twist_kd: float = field(
+        default=0.06, metadata=ui(tier=RECAPTURE, unit="N*m*s", range=(1e-4, 10.0), log=True, group="twist")
     )
     dahl_eps_max: float = field(
         default=0.0,
