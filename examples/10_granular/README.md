@@ -20,9 +20,10 @@ it from above, and the heap names it in `containers` so the grid sees it one
 voxel fatter than the hand does; without that the bottom voxel of rice passes
 under it. The tray's walls are five voxels thick and its open side faces the
 heap, so the sweep ends inside it. Swept at 0.15 m/s as the test sweeps it,
-93% of the rice is in the tray and no grain is through the bench; a tool
-faster than ~0.36 m/s outruns the grid. The panel reads the share of the rice
-inside the tray.
+93% of the rice is in the tray and the rest is on the bench, but for a grain
+the squeeze shot off the bench's edge in two sweeps of thirty (the others lost
+none); a tool faster than ~0.36 m/s outruns the grid. The panel reads the
+share of the rice inside the tray.
 
 ```bash
 uv run examples/10_granular/00_sweep_rice.py
