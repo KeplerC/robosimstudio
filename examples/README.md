@@ -24,6 +24,9 @@
 |---|---|---|
 | <img src="03_rope/media/00_cable.webp" width="240"> | <img src="03_rope/media/01_between_posts.webp" width="240"> | <img src="03_rope/media/02_superdex.webp" width="240"> |
 
+| [A cable keeps its bend](03_rope/03_cable_memory.py) | [A cable carries a twist](03_rope/04_twist.py) |
+|---|---|
+
 ## [04 Robots and Kinds of Your Own](04_extending/README.md)
 
 | [Add a robot](04_extending/00_add_a_robot.py) | [A new kind](04_extending/01_new_kind.py) |
