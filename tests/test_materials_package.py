@@ -319,14 +319,32 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
             with self.subTest(registry=name):
                 self.assertEqual(roots.DOMAIN_PACKAGES, registry.packages)
 
-    def test_the_flat_name_table_keys_the_three_kinds(self) -> None:
+    def test_the_flat_name_table_keys_the_kinds(self) -> None:
         import robosimstudio as rss
 
         self.assertEqual(
-            ["robosimstudio_materials.cloth", "robosimstudio_materials.rod", "robosimstudio_materials.soft"],
+            [
+                "robosimstudio_materials.cloth",
+                "robosimstudio_materials.dough",
+                "robosimstudio_materials.granular",
+                "robosimstudio_materials.liquid",
+                "robosimstudio_materials.rod",
+                "robosimstudio_materials.soft",
+            ],
             sorted(rss._PACKS),
         )
-        for name in ("sheet", "sponge", "rod", "materials", "ClothSpec", "SoftSpec", "RodSpec"):
+        for name in (
+            "sheet",
+            "sponge",
+            "rod",
+            "materials",
+            "ClothSpec",
+            "SoftSpec",
+            "RodSpec",
+            "heap",
+            "liquid",
+            "dough",
+        ):
             self.assertNotIn(name, rss._EXPORTS, f"{name} is a kind's and belongs in _PACKS")
             self.assertIn(name, rss._PACK_EXPORTS)
 

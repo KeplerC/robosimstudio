@@ -1,17 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The kinds of deformable thing the library ships: cloth, soft bodies, the rope.
+"""The kinds of deformable thing the library ships: cloth, soft bodies, the rope, and the particle materials.
 
 A **kind** is one physical kind of thing, carried as one bundle: the spec that
 says what one is, the entity that builds it, the measures that read it, its
 materials and, where a foreign engine serves it, the variant that runs there.
 Each kind here is one module or one package -- ``cloth.py`` and ``soft.py`` are
-read top to bottom, ``rod/`` is a package -- and each stands alone: none of the
-three imports another.
+read top to bottom, ``rod/`` is a package -- and each stands alone: no kind
+imports another.
 
-The kinds here: ``cloth`` (``rss.sheet``), ``soft`` (``rss.sponge``) and ``rod``
-(``rss.rod``). The kinds the library itself is made of -- ``rigid``, ``static``,
-``articulated`` -- stay in :mod:`robosimstudio.domains`, because the composer,
-the robots and the cells are built from them.
+The kinds here: ``cloth`` (``rss.sheet``), ``soft`` (``rss.sponge``), ``rod``
+(``rss.rod``), and the three particle kinds on Newton's implicit MPM --
+``granular`` (``rss.heap``), ``liquid`` (``rss.liquid``) and ``dough``
+(``rss.dough``) -- which share one implementation in the ``mpm/`` package
+(not itself a kind: it registers no domain and no entity). The kinds the
+library itself is made of -- ``rigid``, ``static``, ``articulated`` -- stay in
+:mod:`robosimstudio.domains`, because the composer, the robots and the cells
+are built from them.
 
 This package stands **beside** the library and imports only :mod:`robosimstudio`
 -- never the studio, the benchmark or the agents -- and the library never

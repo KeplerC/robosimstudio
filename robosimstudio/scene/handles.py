@@ -267,12 +267,17 @@ class DeformableHandle:
     surface: Any = None
     """For a particle body, a callable a renderer *may* call to get a surface
     mesh over the particles in their current positions -- ``surface(positions)
-    -> (vertices, triangles)`` with ``positions`` the handle's particles'
-    ``[n, 3]`` world coordinates, or ``None`` when the body offers no surfacing.
-    The mesh's vertex count varies from frame to frame, which is why it is a
-    callable here rather than a fixed ``triangles`` array: a renderer that can
-    re-log a varying mesh per frame (the path tracer) calls it, and one that
-    cannot (the studio page) draws the points."""
+    -> (vertices, triangles, normals)`` with ``positions`` the handle's
+    particles' ``[n, 3]`` world coordinates (a host array or a device one),
+    and the three results device arrays: ``vertices`` ``[m]`` of ``vec3``,
+    ``triangles`` ``[k, 3]`` of ``int32`` into them, ``normals`` ``[m]`` of
+    ``vec3``; all three empty when the reconstruction finds no triangles. Or
+    ``None`` when the body offers no surfacing. The mesh's vertex count varies
+    from frame to frame, which is why it is a callable here rather than a fixed
+    ``triangles`` array: a renderer that can re-log a varying mesh per frame
+    (the path tracer) calls it, and one that cannot (the studio page) draws the
+    points. The particle kinds install it when their spec says
+    ``render="surface"`` (``robosimstudio_materials.mpm.EntityParticleBody.surface_mesh``)."""
 
 
 @dataclass
