@@ -188,6 +188,9 @@ def _bow_cable(points, quats, spec, episode):
 
 HOLD_KP_REFERENCE = 400.0
 HOLD_KD_REFERENCE = 12.0
+"""The latch's position gains [N/m, N.s/m], as the reference tuned them. They
+are forces, so :meth:`EntityRod.hold_gains` scales them by segment mass."""
+
 ROLL_STEP = 0.1
 """How far :meth:`EntityRod.roll` turns a pinned capsule per call at most [rad]:
 a full turn in 63 control steps at 60 Hz. The rate is not what the cable
@@ -196,8 +199,6 @@ the middle third of the twist example's cables with straightness 1.000
 throughout, as 0.05 does (``fix3/twist/probe6.py``, GPU 1) -- it is what a hand
 turning a cable end looks like on the page, and it keeps a slider yanked
 across its range from being a jump the joint never sees."""
-"""The latch's position gains [N/m, N.s/m], as the reference tuned them. They
-are forces, so :meth:`EntityRod.hold_gains` scales them by segment mass."""
 
 
 def _half_heights_of(points) -> np.ndarray:
