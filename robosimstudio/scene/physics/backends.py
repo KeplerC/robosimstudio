@@ -58,7 +58,11 @@ def resolve_backend_class(spec: BackendSpec) -> type:
 
 
 def register_custom_attributes(
-    builder: Any, arrangement: ArrangementSpec, extra: Iterable[BackendSpec] = ()
+    builder: Any,
+    arrangement: ArrangementSpec,
+    extra: Iterable[BackendSpec] = (),
+    *,
+    domains: Iterable[str] | None = None,
 ) -> list[str]:
     """Call ``register_custom_attributes(builder)`` on every backend class the arrangement names.
 
@@ -68,11 +72,22 @@ def register_custom_attributes(
     Done here, from the arrangement, so no entity has to import a solver to
     know which attributes its builder calls will be allowed to keep.
 
+    Args:
+        domains: The domains the scene declares, when known. Given, a backend
+            the arrangement names for a domain not among them is skipped --
+            the ``"*"`` fallback and ``extra`` never are. Resolving a backend
+            imports its solver, and the one the table names for the particle
+            materials costs a second to import (``warp.fem`` behind Newton's
+            implicit MPM, measured at 0.96 s on this machine): a rigid scene
+            should not pay it for a heap it does not have.
+
     Returns:
         The dotted paths registered, in order, for a reader.
     """
     seen: list[str] = []
-    specs = [spec for _, spec in arrangement.backends] + list(extra)
+    wanted = None if domains is None else set(domains)
+    specs = [spec for domain, spec in arrangement.backends if wanted is None or domain == "*" or domain in wanted]
+    specs += list(extra)
     for spec in specs:
         try:
             path = solver_class_path(spec)
