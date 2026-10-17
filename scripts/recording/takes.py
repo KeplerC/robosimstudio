@@ -774,10 +774,34 @@ PARTICLE_DRAFTS = (
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS)
+# The suction hand: the right arm's Vacuum box, ticked on the plate and unticked over the square.
+SUCTION_DRAFTS = (
+    Take(
+        "examples/15_suction/00_pick_a_plate.py",
+        camera=Orbit(At("plate"), distance=0.9, azimuth=-50.0, elevation=35.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the cup over the plate, pointing down"),
+            Drag("right", "z", to=(0.600, -0.310, 0.752), seconds=1.2, label="drag the hand down onto the plate"),
+            Toggle(text="Vacuum", within=RIGHT, label="Vacuum: sealed"),
+            Drag("right", "z", to=(0.600, -0.310, 0.840), seconds=1.0, label="lift"),
+            Drag("right", "y", to=(0.600, -0.110, 0.840), seconds=2.0, label="carry it over the square"),
+            Drag("right", "z", to=(0.600, -0.110, 0.756), seconds=1.0, label="down onto the bench"),
+            Toggle(text="Vacuum", within=RIGHT, label="Vacuum off: it rests in the square"),
+            Drag("right", "z", to=(0.600, -0.110, 0.820), seconds=0.8, label="and the hand lifts away"),
+            Wait(seconds=1.0, mark="placed"),
+        ),
+        pending="not filmed yet: the drags' end points are tests/test_suction_pick's, which drives the same "
+        "gesture through the panel; the Vacuum box has not been clicked by a beat on the page",
+    ),
+)
+
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS, *SUCTION_DRAFTS)
 
 KEPT: dict[str, str] = {
     "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
+    "15_suction/01_pick_scored": "the same plate, cup and square as 00_pick_a_plate with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

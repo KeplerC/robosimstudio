@@ -83,6 +83,11 @@
 | [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
 |---|---|
 
+## [15 Suction](15_suction/README.md)
+
+| [Pick up a plate](15_suction/00_pick_a_plate.py) | [Pick up a plate, scored](15_suction/01_pick_scored.py) |
+|---|---|
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |
