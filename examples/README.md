@@ -60,6 +60,21 @@
 |---|---|
 | <img src="09_teleop/media/00_leader_arm.webp" width="240"> | <img src="09_teleop/media/01_force_feedback.webp" width="240"> |
 
+## [10 Granular](10_granular/README.md)
+
+| [Scoop rice into the tray](10_granular/00_scoop_rice.py) | [Scoop rice, scored](10_granular/01_scoop_rice_scored.py) |
+|---|---|
+
+## [11 Liquid](11_liquid/README.md)
+
+| [Pour honey into a bowl](11_liquid/00_pour_honey.py) | [Wipe a spill](11_liquid/01_wipe_spill.py) |
+|---|---|
+
+## [12 Dough](12_dough/README.md)
+
+| [Roll the dough flat](12_dough/00_roll_dough.py) | [Press a dough ball](12_dough/01_press_dough.py) |
+|---|---|
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |

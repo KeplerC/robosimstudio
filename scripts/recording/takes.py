@@ -650,9 +650,72 @@ DRAFTS = (
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS)
+# The particle kinds: a tool on the page's handle, dragged through what it works on. Drafts:
+# none has been filmed, and each take says what it would show.
+RICE_VIEW = Orbit(At("rice"), distance=0.9, azimuth=-50.0, elevation=35.0)
+PARTICLE_DRAFTS = (
+    handle(
+        "examples/10_granular/00_scoop_rice.py",
+        "paddle",
+        (0.470, -0.310, 0.756),
+        camera=RICE_VIEW,
+        lift=0.02,
+        across=("x", 0.16),
+        expect=(Rose("paddle", 0.01, at="lifted"),),
+        pending="the paddle rides the handle through the heap; a scooping path into the tray is still to be laid out",
+    ),
+    handle(
+        "examples/11_liquid/00_pour_honey.py",
+        "cup",
+        (0.600, -0.310, 0.790),
+        camera=Orbit(At("cup"), distance=0.9, azimuth=-40.0, elevation=30.0),
+        lift=0.10,
+        across=("y", 0.22),
+        expect=(Rose("cup", 0.05, at="lifted"),),
+        pending="the handle carries the cup over the bowl; the tip is the gizmo's rotation ring, which no beat turns yet",
+    ),
+    handle(
+        "examples/11_liquid/01_wipe_spill.py",
+        "wiper",
+        (0.720, -0.310, 0.765),
+        camera=Orbit(At("ketchup"), distance=0.8, azimuth=-50.0, elevation=40.0),
+        lift=0.005,
+        across=("x", -0.20),
+        expect=(Rose("wiper", 0.002, at="lifted"),),
+        pending="the wiper is dragged across the puddle on the handle; the readout's rise is what the clip should show",
+    ),
+    handle(
+        "examples/12_dough/00_roll_dough.py",
+        "pin",
+        (0.730, -0.310, 0.765),
+        camera=Orbit(At("dough"), distance=0.8, azimuth=-50.0, elevation=35.0),
+        lift=0.01,
+        across=("x", -0.20),
+        expect=(Rose("pin", 0.005, at="lifted"),),
+        pending="the pin is dragged across the block on the handle; a roll that flattens it needs the pin held at a height",
+    ),
+    Take(
+        "examples/12_dough/01_press_dough.py",
+        camera=Orbit(At("dough"), distance=0.7, azimuth=-50.0, elevation=30.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the right hand, open, over the puck"),
+            Press(text="Close", within=RIGHT, label="Close: one blade"),
+            Drag("right", "z", to=(0.600, -0.310, 0.830), seconds=1.2, label="drag the gizmo down to the puck"),
+            Drag("right", "z", to=(0.600, -0.310, 0.775), seconds=1.0, label="and 15 mm into it"),
+            Wait(seconds=0.5, mark="pressed"),
+            Drag("right", "z", to=(0.600, -0.310, 0.850), seconds=1.2, label="lift away: the dent stays"),
+            Wait(seconds=1.5, mark="lifted"),
+        ),
+        pending="the press gesture, to be filmed once the gizmo path over the puck is measured on the page",
+    ),
+)
+
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS)
 
 KEPT: dict[str, str] = {
+    "10_granular/01_scoop_rice_scored": "the same rice, paddle and tray as 00_scoop_rice with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",
