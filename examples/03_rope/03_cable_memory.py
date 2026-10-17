@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A cable that keeps its bend
+"""A cable keeps its bend
 
 The between-posts cable, clamped at one end only and given plastic memory: drag its free end round the far post and let go, and it stays wrapped.
 

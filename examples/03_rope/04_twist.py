@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A cable that carries a twist
+"""A cable carries a twist
 
 Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: roll a free end a turn and let go, and the stiff one springs the roll back out while the soft one keeps it.
 

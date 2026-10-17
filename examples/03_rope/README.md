@@ -60,7 +60,7 @@ uv run --extra superdex examples/03_rope/02_superdex.py
 
 Source: [`02_superdex.py`](02_superdex.py)
 
-## A cable that keeps its bend
+## A cable keeps its bend
 
 The between-posts cable, clamped at one end only and given plastic memory: drag its free end round the far post and let go, and it stays wrapped.
 
@@ -79,7 +79,7 @@ uv run examples/03_rope/03_cable_memory.py
 
 Source: [`03_cable_memory.py`](03_cable_memory.py)
 
-## A cable that carries a twist
+## A cable carries a twist
 
 Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: roll a free end a turn and let go, and the stiff one springs the roll back out while the soft one keeps it.
 
