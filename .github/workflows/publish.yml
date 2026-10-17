@@ -41,6 +41,10 @@ jobs:
               "robosimstudio_materials/soft.py",
               "robosimstudio_materials/rod/__init__.py",
               "robosimstudio_materials/paper.py",
+              "robosimstudio_materials/mpm/__init__.py",
+              "robosimstudio_materials/granular.py",
+              "robosimstudio_materials/liquid.py",
+              "robosimstudio_materials/dough.py",
           ]
           missing = [path for path in needed if path not in names]
           assert not missing, f"Missing from {wheel}: {missing}"
