@@ -186,6 +186,23 @@ def _kept_bend(film) -> tuple[bool, str]:
     return straightness < 0.9, f"straightness {straightness:.3f} after release (need under 0.9)"
 
 
+def _rolled_flat(film) -> tuple[bool, str]:
+    """The roll example's own readouts: the footprint 1.2 times the block's or more, the height 60% of it or less."""
+    import numpy as np
+
+    from robosimstudio_materials.mpm.measures import heap_height, spread
+
+    ref = film.sim["dough"]
+    rest = ref.entity.rest["particle_q"][ref.particles]
+    points = np.asarray(ref.particle_q, dtype=np.float64)
+    floor = float(ref.entity.floor_z)
+    footprint, before, after = spread(points, rest), heap_height(rest, floor), heap_height(points, floor)
+    return footprint >= 1.2 and after <= 0.6 * before, (
+        f"footprint {footprint:.2f} of the block's (need 1.2), height {before * 1000:.1f} -> {after * 1000:.1f} mm "
+        f"(need {0.6 * before * 1000:.1f})"
+    )
+
+
 def _succeeded(film) -> tuple[bool, str]:
     """The task's own verdict on the scene as the take left it."""
     result = film.sim.evaluate()[-1]
@@ -733,7 +750,7 @@ DRAFTS = (
 # Each take is the gesture its example's medium test drives through the arm panel,
 # played on the page at the test's speeds: the right arm's gizmo dragged or turned,
 # Close pressed. Nothing is clicked onto a handle, so what moves the rice, the
-# ketchup, the honey and the dough is the hand.
+# ketchup, the honey, the dough and the roller is the hand.
 
 TOOL_DOWN = (0.0, 1.0, 0.0, 0.0)
 """The YAM's tool pointing down, its jaws closing along world y (xyzw). Its home points the tool along +x."""
@@ -1000,24 +1017,38 @@ ROBOT_PARTICLES = (
         ),
         budget=1_300_000,  # 19 s of a moving arm: 1,008 KB at the ladder's last quality, over the default 900
     ),
-)
-
-# The rest of the particle kinds: a tool on the page's handle, dragged through what it works on.
-# Drafts: each take says what the hand's version would show.
-PARTICLE_DRAFTS = (
-    handle(
+    Take(
         "examples/12_dough/00_roll_dough.py",
-        "pin",
-        (0.730, -0.310, 0.765),
-        camera=Orbit(At("dough"), distance=0.8, azimuth=-50.0, elevation=35.0),
-        lift=0.01,
-        across=("x", -0.20),
-        expect=(Rose("pin", 0.005, at="lifted"),),
-        pending="the pin is dragged across the block on the handle; a roll that flattens it needs the pin held at a height",
+        camera=Orbit(At("dough", dx=-0.03, dz=0.06), distance=0.6, azimuth=-80.0, elevation=20.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        # 1.5 s of scene a second: the three passes are 2.4 s of scene each at the test's pace, and at
+        # real time the clip ran 22 s and 1255 KB at the bottom of the quality ladder.
+        speed=1.5,
+        budget=1_200_000,  # nine drags and a press, the hand in the middle of the frame throughout
+        beats=(
+            Wait(seconds=0.4, label="the right hand over the roller's handle"),
+            Drag("right", "z", to=(0.460, -0.310, 0.820), seconds=1.0, label="drag the gizmo down onto the handle"),
+            Wait(seconds=0.2),
+            Press(text="Close", within=RIGHT, label="Close: the jaws on the handle"),
+            Wait(seconds=0.5, mark="closed"),
+            Drag("right", "z", to=(0.460, -0.310, 0.850), seconds=0.6, label="lift it out of its rest"),
+            Drag("right", "x", to=(0.515, -0.310, 0.850), seconds=0.6, label="over the near edge of the block"),
+            # The cursor 88 mm over the bench: the drum's underside runs about 11 mm over it (tests/test_roll_dough).
+            Drag("right", "z", to=(0.515, -0.310, 0.838), seconds=0.4, label="down onto the dough"),
+            # 160 mm in 2.4 s of scene, eased: under 0.11 m/s, a third of what the MPM's grid allows a tool.
+            Drag("right", "x", to=(0.675, -0.310, 0.838), seconds=1.6, label="roll it across"),
+            Drag("right", "x", to=(0.515, -0.310, 0.838), seconds=1.6, label="back"),
+            Drag("right", "x", to=(0.675, -0.310, 0.838), seconds=1.6, label="and across again"),
+            Wait(seconds=0.3, mark="rolled"),
+            Drag("right", "z", to=(0.675, -0.310, 0.890), seconds=0.7, label="lift away: the dough stays flat"),
+            Wait(seconds=0.7),
+        ),
+        expect=(Held("roller", since="closed", at="rolled"), Check(_rolled_flat, needs=("dough",))),
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES, *PARTICLE_DRAFTS)
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES)
 
 KEPT: dict[str, str] = {
     "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
