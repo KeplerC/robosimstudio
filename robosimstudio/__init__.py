@@ -175,6 +175,10 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
         "the rope (the `rod` kind: cables, ropes, cords)",
         ("RodMaterialSpec", "RodSpec", "rod"),
     ),
+    "robosimstudio_materials.paper": (
+        "paper (the `paper` kind: sheets and card whose folds stay)",
+        ("PaperMaterialSpec", "PaperSpec", "paper", "papers"),
+    ),
 }
 """Kind -> what it is, in words, and the flat names it provides.
 

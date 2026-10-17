@@ -1381,6 +1381,7 @@ REFERENCE_FABRICS = (
     ReferenceFabric("cotton poplin", 0.3, 120.0, (1.7, 2.2)),
     ReferenceFabric("terry bath towel", 5.0, 500.0, (2.0, 3.0)),
     ReferenceFabric("denim", 1.0, 380.0, (2.5, 3.5)),
+    ReferenceFabric("copy paper (80 gsm)", 0.1, 80.0, (5.0, 7.0)),
 )
 """Real fabrics to calibrate against. Bending length does not follow thickness: a jersey tee is
 seven times thicker than tissue and droops the same, and a bath towel is ten times thicker than
