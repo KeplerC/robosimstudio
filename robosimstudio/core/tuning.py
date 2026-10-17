@@ -60,6 +60,7 @@ __all__ = [
     "ShapeWriter",
     "Tunable",
     "notify",
+    "set_kinematic",
 ]
 
 
@@ -125,6 +126,68 @@ def notify(pipeline: Any, flags: int) -> None:
                 solver.notify_model_changed(int(flags))
     if getattr(pipeline, "captured", False):
         pipeline.invalidate_graph()
+
+
+def set_kinematic(pipeline: Any, bodies: Iterable[int], on: bool) -> dict[int, int]:
+    """Flag bodies kinematic, or give them back their old flags, in the model and in every island's copy.
+
+    A kinematic body keeps whatever pose the state hands the solver: that is a
+    hand with a capsule in a hard latch, and the way a script rolls or carries
+    one body of a chain. Zeroing the body's inverse mass is not enough once the
+    scene has two islands. Newton's coupled solver hands each island its own
+    state, and VBD's ``coupling_notify_input_state_update`` turns a written pose
+    on a body *without* :attr:`newton.BodyFlags.KINEMATIC` into a velocity and
+    puts the old pose back (``vbd_coupling_kernels._update_vbd_body_input_state_kernel``),
+    so a massless tip held by pose alone stays where it was and every roll written
+    into it is dropped: measured on the two-cable twist example with its robot
+    (``fix3/twist/probe3.py``, GPU 1), 120 tip poses written, none kept, where the
+    same drive on a one-island scene keeps them all. The island reads the flag
+    off its ``ModelView``, whose ``body_flags`` is a copy-on-write override the
+    parent model never refreshes, so the flag is written into each island's
+    copy as well as the model's. VBD reads the array live, so no notification
+    is needed for the flag; the caller still zeroes the inverse mass and
+    inertia and calls :func:`notify` with ``BODY_INERTIAL_PROPERTIES``, which
+    is what makes the hold rigid (the flag alone bent a rolled cable to 0.68
+    straightness and twisted it unevenly; with the mass gone too it stays at
+    1.000 and twists uniformly, ``fix3/twist/probe5.py``).
+
+    Args:
+        pipeline: The scene's pipeline (``model`` and, in a coupled scene, ``solver``).
+        bodies: Model body indices.
+        on: ``True`` sets each body's flags to ``KINEMATIC``; ``False`` clears
+            it and sets ``DYNAMIC``, which is what every body the builder makes
+            carries.
+
+    Returns:
+        The flags each body had in the model before this call, keyed by body.
+    """
+    import newton
+
+    bodies = [int(b) for b in bodies]
+    kinematic = int(newton.BodyFlags.KINEMATIC)
+    dynamic = int(newton.BodyFlags.DYNAMIC)
+    before: dict[int, int] = {}
+    targets: list[tuple[Any, dict[int, int]]] = [(pipeline.model.body_flags, {b: b for b in bodies})]
+    solver = getattr(pipeline, "solver", None)
+    entries = getattr(solver, "_entries", None)
+    if entries and hasattr(solver, "view"):
+        # Newton 1.6 exposes the island's local body map on its private entry only.
+        for name, entry in entries.items():
+            override = solver.view(name).overrides.get("body_flags")
+            if override is None:
+                continue  # this island reads the model's own array, written above
+            local = entry.body_global_to_local.numpy()
+            rows = {b: int(local[b]) for b in bodies if 0 <= b < len(local) and local[b] >= 0}
+            if rows:
+                targets.append((override, rows))
+    for array, rows in targets:
+        flags = array.numpy()
+        for body, row in rows.items():
+            if array is pipeline.model.body_flags:
+                before[body] = int(flags[row])
+            flags[row] = kinematic if on else (int(flags[row]) & ~kinematic) | dynamic
+        array.assign(flags)
+    return before
 
 
 class ArrayWriter:
