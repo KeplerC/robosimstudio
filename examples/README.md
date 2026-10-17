@@ -83,6 +83,11 @@
 | [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
 |---|---|
 
+## [14 Brush](14_brush/README.md)
+
+| [Scrub a patch clean](14_brush/00_scrub_the_bench.py) | [Scrub a patch, scored](14_brush/01_scrub_scored.py) |
+|---|---|
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |

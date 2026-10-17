@@ -774,10 +774,30 @@ PARTICLE_DRAFTS = (
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS)
+BRUSH_DRAFTS = (
+    Take(
+        "examples/14_brush/00_scrub_the_bench.py",
+        camera=Orbit(At("brush"), distance=0.8, azimuth=-55.0, elevation=35.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the right hand, open, over the brush's handle"),
+            Drag("right", "z", to=(0.625, -0.310, 0.803), seconds=1.2, label="drag the gizmo down onto the handle"),
+            Press(text="Close", within=RIGHT, label="Close"),
+            Wait(seconds=0.8),
+            Drag("right", "z", to=(0.625, -0.310, 0.799), seconds=0.6, label="press the bristles 4 mm"),
+            Drag("right", "y", to=(0.625, -0.160, 0.799), seconds=1.5, label="and scrub across the square"),
+            Wait(seconds=1.0, mark="scrubbed"),
+        ),
+        pending="the scrub gesture tests/test_scrub_bench drives, to be filmed once its gizmo path is checked on the page",
+    ),
+)
+
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS, *BRUSH_DRAFTS)
 
 KEPT: dict[str, str] = {
     "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
+    "14_brush/01_scrub_scored": "the same brush, handle and square as 00_scrub_the_bench with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",
