@@ -37,9 +37,10 @@ Source: [`00_pour_honey.py`](00_pour_honey.py)
 A ketchup puddle in front of the right hand and a rubber-faced wiper standing under it: drag the hand down onto the wiper, close on it, and push the puddle toward the middle of the bench.
 
 Ketchup is a Bingham fluid here (a 300 Pa yield stress, viscosity 100), so the
-puddle holds its edge until the wiper moves it. The hand starts 100 mm over the
-wiper pointing down, its jaws across the wiper's 20 mm faces, so the pads cover
-the wiper's whole height and the push cannot tip it: the same wiper on the
+puddle holds its edge until the wiper moves it. The hand starts over the wiper
+pointing down, its tool centre 100 mm over the bench and 85 mm over the wiper's
+centre, its jaws across the wiper's 20 mm faces, so the pads cover the wiper's
+whole height and the push cannot tip it: the same wiper on the
 page's drag handle, which holds a body's tilt with a soft spring, pitched over
 under the puddle's resistance and rode across it, moving 22-51% of a 12 mm
 puddle off its patch in three identical runs; held by the hand it moved 96-98%

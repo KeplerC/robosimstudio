@@ -4,9 +4,10 @@
 A ketchup puddle in front of the right hand and a rubber-faced wiper standing under it: drag the hand down onto the wiper, close on it, and push the puddle toward the middle of the bench.
 
 Ketchup is a Bingham fluid here (a 300 Pa yield stress, viscosity 100), so the
-puddle holds its edge until the wiper moves it. The hand starts 100 mm over the
-wiper pointing down, its jaws across the wiper's 20 mm faces, so the pads cover
-the wiper's whole height and the push cannot tip it: the same wiper on the
+puddle holds its edge until the wiper moves it. The hand starts over the wiper
+pointing down, its tool centre 100 mm over the bench and 85 mm over the wiper's
+centre, its jaws across the wiper's 20 mm faces, so the pads cover the wiper's
+whole height and the push cannot tip it: the same wiper on the
 page's drag handle, which holds a body's tilt with a soft spring, pitched over
 under the puddle's resistance and rode across it, moving 22-51% of a 12 mm
 puddle off its patch in three identical runs; held by the hand it moved 96-98%
@@ -30,8 +31,8 @@ def main():
     puddle_at = (0.025, -0.19, 0.0)  # 120 mm from the wiper toward the middle of the bench, in its frame [m]
     puddle = (0.10, 0.10, 0.006)  # a 100 mm square, 6 mm deep: two layers of 40 x 40, 3,200 particles
     wiper_at = (0.025, -0.31, 0.015)  # under the right hand, standing on its 20 mm edge, long along x
-    # The right arm's joints [rad]: tool centre 100 mm over the wiper, pointing down, jaws closing
-    # along y, across the wiper's faces. Solved with ``sim.arm("right").solve_q_full``.
+    # The right arm's joints [rad]: tool centre 100 mm over the bench above the wiper, pointing down,
+    # jaws closing along y, across the wiper's faces. Solved with ``sim.arm("right").solve_q_full``.
     over_wiper = (0.0, 2.149, 1.879, -1.3, 0.0, 0.0)
 
     yam = get_embodiment("yam_bimanual")
