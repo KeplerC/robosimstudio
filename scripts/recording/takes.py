@@ -17,6 +17,7 @@ Dataclasses only, and no import of the library or a browser:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from .beats import (
     Check,
     Click,
     Corner,
+    Do,
     Drag,
     DragTo,
     Expectation,
@@ -182,6 +184,111 @@ def _kept_bend(film) -> tuple[bool, str]:
     return straightness < 0.9, f"straightness {straightness:.3f} after release (need under 0.9)"
 
 
+def _sprang_back(film) -> tuple[bool, str]:
+    """The span's middle is back where it hung before the hand took it."""
+    key = str(Segment("cable", 0.5))
+    off = abs(film.marks["end"]["things"][key][2] - film.marks["start"]["things"][key][2])
+    return off < 0.002, f"the middle ended {off * 1000:.1f} mm from where it hung (need under 2)"
+
+
+def _round_the_post(film) -> dict:
+    """The memory take's carry: the right cursor walked 120 degrees round the post, its gizmo turning with it.
+
+    What the gizmo's arrows and ring write, a film frame at a time: no beat drags
+    an arc or turns a ring. The path is ``tests/test_cable_robot``'s, at 50 mm/s,
+    shrinking by what the wrap lays on the post; the capsule's distance from the
+    hand at the end is kept for :func:`_carried`.
+    """
+    import math
+
+    import numpy as np
+
+    from robosimstudio.core.math import quat_multiply
+
+    arm, wrap = film.session.arms["right"], math.radians(120.0)
+    post = film.bench((0.0, -0.086, 0.0))
+    x0, y0, z = (float(v) for v in arm.cursor_pos)
+    start = (x0 - post[0], y0 - post[1])
+    rho = math.hypot(*start)
+    frames = round(rho * wrap / 0.05 * film.take.fps)
+    for i in range(1, frames + 1):
+        a, shrink = wrap * i / frames, 1.0 - wrap * 0.031 / rho * i / frames
+        x = (math.cos(a) * start[0] - math.sin(a) * start[1]) * shrink
+        y = (math.sin(a) * start[0] + math.cos(a) * start[1]) * shrink
+        quat = quat_multiply(np.array([0.0, 0.0, math.sin(a / 2), math.cos(a / 2)]), np.array([0.0, 1.0, 0.0, 0.0]))
+        arm.aim((post[0] + x, post[1] + y, z), quat, moving=i < frames)
+        film.hold(1.0 / film.take.fps)
+    film.hold(0.5)
+    cable = film.sim["cable"]
+    body_q = film.sim.state.body_q.numpy()
+    film.carried = min(math.dist(body_q[b, :3], film.hand("right")) for b in cable.bodies)
+    return {"frames": frames, "carried_mm": round(film.carried * 1000, 1)}
+
+
+def _carried(film) -> tuple[bool, str]:
+    """The cable stayed in the right hand's jaws all the way round the post."""
+    gap = getattr(film, "carried", math.inf)
+    return gap < 0.02, f"the nearest capsule ended {gap * 1000:.1f} mm from the tool centre (need under 20)"
+
+
+def _turn_both(film) -> dict:
+    """The twist take's turn: each hand's cursor turned 120 degrees inward about the vertical, over four seconds.
+
+    What each gizmo's ring writes; no beat turns a ring. ``tests/test_cable_robot``
+    turns them the same way, a degree a control step. The mid-cable twists at the
+    end are kept for :func:`_twisted`.
+    """
+    import math
+
+    import numpy as np
+
+    from robosimstudio.core.math import quat_multiply, quat_to_mat
+    from robosimstudio_materials.rod.measures import twist_turns
+
+    level = np.array([0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)])
+    arms = {"right": 1.0, "left": -1.0}
+    start = {}
+    for name in arms:
+        axis = quat_to_mat(np.asarray(film.session.arms[name].cursor_quat))[:, 2]
+        start[name] = math.atan2(axis[1], axis[0])
+    frames = round(4.0 * film.take.fps)  # 2 degrees a frame: a frame is four control steps, and a jump of
+    # four degrees at once, twice the test's whole step, let the soft tip slip a fifth of its turn
+    for i in range(1, frames + 1):
+        for name, sign in arms.items():
+            yaw = start[name] + sign * math.radians(120.0) * i / frames
+            panel = film.session.arms[name]
+            quat = quat_multiply(np.array([0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2)]), level)
+            panel.aim(panel.cursor_pos, quat, moving=i < frames)
+        film.hold(1.0 / film.take.fps)
+    film.hold(1.0)
+    body_q = film.sim.state.body_q.numpy()
+    film.twist_held = {
+        n: abs(twist_turns(body_q[film.sim[n].bodies[8:17], 3:7])) for n in ("soft_twist", "stiff_twist")
+    }
+    return {"turned_deg": 120.0, "held": {n: round(v, 3) for n, v in film.twist_held.items()}}
+
+
+def _twisted(film) -> tuple[bool, str]:
+    """The turn reached both middles while held, and once let go only the stiff cable gave it back."""
+    import numpy as np
+
+    from robosimstudio_materials.rod.measures import twist_turns
+
+    held = getattr(film, "twist_held", {"soft_twist": 0.0, "stiff_twist": 0.0})
+    body_q = film.sim.state.body_q.numpy()
+    now = {n: abs(twist_turns(np.asarray(body_q)[film.sim[n].bodies[8:17], 3:7])) for n in held}
+    ok = (
+        held["soft_twist"] > 0.09
+        and held["stiff_twist"] > 0.03
+        and now["stiff_twist"] < 0.01
+        and now["soft_twist"] > 0.06
+    )
+    return ok, (
+        f"mid-cable turns held soft {held['soft_twist']:.3f} stiff {held['stiff_twist']:.3f} (need 0.09, 0.03); "
+        f"let go soft {now['soft_twist']:.3f} stiff {now['stiff_twist']:.3f} (need over 0.06, under 0.01)"
+    )
+
+
 def _succeeded(film) -> tuple[bool, str]:
     """The task's own verdict on the scene as the take left it."""
     result = film.sim.evaluate()[-1]
@@ -305,23 +412,22 @@ FINAL = (
     ),
     Take(
         "examples/03_rope/01_between_posts.py",
-        # Three-quarters on to the span: square on, the x arrow points into the lens and cannot be grabbed.
-        camera=Orbit(At("cable", dz=0.03), distance=0.65, azimuth=-30.0, elevation=22.0, fov=50.0),
+        camera=Orbit(At("cable", dz=0.05), distance=0.75, azimuth=-35.0, elevation=25.0, fov=50.0),
         warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left", "Arm: right")),
+        layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
-            Wait(seconds=0.5, label="a cable between two posts"),
-            Click(Segment("cable", 0.5), label="click its middle: a handle"),
-            Wait(seconds=0.3),
-            # 50 mm: the span is 0.5 m and does not stretch, so a lift of its
-            # middle much past the sag it rests in pulls the handle off the cable.
-            Drag("handle", "z", 0.05, seconds=1.2, label="drag it up"),
-            Drag("handle", "x", 0.05, seconds=1.0, label="and towards you"),
-            Wait(seconds=0.8, mark="lifted", label="the span hangs from the handle"),
-            Press(text="Release all", label="let go"),
-            Wait(seconds=1.6, label="it falls back between the posts"),
+            Wait(seconds=0.5, label="the right hand pointing at the span's middle"),
+            # The hand leans 40 degrees, so its z arrow is the hand's own axis: 80 mm down it is the cable.
+            Drag("right", "z", -0.08, seconds=1.2, label="drag the gizmo down onto the cable"),
+            Press(text="Close", within=RIGHT, label="Close"),
+            Wait(seconds=0.8, mark="closed"),
+            Drag("right", "z", 0.03, seconds=1.0, label="pull it back up"),
+            Wait(seconds=0.8, mark="pulled", label="the span hangs from the hand"),
+            Press(text="Open", within=RIGHT, label="Open"),
+            Drag("right", "z", 0.05, seconds=0.8, label="and away"),
+            Wait(seconds=1.5, label="it springs back between the posts"),
         ),
-        expect=(Rose(Segment("cable", 0.5), 0.025, at="lifted"),),
+        expect=(Rose(Segment("cable", 0.5), 0.008, at="pulled"), Check(_sprang_back, needs=(Segment("cable", 0.5),))),
     ),
     lift("examples/00_getting_started/00_hello_world.py"),
     lift("examples/00_getting_started/01_core_concepts.py"),
@@ -658,32 +764,49 @@ DRAFTS = (
     ),
     Take(
         "examples/03_rope/03_cable_memory.py",
-        camera=Orbit(At("post_end", dz=0.10), distance=0.65, azimuth=-30.0, elevation=22.0, fov=50.0),
+        camera=Orbit(Bench(-0.05, -0.14, 0.0), distance=1.0, azimuth=30.0, elevation=60.0, fov=50.0),
         warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left", "Arm: right")),
+        budget=1_200_000,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
-            Wait(seconds=0.5, label="a cable clamped at one post, its free end over the other"),
-            Click(Segment("cable", 0.95), label="click near its free end: a handle"),
-            Wait(seconds=0.3),
-            Drag("handle", "x", 0.08, seconds=1.0, label="drag it out round the far post"),
-            Drag("handle", "y", -0.12, seconds=1.2, label="and back along the span"),
-            Wait(seconds=0.6, mark="wrapped", label="the cable is bent round the post"),
-            Press(text="Release all", label="let go"),
-            Wait(seconds=2.0, label="it keeps the bend"),
+            Wait(seconds=0.5, label="the right hand over a cable with memory, a post beside it"),
+            # Capsule 13 lies at bench (-0.15, -0.05), 11 mm up; the tool centre closes 10 mm over its axis.
+            Drag("right", "z", to=(0.450, -0.050, 0.771), seconds=1.2, label="drag the gizmo down onto the cable"),
+            Press(text="Close", within=RIGHT, label="Close"),
+            Wait(seconds=1.0, mark="closed"),
+            Drag("right", "z", 0.03, seconds=0.8, label="lift it 30 mm"),
+            Do(fn=_round_the_post, label="carry it round the post, turning the ring"),
+            Wait(seconds=0.3, mark="wrapped"),
+            Drag("right", "z", -0.03, seconds=0.8, label="lay it down"),
+            Press(text="Open", within=RIGHT, label="Open"),
+            Wait(seconds=0.5),
+            Drag("right", "z", 0.09, seconds=1.0, label="lift away"),
+            Wait(seconds=2.0, label="it stays wrapped round the post"),
         ),
-        expect=(Check(_kept_bend, needs=("cable",)),),
-        pending="the drag round the far post has not been tried on the page yet; filmed to outputs until it has",
+        expect=(Check(_carried), Check(_kept_bend, needs=("cable",))),
     ),
     Take(
         "examples/03_rope/04_twist.py",
-        camera=Orbit(At("stiff_twist", dz=0.05), distance=0.75, azimuth=-30.0, elevation=25.0, fov=50.0),
+        camera=Orbit(Bench(0.04, 0.0, 0.14), distance=0.7, azimuth=10.0, elevation=45.0, fov=50.0),
+        budget=1_500_000,  # two hands turning and two gizmos for 15 s
         warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left", "Arm: right")),
-        beats=(Wait(seconds=0.5, label="two cables clamped at one end: one rolls easily, one does not"),),
-        pending=(
-            "the page rolls a tip with the **tip roll** slider and lets go with the **hold the tips** box "
-            "(tests/test_rod_twist.py drives both); the recorder has no slider beat yet, so no gesture is filmed"
+        layout=Layout(collapse=("Simulation",)),
+        beats=(
+            Wait(seconds=0.5, label="two cables hang, each hand level in front of a tip"),
+            # Each arrow is the hand's own axis, turned 30 degrees out: 60 mm along it is the tip.
+            Drag("right", "x", 0.06, seconds=1.0, label="drag the right hand onto its tip"),
+            Drag("left", "x", 0.06, seconds=1.0, label="and the left onto the other"),
+            Press(text="Close", within=RIGHT, label="Close"),
+            Press(text="Close", within="Arm: left", label="Close"),
+            Wait(seconds=0.8, mark="closed"),
+            Do(fn=_turn_both, label="turn each hand a third of a turn about its cable"),
+            Press(text="Open", within=RIGHT, label="Open: the stiff one unwinds"),
+            Press(text="Open", within="Arm: left", label="Open: the soft one keeps it"),
+            Drag("right", "y", -0.06, seconds=0.8, label="back the hands off"),
+            Drag("left", "y", 0.06, seconds=0.8),
+            Wait(seconds=1.0, label="the stiff reads 0, the soft keeps its turn"),
         ),
+        expect=(Check(_twisted, needs=("soft_twist", "stiff_twist")),),
     ),
     handle(
         "examples/03_rope/02_superdex.py",
