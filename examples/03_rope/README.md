@@ -1,7 +1,8 @@
 # Rope
 
 Cables and ropes: a capsule chain on Newton by default, or a Cosserat rod on
-SuperDex. [`rod/`](rod/) is the implementation behind `rss.rod`; the
+SuperDex. [`robosimstudio_materials/rod/`](../../robosimstudio_materials/rod/) is
+the implementation behind `rss.rod`; the
 [route the cable](../08_demos/route_the_cable/README.md) demo uses it with two
 YAM hands.
 

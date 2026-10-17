@@ -3,6 +3,8 @@
 RoboSimStudio is a Newton-native simulation toolkit. Packages:
 
 - `robosimstudio/`: the core API; builds and steps scenes.
+- `robosimstudio_materials/`: the shipped cloth, soft-body and rope kinds, one
+  module or package each; it imports only `robosimstudio`.
 - `robosimstudio_studio/`: a browser page over any scene.
 - `robosimstudio_bench/`: tasks and their scoring.
 - `robosimstudio_policy_agent/`: policies as graphs of robot tools.
@@ -17,9 +19,10 @@ RoboSimStudio is a Newton-native simulation toolkit. Packages:
    are in the cell's work-surface frame: `at=(0, 0, 0.2)` is 200 mm over the
    middle of the bench, whatever bench (frames and units:
    [`examples/live/REFERENCE.md`](examples/live/REFERENCE.md#frames-and-units)).
-3. `examples/`: numbered scripts, shortest first. `examples/01_cloth/cloth.py`,
-   `examples/02_soft/soft.py` and `examples/03_rope/rod/` are the shipped cloth,
-   soft-body and rope implementations; read them to see how each works.
+3. `examples/`: numbered scripts, shortest first. `robosimstudio_materials/cloth.py`,
+   `robosimstudio_materials/soft.py` and `robosimstudio_materials/rod/` are the
+   shipped cloth, soft-body and rope implementations; read them to see how each
+   works.
 
 ## Checks
 

@@ -1,6 +1,7 @@
 # Cloth
 
-How a sheet is built, section by section: [`cloth.py`](cloth.py), the
+How a sheet is built, section by section:
+[`robosimstudio_materials/cloth.py`](../../robosimstudio_materials/cloth.py), the
 implementation behind `rss.sheet`.
 
 A gripper holds a sheet by friction alone, which needs one-way coupling and

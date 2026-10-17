@@ -1,7 +1,8 @@
 # Soft bodies
 
-Volumetric (tetrahedral) soft bodies. [`soft.py`](soft.py) is the implementation
-behind `rss.sponge`.
+Volumetric (tetrahedral) soft bodies.
+[`robosimstudio_materials/soft.py`](../../robosimstudio_materials/soft.py) is the
+implementation behind `rss.sponge`.
 
 ![The hand driven down onto a sponge: it squashes under the jaw and recovers.](media/press_sponge.webp)
 

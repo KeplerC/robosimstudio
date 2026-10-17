@@ -37,6 +37,10 @@ changing simulation code.
 - **New robots, kinds of thing, tasks and policies** live outside the library: a
   robot or kind registers itself (`examples/04_extending/`), a task is a document
   (`examples/06_tasks/`), and a policy is a graph folder (`examples/07_policies/`).
+  A kind the repository ships is one module (or package) in
+  `robosimstudio_materials/`, found by the registries' scan of that package; a
+  kind of your own registers itself from a folder named in
+  `ROBOSIMSTUDIO_DOMAIN_ROOTS`, as `examples/04_extending/01_new_kind.py` shows.
 - **Imports go one way.** The library imports neither the studio nor the agent,
   and a lower layer never imports a higher one.
 - **A number in a docstring was measured.** A new one should be too.

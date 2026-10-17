@@ -236,10 +236,10 @@ print(stack.position)    # the bottom block, resting on the bench
 
 ### Where the shipped implementations are
 
-`examples/01_cloth/cloth.py` and `examples/02_soft/soft.py` back `rss.sheet` and
-`rss.sponge` (importable as `robosimstudio.domains.cloth` and `.soft`); the
-library scans them the first time a kind is looked up. A folder of your own is
-scanned when `ROBOSIMSTUDIO_DOMAIN_ROOTS` names it or
+`robosimstudio_materials/cloth.py`, `soft.py` and `rod/` back `rss.sheet`,
+`rss.sponge` and `rss.rod` (importable as `robosimstudio_materials.cloth`, `.soft`
+and `.rod`); the library scans that package the first time a kind is looked up.
+A folder of your own is scanned when `ROBOSIMSTUDIO_DOMAIN_ROOTS` names it or
 `robosimstudio.roots.add_domain_root` is called with it.
 
 **See also:** `robosimstudio/robots/embodiments/panda.py` (a registered robot);
