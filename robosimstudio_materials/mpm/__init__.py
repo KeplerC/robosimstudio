@@ -23,9 +23,9 @@ The modules, in reading order:
   point handle with an optional reconstructed surface.
 * ``measures`` -- ``fill_fraction``, ``mass_in_region``, ``spill_fraction``,
   ``heap_height`` and ``spread``, on the ``granular`` layout.
-* ``physics`` -- :data:`GRANULAR_60HZ`, :data:`LIQUID_60HZ`, :data:`DOUGH_60HZ`:
-  ``GENERIC`` with the rigid props on the robot's island and the projection
-  stated per kind.
+* ``physics`` -- :data:`GRANULAR_60HZ`, :data:`LIQUID_120HZ`, :data:`DOUGH_60HZ`:
+  ``GENERIC`` with the rigid props on the robot's island and the projection,
+  the iterations and the rate stated per kind.
 * ``declare`` -- :class:`Heap`, :class:`Liquid`, :class:`Dough` asset records
   for a task document.
 """
@@ -36,7 +36,7 @@ from . import measures as _measures  # noqa: F401 -- registers the atoms and the
 from . import presets as _presets  # noqa: F401 -- registers the material kind and its records
 from .declare import Dough, Heap, Liquid, ParticleBody
 from .entity import EntityParticleBody, island_solver, resolve_material, sample_positions
-from .physics import DOUGH_60HZ, GRANULAR_60HZ, LIQUID_60HZ, with_particles_on
+from .physics import DOUGH_60HZ, GRANULAR_60HZ, LIQUID_120HZ, with_particles_on
 from .presets import BEANS, BUTTER, CLAY, DOUGH, FLOUR, HONEY, KETCHUP, PLASTICINE, RICE, SAND, WATER, presets
 from .spec import MPM_KEYS, NEWTON_MPM_STRESS_SCALE, ParticleBodySpec, ParticleMaterialSpec
 
@@ -50,7 +50,7 @@ __all__ = [
     "GRANULAR_60HZ",
     "HONEY",
     "KETCHUP",
-    "LIQUID_60HZ",
+    "LIQUID_120HZ",
     "MPM_KEYS",
     "NEWTON_MPM_STRESS_SCALE",
     "PLASTICINE",

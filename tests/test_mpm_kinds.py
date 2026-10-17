@@ -10,7 +10,7 @@ scenes, each item on the smallest scene that shows it:
   islands with the MPM entry in place and no main collision pipeline, capture,
   take a hand into the heap, answer the five measures, and take a live material
   write;
-* a cup of honey under ``LIQUID_60HZ`` keeps its particles above its floor;
+* a cup of honey under ``LIQUID_120HZ`` keeps its particles above its floor;
 * a puck of dough under ``DOUGH_60HZ`` holds its height at rest, keeps most of a
   press after the hand lifts, and offers a reconstructed surface;
 * each example script loads under the stub studio and steps finite.
@@ -222,14 +222,14 @@ class TestTheHeapBesideTheRobot(unittest.TestCase):
 
 
 class TestTheHoneyCup(unittest.TestCase):
-    """``LIQUID_60HZ`` and a free cup: the margin and the heavy proxies keep the honey where it was poured."""
+    """``LIQUID_120HZ`` and a free cup: the margin and the heavy proxies keep the honey where it was poured."""
 
     def test_the_cup_holds_its_honey_at_rest(self) -> None:
         import robosimstudio as rss
         from robosimstudio_materials.liquid import cup
 
         wall = 0.008
-        scene = rss.Scene(cell="bench_075", name="honey_cup", physics=rss.LIQUID_60HZ)
+        scene = rss.Scene(cell="bench_075", name="honey_cup", physics=rss.LIQUID_120HZ)
         scene.add(rss.robot("yam_bimanual"))
         scene.add(cup(name="cup", inner=(0.05, 0.05, 0.07), wall=wall, at=(0.0, -0.31, 0.0)))
         honey = scene.add(

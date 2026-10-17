@@ -181,7 +181,7 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "robosimstudio_materials.liquid": (
         "liquids (the `liquid` kind: water, honey, ketchup on the implicit MPM)",
-        ("LIQUID_60HZ", "liquid"),
+        ("LIQUID_120HZ", "liquid"),
     ),
     "robosimstudio_materials.dough": (
         "plastic solids (the `dough` kind: dough, plasticine, clay, butter on the implicit MPM)",

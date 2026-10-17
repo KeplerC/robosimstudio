@@ -34,7 +34,8 @@ constructor over the same solver, and three things besides:
   basis alone and 9.9% with a projection after every step (``probe_b``,
   32,890 particles). For a liquid the projection is wrong -- it pushes
   particles into the container wall and cost 6x in the cup probe -- so the
-  liquid kind states ``project_outside=False``.
+  liquid kind states ``project_outside=False``, and ``step_hz=120``, because
+  what is poured falls faster than the band above allows at 60 Hz.
 
 **What cannot be captured.** The ``"pic"`` collider basis copies to the host
 inside its step (``CUDA error 906`` during capture, and the context is
@@ -74,7 +75,12 @@ class SolverMPM(SolverImplicitMPM):
             registered ``mpm`` backend states 60 (15.6 ms). Keep a tool's
             travel per step under ~1.5 voxels, which at 4 mm and 60 Hz is
             0.36 m/s: the SDF query band is 1.7 voxels and a faster tool
-            tunnels (``probe_b``, grid travel).
+            tunnels (``probe_b``, grid travel). A falling liquid is its own
+            fast body -- it passes 0.36 m/s after 7 mm of free fall -- and
+            honey poured from 100 mm went through the bowl's floor and the
+            bench at 60 Hz (85 of 8,000 particles below the bench) and not at
+            120 Hz; from 170 mm, 406 and 5 (``pour_probe``). The liquid kind
+            states 120.
         project_outside: Project particles out of the colliders after every
             step, at ``project_gap`` (``None`` is Newton's ``voxel * sqrt(3)``).
         project_gap: Maximum closest-point query distance for the projection

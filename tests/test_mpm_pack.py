@@ -69,26 +69,31 @@ class TestTheDomains(unittest.TestCase):
 
 class TestTheArrangements(unittest.TestCase):
     def test_the_tables_put_rigid_props_on_the_arms_solver(self) -> None:
-        from robosimstudio_materials.mpm import DOUGH_60HZ, GRANULAR_60HZ, LIQUID_60HZ
+        from robosimstudio_materials.mpm import DOUGH_60HZ, GRANULAR_60HZ, LIQUID_120HZ
 
-        for table in (GRANULAR_60HZ, LIQUID_60HZ, DOUGH_60HZ):
+        for table in (GRANULAR_60HZ, LIQUID_120HZ, DOUGH_60HZ):
             self.assertEqual(table.backend_for("articulated"), table.backend_for("rigid"))
             self.assertEqual("mujoco", table.backend_for("rigid").solver)
             self.assertEqual(1, len({table.backend_for(kind) for kind in KINDS}), "one island for the three")
             self.assertEqual(60.0, table.control_hz)
             self.assertEqual(16, table.substeps)
 
-    def test_the_projection_and_the_iterations_are_the_differences_between_the_tables(self) -> None:
-        from robosimstudio_materials.mpm import DOUGH_60HZ, GRANULAR_60HZ, LIQUID_60HZ
+    def test_the_projection_the_iterations_and_the_rate_are_the_differences_between_the_tables(self) -> None:
+        from robosimstudio_materials.mpm import DOUGH_60HZ, GRANULAR_60HZ, LIQUID_120HZ
         from robosimstudio_materials.mpm.physics import DOUGH_ITERATIONS, PROXY_MASS_SCALE
 
         self.assertTrue(GRANULAR_60HZ.backend_for("granular").get("project_outside"))
-        self.assertFalse(LIQUID_60HZ.backend_for("liquid").get("project_outside"))
+        self.assertFalse(LIQUID_120HZ.backend_for("liquid").get("project_outside"))
         self.assertTrue(DOUGH_60HZ.backend_for("dough").get("project_outside"))
+        self.assertEqual(120.0, LIQUID_120HZ.backend_for("liquid").get("step_hz"), "a pour tunnels at 60 Hz")
+        for table in (GRANULAR_60HZ, DOUGH_60HZ):
+            self.assertIsNone(
+                table.backend_for("granular").get("step_hz"), "the heap and the lump keep the registered 60"
+            )
         self.assertEqual(DOUGH_ITERATIONS, DOUGH_60HZ.backend_for("dough").get("max_iterations"))
         self.assertIsNone(GRANULAR_60HZ.backend_for("granular").get("max_iterations"), "grains keep the registered 50")
-        self.assertEqual(3, len({t.backend_for("granular") for t in (GRANULAR_60HZ, LIQUID_60HZ, DOUGH_60HZ)}))
-        for table in (GRANULAR_60HZ, LIQUID_60HZ, DOUGH_60HZ):
+        self.assertEqual(3, len({t.backend_for("granular") for t in (GRANULAR_60HZ, LIQUID_120HZ, DOUGH_60HZ)}))
+        for table in (GRANULAR_60HZ, LIQUID_120HZ, DOUGH_60HZ):
             self.assertEqual("proxy", table.coupling.method)
             self.assertEqual(PROXY_MASS_SCALE, table.coupling.get("mass_scale"))
 
@@ -103,9 +108,9 @@ class TestTheArrangements(unittest.TestCase):
         from robosimstudio.scene.physics.compose import _check_in_place_rates
         from robosimstudio.scene.physics.islands import Island
         from robosimstudio.specs.physics import get_backend
-        from robosimstudio_materials.mpm import DOUGH_60HZ, GRANULAR_60HZ, LIQUID_60HZ
+        from robosimstudio_materials.mpm import DOUGH_60HZ, GRANULAR_60HZ, LIQUID_120HZ
 
-        for table in (GRANULAR_60HZ, LIQUID_60HZ, DOUGH_60HZ):
+        for table in (GRANULAR_60HZ, LIQUID_120HZ, DOUGH_60HZ):
             for hz in (60.0, 120.0, 240.0):
                 spec = table.backend_for("granular").with_(step_hz=hz)
                 island = Island(name="mpm", backend=spec, solver_class=get_backend("mpm").cls)
@@ -175,7 +180,7 @@ class TestTheFlatNames(unittest.TestCase):
             ("ParticleBodySpec", "robosimstudio_materials.granular"),
             ("ParticleMaterialSpec", "robosimstudio_materials.granular"),
             ("GRANULAR_60HZ", "robosimstudio_materials.granular"),
-            ("LIQUID_60HZ", "robosimstudio_materials.liquid"),
+            ("LIQUID_120HZ", "robosimstudio_materials.liquid"),
             ("DOUGH_60HZ", "robosimstudio_materials.dough"),
         ):
             with self.subTest(name=name):

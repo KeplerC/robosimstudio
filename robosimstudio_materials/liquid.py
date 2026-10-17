@@ -6,8 +6,9 @@ Run ``examples/11_liquid/00_pour_honey.py`` first. The implementation is shared
 with the granular and dough kinds in :mod:`robosimstudio_materials.mpm`; this
 module is the domain, the entity that names it, the constructor and the presets.
 
-Two facts about liquids in Newton 1.6.0 shape everything here, both measured in
-the Phase 0 cup probe (``probe_c_water``, RTX PRO 6000):
+Three facts about liquids in Newton 1.6.0 shape everything here, the first two
+measured in the Phase 0 cup probe (``probe_c_water``, RTX PRO 6000), the third
+in the pour example's own scene (``pour_probe``):
 
 * **The water preset loses volume.** A 60 mm column in a thick-walled tank at
   4 mm voxels is 34% of its volume after 2 s at rest (69% with the ``P1d``
@@ -23,6 +24,17 @@ the Phase 0 cup probe (``probe_c_water``, RTX PRO 6000):
   ``containers`` and gets that margin at build, or its walls are 8 mm or more.
   The projection granular uses is off here: it pushes a liquid into its walls
   and cost 6x.
+* **What is poured falls through a floor at 60 Hz.** The band a collider is
+  found in is ~1.7 voxels per MPM step, which at 4 mm and 60 Hz is a speed of
+  0.36 m/s -- the limit a tool obeys -- and a liquid in free fall passes it
+  7 mm below the lip it left. Honey poured from 100 mm into a bowl at 60 Hz
+  put 85 of 8,000 particles through the bowl's floor and the bench and 4.0% in
+  the bowl; at 120 Hz none went through and 42.5% were in the bowl (240 Hz:
+  55.2%, at 1.8x the cost of 120). From 170 mm, 60 Hz put 406 through and
+  120 Hz 5, with 65.5% in the bowl. So the liquid table is
+  :data:`LIQUID_120HZ`, two MPM steps per control step: the first rate at
+  which a pour from a hand's height lands, not one at which nothing tunnels. A
+  puddle that is only pushed would be fine at 60.
 """
 
 from __future__ import annotations
@@ -40,7 +52,7 @@ from robosimstudio.specs.physics import register_domain
 from .mpm import (
     HONEY,
     KETCHUP,
-    LIQUID_60HZ,
+    LIQUID_120HZ,
     WATER,
     EntityParticleBody,
     Liquid,
@@ -52,7 +64,7 @@ from .mpm import (
 __all__ = [
     "HONEY",
     "KETCHUP",
-    "LIQUID_60HZ",
+    "LIQUID_120HZ",
     "WATER",
     "EntityLiquid",
     "Liquid",
@@ -97,9 +109,9 @@ def liquid(
         **kwargs: Any other :class:`~robosimstudio_materials.mpm.ParticleBodySpec`
             field.
 
-    A liquid needs the ``mpm`` backend with the projection off:
-    :data:`LIQUID_60HZ` states it, and puts a cup on the robot's island so the
-    hand can tilt one.
+    A liquid needs the ``mpm`` backend with the projection off and, if it is
+    to be poured, stepped at 120 Hz: :data:`LIQUID_120HZ` states both, and
+    puts a cup on the robot's island so the hand can tilt one.
     """
     return ParticleBodySpec(
         entity="liquid",

@@ -7,8 +7,9 @@ Ketchup is a Bingham fluid here (a 300 Pa yield stress, viscosity 100), so the
 puddle holds its edge until the wiper moves it. The panel reads how much of it
 has been pushed off the patch it started on and lies on the bench
 (``spill_fraction``), and how far it has spread. A deformable sponge in place
-of the rigid wiper is a later phase. 16.2 ms per control step on an RTX PRO
-6000, graph-captured.
+of the rigid wiper is a later phase. The puddle is only pushed, never dropped,
+so it would hold at 60 Hz; it runs on the one liquid table, ``rss.LIQUID_120HZ``,
+at 26.0 ms per control step on an RTX PRO 6000, graph-captured.
 """
 
 import numpy as np
@@ -20,10 +21,10 @@ from robosimstudio_materials.mpm.measures import spill_fraction, spread
 def main():
     cell = "bench_075"
     puddle_at = (0.0, -0.31, 0.0)  # under the right hand, in the bench's frame [m]
-    puddle = (0.10, 0.10, 0.006)  # a 100 mm square, 6 mm deep: 1.5 voxels, 2,400 particles
+    puddle = (0.10, 0.10, 0.006)  # a 100 mm square, 6 mm deep: 1.5 voxels, two layers of 40 x 40, 3,200 particles
     wiper_at = (0.12, -0.31, 0.015)  # standing on its edge beside the puddle, 20 mm thick
 
-    scene = rss.Scene(cell=cell, name="wipe_spill", physics=rss.LIQUID_60HZ)
+    scene = rss.Scene(cell=cell, name="wipe_spill", physics=rss.LIQUID_120HZ)
     scene.add(rss.robot("yam_bimanual"))
     sauce = scene.add(rss.liquid(name="ketchup", size=puddle, at=puddle_at, material="ketchup"))
     scene.add(rss.box(name="wiper", half=(0.01, 0.06, 0.015), at=wiper_at, friction=1.5, color=(0.15, 0.15, 0.17)))

@@ -12,23 +12,28 @@ robot's island -- which is also the island a hand can hold a rigid body in
 (:data:`~robosimstudio.specs.MUJOCO_500HZ` makes the same choice for the same
 reason).
 
-The rate is ``GENERIC``'s: sixteen substeps at 60 Hz, the MPM stepping once per
-control step (``step_hz=60``, the registered default). Measured by the core
-agent on an RTX PRO 6000 with Newton 1.6.0, graph-captured: a 28,812-particle
-rice bed beside the YAM bimanual on ``bench_075`` costs 15.6 ms per control
-step at 60 Hz and 25.9 ms at 120 Hz (the robot alone is 4.2 ms). 120 Hz halves
-a tool's travel per MPM step -- the SDF band is ~1.7 voxels, so at 4 mm voxels
-and 60 Hz a tool has to stay under ~0.36 m/s or it tunnels (``probe_b``) -- and
-is one ``replace`` away: ``GRANULAR_60HZ.with_backend("granular", backend("mpm",
-step_hz=120.0))``; 60, 120, 240, 480 and 960 fit the sixteen substeps.
+The rate is ``GENERIC``'s: sixteen substeps at 60 Hz. The heap and the lump
+step the MPM once per control step (``step_hz=60``, the registered default),
+the pool twice (``step_hz=120``). Measured by the core agent on an RTX PRO 6000
+with Newton 1.6.0, graph-captured: a 28,812-particle rice bed beside the YAM
+bimanual on ``bench_075`` costs 15.6 ms per control step at 60 Hz and 25.9 ms
+at 120 Hz (the robot alone is 4.2 ms). What the rate buys is travel per MPM
+step: the SDF band is ~1.7 voxels, so at 4 mm voxels and 60 Hz a tool has to
+stay under ~0.36 m/s or it tunnels (``probe_b``), and a liquid that leaves its
+cup is past that speed after 7 mm of free fall, which is why the pool pays for
+120 Hz (:data:`LIQUID_120HZ`) and a heap, which nothing drops, does not.
+Another rate is one ``replace`` away: ``GRANULAR_60HZ.with_backend("granular",
+backend("mpm", step_hz=120.0))``; 60, 120, 240, 480 and 960 fit the sixteen
+substeps.
 
-Three tables rather than one because two things differ. ``project_outside``
+Three tables rather than one because three things differ. ``project_outside``
 after each MPM step is what keeps a thin tool from leaving grains inside it
 (``probe_b``: 9.9% of the swept rice left behind with it, 14-16% without), and
 it is wrong for a liquid: it pushes particles into the container wall and cost
 6x in the cup probe. So :data:`GRANULAR_60HZ` and :data:`DOUGH_60HZ` state it and
-:data:`LIQUID_60HZ` states it off. And a plastic solid needs more solver
-iterations than grains or it loses volume at rest (:data:`DOUGH_ITERATIONS`).
+:data:`LIQUID_120HZ` states it off. A plastic solid needs more solver
+iterations than grains or it loses volume at rest (:data:`DOUGH_ITERATIONS`),
+and a liquid needs the rate above or it falls through what it is poured into.
 Each difference makes that kind's ``mpm`` spec unequal to the others', so a
 scene holding two kinds gets two MPM islands, and the proxy coupler refuses
 that beside a robot. One particle kind per robot scene under these tables; a
@@ -43,7 +48,7 @@ from __future__ import annotations
 
 from robosimstudio.specs.physics import GENERIC, ArrangementSpec, BackendSpec, backend, coupler
 
-__all__ = ["DOUGH_60HZ", "DOUGH_ITERATIONS", "GRANULAR_60HZ", "LIQUID_60HZ", "PROXY_MASS_SCALE", "with_particles_on"]
+__all__ = ["DOUGH_60HZ", "DOUGH_ITERATIONS", "GRANULAR_60HZ", "LIQUID_120HZ", "PROXY_MASS_SCALE", "with_particles_on"]
 
 PROXY_MASS_SCALE = 1000.0
 """How much heavier the MPM sees a mirrored rigid body than the rigid solver does.
@@ -116,8 +121,8 @@ proxy coupler; a scene wanting both states one spec for both
 (``GRANULAR_60HZ.with_backend("dough", GRANULAR_60HZ.backend_for("granular"))``
 and accepts the creep, or the other way round and pays the iterations)."""
 
-LIQUID_60HZ = with_particles_on(GENERIC, backend("mpm", project_outside=False))
-"""A pool beside the robot, the projection off.
+LIQUID_120HZ = with_particles_on(GENERIC, backend("mpm", project_outside=False, step_hz=120.0))
+"""A pool beside the robot, the projection off and the MPM stepped twice per control step.
 
 The projection pushes a liquid's particles into the walls that hold it and
 cost 6x in the cup probe (``probe_c_water``), so it is off. What keeps the
@@ -125,4 +130,19 @@ liquid in a thin container instead is a signed-distance margin on the
 container's shapes, which :class:`~robosimstudio_materials.mpm.spec.ParticleBodySpec`
 writes for the entities named in ``containers``; without it, walls thinner
 than about two voxels (8 mm at the registered 4 mm) leak under the capturable
-``S2`` collider basis."""
+``S2`` collider basis.
+
+The rate is the pour's. The 0.36 m/s rule a tool obeys at 60 Hz binds a
+falling liquid too, and honey is past it 7 mm below the lip it left
+(``v = sqrt(2 g h)``): the pour example's scene, its cup carried by the drag
+handle to 100 mm over the bench beside the bowl, tilted 130 degrees over 2 s
+and held 3 s (``pour_probe``, RTX PRO 6000, Newton 1.6.0, graph-captured),
+had at 60 Hz 17 of 8,000 particles below the bench before the cup had tilted,
+85 after the hold, 944 on the bench outside the bowl and 4.0% in it; at
+120 Hz none below the bench at any stage, 34 outside and 42.5% in the bowl;
+at 240 Hz 55.2% in the bowl and 12 outside, for 53.5 ms per control step
+against 30.0 at 120 Hz and 18.2 at 60. From 170 mm, 60 Hz put 406 through
+after the hold and 0.2% in the bowl; 120 Hz put 5 through and 65.5% in. So
+120 Hz is the first rung at which a pour from a hand's height lands, not the
+rate at which nothing ever tunnels, and the puddle example pays it too rather
+than ship two liquid tables."""

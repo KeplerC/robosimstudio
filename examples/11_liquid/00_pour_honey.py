@@ -7,9 +7,13 @@ Honey rather than water, because Newton 1.6's water preset loses volume at
 tabletop scale (see ``robosimstudio_materials.liquid``). The cup is one rigid
 body with 8 mm walls -- two voxels -- and is named in the honey's ``containers``,
 which gives its shapes the half-voxel margin a liquid needs to stay inside under
-graph capture; ``rss.LIQUID_60HZ`` keeps the cup on the robot's island and
-turns the granular projection off. The panel counts the honey in the bowl.
-18.3 ms per control step for 8,000 particles on an RTX PRO 6000, graph-captured.
+graph capture; ``rss.LIQUID_120HZ`` keeps the cup on the robot's island, turns
+the granular projection off and steps the MPM twice per control step, because
+honey falling from the lip to the bowl is faster after 7 mm than a 60 Hz step
+can catch at a floor (poured from 100 mm, 60 Hz lost 85 of these 8,000
+particles through the bowl and the bench and put 4% in the bowl; 120 Hz lost
+none and put 42%). The panel counts the honey in the bowl. 30.0 ms per
+control step for 8,000 particles on an RTX PRO 6000, graph-captured.
 """
 
 import numpy as np
@@ -27,7 +31,7 @@ def main():
     fill = 0.05  # depth of honey in the cup [m]: 8,000 particles
     bowl_inside, bowl_wall, bowl_height = 0.14, 0.004, 0.02  # [m], the bowl's slabs
 
-    scene = rss.Scene(cell=cell, name="pour_honey", physics=rss.LIQUID_60HZ)
+    scene = rss.Scene(cell=cell, name="pour_honey", physics=rss.LIQUID_120HZ)
     scene.add(rss.robot("yam_bimanual"))
     scene.add(cup(name="cup", inner=inner, wall=wall, at=cup_at, color=(0.85, 0.85, 0.88)))
     honey = scene.add(

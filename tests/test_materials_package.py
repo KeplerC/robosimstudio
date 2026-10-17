@@ -1,24 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 """The shipped kinds are a sibling package, found by scan, and the library is whole without it.
 
-``cloth``, ``soft``, the rope and ``paper`` are the modules of ``robosimstudio_materials``:
-``cloth.py``, ``soft.py`` and ``paper.py`` one file each, ``rod/`` a package. The library never
-imports that package. It names it as a string in two places -- the registries'
+``cloth``, ``soft``, the rope, ``paper`` and the three particle kinds are the modules
+of ``robosimstudio_materials``: ``cloth.py``, ``soft.py``, ``paper.py``, ``granular.py``,
+``liquid.py`` and ``dough.py`` one file each, ``rod/`` a package, and ``mpm/`` the
+implementation the particle kinds share. The library never imports that package. It names it as a string in two places -- the registries'
 scan list (:data:`robosimstudio.roots.DOMAIN_PACKAGES`) and the flat-name table
 (``robosimstudio._PACKS``) -- and everything else follows from the scan: a kind
 registers itself as it is imported, so a fresh process that asks any kind
-registry finds all three without anybody importing them by name. Five things
+registry finds every one without anybody importing them by name. Five things
 have to hold, and each fails silently when it does not:
 
 * **A fresh process finds the kinds by scan**, and the scan imports no
   numbered example script (none lies in the package; the rule that skips one is
   tested on a third-party root in ``tests/test_registry_discovery``).
-* **Each base kind stands alone**: none of ``cloth``, ``soft`` and ``rod``
-  imports another at any scope, and the package imports nothing from the
-  studio, the benchmark or the agents. With the other kinds left out of the
-  package, one still registers and hands out its spec and its entity. ``paper``
-  is the declared exception: a sheet of paper is a cloth whose hinges yield, so
-  it imports ``cloth`` and nothing else, and stands with cloth alone.
+* **Each base kind stands alone**: none of ``cloth``, ``soft``, ``rod``,
+  ``granular``, ``liquid`` and ``dough`` imports another at any scope, and the
+  package imports nothing from the studio, the benchmark or the agents. With
+  the other kinds left out of the package, one still registers and hands out
+  its spec and its entity. ``paper`` is the declared exception: a sheet of
+  paper is a cloth whose hinges yield, so it imports ``cloth`` and nothing
+  else, and stands with cloth alone. The particle kinds share ``mpm/``, which
+  is not a kind and stays when any of them is left out.
 * **The library names the sibling only as a string.** An ``import
   robosimstudio_materials`` anywhere under ``robosimstudio/`` is the sibling
   law broken, and the day a tree without the package stops importing.
@@ -58,12 +61,40 @@ SIBLINGS = ("robosimstudio_studio", "robosimstudio_bench", "robosimstudio_policy
 """The packages beside the library that the materials may not name."""
 
 KINDS = {
-    "cloth": ("sheet", "ClothSpec", "robosimstudio_materials.cloth"),
-    "soft": ("sponge", "SoftSpec", "robosimstudio_materials.soft"),
-    "rod": ("rod", "RodSpec", "robosimstudio_materials.rod.entity"),
-    "paper": ("paper", "PaperSpec", "robosimstudio_materials.paper"),
+    "cloth": ("sheet", "ClothSpec", "robosimstudio_materials.cloth", "cloth"),
+    "soft": ("sponge", "SoftSpec", "robosimstudio_materials.soft", "soft"),
+    "rod": ("rod", "RodSpec", "robosimstudio_materials.rod.entity", "rod"),
+    "paper": ("paper", "PaperSpec", "robosimstudio_materials.paper", "paper"),
+    "granular": ("heap", "ParticleBodySpec", "robosimstudio_materials.granular", "heap"),
+    "liquid": ("liquid", "ParticleBodySpec", "robosimstudio_materials.liquid", "liquid"),
+    "dough": ("dough", "ParticleBodySpec", "robosimstudio_materials.dough", "dough"),
 }
-"""Kind -> its constructor, its spec and the module its entity is defined in."""
+"""Kind -> its constructor, its spec, the module its entity is defined in, and the entity's registered name.
+
+The entity's name is the kind's except for ``granular``, whose entity is a ``heap``."""
+
+FLAT = {
+    "sheet": "robosimstudio_materials.cloth",
+    "ClothSpec": "robosimstudio_materials.cloth",
+    "sponge": "robosimstudio_materials.soft",
+    "SoftSpec": "robosimstudio_materials.soft",
+    "rod": "robosimstudio_materials.rod.make",
+    "RodSpec": "robosimstudio_materials.rod.spec",
+    "paper": "robosimstudio_materials.paper",
+    "PaperSpec": "robosimstudio_materials.paper",
+    "heap": "robosimstudio_materials.granular",
+    "liquid": "robosimstudio_materials.liquid",
+    "dough": "robosimstudio_materials.dough",
+    "ParticleBodySpec": "robosimstudio_materials.mpm.spec",
+}
+"""Flat name -> the module the thing behind it is defined in: each kind's constructor and spec.
+
+The arrangement tables (``GRANULAR_60HZ`` and the like) are instances and carry
+no module of their own, so they are checked by absence only, with every other
+name ``robosimstudio._PACKS`` provides."""
+
+LISTED = ["dough", "heap", "liquid", "materials", "paper", "papers", "rod", "sheet", "sponge"]
+"""The lower-case flat names, as ``dir(rss)`` lists them when the package is installed."""
 
 
 def _run(script: str, env: dict[str, str] | None = None, *, flags: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
@@ -112,9 +143,9 @@ SCANNED = dedent(
     )
     print(json.dumps({
         "domains": domains, "loaded": loaded, "stray": stray, "from_examples": from_examples,
-        "entities": {kind: get_entity(kind).__module__ for kind in ("cloth", "soft", "rod", "paper")},
-        "flat": {name: getattr(rss, name).__module__ for name in ("sheet", "sponge", "rod", "paper", "ClothSpec", "SoftSpec", "RodSpec", "PaperSpec")},
-        "dir": sorted(n for n in dir(rss) if n in ("sheet", "sponge", "rod", "materials", "paper", "papers")),
+        "entities": {kind: get_entity(entity).__module__ for kind, entity in __ENTITIES__},
+        "flat": {name: getattr(rss, name).__module__ for name in __FLAT__},
+        "dir": sorted(n for n in dir(rss) if n in __LISTED__),
     }))
     """
 ).strip()
@@ -125,30 +156,23 @@ class TestAFreshProcessFindsTheKinds(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        proc = _run(SCANNED)
+        script = (
+            SCANNED.replace("__ENTITIES__", repr([(kind, entity) for kind, (_, _, _, entity) in KINDS.items()]))
+            .replace("__FLAT__", repr(tuple(FLAT)))
+            .replace("__LISTED__", repr(tuple(LISTED)))
+        )
+        proc = _run(script)
         if proc.returncode != 0:
             raise AssertionError(proc.stderr[-4000:])
         cls.got = _last_json(proc)
 
     def test_the_kinds_register(self) -> None:
         self.assertLessEqual(set(KINDS), set(self.got["domains"]))
-        self.assertEqual({kind: module for kind, (_, _, module) in KINDS.items()}, self.got["entities"])
+        self.assertEqual({kind: module for kind, (_, _, module, _) in KINDS.items()}, self.got["entities"])
 
     def test_the_flat_names_are_the_packages_own(self) -> None:
-        self.assertEqual(
-            {
-                "sheet": "robosimstudio_materials.cloth",
-                "ClothSpec": "robosimstudio_materials.cloth",
-                "sponge": "robosimstudio_materials.soft",
-                "SoftSpec": "robosimstudio_materials.soft",
-                "rod": "robosimstudio_materials.rod.make",
-                "RodSpec": "robosimstudio_materials.rod.spec",
-                "paper": "robosimstudio_materials.paper",
-                "PaperSpec": "robosimstudio_materials.paper",
-            },
-            self.got["flat"],
-        )
-        self.assertEqual(["materials", "paper", "papers", "rod", "sheet", "sponge"], self.got["dir"])
+        self.assertEqual(FLAT, self.got["flat"])
+        self.assertEqual(LISTED, self.got["dir"])
 
     def test_the_scan_imports_no_example_script(self) -> None:
         self.assertEqual([], self.got["stray"], "a non-identifier name was imported under robosimstudio_materials")
@@ -204,7 +228,7 @@ ALONE = dedent(
 
 
 class TestEachKindStandsAlone(unittest.TestCase):
-    """Cloth without soft, soft without cloth, the rope without either: one module, one kind, nothing borrowed.
+    """Cloth without soft, soft without cloth, the rope without either, a heap without the pool: one module, one kind, nothing borrowed.
 
     ``soft.py`` used to reach into ``cloth.py`` for ``resolve_selector`` inside
     two functions, so a tree holding soft alone imported, registered, and then
@@ -268,7 +292,7 @@ class TestEachKindStandsAlone(unittest.TestCase):
         )
 
     def test_a_kind_registers_and_builds_its_spec_with_the_others_absent(self) -> None:
-        for kind, (make, spec, entity_module) in KINDS.items():
+        for kind, (make, spec, entity_module, _) in KINDS.items():
             others = tuple(sorted(set(KINDS) - {kind} - set(NEEDS.get(kind, ()))))
             with self.subTest(kind=kind, without=others), ExitStack() as stack:
                 script = ALONE.replace("__KIND__", kind).replace("__MAKE__", make).replace("__OTHERS__", repr(others))
@@ -399,7 +423,7 @@ WITHOUT = dedent(
     sys.modules["robosimstudio_materials"] = None   # the import system now says the package is not there
     import robosimstudio as rss
     out = {"errors": {}, "resolved": []}
-    for name in ("sheet", "sponge", "rod", "paper", "papers", "materials", "ClothSpec", "SoftSpec", "RodSpec", "PaperSpec"):
+    for name in __NAMES__:
         try:
             getattr(rss, name)
             out["errors"][name] = "resolved"
@@ -436,7 +460,10 @@ class TestTheLibraryIsWholeWithoutThePackage(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        proc = _run(WITHOUT)
+        import robosimstudio as rss
+
+        cls.names = sorted(rss._PACK_EXPORTS)
+        proc = _run(WITHOUT.replace("__NAMES__", repr(tuple(cls.names))))
         if proc.returncode != 0:
             raise AssertionError(f"the library did not come up without robosimstudio_materials:\n{proc.stderr[-6000:]}")
         cls.got = _last_json(proc)
@@ -444,10 +471,15 @@ class TestTheLibraryIsWholeWithoutThePackage(unittest.TestCase):
     def test_the_package_really_was_absent(self) -> None:
         self.assertEqual([], self.got["materials_loaded"])
         self.assertEqual(["articulated", "rigid", "static"], self.got["domains"])
-        self.assertFalse({"cloth", "soft", "rod", "paper"} & set(self.got["entities"]))
+        self.assertFalse({entity for (_, _, _, entity) in KINDS.values()} & set(self.got["entities"]))
+        self.assertNotIn("rice", self.got["materials"])
         self.assertNotIn("terry_towelling", self.got["materials"])
 
     def test_the_kinds_names_say_which_package_is_missing(self) -> None:
+        self.assertEqual(self.names, sorted(self.got["errors"]))
+        self.assertLessEqual(
+            set(FLAT) | set(LISTED), set(self.names), "every name the tests know is one the table provides"
+        )
         for name, message in self.got["errors"].items():
             with self.subTest(name=name):
                 self.assertTrue(message.startswith("AttributeError: "), message)

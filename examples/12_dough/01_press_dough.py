@@ -18,7 +18,7 @@ from robosimstudio_materials.mpm.measures import heap_height, spread
 def main():
     cell = "bench_075"
     puck_at = (0.0, -0.31, 0.0)  # under the right hand, in the bench's frame [m]
-    puck = (0.06, 0.06, 0.04)  # diameter, diameter, height [m]: a cylinder of 7,000 particles
+    puck = (0.06, 0.06, 0.04)  # diameter, diameter, height [m]: a cylinder of 7,168 particles
     material = "dough"
 
     scene = rss.Scene(cell=cell, name="press_dough", physics=rss.DOUGH_60HZ)
