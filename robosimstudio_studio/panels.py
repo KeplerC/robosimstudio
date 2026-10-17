@@ -22,7 +22,8 @@ page's benchmark half.
   deformable a *foreign* engine owns -- a SuperDex sponge -- is held through
   that engine's own node constraints instead; see :class:`PanelCloth`.
 * An **arm** carries a gizmo of its own on its tool centre and tracks it every
-  step. The fingers are the ``Close`` slider and nothing else.
+  step. The fingers are the ``Close`` slider and nothing else; a vacuum cup is
+  the ``Vacuum`` box, which seals onto whatever is under the face.
 
 Placing a handle and taking hold are the same act, deliberately. A visible
 handle is a handle that is holding something; the buttons that remain are for
@@ -118,6 +119,19 @@ def _role_suffix(panel) -> str:
     return ""
 
 
+def seal_text(suction) -> str:
+    """The **Seal** readout: sealed or not, the face's gap to the part, and the mass held.
+
+    Holding, the gap is the held part's; otherwise it is whatever is under the
+    cup (:meth:`~robosimstudio.core.suction.Suction.under`), so the number counts
+    down as the hand comes down onto a plate.
+    """
+    holding = suction.holding
+    report = suction.seal(suction.held) if holding else suction.under()
+    gap = f"gap {report.gap_m * 1000:.1f} mm" if np.isfinite(report.gap_m) else "nothing under the cup"
+    return f"{'sealed' if holding else 'not sealed'}, {gap}, holding {suction.held_mass:.3f} kg"
+
+
 class Panel:
     """Base panel. Subclasses build widgets and act on their state in ``drain``."""
 
@@ -206,6 +220,8 @@ class PanelArm(Panel):
         self.name = name
         self.ik = self.env.arm(name)
         self.gripper = self.env.scene.embodiment.grippers.get(name)
+        self.suction = getattr(self.env.scene.embodiment, "suctions", {}).get(name)
+        """The arm's vacuum cup (:class:`~robosimstudio.core.suction.Suction`), or ``None`` for a hand with fingers."""
         index = self.env.scene.embodiment.arms.get(name)
         self.index = index
         self.finger_bodies = tuple(b for side in (index.finger_bodies if index else ()) for b in side)
@@ -237,6 +253,12 @@ class PanelArm(Panel):
         self._ee_readout = None
         self._grip = None
         self._width_readout = None
+        self.vacuum = False
+        self.vacuum_request: bool | None = None
+        """The **Vacuum** box as a callback last set it, applied on the main thread by ``drain`` like a grip."""
+        self._vacuum = None
+        self._seal_readout = None
+        self._held_last = False
 
     @property
     def profile_name(self) -> str:
@@ -289,6 +311,14 @@ class PanelArm(Panel):
                 )
                 self._grip.on_update(lambda _: setattr(self, "gripper_command", float(self._grip.value)))
                 self._width_readout = gui.add_text("Opening", initial_value="", disabled=True)
+            elif self.suction is not None:
+                # A cup in place of jaws: one switch, and what the cup found.
+                # Ticked, it seals onto whatever is under the face the first
+                # step the face is on it, so it can be ticked before the hand
+                # comes down; unticked, it lets go.
+                self._vacuum = gui.add_checkbox("Vacuum", initial_value=False)
+                self._vacuum.on_update(lambda _: setattr(self, "vacuum_request", bool(self._vacuum.value)))
+                self._seal_readout = gui.add_text("Seal", initial_value="", disabled=True)
         self._take_hand()
 
     # -------------------------------------------------------------------- loop
@@ -330,6 +360,21 @@ class PanelArm(Panel):
                     self._grip.value = self.gripper_command
             self.gripper.command = self.gripper_command
             self.gripper.apply(env.control.joint_target_q)
+        if self.suction is not None and not self.suspended:
+            # The box arms the cup and then follows it. Ticked, the cup seals the
+            # first step its face is on something; unticked, it lets go. A cup
+            # held or let go from code, or whose seal broke, moves the box rather
+            # than being undone by it.
+            holding = self.suction.holding
+            if self.vacuum_request is not None:
+                self.vacuum, self.vacuum_request = bool(self.vacuum_request), None
+                if not self.vacuum and holding:
+                    self.suction.release()
+            elif holding != self._held_last:
+                self.vacuum = holding
+            if self.vacuum and not self.suction.holding:
+                self.suction.hold()
+            self._held_last = self.suction.holding
 
     def _drive(self, env) -> None:
         """Track the gizmo with the hand, and whatever the hand is on.
@@ -449,6 +494,9 @@ class PanelArm(Panel):
         would relax the squeeze by exactly the amount that is holding the thing
         up.
         """
+        if self.suction is not None:
+            # A cup a policy left holding stays holding: the box follows the cup.
+            self.vacuum_request = bool(self.suction.holding)
         if self.gripper is None:
             return
         # Through ``grip_request`` rather than assigned: it moves the slider too,
@@ -478,6 +526,10 @@ class PanelArm(Panel):
             self._ee_readout.value = f"{where}  {self.status}".strip()
         if self._width_readout is not None and self.gripper is not None:
             self._width_readout.value = f"{self.gripper.width(self.env.state) * 1000:.1f} mm"
+        if self._seal_readout is not None and self.suction is not None:
+            self._seal_readout.value = seal_text(self.suction)
+        if self._vacuum is not None and self.vacuum_request is None and bool(self._vacuum.value) != self.vacuum:
+            self._vacuum.value = self.vacuum
 
     def on_reset(self, obs: dict[str, Any], info: dict[str, Any]) -> None:
         del obs, info
@@ -488,6 +540,9 @@ class PanelArm(Panel):
         self.grip_request = None
         if self._grip is not None:
             self._grip.value = 0.0
+        self.vacuum, self.vacuum_request, self._held_last = False, None, False
+        if self._vacuum is not None:
+            self._vacuum.value = False
         self._take_hand()
 
 
