@@ -19,7 +19,7 @@ from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, Ato
 from robosimstudio.assetlib.semantics.handlers import handler
 from robosimstudio.core.math import transform_point
 
-__all__ = ["NEAR_RADIUS", "WRAP_GATE_TURNS", "straightness", "winding_turns"]
+__all__ = ["NEAR_RADIUS", "WRAP_GATE_TURNS", "curl_retained", "straightness", "winding_turns"]
 
 NEAR_RADIUS = 0.10
 """A segment takes part in the winding while within this of the axis, in the
@@ -75,6 +75,21 @@ def straightness(positions: np.ndarray) -> float:
     if path <= 1e-12:
         return 1.0
     return float(np.linalg.norm(positions[-1] - positions[0]) / path)
+
+
+def curl_retained(positions: np.ndarray) -> float:
+    """How much of a chain's length is spent on curl: ``1 - straightness``, in ``[0, 1]``.
+
+    The complement of :func:`straightness`, named for what a cable with memory
+    is asked: after the hand lets go, how bent did it stay. 0 is a straight
+    line, and a cable folded double scores near 1. Stateless on purpose: a
+    "share of the peak bend retained" would need the peak, which a reading of
+    one instant does not have, and a rod whose rest shape is straight (every
+    spawn but a stated ``nodes`` polyline) answers the same question with this
+    number alone. Compare it against the same cable built elastic, which is
+    what ``tests/test_rod_dahl_memory.py`` does.
+    """
+    return 1.0 - straightness(positions)
 
 
 # ----------------------------------------------------------------- catalogue
@@ -196,9 +211,27 @@ def _rod_point_geometry(point: dict) -> dict[str, Any]:
     return {"at": point.get("at"), "frame": "world", "s": float(point.get("s", 0.5))}
 
 
+register_atom(
+    AtomSpec(
+        name="curl_retained",
+        summary="How bent a 1-D body stays: one minus its straightness.",
+        fn=curl_retained,
+        args=(ArgSpec(name="body", substrates=("rod",)),),
+        directions=("check", "observe"),
+        returns=("curl_retained",),
+        provenance="Designed here for the cable with plastic memory (RodSpec.dahl_eps_max); the reference ships none.",
+    )
+)
+
+
 @handler("straightness", substrates=("rod",), summary="End-to-end over path length.")
 def _straightness(positions: np.ndarray) -> dict:
     return {"straightness": straightness(positions)}
+
+
+@handler("curl_retained", substrates=("rod",), summary="One minus end-to-end over path length.")
+def _curl_retained(positions: np.ndarray) -> dict:
+    return {"curl_retained": curl_retained(positions)}
 
 
 # ------------------------------------------------- the generic three, for a rod

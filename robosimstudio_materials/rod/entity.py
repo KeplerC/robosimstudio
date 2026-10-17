@@ -735,6 +735,62 @@ class EntityRod(Centerline, Entity):
         model.shape_material_mu.assign(mu)
         model.shape_material_ke.assign(ke)
         model.shape_material_kd.assign(kd)
+        self._apply_dahl(model)
+
+    def _cable_joints(self, model: newton.Model) -> np.ndarray:
+        """The rod joints among :attr:`joints`, template-indexed.
+
+        :attr:`joints` is the rod's whole span, which also holds the anchor
+        welds (``FIXED``); the stiffness rows and the Dahl rows belong to the
+        ``ROD`` joints alone.
+        """
+        if not len(self.joints):
+            return np.zeros(0, dtype=np.int64)
+        types = model.joint_type.numpy()
+        return np.asarray([int(j) for j in self.joints if int(types[j]) == int(newton.JointType.ROD)], dtype=np.int64)
+
+    def _apply_dahl(self, model: newton.Model) -> None:
+        """Author the cable joints' Dahl rows, in every world, when the spec asks for memory.
+
+        Here rather than in ``build`` because the attributes are per-joint
+        *model* arrays: the builder's custom-attribute defaults are what
+        ``finalize`` writes, and this runs on the finalized model -- the
+        replicated one in a wave -- in the window before the solver is
+        constructed. That window is the whole point: ``SolverVBD`` decides at
+        construction whether to run its Dahl kernels at all, from whether any
+        joint has both rows positive, and binds the arrays by pointer after
+        that. A rod built at ``dahl_eps_max=0`` writes nothing, so a scene with
+        no memory in it is the scene it always was.
+
+        The anchor welds are left at 0: they are ``FIXED`` joints and the
+        kernels skip them, but a row that reads 2.0 on a weld is a row somebody
+        will one day have to explain.
+        """
+        spec = self.spec
+        if float(spec.dahl_eps_max) <= 0.0:
+            return
+        vbd = getattr(model, "vbd", None)
+        eps_array = getattr(vbd, "dahl_eps_max", None)
+        tau_array = getattr(vbd, "dahl_tau", None)
+        if eps_array is None or tau_array is None:
+            raise RuntimeError(
+                f"rod {self.name!r}: dahl_eps_max={spec.dahl_eps_max} needs VBD's custom attributes on the model, "
+                "and this model has none; the rod is built on a backend that is not VBD"
+            )
+        joints = self._cable_joints(model)
+        if not len(joints):
+            return
+        worlds = self.worlds
+        if worlds is not None:
+            joints = np.asarray(
+                [worlds.joint(int(j), w) for w in range(self._num_worlds) for j in joints], dtype=np.int64
+            )
+        eps = eps_array.numpy()
+        tau = tau_array.numpy()
+        eps[joints] = float(spec.dahl_eps_max)
+        tau[joints] = float(spec.dahl_tau)
+        eps_array.assign(eps)
+        tau_array.assign(tau)
 
     # -------------------------------------------------------------- phase 3
     def contribute_hooks(self, hooks) -> None:
@@ -969,6 +1025,7 @@ class EntityRod(Centerline, Entity):
         stretch_dofs, bend_dofs = self._drive_dofs()
         if len(bend_dofs):
             joints = tuple(int(j) for j in self.joints)
+            cable_joints = self._cable_joints(self.model)
 
             class _DriveWriter(ArrayWriter):
                 flags = 1 << 1
@@ -979,7 +1036,14 @@ class EntityRod(Centerline, Entity):
                     "bend_kd": ("joint_target_kd", bend_dofs),
                     "stretch_ke": ("joint_target_ke", stretch_dofs),
                     "stretch_kd": ("joint_target_kd", stretch_dofs),
+                    "dahl_eps_max": ("vbd.dahl_eps_max", cable_joints),
+                    "dahl_tau": ("vbd.dahl_tau", cable_joints),
                 }
+
+                LIVE_ROWS: ClassVar[frozenset[str]] = frozenset({"dahl_eps_max", "dahl_tau"})
+                """Rows VBD reads by pointer every substep: written, not notified
+                (``flags=0``) and not relanded -- there is no penalty copy of them.
+                Per *joint*, where the stiffness rows are per dof."""
 
                 def read(self) -> dict[str, float]:
                     return {name: self._read(attr, rows) for name, (attr, rows) in self.ROWS.items()}
@@ -988,6 +1052,8 @@ class EntityRod(Centerline, Entity):
                     row = self.ROWS.get(field_name)
                     if row is None:
                         return False
+                    if field_name in self.LIVE_ROWS:
+                        return self._write(row[0], row[1], float(value))
                     landed = self.landed(self._write(row[0], row[1], float(value)))
                     if landed:
                         self._reland_vbd_penalties()
@@ -1007,7 +1073,12 @@ class EntityRod(Centerline, Entity):
                     takes effect now), and the damping row follows. In place,
                     so a captured graph's pointers stay valid; if newton
                     renames these internals, this falls back to
-                    write-and-notify rather than raising.
+                    write-and-notify rather than raising -- which is where
+                    Newton 1.6 lands: it has no ``joint_penalty_k_max``, and its
+                    ``notify_model_changed(JOINT_DOF_PROPERTIES)`` reseeds the
+                    ROD slots' penalty, floor and damping itself
+                    (``_refresh_joint_material_params``), so the notify alone is
+                    the reland there.
                     """
                     program = getattr(self.pipeline, "program", None)
                     solvers = list(program.solvers().values()) if program is not None else []
@@ -1047,7 +1118,10 @@ class EntityRod(Centerline, Entity):
                     name="drive",
                     spec=RodMaterialSpec(**drive.read()),
                     write=drive,
-                    summary=f"Bend and stretch over {len(self.joints)} cable joints. Bend is why it feels stiff.",
+                    summary=(
+                        f"Bend and stretch over {len(cable_joints)} cable joints. Bend is why it feels stiff. "
+                        "The plastic pair is live, and inert when built at 0."
+                    ),
                 )
             )
 

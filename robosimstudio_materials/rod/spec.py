@@ -14,7 +14,7 @@ import numpy as np
 
 from robosimstudio.core.render.finish import Finish
 from robosimstudio.core.render.palette import DEFORMABLE
-from robosimstudio.specs.params import RECAPTURE, ui
+from robosimstudio.specs.params import LIVE, RECAPTURE, ui
 from robosimstudio.specs.physics import SimRequirements
 
 __all__ = ["RodMaterialSpec", "RodSpec"]
@@ -44,6 +44,23 @@ class RodSpec:
     stretch_kd: float = 1.0
     bend_ke: float = 0.04
     bend_kd: float = 0.06
+    dahl_eps_max: float = 0.0
+    """How much bend the cable may keep, as the Dahl hysteresis envelope [rad]:
+    the bending (and twisting) moment friction can hold at a joint is
+    ``bend_ke * dahl_eps_max``, so a cable loaded past this curvature slips and
+    one loaded short of it springs back only as far as the friction lets it.
+    ``0.0`` is elastic: the joint stores no plastic memory and VBD never runs
+    its Dahl kernels. **REBUILD-arms the model**: the solver decides whether to
+    run those kernels once, at construction, from whether any joint was built
+    with both this and :attr:`dahl_tau` positive -- a cable built at 0 cannot be
+    given memory by a slider, and one built positive can be tuned live, down to
+    anything above 0. Newton's own cable-bundle example uses 2.0."""
+    dahl_tau: float = 0.1
+    """Over how much curvature change the friction builds up to its envelope
+    [rad]: the Dahl transition length. Small and the memory is sharp -- the cable
+    keeps nearly every bend put into it; large and it is a slow drag that lets
+    most of a bend spring back. Read only where :attr:`dahl_eps_max` is positive;
+    Newton's own example uses 0.1."""
     contact_ke: float = 1.0e4
     contact_kd: float = 0.1
     contact_gap: float = 0.01
@@ -256,12 +273,22 @@ class RodMaterialSpec:
     the coupled solver's *view* of the model and the write reaches it through
     ``notify_model_changed`` -- host work a captured graph does not replay.
 
+    The two plastic fields are a view of ``model.vbd.dahl_eps_max`` /
+    ``dahl_tau`` over the same joints, and those VBD reads by pointer every
+    substep, so they are LIVE -- **where the rod was built with them positive**.
+    Built at 0 the solver never runs its Dahl kernels, and the slider moves a
+    number nothing reads (see :attr:`RodSpec.dahl_eps_max`).
+
     Attributes:
         bend_ke: Per-joint bend (and twist) stiffness [N*m]. The number that
             answers "why is this cable so stiff".
         bend_kd: Bend (and twist) damping [N*m*s].
         stretch_ke: Per-joint stretch (and shear) stiffness [N/m].
         stretch_kd: Stretch (and shear) damping [N*s/m].
+        dahl_eps_max: The bend the cable keeps, as a curvature [rad];
+            :attr:`RodSpec.dahl_eps_max`.
+        dahl_tau: The curvature change the friction builds up over [rad];
+            :attr:`RodSpec.dahl_tau`.
     """
 
     bend_ke: float = field(
@@ -275,4 +302,27 @@ class RodMaterialSpec:
     )
     stretch_kd: float = field(
         default=1.0, metadata=ui(tier=RECAPTURE, unit="N*s/m", range=(1e-2, 1e3), log=True, group="stretch")
+    )
+    dahl_eps_max: float = field(
+        default=0.0,
+        metadata=ui(
+            tier=LIVE,
+            unit="rad",
+            log=True,
+            range=(1e-3, 5.0),
+            group="plastic",
+            doc="Bend the cable keeps: the Dahl friction envelope as a curvature, times bend_ke for the moment. "
+            "Inert when built at 0 -- the solver arms its Dahl kernels at construction.",
+        ),
+    )
+    dahl_tau: float = field(
+        default=0.1,
+        metadata=ui(
+            tier=LIVE,
+            unit="rad",
+            log=True,
+            range=(1e-3, 5.0),
+            group="plastic",
+            doc="Curvature change over which the friction builds up: small keeps every bend, large lets most spring back.",
+        ),
     )

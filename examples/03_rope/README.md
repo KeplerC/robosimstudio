@@ -60,4 +60,23 @@ uv run --extra superdex examples/03_rope/02_superdex.py
 
 Source: [`02_superdex.py`](02_superdex.py)
 
+## A cable that keeps its bend
+
+The between-posts cable, clamped at one end only and given plastic memory: drag its free end round the far post and let go, and it stays wrapped.
+
+`dahl_eps_max` turns on Newton's Dahl bending hysteresis for the capsule
+chain: each cable joint carries a friction moment of `bend_ke * dahl_eps_max`
+that builds up over `dahl_tau` radians of bending, so a bend put in past that
+is held rather than sprung back. The same cable at 0 is elastic and springs
+straight. The solver decides at construction whether to run the friction at
+all, so the two plastic sliders in the cable's Parameters are live here and
+inert on a cable built at 0. The page reads the cable's straightness: 1.0 is a
+straight line, and what it reads after the hand lets go is what the cable kept.
+
+```bash
+uv run examples/03_rope/03_cable_memory.py
+```
+
+Source: [`03_cable_memory.py`](03_cable_memory.py)
+
 <!-- examples:end -->

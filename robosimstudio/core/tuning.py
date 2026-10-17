@@ -46,6 +46,7 @@ its own docstring gives at length.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
@@ -148,13 +149,26 @@ class ArrayWriter:
         self.pipeline = pipeline
 
     # ------------------------------------------------------------------ arrays
+    def _array(self, attr: str) -> Any:
+        """The model array ``attr`` names, or ``None``.
+
+        A dotted name walks attribute by attribute (``"vbd.dahl_eps_max"`` is
+        ``model.vbd.dahl_eps_max``): a solver's custom attributes sit in a
+        namespace on the model, and a writer over one is otherwise no different
+        from a writer over ``joint_target_ke``.
+        """
+        try:
+            return functools.reduce(getattr, attr.split("."), self.model)
+        except AttributeError:
+            return None
+
     def _fetched(self, attr: str) -> np.ndarray | None:
         """The array as the model holds it now, as a host copy to edit."""
-        array = getattr(self.model, attr, None)
+        array = self._array(attr)
         return None if array is None else np.array(array.numpy(), copy=True)
 
     def _flush(self, attr: str, values: np.ndarray) -> None:
-        getattr(self.model, attr).assign(values)
+        self._array(attr).assign(values)
 
     def _write(self, attr: str, rows: Sequence[int], value: Any, *, column: int | None = None) -> bool:
         """Write one value into ``rows`` of one array. ``False`` if there is nowhere to."""
@@ -180,7 +194,7 @@ class ArrayWriter:
         least a number something in the entity actually has.
         """
         index = np.asarray(rows, dtype=np.int64)
-        array = getattr(self.model, attr, None)
+        array = self._array(attr)
         if array is None or not len(index):
             return default
         values = self._fetched(attr)

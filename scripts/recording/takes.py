@@ -171,6 +171,17 @@ def _wiped(film) -> tuple[bool, str]:
     return cleaned >= 0.9, f"{cleaned:.3f} of the stripe clean (need 0.9)"
 
 
+def _kept_bend(film) -> tuple[bool, str]:
+    """The cable with plastic memory is still bent after the hand let go: straightness under 0.9."""
+    import numpy as np
+
+    ref = film.sim["cable"]
+    points = np.asarray(film.sim.pipeline.state_0.body_q.numpy())[ref.bodies, :3]
+    path = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+    straightness = float(np.linalg.norm(points[-1] - points[0]) / path) if path > 0 else 1.0
+    return straightness < 0.9, f"straightness {straightness:.3f} after release (need under 0.9)"
+
+
 def _succeeded(film) -> tuple[bool, str]:
     """The task's own verdict on the scene as the take left it."""
     result = film.sim.evaluate()[-1]
@@ -624,6 +635,24 @@ DRAFTS = (
         ),
         # The capsule in the jaws. Measured 92 mm.
         expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.771)), 0.06, at="lifted"),),
+    ),
+    Take(
+        "examples/03_rope/03_cable_memory.py",
+        camera=Orbit(At("post_end", dz=0.10), distance=0.65, azimuth=-30.0, elevation=22.0, fov=50.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left", "Arm: right")),
+        beats=(
+            Wait(seconds=0.5, label="a cable clamped at one post, its free end over the other"),
+            Click(Segment("cable", 0.95), label="click near its free end: a handle"),
+            Wait(seconds=0.3),
+            Drag("handle", "x", 0.08, seconds=1.0, label="drag it out round the far post"),
+            Drag("handle", "y", -0.12, seconds=1.2, label="and back along the span"),
+            Wait(seconds=0.6, mark="wrapped", label="the cable is bent round the post"),
+            Press(text="Release all", label="let go"),
+            Wait(seconds=2.0, label="it keeps the bend"),
+        ),
+        expect=(Check(_kept_bend, needs=("cable",)),),
+        pending="the drag round the far post has not been tried on the page yet; filmed to outputs until it has",
     ),
     handle(
         "examples/03_rope/02_superdex.py",
