@@ -526,6 +526,44 @@ def _warn_lost_material(node: Any, declared: HostActor, island: Any) -> None:
     )
 
 
+def _check_in_place_rates(arrangement: ArrangementSpec, islands: list[Island]) -> None:
+    """Refuse an in-place island whose own rate does not fit a control step whole.
+
+    An in-place solver may step slower than the substep loop by taking a
+    ``step_hz`` and skipping the calls between its steps
+    (:attr:`~robosimstudio.specs.registries.BackendInfo.steps_in_place`). The
+    skipping is host-side and a captured graph bakes it in, so it is right only
+    when every control step holds the same whole number of its steps: the call
+    rate (``control_hz * substeps``, times the entry's own substeps) must be an
+    integer multiple of ``step_hz``, and that multiple must divide the calls in
+    a control step. A rate above the call rate is a ceiling and steps every call.
+
+    Raises:
+        CompositionError: Naming the island, the rates, and the rates that fit.
+    """
+    for island in islands:
+        if not get_backend(island.backend.solver).steps_in_place:
+            continue
+        params = effective_backend(island.backend, has_particles=bool(island.particles.size)).kwargs()
+        step_hz = params.get("step_hz")
+        if step_hz is None:
+            continue
+        calls = int(arrangement.substeps) * int(island.backend.substeps)
+        call_hz = float(arrangement.control_hz) * calls
+        ratio = call_hz / float(step_hz)
+        if ratio < 1.0 - 1.0e-6:
+            continue
+        stride = max(1, int(round(ratio)))
+        if abs(ratio - stride) > 1.0e-6 or calls % stride:
+            fits = sorted({call_hz / k for k in range(1, calls + 1) if calls % k == 0})
+            raise CompositionError(
+                f"island {island.name!r} ({island.backend.solver}) states step_hz={float(step_hz):g}, which does not "
+                f"fit the arrangement's {call_hz:g} Hz call rate a whole number of times per control step; a captured "
+                f"control step would hold a fraction of one of its steps. At control_hz={arrangement.control_hz:g} "
+                f"with {calls} calls per control step the rates that fit are {[f'{v:g}' for v in fits]}."
+            )
+
+
 def compose(
     model: newton.Model,
     parts: dict[str, Any],
@@ -588,6 +626,7 @@ def compose(
             get_coupler(arrangement.coupling.method)
         except KeyError as exc:
             raise CompositionError(str(exc)) from exc
+    _check_in_place_rates(arrangement, newton_islands)
 
     world_shapes = (
         np.flatnonzero(model.shape_body.numpy() < 0).astype(np.int32) if model.shape_count else np.zeros(0, np.int32)
@@ -681,6 +720,25 @@ def compose(
                 _inner.rebuild_bvh(solver.entry_state(_name) if _views else state)
 
             schedule.add(Stage(name=f"rebuild_bvh:{island.name}", fn=rebuild, phase="before"))
+        if getattr(inner, "grid_type", None) == "sparse" and hasattr(inner, "check_sparse_grid_rebuild_status"):
+            # Once per control step, outside the graph: a capacity-bounded
+            # sparse grid that overflows keeps stepping and keeps the failure
+            # in a device-side status word, so nothing raises on its own. The
+            # check reads that word (a device sync) and names the knobs.
+            def grid_check(state, dt, _inner=inner, _name=island.name) -> None:
+                del state, dt
+                try:
+                    _inner.check_sparse_grid_rebuild_status()
+                except RuntimeError as exc:
+                    if "capacity" not in str(exc) and "status" not in str(exc):
+                        raise  # a CUDA fault surfacing at this sync is not a capacity question
+                    raise RuntimeError(
+                        f"island {_name!r}: its sparse grid overflowed the capacity it was built with ({exc}). "
+                        "Raise max_active_cell_count, max_lower_node_count or max_upper_node_count on that "
+                        "island's backend, or keep the material in a smaller volume."
+                    ) from exc
+
+            schedule.add(Stage(name=f"mpm_grid_check:{island.name}", fn=grid_check, phase="after"))
     for name, host in host_solvers.items():
         # The co-simulation tick: eager, once per control step, after the
         # substeps and before the batched read-back -- ``after`` rather than
