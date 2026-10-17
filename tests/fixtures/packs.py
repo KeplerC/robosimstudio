@@ -36,6 +36,7 @@ from tempfile import TemporaryDirectory
 __all__ = [
     "HAS_ROD_PACK",
     "MATERIALS",
+    "NEEDS",
     "PYTHON_FLAGS",
     "env_without",
     "has_pack",
@@ -45,6 +46,15 @@ __all__ = [
 
 MATERIALS = Path(__file__).resolve().parents[2] / "robosimstudio_materials"
 """The sibling package, as it lies in this checkout."""
+
+NEEDS: dict[str, tuple[str, ...]] = {"paper": ("cloth",)}
+"""Kind -> the kinds it is built on.
+
+``paper`` extends cloth's spec, entity and measures, so a tree that leaves cloth
+out has left paper out too: :func:`materials_without` drops a kind's dependents
+with it, and the stand-alone tests read this table for which kinds are expected
+to go. Nothing else leans on another kind.
+"""
 
 PYTHON_FLAGS = ("-P",)
 """Interpreter flags for a subprocess whose ``robosimstudio_materials`` is a scratch copy.
@@ -67,14 +77,20 @@ def materials_without(stack: ExitStack, *names: str) -> Path:
     """A directory holding ``robosimstudio_materials`` with the kinds ``names`` left out.
 
     Every other file and package of the real one is linked in, so what remains
-    is exactly the release that never shipped those kinds. Returns the directory
-    to put on ``PYTHONPATH``; the package inside it is ``<dir>/robosimstudio_materials``.
+    is exactly the release that never shipped those kinds. A kind built on one
+    of ``names`` (:data:`NEEDS`) goes with it, since it could not import. Returns
+    the directory to put on ``PYTHONPATH``; the package inside it is
+    ``<dir>/robosimstudio_materials``.
     """
+    dropped = set(names)
+    for kind, needs in NEEDS.items():
+        if dropped & set(needs):
+            dropped.add(kind)
     site = Path(stack.enter_context(TemporaryDirectory())).resolve()
     copy = site / MATERIALS.name
     copy.mkdir()
     for child in sorted(MATERIALS.iterdir()):
-        if child.name == "__pycache__" or child.stem in names:
+        if child.name == "__pycache__" or child.stem in dropped:
             continue
         (copy / child.name).symlink_to(child, target_is_directory=child.is_dir())
     return site

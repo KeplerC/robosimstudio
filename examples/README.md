@@ -75,6 +75,11 @@
 | [Roll the dough flat](12_dough/00_roll_dough.py) | [Press a dough ball](12_dough/01_press_dough.py) |
 |---|---|
 
+## [13 Paper](13_paper/README.md)
+
+| [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
+|---|---|
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |
