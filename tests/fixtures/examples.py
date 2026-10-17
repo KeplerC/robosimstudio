@@ -55,6 +55,8 @@ NUMBERED = (
     "04_extending/01_new_kind.py",
     "03_rope/00_cable.py",
     "03_rope/01_between_posts.py",
+    "03_rope/03_cable_memory.py",
+    "03_rope/04_twist.py",
     "10_granular/00_scoop_rice.py",
     "10_granular/01_scoop_rice_scored.py",
     "11_liquid/00_pour_honey.py",

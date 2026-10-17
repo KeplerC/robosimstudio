@@ -60,4 +60,45 @@ uv run --extra superdex examples/03_rope/02_superdex.py
 
 Source: [`02_superdex.py`](02_superdex.py)
 
+## A cable keeps its bend
+
+The between-posts cable, clamped at one end only and given plastic memory: drag its free end round the far post and let go, and it stays wrapped.
+
+`dahl_eps_max` turns on Newton's Dahl bending hysteresis for the capsule
+chain: each cable joint carries a friction moment of `bend_ke * dahl_eps_max`
+that builds up over `dahl_tau` radians of bending, so a bend put in past that
+is held rather than sprung back. The same cable at 0 is elastic and springs
+straight. The solver decides at construction whether to run the friction at
+all, so the two plastic sliders in the cable's Parameters are live here and
+inert on a cable built at 0. The page reads the cable's straightness: 1.0 is a
+straight line, and what it reads after the hand lets go is what the cable kept.
+
+```bash
+uv run examples/03_rope/03_cable_memory.py
+```
+
+Source: [`03_cable_memory.py`](03_cable_memory.py)
+
+## A cable carries a twist
+
+Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: roll a free end a turn and let go, and the stiff one springs the roll back out while the soft one keeps it.
+
+`twist_ke` splits Newton's rod joint from its bend: left at `None` a cable
+twists as stiffly as it bends, which is the isotropic pairing the builder
+makes. A data cable's jacket rolls far more easily than it bends; a stranded
+steel cable the other way round. The page reads each cable's `twist_turns`
+over its middle third -- the roll between consecutive capsule frames with the
+bend taken out, so a cable bent into a hook with no roll reads 0. Rolled a
+full turn at the tip, both carry the same twist in the middle (a clamped cable
+twists uniformly); let go, the stiff one unwinds in a fraction of a second and
+the soft one over seconds, the time being `twist_kd / twist_ke`. They hang
+because a level cantilever at this bend stiffness droops to the bench. Click a
+capsule near a free end and drag its handle round to roll it.
+
+```bash
+uv run examples/03_rope/04_twist.py
+```
+
+Source: [`04_twist.py`](04_twist.py)
+
 <!-- examples:end -->

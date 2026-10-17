@@ -56,6 +56,10 @@ VBD_SCHEMA: dict[str, ParamRule] = {
     "particle_rest_shape_contact_exclusion_radius": rule(unit="m", range=(0.0, 3.0e-2), group="self-contact"),
     "particle_vertex_contact_buffer_size": rule(range=(8.0, 512.0), group="buffers"),
     "particle_edge_contact_buffer_size": rule(range=(8.0, 512.0), group="buffers"),
+    "rigid_compliant_alm": rule(
+        group="rigid",
+        doc="Newton 1.6's contact and joint formulation switch; False keeps the legacy AVBD path the rod tests measure.",
+    ),
     "rigid_avbd_beta": rule(log=True, range=(1.0, 1.0e4), group="rigid"),
     "rigid_contact_k_start": rule(log=True, range=(1.0, 1.0e6), group="rigid"),
     "rigid_contact_history": rule(group="rigid"),
@@ -172,7 +176,14 @@ VBD = register_backend(
     maximal_coordinates=True,
     schema=VBD_SCHEMA,
     summary="Vertex Block Descent: cloth, soft bodies, and chains of capsules on cable joints.",
-    defaults={"iterations": 5},
+    # ``rigid_compliant_alm=False`` is stated rather than left to Newton: 1.6
+    # resolves an omitted value to False behind a DeprecationWarning and says
+    # the default will flip to True, and the rod tests (the Dahl memory, the
+    # twist, the latch) measure the legacy AVBD path -- its penalty ramp on the
+    # cable joints and its Dahl stiffness read off that ramp. Pinning it keeps
+    # a Newton bump from changing what those tests measure without a diff here
+    # to point at; switching to compliant ALM is a retune, not a default.
+    defaults={"iterations": 5, "rigid_compliant_alm": False},
     # Millimetre-scale self-contact, on: Newton's own defaults are 0.2 m radii
     # sized for its centimetre-scale demos, and a sheet that does not collide
     # with itself is not a sheet that folds.
