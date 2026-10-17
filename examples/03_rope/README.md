@@ -29,12 +29,17 @@ Source: [`00_cable.py`](00_cable.py)
 
 ![Cable between two posts](media/01_between_posts.webp)
 
-A cable clamped by both ends on top of two posts: hook it with a gripper or drag its middle, and it springs back.
+A cable clamped by both ends on top of two posts: drag the right hand down its arrow onto the cable's middle, press **Close**, drag it back up, press **Open**, and the cable springs back.
 
 `anchors` holds each end's position, direction and twist where it was built:
 one end clamped makes a cantilever, both make a span that sags under its own
-weight. The cable is built 2 mm above the post tops so no contact fights the
-clamps.
+weight (22 mm here). The cable is built 2 mm above the post tops so no contact
+fights the clamps. The hand leans 40 degrees off straight down: pointing
+straight down, a YAM's wrist cannot rise 30 mm off this span (`hook_reach`
+probe, GPU 2). The jaws close on the 16 mm cable by contact (no latch); pulled
+back 30 mm along the hand's axis, the middle rises 14 mm before the span, which
+does not stretch, stops the hand; opened, it is back within 0.1 mm of where it
+hung (`tests/test_cable_hook`, GPU 2).
 
 ```bash
 uv run examples/03_rope/01_between_posts.py
@@ -62,16 +67,17 @@ Source: [`02_superdex.py`](02_superdex.py)
 
 ## A cable keeps its bend
 
-The between-posts cable, clamped at one end only and given plastic memory: drag its free end round the far post and let go, and it stays wrapped.
+![A cable keeps its bend](media/03_cable_memory.webp)
 
-`dahl_eps_max` turns on Newton's Dahl bending hysteresis for the capsule
-chain: each cable joint carries a friction moment of `bend_ke * dahl_eps_max`
-that builds up over `dahl_tau` radians of bending, so a bend put in past that
-is held rather than sprung back. The same cable at 0 is elastic and springs
-straight. The solver decides at construction whether to run the friction at
-all, so the two plastic sliders in the cable's Parameters are live here and
-inert on a cable built at 0. The page reads the cable's straightness: 1.0 is a
-straight line, and what it reads after the hand lets go is what the cable kept.
+A cable with plastic memory lies on the bench, clamped at its far end: drag the right hand down onto it, press **Close**, lift it a little, carry its end round the post while turning the gizmo's ring a third of a turn, lay it down, press **Open** and lift away, and it stays wrapped.
+
+`dahl_eps_max` turns on Newton's Dahl bending hysteresis: a bend put into a
+joint past `dahl_tau` radians is kept. The pads alone hold the cable (sticky
+contacts, as in `00_cable`). Carried 120 degrees round the post and let go,
+it reads straightness 0.69; built at 0, the same drive springs back to 0.99
+(`tests/test_cable_robot`, GPU 2). The bench and posts have no friction, so
+the bend is the cable's: with 0.24 or 0.024 left, the elastic cable stayed
+wrapped too, 0.74 and 0.78 (`mem_drive` probe, GPU 2).
 
 ```bash
 uv run examples/03_rope/03_cable_memory.py
@@ -81,18 +87,14 @@ Source: [`03_cable_memory.py`](03_cable_memory.py)
 
 ## A cable carries a twist
 
-Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: drag **tip roll** to a turn, untick **hold the tips**, and the stiff one springs the roll back out while the soft one keeps it.
+![A cable carries a twist](media/04_twist.webp)
 
-`twist_ke` splits Newton's rod joint from its bend: left at `None` a cable
-twists as stiffly as it bends; a data cable's jacket rolls far more easily
-than it bends, a steel cable the other way round. Each free end is held in a
-hard latch, as a hand holds it (`cable.entity.roll`), and the slider rolls
-it about its own axis at 0.1 rad a step (a click's handle cannot: its wrench
-is bounded by the capsule's own inertia). The page reads each cable's
-`twist_turns` over its middle third, the roll between consecutive frames
-with the bend taken out. A clamped cable twists uniformly: one turn at the tip
-puts 0.348 turns (8 of 23 joints) in the middle of both; let go, the stiff one
-reads 0.000 within 60 steps, the soft one 0.33 then and 0.27 after four seconds.
+Two cables hang from a clamp, one twisting ten times more easily than it bends and one ten times less: drag each hand onto its cable's tip, press **Close**, turn each gizmo's ring a third of a turn about the cable and press **Open**, and the stiff one springs the turn back out while the soft one keeps it.
+
+`twist_ke` splits Newton's rod joint from its bend. The pads alone hold each
+tip, turned about the vertical. Turned 120 degrees, the soft cable takes 0.33
+turns and the stiff 0.16, slipping in the jaws; opened, the stiff reads 0.000 in
+30 steps, the soft 0.107 in 60 (`tests/test_cable_robot`, GPU 2).
 
 ```bash
 uv run examples/03_rope/04_twist.py
