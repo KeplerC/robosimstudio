@@ -640,7 +640,9 @@ def _creases(snapshot, paper: str, panel: dict[str, Any] | None) -> dict[str, An
     near = along & (np.abs(mid[:, axis] - origin) <= cell + 1.0e-6)
     if not near.any():
         return {"angle": 0.0, "peak": 0.0, "edges": 0.0, f"{paper}/crease_angle": 0.0}
-    other = 1 - axis
+    # The axis the line runs along is the one its hinges run along: ``1 - axis`` for a sheet lying
+    # on the bench, ``x`` for a flap standing up whose line is stated in height (``axis`` 2).
+    other = int(np.argmax(np.abs(direction[near]).mean(axis=0)))
     span = float(mid[near][:, other].max() - mid[near][:, other].min()) + cell
     rows = max(1.0, span / cell) if cell > 0.0 else 1.0
     angle = float(kept[near].sum() / rows)

@@ -203,6 +203,44 @@ def _rolled_flat(film) -> tuple[bool, str]:
     )
 
 
+def _paper_folded(film) -> tuple[bool, str]:
+    """The sheet's fold, a third of the way along it, kept 1.5 rad once the hands had gone, and it lies in thirds."""
+    from robosimstudio.assetlib.semantics.snapshot import Snapshot
+    from robosimstudio.assetlib.vocabulary.measures import cloth_fold
+    from robosimstudio_materials.paper import crease_angle
+
+    sim = film.sim
+    sim["paper"].entity.update_probe(sim.state, sim.step_count)
+    snapshot = Snapshot(sim.make_context())
+    angle = float(crease_angle(snapshot, "paper", {"crease": {"axis": 1, "at": -0.20 + 0.297 / 3}})["angle"])
+    extent = float(cloth_fold(snapshot.ctx, "paper", axis=1)[0])
+    return (
+        angle >= 1.5 and extent < 0.75,
+        f"the fold kept {angle:.2f} rad (need 1.5), span {extent:.3f} (need under 0.75)",
+    )
+
+
+def _flap_shut(film) -> tuple[bool, str]:
+    """The box flap's hinge kept 1.8 rad once the hand had gone, and its free edge rests no higher than the rim."""
+    import math
+
+    import numpy as np
+
+    from robosimstudio.assetlib.semantics.snapshot import Snapshot
+    from robosimstudio_materials.paper import crease_angle
+
+    sim, flap = film.sim, film.sim["flap"]
+    line = {"crease": {"axis": 2, "at": 0.103 + 0.02 * math.cos(math.radians(15.0))}}  # the example's hinge rows
+    flap.entity.update_probe(sim.state, sim.step_count)
+    angle = float(crease_angle(Snapshot(sim.make_context()), "flap", line)["angle"])
+    rest = np.asarray(flap.entity.rest["particle_q"], dtype=np.float64)[flap.particles]
+    edge = np.asarray(flap.particle_q, dtype=np.float64)[rest[:, 2] > rest[:, 2].max() - 0.003].mean(axis=0)
+    above = float(edge[2]) - (0.728 + 0.10)
+    return angle >= 1.8 and above < 0.015, (
+        f"the hinge kept {angle:.2f} rad (need 1.8) and the free edge is {above * 1000:+.0f} mm off the rim (need under 15)"
+    )
+
+
 def _succeeded(film) -> tuple[bool, str]:
     """The task's own verdict on the scene as the take left it."""
     result = film.sim.evaluate()[-1]
@@ -639,25 +677,67 @@ DRAFTS = (
         lift=0.12,
         radius=0.012,  # the one link the handle took: the links are loose, and the rest stay in the heap
     ),
-    handle(
+    # Both hands: the left holds the far end down, the right carries the near edge over on the page's
+    # attachment box, the left stamps the fold flat. tests/test_fold_paper_robot.py drives the same path.
+    Take(
         "examples/13_paper/00_fold_paper.py",
-        "paper",
-        Corner("paper", sx=1, sy=1, inset=0.02),
-        camera=Orbit(At("paper", dz=0.05), distance=0.8, azimuth=-25.0, elevation=35.0),
-        lift=0.08,
-        across=("y", -0.25),
-        pending="a fold is a carry, a press and a release, which the one-handle beat does not do: "
-        "the take needs a second click on the standing loop and a drag down before Release all",
+        camera=Orbit(Bench(0.0, -0.05, 0.04), distance=0.95, azimuth=-15.0, elevation=40.0),
+        warmup=0.5,
+        fps=10,
+        speed=2.0,  # a minute of scene: two hands, a carry and three stamps
+        budget=2_000_000,
+        layout=Layout(collapse=("Simulation", "Material", "Physics")),
+        beats=(
+            Wait(seconds=0.4, label="an A4 sheet between the two hands"),
+            Press(text="Close", within="Arm: left", label="Close both hands"),
+            Press(text="Close", within=RIGHT),
+            DragTo("left", Bench(0.05, 0.075, 0.072), seconds_per_m=3.0),
+            Drag("left", "z", to=Bench(z=0.005), seconds=0.8, label="the left hand holds the far end down"),
+            DragTo("right", Bench(0.05, -0.195, 0.072), seconds_per_m=3.0),
+            Drag("right", "z", to=Bench(z=0.010), seconds=0.8, label="the right hand onto the near edge"),
+            Toggle(text="Edge on the right hand", within="Crease", label="tick: the edge is pinned at the hand"),
+            Drag("right", "z", to=Bench(z=0.10), seconds=1.0, label="up"),
+            Drag("right", "y", to=Bench(y=-0.002), seconds=1.6, label="across"),
+            Drag("right", "z", to=Bench(z=0.014), seconds=1.0, label="and down onto the middle"),
+            Drag("right", "y", to=Bench(y=0.013), seconds=0.5, label="drawn on: the loop tightens"),
+            Drag("left", "z", to=Bench(z=0.06), seconds=0.5),
+            DragTo("left", Bench(-0.04, -0.07, 0.06), seconds_per_m=4.0),
+            *(
+                beat
+                for x in (-0.04, 0.03, 0.10)
+                for beat in (
+                    Drag("left", "x", to=Bench(x=x), seconds=0.4),
+                    Drag("left", "z", to=Bench(z=0.009), seconds=0.6, label="the left hand stamps the fold"),
+                    Wait(seconds=0.2),
+                    Drag("left", "z", to=Bench(z=0.05), seconds=0.4),
+                )
+            ),
+            Toggle(text="Edge on the right hand", within="Crease", label="untick: the edge is let go"),
+            Drag("right", "z", to=Bench(z=0.22), seconds=0.6, label="both hands lift"),
+            Drag("left", "z", to=Bench(z=0.22), seconds=0.6),
+            Wait(seconds=1.5, label="it stays folded"),
+        ),
+        expect=(Check(_paper_folded, needs=("paper",)),),
     ),
-    handle(
+    # The hand, closed and pointing down, pushes the standing flap over and presses it into the box;
+    # tests/test_fold_paper_robot.py drives the same path through the panel.
+    Take(
         "examples/13_paper/01_box_flap.py",
-        "flap",
-        Corner("flap", sx=0, sy=1, inset=0.02),
-        camera=Orbit(At("flap", dz=0.05), distance=0.7, azimuth=-30.0, elevation=30.0),
-        lift=0.04,
-        across=("y", -0.14),
-        pending="the flap is closed by a hand pushing it over the box, not by a handle lifting a corner: "
-        "the take wants a Drag of the left gizmo onto the free end and down",
+        camera=Orbit(Bench(-0.05, 0.03, 0.11), distance=0.85, azimuth=30.0, elevation=30.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: right")),
+        beats=(
+            Wait(seconds=0.5, label="the flap stands open, the left hand beside it"),
+            Press(text="Close", within="Arm: left", label="Close"),
+            Wait(seconds=0.6),
+            Drag("left", "z", to=Bench(z=0.162), seconds=0.8, label="down, level with the flap"),
+            Drag("left", "y", to=Bench(y=-0.01), seconds=1.8, label="across: the hand pushes it over"),
+            Drag("left", "z", to=Bench(z=0.062), seconds=1.2, label="down: it presses the flap into the box"),
+            Wait(seconds=0.5, mark="pressed"),
+            Drag("left", "z", to=Bench(z=0.162), seconds=1.0, label="up: the hand leaves"),
+            Wait(seconds=2.5, label="the flap stays shut"),
+        ),
+        expect=(Check(_flap_shut, needs=("flap",)),),
     ),
     Take(
         "examples/09_teleop/01_force_feedback.py",
