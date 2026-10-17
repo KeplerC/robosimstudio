@@ -191,6 +191,10 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
         "paper (the `paper` kind: sheets and card whose folds stay)",
         ("PaperMaterialSpec", "PaperSpec", "paper", "papers"),
     ),
+    "robosimstudio_materials.brush": (
+        "brushes (the `brush` kind: a handle with a field of short capsule-chain bristles)",
+        ("BRUSH_60HZ", "BrushMaterialSpec", "BrushSpec", "brush"),
+    ),
 }
 """Kind -> what it is, in words, and the flat names it provides.
 
