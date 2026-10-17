@@ -22,9 +22,10 @@ Three things the pairing says that the plain robot does not:
   139 mm, measured in :mod:`robosimstudio.robots.grippers.yam_linear_arena`):
   the plate under the face is clear of the fingers, and so is the plate once
   it is carried.
-* **The right arm's home points the cup straight down**, its face 100 mm over
-  the bench straight ahead of the right shoulder (:data:`CUP_DOWN`), so a hand
-  dragged down on the page lands the face flat. Solved with
+* **The right arm's home points the cup straight down**, its face 106 mm over
+  the bench straight ahead of the right shoulder, 100 mm over the top of the
+  6 mm plate the examples lay there (:data:`CUP_DOWN`; ``probe_suction_fix``,
+  GPU 3), so a hand dragged down on the page lands the face flat. Solved with
   ``sim.arm("right").solve_q_full`` on ``bench_075``; the wrist's last joint is
   left at 0, the middle of its travel, because a round cup has no roll to keep.
 """
@@ -45,7 +46,7 @@ SUCTION_MOUNT = (0.0, 0.0, 0.105, 0.0, 0.0, 0.0, 1.0)
 """The cup's flange in ``right_link_6``'s frame: 105 mm along the wrist's +z, unrotated."""
 
 CUP_DOWN = (0.0, 1.8599, 1.6247, -1.3356, 0.0, 0.0)
-"""The right arm's home [rad]: the cup's face 100 mm over the bench, pointing straight down."""
+"""The right arm's home [rad]: the cup's face 106 mm over ``bench_075``, pointing straight down."""
 
 _LEFT, _RIGHT = YAM_BIMANUAL.arms
 

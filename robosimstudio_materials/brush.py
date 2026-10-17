@@ -8,7 +8,7 @@ A brush is a sole of ``rows`` strips under a grip, and ``rows x columns``
 bristles rooted in the strips' undersides, pointing down: each bristle a few
 overlapping capsules chained by Newton's rod joints -- built by the rod kind's
 own :func:`~robosimstudio_materials.rod.add_capsule_chain`, solved by the same
-rigid VBD -- and welded at its root to its strip. The domain reads as
+rigid VBD -- and welded at its root to its strip. The kind reads as
 ``("brush", "rod")``. What makes it a brush rather than a bundle of cables is
 the grip the field hangs from and the one thing a brush is for, which this kind
 measures: where its tips have been while down on the surface (:func:`scrubbed`).
@@ -267,7 +267,7 @@ class BrushSpec:
     """The brush's own grip's radius [m]: 22 mm across the jaws."""
     handle_color: tuple[float, float, float] = (0.15, 0.15, 0.17)
     handle_density: float = 700.0
-    """The sole's and the own grip's matter [kg/m^3]: a plastic, 41 g at the default sizes."""
+    """The sole's and the own grip's matter [kg/m^3]: a plastic, 42 g at the default sizes."""
     handle_friction: float = 1.0
     contact_ke: float = 1.0e5
     """Each bristle capsule's contact stiffness [N/m], ten times a cable's.
@@ -511,8 +511,10 @@ Newton 1.6's ``finalize`` treats a principal moment under 1e-10 as degenerate
 and adds 1e-6 to all three, and a bristle capsule is far under it: 5 mm of
 0.75 mm-radius nylon is 12.2 mg, with moments of 3.9e-11 across and 3.3e-12
 along, as ``add_rod`` builds it. Left to that correction its moment across
-grows 26,000 times, and a push at its end meets 0.16 kg instead of 12 mg. At
-this floor the end of a capsule meets 36 mg."""
+grows 26,000 times and the capsule all but stops turning: a sideways push at
+its end meets 12.2 mg, the whole capsule, where its own moments give 4.1 mg. At
+this floor the end meets 8.1 mg. Each is ``1 / (1/m + r^2/I)`` with ``r`` the
+2.5 mm from the capsule's centre to its end (``probe_brush_masses``, GPU 5)."""
 
 
 def _floor_inertia(builder: newton.ModelBuilder, bodies) -> None:
@@ -1092,7 +1094,7 @@ PROXY_MASS_SCALE = 1000.0
 """How much heavier the bristles' solver sees a named handle than the arm's solver does.
 
 The strips are welded to the handle's mirror inside VBD, and that mirror is a
-body VBD moves: at the handle's own 52 g, a 6 mm downward step of the handle
+body VBD moves: at the handle's own 53 g, a 6 mm downward step of the handle
 moved the strips 0.5 mm, the field pushing the mirror back up instead of the
 mirror pressing the field, and at this scale 5.8 mm (``diag_jointq``, GPU 3).
 The fingers meet nothing on VBD, so nothing else feels the scale."""

@@ -5,11 +5,15 @@ A plate lying flat under the right hand's suction cup and a square 200 mm toward
 
 The plate is 150 by 150 by 6 mm and 0.3 kg, flat on the bench, so a parallel
 jaw has nothing to close across; ``yam_bimanual_suction`` carries a vacuum cup
-on its right arm instead, its face 100 mm over the bench and pointing down at
+on its right arm instead, its face 100 mm over the plate and pointing down at
 home, and keeps the left hand's jaws. The cup seals when its face is within
 2 mm of the plate and square to it within 15 degrees, and the arm's **Seal**
-readout says sealed or not, the gap and the mass held; the panel stops a few
-millimetres short of where the gizmo is put, so put it a little into the plate.
+readout says sealed or not, the gap and the mass held. A hand dragged down
+trails the gizmo by a few millimetres, and the panel puts the gizmo back on the
+hand when a drag ends that close to it, so put the gizmo a little into the
+plate. Tick **Vacuum** once the face is down: ticked on the way down, the cup
+seals as soon as the face is within 2 mm and carries the plate about that far
+under it.
 The arm and the plate share one MuJoCo solver (``rss.MUJOCO_500HZ``), so the
 seal is a weld switched on inside the captured graph and the arm carries the
 plate's weight. Driven through the panel, the plate rides 198 mm with the cup

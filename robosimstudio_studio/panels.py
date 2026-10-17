@@ -313,9 +313,11 @@ class PanelArm(Panel):
                 self._width_readout = gui.add_text("Opening", initial_value="", disabled=True)
             elif self.suction is not None:
                 # A cup in place of jaws: one switch, and what the cup found.
-                # Ticked, it seals onto whatever is under the face the first
-                # step the face is on it, so it can be ticked before the hand
-                # comes down; unticked, it lets go.
+                # Ticked, it seals the first step the face is within the seal's
+                # GAP_TOLERANCE of whatever is under it, so it can be ticked
+                # before the hand comes down; the hold then keeps the part where
+                # it sealed, up to that far under the face, where a tick after
+                # the face is down holds it flush. Unticked, it lets go.
                 self._vacuum = gui.add_checkbox("Vacuum", initial_value=False)
                 self._vacuum.on_update(lambda _: setattr(self, "vacuum_request", bool(self._vacuum.value)))
                 self._seal_readout = gui.add_text("Seal", initial_value="", disabled=True)
@@ -362,7 +364,8 @@ class PanelArm(Panel):
             self.gripper.apply(env.control.joint_target_q)
         if self.suction is not None and not self.suspended:
             # The box arms the cup and then follows it. Ticked, the cup seals the
-            # first step its face is on something; unticked, it lets go. A cup
+            # first step its face is close enough to something to pass
+            # Suction.seal; unticked, it lets go. A cup
             # held or let go from code, or whose seal broke, moves the box rather
             # than being undone by it.
             holding = self.suction.holding

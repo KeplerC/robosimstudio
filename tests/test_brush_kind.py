@@ -35,7 +35,7 @@ PRESS = 0.004
 """How far below where it closed the hand presses [m]: the scrub's own press."""
 
 OVER_BRUSH = (0.0, 2.149, 1.879, -1.3, 0.0, 0.0)
-"""The right arm's joints [rad] with the tool centre 100 mm over the brush, pointing down, as the example starts it."""
+"""The right arm's joints [rad]: tool centre 100 mm over the bench above the brush, pointing down, as in the example."""
 
 
 def _build(scene, **kwargs):
