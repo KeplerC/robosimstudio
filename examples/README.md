@@ -65,7 +65,7 @@
 
 ## [10 Granular](10_granular/README.md)
 
-| [Scoop rice into the tray](10_granular/00_scoop_rice.py) | [Scoop rice, scored](10_granular/01_scoop_rice_scored.py) |
+| [Sweep rice into the tray](10_granular/00_sweep_rice.py) | [Sweep rice, scored](10_granular/01_sweep_rice_scored.py) |
 |---|---|
 
 ## [11 Liquid](11_liquid/README.md)

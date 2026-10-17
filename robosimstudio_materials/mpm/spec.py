@@ -246,9 +246,18 @@ class ParticleBodySpec:
             keeps a liquid inside a thin wall under graph capture: measured in
             the cup probe (``probe_c_water``), a 3 mm wall at 4 mm
             voxels lost 60% of the water through its walls in 2 s at rest and
-            5% with a 1.5 mm margin. The margin also offsets those shapes'
-            rigid contacts by the same distance, so it is for containers, not
-            for tools.
+            5% with a 1.5 mm margin. A tool that pushes a heap along the
+            bench names itself here too, at one voxel: the grid cannot resolve
+            the sliver between a tool's underside and the bench, so the bottom
+            voxel of grains lags the tool and passes under it. A 160 mm pusher
+            standing on the bench, swept 290 mm through a 16,000-particle heap
+            of rice at 0.15 m/s (``probe_sweep``, GPU 3, RTX PRO 6000, Newton
+            1.6.0), left 40% of the rice behind itself with no margin and 10%
+            with a 4 mm one. Under the particle arrangements the rigid
+            contacts are MuJoCo's, which zeroes an authored geom margin under
+            its native CCD and says so once at build, so the hand and the
+            bench still meet the tool's true faces; Newton's own collision
+            pipeline would offset them by the margin.
         container_margin: The margin [m], or ``None`` for 2 mm, half the
             registered voxel.
         color: Display RGB in [0, 1], or ``None`` for the material's.

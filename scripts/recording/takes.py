@@ -720,14 +720,15 @@ DRAFTS = (
 RICE_VIEW = Orbit(At("rice"), distance=0.9, azimuth=-50.0, elevation=35.0)
 PARTICLE_DRAFTS = (
     handle(
-        "examples/10_granular/00_scoop_rice.py",
-        "paddle",
-        (0.470, -0.310, 0.756),
+        "examples/10_granular/00_sweep_rice.py",
+        "pusher",
+        (0.600, -0.450, 0.770),
         camera=RICE_VIEW,
-        lift=0.02,
-        across=("x", 0.16),
-        expect=(Rose("paddle", 0.01, at="lifted"),),
-        pending="the paddle rides the handle through the heap; a scooping path into the tray is still to be laid out",
+        lift=0.005,
+        across=("y", 0.25),
+        expect=(Rose("pusher", 0.002, at="lifted"),),
+        pending="the pusher rides the handle into the tray; the clip should show the hand's sweep, the gesture "
+        "tests/test_sweep_rice drives, once it is written as beats",
     ),
     handle(
         "examples/11_liquid/00_pour_honey.py",
@@ -780,7 +781,7 @@ PARTICLE_DRAFTS = (
 TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS)
 
 KEPT: dict[str, str] = {
-    "10_granular/01_scoop_rice_scored": "the same rice, paddle and tray as 00_scoop_rice with a goal beside them; its clip is that one's",
+    "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

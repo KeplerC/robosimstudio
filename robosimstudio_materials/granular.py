@@ -2,7 +2,7 @@
 """The ``granular`` kind: a heap of grains -- rice, sand, beans, flour -- on Newton's implicit MPM.
 
 This file is what ``rss.heap`` builds, imported as ``robosimstudio_materials.granular``.
-Run ``examples/10_granular/00_scoop_rice.py`` first. The implementation is shared
+Run ``examples/10_granular/00_sweep_rice.py`` first. The implementation is shared
 with the liquid and dough kinds in :mod:`robosimstudio_materials.mpm`; this module
 is the domain, the entity that names it, the constructor and the presets.
 
@@ -10,7 +10,14 @@ A heap is a continuum of particles, not grains: the MPM smears a bean into a
 material with a bean's friction and density, and a tool thinner than about two
 voxels (8 mm at the registered 4 mm) leaves grains inside itself as it pushes
 (``probe_b``: a 3 mm blade kept ~300 particles inside it and left 10-16% of the
-rice it swept behind it). A paddle or a scoop is 8 mm thick or more.
+rice it swept behind it). A paddle or a scoop is 8 mm thick or more, and a
+tool that slides along the bench names itself in the heap's ``containers`` so
+the grid sees it one voxel fatter than the hand does: otherwise the bottom
+voxel of grains passes under it (``probe_sweep``, GPU 3: 40% of a heap left
+behind a 160 mm pusher with no margin, 10% with one). What a tool pushes
+pushes back, and a parallel gripper feels it along its closing axis: 16,000
+grains of rice ahead of that pusher opened the YAM's jaws (``kp`` 200 N/m)
+from the pusher's 20 mm to 42 mm, with the fingers still either side of it.
 """
 
 from __future__ import annotations
