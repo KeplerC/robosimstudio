@@ -1,19 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """A cable carries a twist
 
-Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: roll a free end a turn and let go, and the stiff one springs the roll back out while the soft one keeps it.
+Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: drag **tip roll** to a turn, untick **hold the tips**, and the stiff one springs the roll back out while the soft one keeps it.
 
 ``twist_ke`` splits Newton's rod joint from its bend: left at ``None`` a cable
-twists as stiffly as it bends, which is the isotropic pairing the builder
-makes. A data cable's jacket rolls far more easily than it bends; a stranded
-steel cable the other way round. The page reads each cable's ``twist_turns``
-over its middle third -- the roll between consecutive capsule frames with the
-bend taken out, so a cable bent into a hook with no roll reads 0. Rolled a
-full turn at the tip, both carry the same twist in the middle (a clamped cable
-twists uniformly); let go, the stiff one unwinds in a fraction of a second and
-the soft one over seconds, the time being ``twist_kd / twist_ke``. They hang
-because a level cantilever at this bend stiffness droops to the bench. Click a
-capsule near a free end and drag its handle round to roll it.
+twists as stiffly as it bends; a data cable's jacket rolls far more easily
+than it bends, a steel cable the other way round. Each free end is held in a
+hard latch, as a hand holds it (``cable.entity.roll``), and the slider rolls
+it about its own axis at 0.1 rad a step (a click's handle cannot: its wrench
+is bounded by the capsule's own inertia). The page reads each cable's
+``twist_turns`` over its middle third, the roll between consecutive frames
+with the bend taken out. A clamped cable twists uniformly: one turn at the tip
+puts 0.348 turns (8 of 23 joints) in the middle of both; let go, the stiff one
+reads 0.000 within 60 steps, the soft one 0.33 then and 0.27 after four seconds.
 """
 
 import numpy as np
@@ -49,18 +48,20 @@ def main():
     sim = scene.build(control_mode="joint_position")
 
     def page(studio):
-        readouts = {
-            name: studio.gui.add_number(f"{name}: mid-cable twist (turns)", 0.0, disabled=True) for name in cables
-        }
+        roll = studio.gui.add_slider("tip roll (turns)", min=0.0, max=2.0, step=0.05, initial_value=0.0)
+        held = studio.gui.add_checkbox("hold the tips", initial_value=True)
+        readouts = {n: studio.gui.add_number(f"{n}: mid-cable twist (turns)", 0.0, disabled=True) for n in cables}
 
-        def read():
-            body_q = np.asarray(sim.pipeline.snapshot.body_q)
+        def drive():
             for name, cable in cables.items():
-                bodies = cable.bodies
-                middle = bodies[len(bodies) // 3 : 2 * len(bodies) // 3 + 1]
-                readouts[name].value = round(twist_turns(body_q[middle, 3:7]), 3)
+                if held.value:  # the latch: roll the held tip towards the slider, or let it go
+                    cable.entity.roll(sim.pipeline, 2 * np.pi * roll.value)
+                else:
+                    cable.entity.pin(sim.pipeline, on=False)
+                middle = cable.bodies[len(cable.bodies) // 3 : 2 * len(cable.bodies) // 3 + 1]
+                readouts[name].value = round(twist_turns(np.asarray(sim.pipeline.snapshot.body_q)[middle, 3:7]), 3)
 
-        studio.each_step(read)
+        studio.each_step(drive)
 
     rss.view(sim, page=page)
 
