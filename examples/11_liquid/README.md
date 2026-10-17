@@ -34,6 +34,8 @@ Source: [`00_pour_honey.py`](00_pour_honey.py)
 
 ## Wipe a spill
 
+![Wipe a spill](media/01_wipe_spill.webp)
+
 A ketchup puddle in front of the right hand and a rubber-faced wiper standing under it: drag the hand down onto the wiper, close on it, and push the puddle toward the middle of the bench.
 
 Ketchup is a Bingham fluid here (a 300 Pa yield stress, viscosity 100), so the

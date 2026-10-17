@@ -6,7 +6,9 @@ A puck of dough under the right hand: close the gripper, drag the hand down into
 What a plastic solid keeps is the measure: the press probe behind the ``dough``
 preset kept 83% of a 15 mm compression after the plate lifted (plasticine 75%,
 clay 66%). The panel reads the puck's height as a share of the height it
-settled at, and its footprint against the settled one. Change ``material`` to
+settled at, and its footprint against the settled one: the closed hand driven
+15 mm under the top through the arm panel and lifted away leaves 76% under
+the hand and 76% after (``tests/test_press_dough``, GPU 0). Change ``material`` to
 ``"plasticine"`` or ``"clay"`` for a stiffer lump. 23.4 ms per control step on
 an RTX PRO 6000, graph-captured.
 """
