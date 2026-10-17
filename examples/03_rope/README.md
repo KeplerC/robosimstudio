@@ -81,19 +81,18 @@ Source: [`03_cable_memory.py`](03_cable_memory.py)
 
 ## A cable carries a twist
 
-Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: roll a free end a turn and let go, and the stiff one springs the roll back out while the soft one keeps it.
+Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: drag **tip roll** to a turn, untick **hold the tips**, and the stiff one springs the roll back out while the soft one keeps it.
 
 `twist_ke` splits Newton's rod joint from its bend: left at `None` a cable
-twists as stiffly as it bends, which is the isotropic pairing the builder
-makes. A data cable's jacket rolls far more easily than it bends; a stranded
-steel cable the other way round. The page reads each cable's `twist_turns`
-over its middle third -- the roll between consecutive capsule frames with the
-bend taken out, so a cable bent into a hook with no roll reads 0. Rolled a
-full turn at the tip, both carry the same twist in the middle (a clamped cable
-twists uniformly); let go, the stiff one unwinds in a fraction of a second and
-the soft one over seconds, the time being `twist_kd / twist_ke`. They hang
-because a level cantilever at this bend stiffness droops to the bench. Click a
-capsule near a free end and drag its handle round to roll it.
+twists as stiffly as it bends; a data cable's jacket rolls far more easily
+than it bends, a steel cable the other way round. Each free end is held in a
+hard latch, as a hand holds it (`cable.entity.roll`), and the slider rolls
+it about its own axis at 0.1 rad a step (a click's handle cannot: its wrench
+is bounded by the capsule's own inertia). The page reads each cable's
+`twist_turns` over its middle third, the roll between consecutive frames
+with the bend taken out. A clamped cable twists uniformly: one turn at the tip
+puts 0.348 turns (8 of 23 joints) in the middle of both; let go, the stiff one
+reads 0.000 within 60 steps, the soft one 0.33 then and 0.27 after four seconds.
 
 ```bash
 uv run examples/03_rope/04_twist.py

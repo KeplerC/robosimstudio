@@ -188,6 +188,14 @@ def _bow_cable(points, quats, spec, episode):
 
 HOLD_KP_REFERENCE = 400.0
 HOLD_KD_REFERENCE = 12.0
+ROLL_STEP = 0.1
+"""How far :meth:`EntityRod.roll` turns a pinned capsule per call at most [rad]:
+a full turn in 63 control steps at 60 Hz. The rate is not what the cable
+feels -- 0.26 rad (15 degrees) per step puts the same uniform 0.348 turns into
+the middle third of the twist example's cables with straightness 1.000
+throughout, as 0.05 does (``fix3/twist/probe6.py``, GPU 1) -- it is what a hand
+turning a cable end looks like on the page, and it keeps a slider yanked
+across its range from being a jump the joint never sees."""
 """The latch's position gains [N/m, N.s/m], as the reference tuned them. They
 are forces, so :meth:`EntityRod.hold_gains` scales them by segment mass."""
 
@@ -248,6 +256,8 @@ class EntityRod(Centerline, Entity):
         self._hold_gains: wp.array | None = None
         self._grip_bodies: dict[str, int] = {}
         self._tcp_offsets: dict[str, np.ndarray] = {}
+        self._pins: dict[int, dict[str, Any]] = {}
+        """Capsules held by :meth:`pin`, by model body: which segment and world, the pose held, the roll since, and the mass to give back."""
 
     # -------------------------------------------------------------- phase 1
     def _shape_cfg(self) -> Any:
@@ -933,6 +943,7 @@ class EntityRod(Centerline, Entity):
         if self._rest_joint_q is None:
             return
         if world == 0:
+            self._release_pins(pipeline)
             self._straighten(pipeline)
         self._pose_anchor(pipeline, world=world)
 
@@ -1246,6 +1257,110 @@ class EntityRod(Centerline, Entity):
         flags[row] = 1
         self._hold_flag.assign(flags)
         return seg
+
+    # ---------------------------------------------------------- a hand's hold
+    def pin(self, pipeline, *, segment: int = -1, on: bool = True, world: int = 0) -> int:
+        """Hold one capsule where it is now, kinematically, or let it go. Returns its body index.
+
+        A hand with a cable end in a hard latch: the capsule keeps the pose it
+        has when pinned, whatever the chain does, until :meth:`roll` or another
+        pin moves it. Its inverse mass and inertia go to zero and it is flagged
+        kinematic in the model and in every island
+        (:func:`robosimstudio.core.tuning.set_kinematic` says why both are
+        needed once a robot shares the scene). Let go, it gets its mass back
+        where it is, so a cable released mid-roll unwinds from there.
+        Pinning a pinned capsule re-reads its pose; releasing a free one does
+        nothing. A reset releases every pin. This is a kinematic hold and not
+        a grasp: the page's object handle is a clamped wrench, which cannot
+        roll a capsule (its torque is bounded by the capsule's own inertia,
+        3.2e-6 N*m on this chain's 6 mm capsules, against the 1e-3 to 1e-1
+        N*m a turn of twist takes; lifting the bound whips both cables into
+        loops -- ``fix3/twist/probe4.py``, GPU 1).
+
+        Args:
+            segment: Which capsule, chain-indexed; ``-1`` is the free end of a
+                cable clamped at its start.
+            on: ``False`` releases it.
+            world: The fleet world, for a batched build.
+        """
+        from robosimstudio.core.tuning import notify, set_kinematic
+
+        body = self._global(int(self.bodies[int(segment)]), world)
+        model = self._fleet_model
+        pin = self._pins.get(body)
+        if not on:
+            if pin is None:
+                return body
+            inv_mass, inv_inertia = model.body_inv_mass.numpy(), model.body_inv_inertia.numpy()
+            inv_mass[body], inv_inertia[body] = pin["inv_mass"], pin["inv_inertia"]
+            model.body_inv_mass.assign(inv_mass)
+            model.body_inv_inertia.assign(inv_inertia)
+            set_kinematic(pipeline, [body], False)
+            notify(pipeline, int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES))
+            del self._pins[body]
+            return body
+        pose = np.asarray(pipeline.state_0.body_q.numpy()[body], dtype=np.float64).copy()
+        if pin is None:
+            inv_mass, inv_inertia = model.body_inv_mass.numpy(), model.body_inv_inertia.numpy()
+            pin = {
+                "segment": int(segment),
+                "world": int(world),
+                "inv_mass": float(inv_mass[body]),
+                "inv_inertia": inv_inertia[body].copy(),
+            }
+            inv_mass[body], inv_inertia[body] = 0.0, 0.0
+            model.body_inv_mass.assign(inv_mass)
+            model.body_inv_inertia.assign(inv_inertia)
+            set_kinematic(pipeline, [body], True)
+            notify(pipeline, int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES))
+            self._pins[body] = pin
+        pin["pose"], pin["angle"] = pose, 0.0
+        self._write_pin(pipeline, body)
+        return body
+
+    def roll(self, pipeline, angle: float, *, segment: int = -1, max_step: float = ROLL_STEP, world: int = 0) -> float:
+        """Turn a pinned capsule about its own axis to ``angle`` from where it was pinned, and say where it got to.
+
+        Right-handed about the capsule's axis (its local ``+Z``, pointing along
+        the chain), in radians, absolute since the pin: calling with the same
+        angle every step holds it there, and ``0.0`` rolls it back. The turn
+        is rate-limited to ``max_step`` per call because the capsule is
+        kinematic: a jump of a full turn is the same frame as no turn at all
+        to the joint and to :func:`~robosimstudio_materials.rod.measures.twist_turns`,
+        and a jump of half a turn is a shock. Pins the capsule first when it
+        is free. Returns the angle it now stands at, which lags the request
+        while it is still turning.
+        """
+        from robosimstudio.core.math import quat_from_axis_angle, quat_multiply, quat_to_mat
+
+        body = self._global(int(self.bodies[int(segment)]), world)
+        if body not in self._pins:
+            self.pin(pipeline, segment=segment, world=world)
+        pin = self._pins[body]
+        step = float(max_step) if max_step and max_step > 0 else float("inf")
+        pin["angle"] += float(np.clip(float(angle) - pin["angle"], -step, step))
+        rest = pin["pose"]
+        axis = quat_to_mat(rest[3:7])[:, 2]
+        self._write_pin(pipeline, body, quat_multiply(quat_from_axis_angle(axis, pin["angle"]), rest[3:7]))
+        return float(pin["angle"])
+
+    def _write_pin(self, pipeline, body: int, quat=None) -> None:
+        """Put a pinned capsule's pose into both state buffers, at rest: what the solver reads next substep."""
+        pose = self._pins[body]["pose"].copy()
+        if quat is not None:
+            pose[3:7] = quat
+        for state in (pipeline.state_0, pipeline.state_1):
+            q = state.body_q.numpy()
+            q[body] = pose
+            state.body_q.assign(q)
+            qd = state.body_qd.numpy()
+            qd[body] = 0.0
+            state.body_qd.assign(qd)
+
+    def _release_pins(self, pipeline) -> None:
+        """Every pin let go, with the mass given back: a reset's rod is nobody's."""
+        for pin in list(self._pins.values()):
+            self.pin(pipeline, segment=pin["segment"], world=pin["world"], on=False)
 
     # ---------------------------------------------------------------- runtime
     def positions(self, body_q: np.ndarray) -> np.ndarray:

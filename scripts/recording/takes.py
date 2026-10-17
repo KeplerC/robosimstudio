@@ -679,16 +679,11 @@ DRAFTS = (
         camera=Orbit(At("stiff_twist", dz=0.05), distance=0.75, azimuth=-30.0, elevation=25.0, fov=50.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left", "Arm: right")),
-        beats=(
-            Wait(seconds=0.5, label="two cables clamped at one end: one rolls easily, one does not"),
-            Click(Segment("stiff_twist", 0.97), label="click the stiff cable near its free end"),
-            Wait(seconds=0.3),
-            Drag("handle", "x", 0.04, seconds=0.8, label="swing its end out"),
-            Drag("handle", "z", -0.04, seconds=0.8, label="down"),
-            Drag("handle", "x", -0.04, seconds=0.8, label="and back under: a roll"),
-            Wait(seconds=1.5, mark="rolled", label="the twist reaches the middle; the readout counts it"),
+        beats=(Wait(seconds=0.5, label="two cables clamped at one end: one rolls easily, one does not"),),
+        pending=(
+            "the page rolls a tip with the **tip roll** slider and lets go with the **hold the tips** box "
+            "(tests/test_rod_twist.py drives both); the recorder has no slider beat yet, so no gesture is filmed"
         ),
-        pending="a roll from a position handle has not been tried on the page; filmed to outputs until it has",
     ),
     handle(
         "examples/03_rope/02_superdex.py",
