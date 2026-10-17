@@ -31,7 +31,11 @@ after each MPM step is what keeps a thin tool from leaving grains inside it
 (``probe_b``: 9.9% of the swept rice left behind with it, 14-16% without), and
 it is wrong for a liquid: it pushes particles into the container wall and cost
 6x in the cup probe. So :data:`GRANULAR_60HZ` and :data:`DOUGH_60HZ` state it and
-:data:`LIQUID_120HZ` states it off. A plastic solid needs more solver
+:data:`LIQUID_120HZ` states it off. The two that project do so at
+:data:`PROJECT_GAP` rather than Newton's default, because the default gap is
+the same ~1.7 voxels as the solve's own band, so a grain that crossed the band
+in one step -- rice let go from a hand's height -- was through the bench for
+good; a 30 mm gap reaches it and puts it back. A plastic solid needs more solver
 iterations than grains or it loses volume at rest (:data:`DOUGH_ITERATIONS`),
 and a liquid needs the rate above or it falls through what it is poured into.
 Each difference makes that kind's ``mpm`` spec unequal to the others', so a
@@ -48,7 +52,15 @@ from __future__ import annotations
 
 from robosimstudio.specs.physics import GENERIC, ArrangementSpec, BackendSpec, backend, coupler
 
-__all__ = ["DOUGH_60HZ", "DOUGH_ITERATIONS", "GRANULAR_60HZ", "LIQUID_120HZ", "PROXY_MASS_SCALE", "with_particles_on"]
+__all__ = [
+    "DOUGH_60HZ",
+    "DOUGH_ITERATIONS",
+    "GRANULAR_60HZ",
+    "LIQUID_120HZ",
+    "PROJECT_GAP",
+    "PROXY_MASS_SCALE",
+    "with_particles_on",
+]
 
 PROXY_MASS_SCALE = 1000.0
 """How much heavier the MPM sees a mirrored rigid body than the rigid solver does.
@@ -91,13 +103,34 @@ def with_particles_on(arrangement: ArrangementSpec, spec: BackendSpec) -> Arrang
     return table.with_(coupling=link)
 
 
-GRANULAR_60HZ = with_particles_on(GENERIC, backend("mpm", project_outside=True))
+PROJECT_GAP = 0.03
+"""How far the projection after each MPM step looks for a collider surface [m]: 7.5 of the registered 4 mm voxels.
+
+Newton's default is ``voxel * sqrt(3)``, 6.9 mm, which is also the width of the
+band the solve itself sees a collider in. A particle that crosses that band
+inside one step is beyond both: it sees no collider, is not projected, and
+falls through the bench top and the ground. At 60 Hz the band is crossed at
+0.42 m/s, which rice reaches 9 mm into a free fall, so a heap dropped by a
+hand, a paddle tipped over a tray or grains thrown up by a tool all lose
+particles. Measured with ``probe_drop`` (GPU 3, RTX PRO 6000, Newton 1.6.0,
+graph-captured, beside the YAM on ``bench_075``): a 27,648-particle block of
+the rice preset let go 80 mm over the bench put 10,183 particles through the
+bench and the ground with the default gap, 1,429 from 30 mm and 309 from
+150 mm; with a 30 mm gap none at any height, and none from a block built on
+the bench. 30 mm covers a step at 1.8 m/s, a fall of 165 mm, and costs
+nothing measurable: 16.6 ms per control step against 16.8 with the default on
+that scene. A wider gap would also start projecting a particle out through
+the far side of a thin wall, which at 30 mm a two-voxel wall is already prone
+to under a hand's push, so a tray a heap is swept into has walls of five."""
+
+GRANULAR_60HZ = with_particles_on(GENERIC, backend("mpm", project_outside=True, project_gap=PROJECT_GAP))
 """A heap beside the robot, its tools on the robot's island, the MPM at 60 Hz with the projection on.
 
 ``GENERIC``'s rates and coupler; ``project_outside=True`` is the registered
-default restated so that the spec reads as what it is. 15.6 ms per 60 Hz
-control step for a 28,812-particle rice bed and the YAM bimanual on
-``bench_075`` (RTX PRO 6000, Newton 1.6.0, graph-captured)."""
+default restated so that the spec reads as what it is, at :data:`PROJECT_GAP`
+rather than the registered default gap. 15.6 ms per 60 Hz control step for a
+28,812-particle rice bed and the YAM bimanual on ``bench_075`` (RTX PRO 6000,
+Newton 1.6.0, graph-captured)."""
 
 DOUGH_ITERATIONS = 150
 """Solver iterations per MPM step for a plastic solid, against the registered 50.
@@ -111,11 +144,13 @@ per control step; 150: 1.1% at 23.4 ms; 250: 0.2% at 31.1 ms; 50 cost 15.7 ms.
 150 is the last rung inside the 25 ms the GENERIC scene was budgeted. A
 granular (E 1e15) does not creep this way and keeps the 50."""
 
-DOUGH_60HZ = with_particles_on(GENERIC, backend("mpm", project_outside=True, max_iterations=DOUGH_ITERATIONS))
+DOUGH_60HZ = with_particles_on(
+    GENERIC, backend("mpm", project_outside=True, project_gap=PROJECT_GAP, max_iterations=DOUGH_ITERATIONS)
+)
 """A lump beside the robot: the granular table at :data:`DOUGH_ITERATIONS`.
 
-The same projection as the heap's (it keeps a rolling pin from leaving dough
-inside it), three times the iterations, so the lump holds its height while
+The same projection as the heap's, at the same gap (it keeps a rolling pin
+from leaving dough inside it), three times the iterations, so the lump holds its height while
 nothing presses it. A different ``mpm`` spec from :data:`GRANULAR_60HZ`, so a
 heap and a lump in one robot scene are two MPM islands and refused by the
 proxy coupler; a scene wanting both states one spec for both
