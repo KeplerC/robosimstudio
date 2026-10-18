@@ -181,8 +181,9 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         # 20 mm up, the turned hand's lowest collider is 3 mm over the sheet (fold_contact.py, hand_bottom).
         cls.miss["lay"] = jaws_to((PINCH_X, CREASE_Y + radius, surface + 0.020), 0.02, 60)
         tick(session, 30)
-        # Drawn on 30 mm and up 10, which tightens the loop, then up 20 more: laid 3 mm over the sheet,
-        # the stamps pushed it into the lower finger and the leaving hand dragged it 75 to 110 mm.
+        # Drawn on 30 mm and up 10, which tightens the loop, then up 20 more: held where it was laid,
+        # 3 mm over the sheet, the open hand drawn out took the whole sheet 58 to 66 mm with it
+        # (fold_counter.py, two drives, GPU 3).
         jaws_to((PINCH_X, CREASE_Y + radius + 0.03, surface + 0.03), 0.03)
         tick(session, 20)
         cls.laid = _measures(sim)
@@ -247,11 +248,12 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         )
 
     def test_the_left_hand_kept_the_sheet_from_sliding(self) -> None:
-        # Held, the far end moved 7.7 mm over the carry; with the left hand kept off it, 51 mm, and
-        # the fold missed its line and kept 0.35 rad (fold_contact.py, GPUs 3 and 5). The bound sits
-        # between, so an unheld sheet fails it.
+        # Held, the far end moved 4.1 mm over the carry in four drives of this path; with the left hand
+        # kept off it, 31.3 to 32.3 mm in four, and the edge was laid with no crease (0 rad), which
+        # stamping afterwards took only to 0.47 and 0.53 rad (fold_counter.py, GPU 3). The bound sits
+        # between, 11 mm over a held sheet and 16 mm under an unheld one, so an unheld sheet fails it.
         moved = abs(self.far_carried - self.far0)
-        self.assertLess(moved, 0.025, f"the far end moved {moved * 1e3:.1f} mm under the left hand")
+        self.assertLess(moved, 0.015, f"the far end moved {moved * 1e3:.1f} mm under the left hand")
 
     def test_the_stamps_shove_the_folded_sheet_but_leave_it_on_the_bench(self) -> None:
         # The left hand's three stamps push the whole folded sheet along the bench, away from the edge

@@ -21,11 +21,11 @@ The pads hold the paper by friction alone, and the fold keeps 2.52 to 2.67 rad o
 a sheet lying flat gives the lower pad nothing to get under (seven top-down pinches raised it 0 mm), and
 the palm stops the jaws at the corner. The three stamps also shove the folded sheet 46 to 55 mm along
 the bench, away from the edge, and the fold rides with it (`tests/test_fold_paper_robot`, three
-drives). The stamps need the edge still held and lifted clear: let go first and the stamped fold kept
-1.0 rad; held 3 mm over the sheet, the stamps pushed it into the lower finger and the leaving hand
-dragged it 94 to 108 mm (`fold_contact.py`, GPUs 3 and 5). The **Crease** folder reads
-`crease_angle` and `fold_extent`; set `yield_angle` to 0 under **Material** and the same fold
-springs open.
+drives). The stamps need the edge still held and lifted clear: let go first and the flap springs back
+up 85 to 87 mm, so the stamps leave the fold at the 1.38 to 1.39 rad the carry laid; held where it was
+laid, 3 mm over the sheet, the open hand drawn out took the whole sheet 58 to 66 mm along with it
+(`fold_counter.py`, two drives each, GPU 3). The **Crease** folder reads `crease_angle` and
+`fold_extent`; set `yield_angle` to 0 under **Material** and the same fold springs open.
 
 ```bash
 uv run examples/13_paper/00_fold_paper.py
