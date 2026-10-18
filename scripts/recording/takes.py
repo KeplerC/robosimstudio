@@ -45,6 +45,7 @@ from .beats import (
     Patch,
     Policy,
     Press,
+    Rest,
     Rose,
     Run,
     Sank,
@@ -1529,7 +1530,8 @@ ROBOT_TAPE = (
             ),
             Wait(seconds=0.3),
             Press(text="Close", within=RIGHT, label="Close: the pads squeeze the tab"),
-            Wait(seconds=0.8, mark="closed"),
+            Rest(seconds=0.4),  # off the button: left there, Close sat lit as hovered while the jaws shut
+            Wait(seconds=0.4, mark="closed"),
             Drag(
                 "right", "z", to=Bench(z=TAPE_TOP + 0.03), seconds=1.0, label="drag it up 30 mm: the first rows let go"
             ),
@@ -1967,7 +1969,9 @@ ROBOT_CONTACT = (
             Fold(title="How to drive this", open=False),
             Wait(seconds=0.5, label="the right hand over the stain's near end"),
             Press(text="Close", within=RIGHT, label="Close"),
-            Scroll(pixels=-600, seconds=0.4),  # back to the top: the Scrub readouts lead the panel
+            # Straight off the sidebar. A Scroll here moved nothing (the sidebar fits) and glided the
+            # pointer to its middle, onto the right arm's Open, lit as hovered until the drive began.
+            Rest(seconds=0.4),
             Wait(seconds=0.4),
             _per_step(_scrub_press(0.5), "down until the fingers touch the towel"),
             _per_step(_scrub_along, "a light stroke: push under 20 N, nothing wiped"),

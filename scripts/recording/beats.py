@@ -520,6 +520,20 @@ class Scroll(Beat):
 
 
 @dataclass(frozen=True)
+class Rest(Beat):
+    """Take the pointer off the sidebar to the 3D view's lower right over ``seconds``, pressing nothing.
+
+    After a :class:`Scroll` the pointer sits on the middle of the sidebar, and a button scrolled under it
+    lights up as hovered, which reads as a hand still on it.
+    """
+
+    seconds: float = 0.4
+
+    def play(self, film):
+        film.page.rest(self.seconds)
+
+
+@dataclass(frozen=True)
 class Run(Beat):
     """Press a routine's **Run** button and film it to its end, at most ``timeout`` seconds of scene.
 
