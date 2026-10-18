@@ -364,6 +364,21 @@ def _poured(film) -> tuple[bool, str]:
     return share >= 0.9, f"{share:.3f} of the honey in the bowl (need 0.9)"
 
 
+def _bag_open(film) -> tuple[bool, str]:
+    """The bag's mouth stands 30 mm open in the right hand, and its layers stayed apart."""
+    import numpy as np
+
+    from robosimstudio_materials.bag import layer_gap, mouth_opening
+
+    bag = film.sim["bag"]
+    points = np.asarray(bag.particle_q, dtype=np.float64)
+    mouth, gap = mouth_opening(points, bag.entity), layer_gap(points, bag.entity)
+    return mouth["height"] >= 0.03 and gap > 0.0015, (
+        f"the mouth stands {mouth['height'] * 1000:.1f} mm open (need 30), {mouth['area'] * 1e4:.1f} cm^2, "
+        f"the layers at least {gap * 1000:.2f} mm apart (need 1.5)"
+    )
+
+
 RIGHT = "Arm: right"
 """The right arm's fold; its title may carry a role, ``Arm: right (work)``, which a prefix still matches."""
 PANDA_VIEW = Camera(eye=(0.95, -0.25, 1.00), look_at=(0.457, -0.115, 0.85))
@@ -1253,9 +1268,36 @@ ROBOT_PARTICLES = (
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES)
+ROBOT_BAGS: tuple[Take, ...] = (
+    # The left hand closed on the bag's closed end, the right pinching the top layer's lip by contact and
+    # opening the mouth; tests/test_open_a_bag.py drives the same path through the panel.
+    Take(
+        "examples/16_bags/00_open_a_bag.py",
+        camera=Orbit(Bench(0.0, -0.06, 0.09), distance=1.2, azimuth=-68.0, elevation=28.0, fov=40.0),
+        warmup=0.5,
+        layout=Layout(collapse=("Simulation",)),
+        beats=(
+            Wait(seconds=0.4, label="a canvas bag, its lip turned up toward the right hand"),
+            Press(text="Close", within="Arm: left", label="Close the left hand"),
+            Drag("left", "z", to=Bench(z=0.019), seconds=1.0, label="drag it down onto the closed end"),
+            Drag(
+                "right", "z", to=Bench(z=0.02), seconds=1.2, label="the right hand down: its open jaws straddle the lip"
+            ),
+            Wait(seconds=0.3),
+            Press(text="Close", within=RIGHT, label="Close: the pads pinch the lip"),
+            Wait(seconds=1.0, mark="closed"),
+            Drag("right", "z", to=Bench(z=0.12), seconds=1.6, label="drag it up"),
+            Drag("right", "y", to=Bench(y=-0.077), seconds=1.0, label="and back over the bag: the mouth opens"),
+            Wait(seconds=1.5, mark="open", label="the two layers stay apart"),
+        ),
+        expect=(Check(_bag_open, needs=("bag",)),),
+    ),
+)
+
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES, *ROBOT_BAGS)
 
 KEPT: dict[str, str] = {
+    "16_bags/01_open_a_bag_scored": "the same bag, hands and gesture as 00_open_a_bag with a goal beside them; its clip is that one's",
     "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
