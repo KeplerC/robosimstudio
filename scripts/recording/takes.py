@@ -631,7 +631,7 @@ TELEOP_VIEW = Camera(eye=(1.55, -0.35, 1.30), look_at=(0.55, 0.0, 0.98))
 DRAFTS = (
     Take(
         TOWEL,
-        camera=Camera(eye=(1.05, -0.40, 0.95), look_at=(0.60, -0.17, 0.77)),
+        camera=Orbit(Bench(0.0, -0.11, 0.08), distance=1.1, azimuth=-22.0, elevation=30.0, fov=40.0),
         warmup=1.0,  # the towel lands from 20 mm
         layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
@@ -1105,7 +1105,7 @@ ROBOT_PARTICLES = (
     Take(
         "examples/10_granular/00_sweep_rice.py",
         # From the front and the tray's side: the heap comes toward the lens into the tray, and the arm stays behind it.
-        camera=Orbit(Bench(0.0, -0.25, 0.03), distance=0.9, azimuth=45.0, elevation=45.0),
+        camera=Orbit(Bench(0.0, -0.29, 0.08), distance=1.1, azimuth=40.0, elevation=35.0, fov=42.0),
         warmup=1.0,  # the heap settles before the first frame
         layout=Layout(collapse=("Simulation", "Arm: left")),
         budget=1_800_000,  # nine gestures and a sweep: 18 s of clip
@@ -1123,10 +1123,8 @@ ROBOT_PARTICLES = (
             Press(text="Open", within=RIGHT, label="Open"),
             Drag("right", "z", 0.10, seconds=1.0, label="lift away"),
             Drag("right", "y", -0.15, seconds=1.0, label="and back out of the tray"),
-            # From above, where a thin layer of points still shows against the bench: under the push the
-            # rice packs into a strip a few millimetres high along the pusher's face, and a tenth of it
-            # runs round the pusher's ends (sweep_where.py, GPU 0).
-            _dolly(Orbit(Bench(0.0, -0.17, 0.0), distance=0.75, azimuth=0.0, elevation=80.0), 1.2, "from above"),
+            # Under the push the rice packs into a strip a few millimetres high along the pusher's face, the
+            # face this view looks at, and a tenth of it runs round the pusher's ends (sweep_where.py, GPU 0).
             Wait(seconds=1.2, label="the strip along the pusher's face, and what ran round its ends"),
         ),
         expect=(
@@ -1137,8 +1135,9 @@ ROBOT_PARTICLES = (
     ),
     Take(
         "examples/11_liquid/01_wipe_spill.py",
-        # From in front of the arms: the push runs left to right, and the hand backs away at the end.
-        camera=Orbit(Bench(0.025, -0.21, 0.02), distance=0.75, azimuth=15.0, elevation=42.0),
+        # From the front and the bench's middle: the push runs left to right toward the lens, the ridge forms on the
+        # wiper's face this view looks at, and the arm stays side-on as the hand backs away at the end.
+        camera=Orbit(Bench(0.0, -0.22, 0.09), distance=1.05, azimuth=50.0, elevation=36.0, fov=42.0),
         warmup=1.0,  # the puddle settles before the first frame
         layout=Layout(collapse=("Simulation", "Arm: left")),
         budget=1_200_000,
@@ -1165,29 +1164,34 @@ ROBOT_PARTICLES = (
     ),
     Take(
         "examples/12_dough/01_press_dough.py",
-        # Wide enough for the hand at its home, 330 mm over the puck; the view closes in once the hand is down.
-        camera=Orbit(Bench(0.0, -0.31, 0.17), distance=0.75, azimuth=5.0, elevation=20.0),
+        # From the front and the arm's outside: the hand at its home, 330 mm over the puck, and the puck both in view.
+        # The particles are drawn unlit, so a dent shows only as a notch in the outline, seen along the blade.
+        camera=Orbit(Bench(0.0, -0.31, 0.14), distance=1.0, azimuth=-35.0, elevation=28.0, fov=40.0),
         warmup=1.0,  # the puck settles before the first frame
         layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
             Wait(seconds=0.5, label="the right hand, open, over the puck"),
             Press(text="Close", within=RIGHT, label="Close: the fingers make one blade"),
             Drag("right", "z", to=Bench(0.0, -0.31, 0.08), seconds=1.2, label="drag the gizmo down to the puck"),
-            # Low and along the blade: the particles are drawn unlit, so a dent shows only as a notch in the outline.
-            _dolly(Orbit(At("dough", dz=0.015), distance=0.35, azimuth=5.0, elevation=12.0), 1.0, "closer"),
             # 15 mm under the settled top, as tests/test_mpm_kinds presses it.
             Drag("right", "z", to=Top("dough", dz=-0.015), seconds=1.5, label="and 15 mm into it"),
             Wait(seconds=0.5, mark="pressed"),
             _note("height_pct", _dough_height, "the puck's height under the hand"),
             Drag("right", "z", 0.12, seconds=1.4, label="lift away"),
             Drag("right", "y", -0.12, seconds=1.0, label="and aside"),
+            # Round to the front, along the blade, at the same distance: the dent's notch shows in the outline.
+            _dolly(
+                Orbit(Bench(0.0, -0.31, 0.10), distance=1.0, azimuth=-5.0, elevation=28.0, fov=36.0),
+                1.5,
+                "round to the front",
+            ),
             Wait(seconds=1.5, label="the dent stays"),
         ),
         expect=(Check(_dent_kept), Squashed("dough", 0.003, at="pressed")),
     ),
     Take(
         "examples/11_liquid/00_pour_honey.py",
-        camera=Orbit(Bench(0.12, -0.235, 0.12), distance=0.8, azimuth=-25.0, elevation=24.0),
+        camera=Orbit(Bench(0.09, -0.24, 0.13), distance=1.1, azimuth=-30.0, elevation=30.0, fov=40.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
@@ -1220,7 +1224,7 @@ ROBOT_PARTICLES = (
     ),
     Take(
         "examples/12_dough/00_roll_dough.py",
-        camera=Orbit(At("dough", dx=-0.03, dz=0.06), distance=0.6, azimuth=-80.0, elevation=20.0),
+        camera=Orbit(Bench(-0.03, -0.31, 0.10), distance=1.0, azimuth=-40.0, elevation=32.0, fov=40.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left")),
         # 1.5 s of scene a second: the three passes are 2.4 s of scene each at the test's pace, and at
