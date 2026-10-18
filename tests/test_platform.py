@@ -228,7 +228,7 @@ class TestTheArrangementOnACpu(unittest.TestCase):
 
     def test_vbd_is_replaced_by_domain_and_free_bodies_join_the_arm(self) -> None:
         """The sponge's arrangement: GENERIC with its own SuperDex, VBD for everything else."""
-        from robosimstudio.specs.physics import GENERIC, backend
+        from robosimstudio.specs.physics import CPU, GENERIC, backend
 
         sponge = backend("superdex", substeps=2, feedback_dv_max=20.0)
         arrangement = GENERIC.with_backend("soft", sponge)
@@ -237,9 +237,10 @@ class TestTheArrangementOnACpu(unittest.TestCase):
         # The arm's own spec, so the cube and the arm are one MuJoCo island and not two.
         self.assertEqual(got.backend_for("rigid"), got.backend_for("articulated"))
         self.assertEqual(got.backend_for("soft"), sponge)
-        # Cloth and rope fell to "*" = VBD; they land on the arrangement's own SuperDex.
-        self.assertEqual(got.backend_for("cloth"), sponge)
-        self.assertEqual(got.backend_for("rod"), sponge)
+        # Cloth and rope fell to "*" = VBD; they land on CPU's own islands, not the sponge's.
+        self.assertEqual(got.backend_for("cloth"), CPU.backend_for("cloth"))
+        self.assertEqual(got.backend_for("rod"), CPU.backend_for("rod"))
+        self.assertEqual(got.backend_for("rod").get("feedback"), "off")
         self.assertEqual((got.control_hz, got.substeps, got.coupling), (60.0, 16, arrangement.coupling))
         self.assertEqual(len(notes), 1)
         self.assertIn("vbd has no CPU path", notes[0])
@@ -386,6 +387,7 @@ class TestTheRegisteredFacts(unittest.TestCase):
         self.assertEqual(
             {domain for domain, spec in CPU.backends if spec.solver == "superdex"}, {"soft", "cloth", "rod"}
         )
+        self.assertEqual(CPU.backend_for("rod").get("feedback"), "off", "a two-way cable slips out of a hand")
 
     def test_the_mujoco_solver_is_found_by_class(self) -> None:
         import newton

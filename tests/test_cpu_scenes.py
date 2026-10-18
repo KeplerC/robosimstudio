@@ -247,6 +247,52 @@ class TestTheDeformableExamplesUnchanged(unittest.TestCase):
         self.run_example("03_rope/00_cable.py", "cable")
 
 
+@unittest.skipUnless(HAS_SUPERDEX, NO_SUPERDEX)
+class TestTheCableComesUpInTheHand(unittest.TestCase):
+    """``03_rope/00_cable``'s grasp on a CPU, as its page makes it: down, **Close**, up, and the cable comes too.
+
+    The GPU's rope test (:mod:`tests.test_example_grasps_rope`) on the capsule
+    chain, made here on the SuperDex centerline the CPU puts the rope on --
+    friction alone, no latch -- with its nodes tracked where that test tracks
+    capsules. It holds because ``rss.CPU``'s rope is one-way; two-way, this
+    gesture lifted the cable in under half its runs (see :data:`rss.CPU`).
+    """
+
+    def test_the_hand_lifts_it_and_it_stays_in_the_fingers(self) -> None:
+        from tests.fixtures.examples import _run
+        from tests.fixtures.grasp import drag_to_grasp, open_session, tick
+
+        sim, kwargs = _run("03_rope/00_cable.py")
+        session = open_session(sim, 8979, kwargs.get("page"))
+        try:
+            self.assertEqual(sim.request.physics.backend_for("rod").get("feedback"), "off")
+            nodes = np.asarray(sim["cable"].particles, dtype=int)
+
+            def points() -> np.ndarray:
+                return sim.state.particle_q.numpy()[nodes].astype(np.float64)
+
+            tick(session, 30)  # the cable lands on the bench
+            lying = points()
+            home = session.arms["right"].ik.home_pose[0]
+            under = int(np.argmin(np.linalg.norm(lying[:, :2] - home[:2], axis=1)))
+            grasp = drag_to_grasp(
+                session,
+                "right",
+                lambda: points()[under],
+                at=lying[under] + np.array([0.0, 0.0, 0.010]),
+                hover=0.03,
+                lift=0.12,
+                speed=0.2,
+            )
+            middle = slice(len(nodes) // 2 - 1, len(nodes) // 2 + 1)
+            rise = float(points()[middle].mean(axis=0)[2] - lying[middle].mean(axis=0)[2])
+            self.assertTrue(grasp.finite)
+            self.assertGreater(rise, 0.10, f"the cable's middle rose {rise * 1e3:.1f} mm of a 120 mm lift")
+            self.assertLess(grasp.drift, 0.005, "the cable slid in the fingers")
+        finally:
+            session.teardown()
+
+
 class TestWhatACpuRefuses(unittest.TestCase):
     """Said by name, before anything is built, and pointing at what works instead."""
 

@@ -69,9 +69,12 @@ def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[Arra
     domains ``CPU`` routes specially (cloth, rope, soft) get their own entries,
     so a towel that fell to VBD lands on SuperDex rather than on MuJoCo.
 
-    A replacement reuses the arrangement's own spec for the same solver where
-    it has one, so free bodies that were on VBD join the arm's MuJoCo island
-    instead of founding a second one beside it.
+    The ``"*"`` entry's replacement reuses the arrangement's own spec for the
+    same solver where it has one, so free bodies that were on VBD join the arm's
+    MuJoCo island instead of founding a second one beside it. Every other
+    domain takes ``CPU``'s own spec for it: a rope that fell to VBD lands on
+    ``CPU``'s one-way rope island, not on whatever SuperDex island the
+    arrangement had for its sponge.
     """
     if not is_cpu:
         return arrangement, ()
@@ -83,6 +86,8 @@ def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[Arra
 
     def replacement(domain: str) -> BackendSpec:
         wanted = CPU.backend_for(domain)
+        if domain != "*":
+            return wanted
         own = next((s for _, s in table if s.solver == wanted.solver and runs_on_cpu(s)), None)
         return own or wanted
 

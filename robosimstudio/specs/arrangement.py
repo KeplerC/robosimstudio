@@ -413,7 +413,7 @@ CPU = replace(
     backends=(
         ("soft", backend("superdex", substeps=2)),
         ("cloth", backend("superdex", substeps=2)),
-        ("rod", backend("superdex", substeps=2)),
+        ("rod", backend("superdex", substeps=2, feedback="off")),
         *MUJOCO_500HZ.backends,
     ),
 )
@@ -433,12 +433,30 @@ puts on a CPU, so this arrangement does not state it and means the same physics
 on either device. One world, because the C library steps one ``MjData``.
 
 **Every deformable is on SuperDex**, the CPU FEM engine, co-simulated beside
-the MuJoCo island as it is on a GPU. Newton's own deformable solver is not an
+the MuJoCo island as it is on a GPU -- soft bodies and cloth on one island, rope
+on another. Newton's own deformable solver is not an
 option on a CPU: VBD's Warp kernels run one thread at a time there, and a
 1922-particle towel took 96 s for 20 control steps. Two engine steps per
 control step, 10 ms each, inside SuperDex's comfort band. Without the
 ``[cpu]`` extra the arm and rigid bodies still run, and a cloth, rope or soft
 body refuses to build, naming it.
+
+**A rope is one-way: it does not push back on what touches it.** The rod's
+SuperDex island harvests no contact wrench (``feedback="off"``), so the pads,
+the bench and every rigid body drive the cable and none of them feels it. That
+is what lets a hand hold one. Two-way, the cable's contact force reaches the
+10 g finger pads one control step late, and on the cable example's own grasp
+-- down, close, lift 120 mm, hold 2 s, friction alone -- that either kicked the
+hand 100 mm off the cable or let the jaws close through it. Over 95 two-way runs
+(contact penalty 8e7 to 1e11, feedback cap 0.5 to 20 m/s, 2 to 8 engine steps,
+friction falloff 10 and 1 mm/s, the jaws closed fully or to 14-20 mm), no
+setting held it in more than two of four slightly different approaches, and
+repeats of one setting disagreed. One-way, it came up in all 35 runs, CPU and
+GPU alike, rising 118-121 mm and slipping 0.5-2.6 mm in the fingers, on Close
+or closed to 16-20 mm round its 22 mm, and repeats were identical. What it costs: a cable pulled
+taut does not hold the hand back, it does not shove a free block, and on its own
+island it does not touch a sponge or a sheet in the same scene. Stage
+``("rod", backend("superdex", substeps=2))`` for the two-way cable.
 
 **The rates and the contact law are :data:`MUJOCO_500HZ`'s**, 50 Hz control over
 500 Hz physics, so a hand holds a rigid body here as it does there. Measured
