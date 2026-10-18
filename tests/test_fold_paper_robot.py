@@ -186,6 +186,7 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         jaws_to((PINCH_X, CREASE_Y + radius + 0.03, surface + 0.03), 0.03)
         tick(session, 20)
         cls.laid = _measures(sim)
+        cls.far_laid = float(points()[:, 1].max())
         y = float(points()[:, 1].min()) + 0.02
         jaws_to((PINCH_X, CREASE_Y + radius + 0.03, surface + 0.05), 0.02)
         session.arms["left"].cursor_quat = STAMP
@@ -198,6 +199,7 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
             stamps.append(go(session, "left", (x, y, BENCH[2] + 0.06), speed=0.06, **left))
         cls.miss["stamps"] = max(stamps)
         cls.stamped = _measures(sim)
+        cls.shoved = float(points()[:, 1].max()) - cls.far_laid
         # Let go: up 25 mm, open to half (the lower pad comes back down the 25 mm), out past the edge, up.
         jaws_to(hand.middle() + np.array([0.0, 0.0, 0.025]), 0.02)
         right.grip_request = 0.5
@@ -216,7 +218,8 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         cls.far_end = float(points()[:, 1].max())
         print(
             f"\n[fold] miss {cls.miss} pushes {cls.pushes} laid {cls.laid} stamped {cls.stamped} "
-            f"after {cls.after[-1]} top {cls.top:.4f} dragged {cls.dragged:.4f} {cls.ms_per_step:.1f} ms",
+            f"after {cls.after[-1]} top {cls.top:.4f} dragged {cls.dragged:.4f} shoved {cls.shoved:.4f} "
+            f"{cls.ms_per_step:.1f} ms",
             flush=True,
         )
 
@@ -249,6 +252,13 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         # between, so an unheld sheet fails it.
         moved = abs(self.far_carried - self.far0)
         self.assertLess(moved, 0.025, f"the far end moved {moved * 1e3:.1f} mm under the left hand")
+
+    def test_the_stamps_shove_the_folded_sheet_but_leave_it_on_the_bench(self) -> None:
+        # The left hand's three stamps push the whole folded sheet along the bench, away from the edge
+        # it overhung, and the fold rides with it: 45.9 and 47.3 mm in two drives of this test (GPU 3).
+        # The bound keeps the sheet's far end on the bench.
+        self.assertGreater(self.shoved, 0.0, f"the far end moved {self.shoved * 1e3:.1f} mm")
+        self.assertLess(self.shoved, 0.08, f"the stamps shoved the sheet {self.shoved * 1e3:.1f} mm along the bench")
 
     def test_the_hand_leaves_without_the_sheet(self) -> None:
         self.assertLess(self.dragged, 0.01, f"drawing the open hand out moved the sheet {self.dragged * 1e3:.1f} mm")

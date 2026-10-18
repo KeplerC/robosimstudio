@@ -21,12 +21,13 @@ a handle the jaws close across, a small articulation on the robot's island
 30 mm up through the jaws in one pass), so the handle's shape carries the load:
 a shoulder under the fingertips takes the dough's push, a wall either side of
 each finger takes the drag. Three passes at 0.1 m/s, the drum's underside about
-11 mm over the bench, take the block from 28.6 to 13.2 mm and its footprint to
-1.8 times the settled one, the drum turning 4.5 rad a pass; welded to its handle
-it slides and leaves 18.6 mm. The panel reads the footprint against the settled
-one and the height at the 95th percentile of the particles. 24.6 ms per control
-step on an RTX PRO 6000, graph-captured (`tests/test_roll_dough`,
-`probe_roll2`, GPU 6).
+11 mm over the bench, take the block from 28.6 to 12.6 mm and its footprint to
+about twice the settled one (2.01 to 2.11 in three drives on Newton 1.7, where
+1.6 read 1.75), the drum turning 4.2 to 4.6 rad a pass; welded to its handle it
+slid and left 18.6 mm on 1.6 (`probe_roll2`). The panel reads the footprint
+against the settled one and the height at the 95th percentile of the particles.
+21.8 ms per control step on an RTX PRO 6000, graph-captured
+(`tests/test_roll_dough`, GPU 3).
 
 ```bash
 uv run examples/12_dough/00_roll_dough.py
