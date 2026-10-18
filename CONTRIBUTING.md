@@ -25,7 +25,7 @@ uvx ruff@0.16.1 check . && uvx ruff@0.16.1 format . --check
 Every test module declares `TIER = "fast" | "medium" | "slow" | "cpu"`;
 `scripts/testrun.py` fails, naming the module, on one without it. Tests that
 build a scene on a GPU are `medium`, and tests that build one on a CPU are `cpu`
-(the runner hides every GPU for that tier). CI runs `fast` and `cpu`, so run
+(the runner hides every GPU for `fast` and `cpu`, as CI's runners have none). CI runs `fast` and `cpu`, so run
 `medium` on a GPU before changing simulation code.
 
 ## Where things go

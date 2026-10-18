@@ -631,6 +631,9 @@ class TestTheRestFollowsTheDevice(unittest.TestCase):
         run = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(run)
         self.assertIn("cpu", run.TIERS)
+        # Both no-GPU tiers hide the GPUs, so a GPU machine runs what CI's runners do.
+        self.assertEqual(set(run.NO_GPU_TIERS), {"fast", "cpu"})
+        self.assertEqual(run.NO_GPU["CUDA_VISIBLE_DEVICES"], "")
 
 
 if __name__ == "__main__":

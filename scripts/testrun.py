@@ -6,7 +6,10 @@ The suite splits by what a test *needs*, not by what it is about:
 ``fast``
     No GPU. Runs in seconds and gates every commit. Schema and typecheck claims,
     handler contracts, atom arithmetic on synthetic geometry, goal-tree semantics
-    on scripted snapshots, structural rules about the tree itself.
+    on scripted snapshots, structural rules about the tree itself. Run with every
+    GPU hidden, as CI's runners have none: a test that composes a model puts it
+    on whatever device Warp finds, and on a GPU machine that would quietly be
+    the GPU.
 ``medium``
     A GPU, and a scene or two. Build, reset, settle, a handful of steps. Run by
     hand on a GPU machine; no CI workflow runs it.
@@ -17,7 +20,7 @@ The suite splits by what a test *needs*, not by what it is about:
     No GPU, and real scenes: built and stepped on Warp's CPU device with MuJoCo's
     C library and SuperDex, the way ``robosimstudio[cpu]`` runs them. Needs the
     ``[cpu]`` extra; under a minute, about half of it Warp compiling its kernels
-    for the CPU the first time. Run with ``CUDA_VISIBLE_DEVICES`` emptied, so a
+    for the CPU the first time. Run with every GPU hidden, like ``fast``, so a
     GPU machine proves what a machine without one does; CI runs it.
 
 The tier is declared by each module as a ``TIER`` constant and read **by AST**,
@@ -47,6 +50,14 @@ import subprocess
 import sys
 
 TIERS = ("fast", "medium", "slow", "cpu")
+
+NO_GPU_TIERS = ("fast", "cpu")
+"""The tiers run with every GPU hidden, so a GPU machine runs exactly what CI does."""
+
+NO_GPU = {"CUDA_VISIBLE_DEVICES": "", "ROBOSIMSTUDIO_DEVICE": "", "ROBOSIMSTUDIO_RENDERER": ""}
+"""What hides them: the driver's variable, and the device rule's own two cleared,
+so the device is picked as a machine without a GPU picks it -- not forced, and not
+left to whatever a shell exported."""
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TESTS = ROOT / "tests"
 
@@ -131,11 +142,7 @@ def main(argv: list[str] | None = None) -> int:
 
     command = [sys.executable, "-m", "unittest", *names, *(["-v"] if args.verbose else []), *args.rest]
     print(f"$ {' '.join(command[:4])} ... ({len(names)} modules)")
-    # The cpu tier hides every GPU, so a machine that has one runs exactly what
-    # a machine without one would: the device is picked, not forced -- which is
-    # also why a shell's own ROBOSIMSTUDIO_DEVICE / _RENDERER is cleared for it.
-    cpu = {"CUDA_VISIBLE_DEVICES": "", "ROBOSIMSTUDIO_DEVICE": "", "ROBOSIMSTUDIO_RENDERER": ""}
-    env = {**os.environ, **cpu} if args.tier == "cpu" else None
+    env = {**os.environ, **NO_GPU} if args.tier in NO_GPU_TIERS else None
     return subprocess.run(command, cwd=ROOT, check=False, env=env).returncode
 
 
