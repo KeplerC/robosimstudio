@@ -6,13 +6,15 @@ An A4 sheet hangs 35 mm over the bench's right edge: close the left hand and pre
 The pads hold the paper by friction alone, and the fold keeps 2.52 to 2.67 rad over 22 drives
 (``tests/test_fold_paper_robot``, its take, Newton 1.7). The overhang is what makes the pinch possible:
 a sheet lying flat gives the lower pad nothing to get under (seven top-down pinches raised it 0 mm), and
-the palm stops the jaws at the corner. The three stamps also shove the folded sheet 46 to 55 mm along
-the bench, away from the edge, and the fold rides with it (``tests/test_fold_paper_robot``, three
-drives). The stamps need the edge still held and lifted clear: let go first and the flap springs back
-up 85 to 87 mm, so the stamps leave the fold at the 1.38 to 1.39 rad the carry laid; held where it was
-laid, 3 mm over the sheet, the open hand drawn out took the whole sheet 58 to 66 mm along with it
-(``fold_counter.py``, two drives each, GPU 3). The **Crease** folder reads ``crease_angle`` and
-``fold_extent``; set ``yield_angle`` to 0 under **Material** and the same fold springs open.
+the palm stops the jaws at the corner. The three stamps also shove the folded sheet 42 to 55 mm along
+the bench, away from the edge, and the fold rides with it (11 drives, ``tests/test_fold_paper_robot``
+and ``fold3.py``). The stamps need the edge still held and lifted clear: let go first and the flap
+springs back up 85 to 87 mm, so the stamps leave the fold at the 1.38 to 1.39 rad the carry laid; held
+where it was laid, 3 mm over the sheet, the open hand drawn out took the whole sheet 58 to 66 mm along
+with it (``fold_counter.py``, two drives each, GPU 3). The **Crease** folder reads ``crease_angle`` and
+``fold_extent``. Set ``yield_angle`` to 0 under **Material** before the fold and no crease forms: in two
+drives the crease read 0.00 rad laid and stamped, the flap stood 63 to 65 mm up as the hand left, and
+the sheet then lay open and flat, ``fold_extent`` 1.22 (``fold_r3.py``, GPU 3).
 """
 
 import robosimstudio as rss

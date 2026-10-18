@@ -37,9 +37,9 @@ TIP = 0.0167
 STAIN = (0.55, 0.65, -0.08)
 """The stain's two ends along x and its line in y [world, m]."""
 DEPTHS = (0.0055, 0.0045, 0.0035)
-"""Fingertip heights over the bench for the static presses [m]. Held still the hand first reads
-the towel at 5.5 mm (2.3 N; nothing at 6.5); stroking, at 7.2 (1.9 N), the stroke heaping the
-towel in front of the fingers."""
+"""Fingertip heights over the bench for the static presses [m]. Held still, the fingers press the
+towel 6.0 N at 5.5 mm, 28 N at 4.5 and 53 N at 3.5 (6.04/28.28/53.04 and 6.05/28.31/53.06 in two runs
+of this test, GPUs 6 and 1)."""
 STROKES = {"brush": 0.5, "hard": 90.0, "band": 20.0}
 """What **push** reads [N] when the hand stops going down for each stroke, the way the page asks for
 it: a height is a poor stand-in, because the push climbs 30 to 80 N a millimetre and a towel settled

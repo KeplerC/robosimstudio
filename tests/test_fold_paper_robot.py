@@ -257,8 +257,8 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
 
     def test_the_stamps_shove_the_folded_sheet_but_leave_it_on_the_bench(self) -> None:
         # The left hand's three stamps push the whole folded sheet along the bench, away from the edge
-        # it overhung, and the fold rides with it: 45.9, 47.3 and 55.2 mm in three drives of this test
-        # (GPUs 1 and 3).
+        # it overhung, and the fold rides with it: 42.2 to 55.2 mm in 11 drives of this path over three
+        # review rounds (this test and fold3.py, GPUs 1, 3 and 6).
         # The bound keeps the sheet's far end on the bench.
         self.assertGreater(self.shoved, 0.0, f"the far end moved {self.shoved * 1e3:.1f} mm")
         self.assertLess(self.shoved, 0.08, f"the stamps shoved the sheet {self.shoved * 1e3:.1f} mm along the bench")
