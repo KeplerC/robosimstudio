@@ -438,20 +438,22 @@ register_atom(
         provenance="Designed here, on the rim the bag is built with: the top and bottom layers' mouth rows.",
         calibration=AtomCalibration(
             positives=(
-                "The example's canvas bag, its lip pinched by the YAM's pads and lifted 120 mm and drawn 50 mm "
-                "back, reads 54-91 mm and 59-86 cm^2 over eight drives (p9_drive.py, GPUs 3 and 5), 33-74 mm "
-                "in four filmed takes.",
+                "The example's canvas bag, its lip pinched by the YAM's pads 25 mm over the bench, lifted to "
+                "80 mm and drawn 60 mm back, reads 74.9-76.6 mm and 66-67 cm^2 in seven drives; pinched 12-30 mm "
+                "over the bench, 66-90 mm (f_bag.py, GPUs 1 and 3).",
             ),
             negatives=(
-                "The bag lying shut reads 7.7 mm and 10.2 cm^2: its rows a contact radius apart. Pinched 15 mm "
-                "over the bench, both layers in the pads, the bag is dragged and reads 39-47 mm.",
+                "The bag lying shut reads 7.7 mm and 10.2 cm^2: its rows a contact radius apart. A hand that closes "
+                "over the lip's top, 45 mm up, lifts nothing and the bag reads the same 7.7 mm (f_bag.py).",
             ),
             gate=0.03,
-            bench="examples/16_bags/00_open_a_bag driven through its arm panels, tests/test_open_a_bag.py",
+            bench="examples/16_bags/00_open_a_bag driven through its right arm panel, tests/test_open_a_bag.py",
             notes=(
                 "The height is the widest span between the top and bottom rows of the mouth, the area the "
                 "rim's vector area, so a mouth tilted toward the hand reads its true opening. The gate sits "
-                "four times over a shut bag and under the least a lifted lip gave."
+                "four times over a shut bag and under half the least a pinched lip gave. It reads the mouth, "
+                "not the layers: with self-contact off the same drive reads 75 mm, so layer_gap is the "
+                "measure that tells the two apart."
             ),
         ),
     )

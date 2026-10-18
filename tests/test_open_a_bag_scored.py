@@ -3,10 +3,10 @@
 
 ``examples/16_bags/01_open_a_bag_scored`` is ``00_open_a_bag`` as a task document with a goal,
 ``(>= (mouth_opening bag) 0.03)``. The task's hands start at the YAM's own home, pointing ahead,
-so a person first turns each gizmo to point down; this writes that turn into the arm panels'
-cursors, then drives them through :mod:`tests.fixtures.grasp` as ``tests/test_open_a_bag``
-does: the left hand closed onto the closed end, the right hand down onto the lip, **Close**,
-up and back. ``evaluate`` reads the atom and says success.
+so a person first turns the right gizmo to point down; this writes that turn into the arm panel's
+cursor, then drives it through :mod:`tests.fixtures.grasp` as ``tests/test_open_a_bag`` does:
+the right hand down onto the lip, **Close**, up to 80 mm and back 60 mm. ``evaluate`` reads the
+atom and says success.
 """
 
 from __future__ import annotations
@@ -19,17 +19,17 @@ from tests.fixtures.examples import _run
 from tests.fixtures.grasp import go, open_session, tick
 
 TIER = "medium"
-"""One GPU: the task built once and driven through its page for about 8 s of scene."""
+"""One GPU: the task built once and driven through its page for about 7 s of scene."""
 
 PORT = 9763
 Z = 0.728
 """``bench_0728``'s work surface [m]."""
 TOOL_DOWN = (0.0, 1.0, 0.0, 0.0)
-"""The YAM's tool pointing down, jaws closing along world y: the turn a person gives each gizmo first."""
+"""The YAM's tool pointing down, jaws closing along world y: the turn a person gives the right gizmo first."""
 
 
 class TestTheTaskGoalTurnsTrue(unittest.TestCase):
-    """Both hands turned down, the bag opened as in 00: ``evaluate`` reports the goal met."""
+    """The right hand turned down, the bag opened as in 00: ``evaluate`` reports the goal met."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -42,19 +42,16 @@ class TestTheTaskGoalTurnsTrue(unittest.TestCase):
         cls.self_contact = bool(bag.entity.spec.self_contact)
         cls.session = session = open_session(cls.env, PORT, kwargs.get("page"))
         tick(session, 30)
-        for arm in ("left", "right"):
-            session.arms[arm].cursor_quat = np.asarray(TOOL_DOWN, dtype=np.float64)
+        session.arms["right"].cursor_quat = np.asarray(TOOL_DOWN, dtype=np.float64)
         lip = points()[bag.entity.top[int(bag.entity.spec.cells[0]) + 1 :].ravel()]
         order = np.argsort(lip[:, 2])
-        x, y = float(np.median(lip[:, 0])), float(np.interp(Z + 0.02, lip[order, 2], lip[order, 1]))
-        session.arms["left"].grip_request = 1.0
-        miss = [go(session, "left", (0.6, 0.08, Z + 0.10)), go(session, "left", (0.6, 0.08, Z + 0.019), speed=0.06)]
-        miss += [go(session, "right", (x, y, Z + 0.10)), go(session, "right", (x, y, Z + 0.02), speed=0.06)]
+        x, y = float(np.median(lip[:, 0])), float(np.interp(Z + 0.025, lip[order, 2], lip[order, 1]))
+        miss = [go(session, "right", (x, y, Z + 0.10)), go(session, "right", (x, y, Z + 0.025), speed=0.06)]
         session.arms["right"].grip_request = 1.0
         tick(session, 60)
         miss += [
-            go(session, "right", (x, y, Z + 0.12), speed=0.06),
-            go(session, "right", (x, y + 0.05, Z + 0.12), speed=0.04),
+            go(session, "right", (x, y, Z + 0.08), speed=0.06),
+            go(session, "right", (x, y + 0.06, Z + 0.08), speed=0.04),
         ]
         tick(session, 60)
         cls.miss = max(miss)
@@ -70,10 +67,10 @@ class TestTheTaskGoalTurnsTrue(unittest.TestCase):
         self.assertTrue(self.self_contact, "the record carries the spec's self-contact")
 
     def test_the_hands_got_where_they_were_dragged(self) -> None:
-        self.assertLess(self.miss, 0.008, f"a hand ended {self.miss * 1e3:.1f} mm short")
+        self.assertLess(self.miss, 0.008, f"the hand ended {self.miss * 1e3:.1f} mm short")
 
     def test_the_goal_is_met(self) -> None:
-        # 59.9 mm and 63.6 cm^2, the layers 3.63 mm apart at worst (p12_scored.py, GPU 3).
+        # 75.5 mm and 66.5 cm^2, the layers 3.48 mm apart at the end (t_scored.py, GPU 3).
         self.assertTrue(self.info["success"], f"metrics: {self.info['metrics']}")
         self.assertGreaterEqual(float(self.info["metrics"]["height"]), 0.03)
         self.assertGreater(self.gap, 0.0015, f"least gap {self.gap * 1e3:.2f} mm")
