@@ -569,6 +569,8 @@ class EntityBrush(Entity):
         self.joints: np.ndarray = np.zeros(0, dtype=np.int32)
         self.strip_bodies: np.ndarray = np.zeros(0, dtype=np.int32)
         """One sole strip per row of bristles, welded under the grip."""
+        self.strip_coords: list[int] = []
+        """Under a named handle, each strip's free-joint coordinates (:meth:`build`); empty under its own grip."""
         self.bristle_bodies: np.ndarray = np.zeros((0, 0), dtype=np.int32)
         """``(count, segments)`` capsule bodies, root to tip, template-indexed."""
         self.handle_shapes: np.ndarray = np.zeros(0, dtype=np.int32)
@@ -686,6 +688,13 @@ class EntityBrush(Entity):
         row, no body carries more than ``columns + 1`` joints. The grip, its
         strips and their welds are one articulation, built first so its joints
         run contiguously as Newton requires; each bristle is its own chain.
+
+        A named handle is already in an articulation of its own, which Newton
+        1.7 refuses to see joined to another through a joint. There each strip
+        is rooted to the world by a free joint, its own articulation, and the
+        weld from the handle stays outside every articulation -- the way 1.7
+        roots a cable and leaves its extra welds out. VBD solves a free joint
+        as no constraint, so the welds hold the strips to the handle as before.
         """
         del episode
         spec = self.spec
@@ -696,6 +705,7 @@ class EntityBrush(Entity):
         body_start, joint_start, shape_start = builder.body_count, builder.joint_count, builder.shape_count
 
         sole = self._sole_xform()
+        self.strip_coords = []
         grip, grip_xform, articulation, own = self._grip(builder, sole)
         handle_shapes = list(own)
         sx, sy, sz = (float(v) for v in spec.sole)
@@ -708,6 +718,10 @@ class EntityBrush(Entity):
             )
             strip = builder.add_link(xform=strip_xform, label=f"{spec.name}/strip{r:02d}")
             strips.append((int(strip), strip_xform))
+            if spec.handle:
+                root = builder.add_joint_free(child=strip, label=f"{spec.name}/strip{r:02d}_free")
+                builder.add_articulation([root], label=f"{spec.name}/strip{r:02d}_articulation")
+                self.strip_coords.append(int(builder.joint_q_start[root]))
             handle_shapes.append(
                 builder.add_shape_box(
                     strip,
@@ -719,16 +733,17 @@ class EntityBrush(Entity):
                     label=f"{spec.name}/sole{r:02d}",
                 )
             )
-            articulation.append(
-                builder.add_joint_fixed(
-                    parent=grip,
-                    child=strip,
-                    parent_xform=wp.transform_multiply(wp.transform_inverse(grip_xform), strip_xform),
-                    child_xform=wp.transform_identity(),
-                    label=f"{spec.name}/strip{r:02d}_weld",
-                )
+            weld = builder.add_joint_fixed(
+                parent=grip,
+                child=strip,
+                parent_xform=wp.transform_multiply(wp.transform_inverse(grip_xform), strip_xform),
+                child_xform=wp.transform_identity(),
+                label=f"{spec.name}/strip{r:02d}_weld",
             )
-        builder.add_articulation(articulation, label=f"{spec.name}_articulation")
+            if not spec.handle:
+                articulation.append(weld)
+        if articulation:
+            builder.add_articulation(articulation, label=f"{spec.name}_articulation")
 
         # The hand meets the brush at the grip and nowhere else (BrushSpec.hand_contact),
         # and a named handle never meets its own bristles (module docstring).
@@ -914,7 +929,8 @@ class EntityBrush(Entity):
         if self._rest_body_q is None:
             return
         rows = self._global(self.bodies, world)
-        coords = np.arange(self.coord_start, self.coord_start + 7, dtype=np.int64) if self.coord_start >= 0 else None
+        starts = [self.coord_start] if self.coord_start >= 0 else list(self.strip_coords)
+        coords = np.concatenate([np.arange(c, c + 7, dtype=np.int64) for c in starts]) if starts else None
         if coords is not None and self.worlds is not None:
             coords = np.asarray([self.worlds.coord(int(c), world) for c in coords], dtype=np.int64)
         for state in (pipeline.state_0, pipeline.state_1):
