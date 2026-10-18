@@ -108,7 +108,7 @@ class TestTheWipeIsGatedOnThePush(unittest.TestCase):
         from robosimstudio_materials.cloth import ForceGatedWipe
 
         sim = _Sim(**vars(_scene(_coupler(records, capacity=8))))
-        return ForceGatedWipe(sim, "towel", "stain", "right", (20.0, 60.0))
+        return ForceGatedWipe(sim, "towel", "stain", "right", (20.0, 60.0), rub=0.0)  # every touch counts
 
     def test_the_hand_is_its_tool_link_and_fingers_and_the_bench_is_found_by_name(self) -> None:
         from robosimstudio_materials.cloth import contact_shapes
@@ -154,6 +154,46 @@ class TestTheWipeIsGatedOnThePush(unittest.TestCase):
         self.assertEqual(reading["crushed"], 0.0, "a step's jump is not a press")
         self.assertEqual(reading["wiped"], 0.25)
         self.assertEqual(max(wipe.raw), 500.0, "the raw readings keep it")
+
+    def test_lifting_a_hard_press_back_through_the_band_wipes_nothing(self) -> None:
+        import warp as wp
+
+        from robosimstudio_materials.cloth import ForceGatedWipe
+
+        sim = _Sim(**vars(_scene(_coupler([((10,), 1, (0.0, 0.0, 90.0))], capacity=8))))
+        wipe = ForceGatedWipe(sim, "towel", "stain", "right", (20.0, 60.0), window=1, rub=0.0)
+        rows = sim.pipeline.program.solver.observables.contact_f
+
+        def push(newtons: float) -> dict:  # the hand's one record, on the stain's first particle
+            values = rows.numpy()
+            values[3, 2] = newtons
+            rows.assign(wp.array(values, dtype=wp.spatial_vector, device="cpu"))
+            return wipe.update()
+
+        reading = push(90.0)
+        self.assertEqual((reading["wiped"], reading["crushed"]), (0.0, 0.25))
+        reading = push(40.0)  # coming off, the push passes back through the band
+        self.assertEqual((reading["wiped"], reading["crushed"]), (0.0, 0.25), "still the hard press")
+        push(5.0)  # off: the press is over
+        self.assertFalse(wipe.hard)
+        reading = push(40.0)  # a fresh press inside the band wipes
+        self.assertEqual(reading["wiped"], 0.25)
+
+    def test_only_a_hand_sliding_along_the_sheet_wipes(self) -> None:
+        from robosimstudio_materials.cloth import ForceGatedWipe
+
+        sim = _Sim(**vars(_scene(_coupler([((10,), 1, (0.0, 0.0, 30.0))], capacity=8))))
+        body_q = np.zeros((8, 7), dtype=np.float32)
+        sim.state = SimpleNamespace(body_q=SimpleNamespace(numpy=body_q.copy))
+        wipe = ForceGatedWipe(sim, "towel", "stain", "right", (20.0, 60.0), window=1)
+        np.testing.assert_array_equal(wipe.bodies, [5, 6])
+        self.assertEqual(wipe.update()["wiped"], 0.0, "the first reading has nothing to compare with")
+        body_q[[5, 6], 2] += 0.01  # straight up 10 mm: a lift, not a rub
+        self.assertEqual(wipe.update()["wiped"], 0.0)
+        body_q[[5, 6], 0] += 0.0001  # 0.1 mm along: under the default 0.2
+        self.assertEqual(wipe.update()["wiped"], 0.0)
+        body_q[[5, 6], 0] += 0.0005
+        self.assertEqual(wipe.update()["wiped"], 0.25)
 
     def test_a_push_past_the_band_is_too_hard_and_wipes_nothing(self) -> None:
         wipe = self._wipe([((10, 11), 1, (0.0, 0.0, 90.0))])

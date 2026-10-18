@@ -10,7 +10,8 @@ joint, and holds the readout to physics first: nothing until the fingers touch,
 more the deeper they press, and what the hand puts in coming out of the bench's
 own reading. Then the three strokes the page promises: one that only
 brushes the stain wipes none of it, one inside the band wipes it, and one pressed
-past the band marks it too hard and wipes none.
+past the band marks it too hard and wipes none; lifting the hand straight up off any
+of them wipes nothing more, because only a hand sliding along the towel rubs.
 """
 
 from __future__ import annotations
@@ -49,10 +50,18 @@ CLEAR = 0.04
 """How far before the stain each stroke starts along x [m]: the hand goes down away from it, so the
 push's climb through the band touches none of it."""
 PAST = 0.01
-"""How far past the stain each stroke ends [m]. Stroked on to 40 mm past, the push climbed 20 to 50 N
-a control step over the last eight, to 208 N in a light stroke whose median was 4.2 N and 940 N in
-the hard one, there and nowhere else along the stroke; a stroke drags the towel 7 to 20 mm along
-with it (``scrub2.py``), which is the likeliest thing for the fingers to meet there."""
+"""How far past the stain each stroke stays at its height [m]. Stroked on to 40 mm past, the push
+climbed 20 to 50 N a control step over the last eight, to 208 N in a light stroke whose median was
+4.2 N and 940 N in the hard one, there and nowhere else along the stroke; a stroke drags the towel 7
+to 20 mm along with it (``scrub2.py``), which is the likeliest thing for the fingers to meet there."""
+EASE = (0.015, 0.008)
+"""Then on another 15 mm while rising 8 mm [m], off the towel the stroke pushed ahead of it. Stopped
+dead 10 mm past the stain, that towel bunched under the fingers and pressed back into the band as the
+hand came to rest, and a light stroke wiped the stain's last particle (1 of 9) in the take and in
+two of three replays of its drive (``take_path.py``); eased off, three light strokes of three wiped
+nothing, and the band and hard strokes read as before (``take_ramp.py``, GPU 3)."""
+STEP = 0.00075
+"""How far the cursor moves along a stroke each control step [m]: 45 mm/s."""
 
 
 def _settled_push(session, sim, read, steps: int = 30, window: int = 10) -> np.ndarray:
@@ -107,21 +116,32 @@ class TestTheScrubReadsAPhysicalForce(unittest.TestCase):
                 tick(session, 1)
             panel.dragging = False
             tick(session, 20)
-            pushes, n = [], 200
+            begin, flat, end = x0 - CLEAR, x1 + PAST, x1 + PAST + EASE[0]
+            pushes, n = [], round((end - begin) / STEP)
             for k in range(1, n + 1):
-                along = x0 - CLEAR + (x1 - x0 + CLEAR + PAST) * k / n
-                panel.cursor_pos, panel.dragging = np.array([along, y, z]), k < n
+                along = begin + (end - begin) * k / n
+                rise = EASE[1] * max(0.0, along - flat) / EASE[0]
+                panel.cursor_pos, panel.dragging = np.array([along, y, z + rise]), k < n
                 tick(session, 1)
                 pushes.append(gate.update()["push"])
             reading = gate.readout()
+            # Up 30 mm more at 0.05 m/s, the gate still reading: lifting a hard press takes the push
+            # back down through the band while the fingers touch.
+            for k in range(1, 37):
+                panel.cursor_pos, panel.dragging = np.array([end, y, z + EASE[1] + 0.03 * k / 36]), k < 36
+                tick(session, 1)
+                gate.update()
+            tick(session, 20)
+            lifted = gate.update()
             cls.strokes[name] = {
                 "over": round((z - SURFACE - TIP) * 1e3, 2),
                 "push": float(np.median(pushes)),
                 "most": float(np.max(pushes)),
                 "wiped": reading["wiped"],
                 "too hard": reading["crushed"],
+                "wiped lifted": lifted["wiped"],
+                "too hard lifted": lifted["crushed"],
             }
-            go(session, "right", (x1 + PAST, y, SURFACE + TIP + 0.03), speed=0.05)
             go(session, "right", start, speed=0.1)
         tick(session, 2)
         cls.page = {label: float(handle.value) for label, handle in cls.shown.items()}
@@ -163,6 +183,7 @@ class TestTheScrubReadsAPhysicalForce(unittest.TestCase):
         stroke = self.strokes["brush"]
         self.assertLess(stroke["most"], 20.0, stroke)
         self.assertEqual(stroke["wiped"], 0.0, stroke)
+        self.assertEqual(stroke["wiped lifted"], 0.0, f"lifting straight up off it rubs nothing: {stroke}")
 
     def test_a_stroke_inside_the_band_wipes_the_stain(self) -> None:
         stroke = self.strokes["band"]
@@ -176,6 +197,14 @@ class TestTheScrubReadsAPhysicalForce(unittest.TestCase):
         self.assertGreater(stroke["push"], 60.0, stroke)
         self.assertGreaterEqual(stroke["too hard"], 0.5, stroke)
         self.assertLess(stroke["wiped"], 0.2, stroke)
+
+    def test_lifting_the_hard_press_off_wipes_nothing(self) -> None:
+        # Gated on the band alone, the lift took the push back through it with the fingers still on the
+        # towel and marked 3 of the stain's 9 particles wiped after a stroke that wiped none, in one drive
+        # of two (scrub_lift.py).
+        stroke = self.strokes["hard"]
+        self.assertEqual(stroke["wiped lifted"], stroke["wiped"], stroke)
+        self.assertGreaterEqual(stroke["too hard lifted"], stroke["too hard"], stroke)
 
     def test_the_page_shows_the_readout(self) -> None:
         self.assertEqual(set(self.shown), {"push (N)", "wiped (20-60 N)", "too hard"})

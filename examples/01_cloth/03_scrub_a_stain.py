@@ -3,13 +3,14 @@
 
 A towel with a stain along its middle under the right hand: press **Close**, drag the hand down onto the stain until **push** reads between 20 and 60 N, and drag it along the stain: only what it rubbed inside that band is wiped.
 
-The push is what the towel puts on the hand's colliders: Newton 1.7's VBD contact force, read
-through ``coupler("one_way", contact_forces=True)``. The arm still goes where it is dragged, so it is
-the force the hand would feel: zero until the fingers touch, then, stroking, 32 N with the fingertips
-6 mm over the bench and 116 N at 4 mm, which the bench's own reading takes up to within a newton
-(``tests/test_scrub_a_stain.py``, GPU 5). A stroke that only brushes the stain wipes nothing, and
-one pressed past 60 N marks what it rubbed **too hard** instead. Contact forces resolve a press, not
-a weight: the towel lying still does not read its own 0.6 N on the bench.
+The push is what the towel puts on the hand's colliders: Newton 1.7's VBD contact force, read through
+``coupler("one_way", contact_forces=True)``, while the arm still goes where it is dragged. It reads zero
+until the fingers touch, then, stroking, 32 N with the fingertips 6 mm over the bench and 116 N at 4 mm,
+which the bench's own reading takes up to within a newton (``tests/test_scrub_a_stain.py``, GPU 5). A
+stroke that only brushes the stain wipes nothing, one pressed past 60 N marks what it rubs **too hard**
+until the hand comes off, and pressing or lifting without sliding counts for nothing. Ease the hand up as
+it leaves the stain: stopped dead, the towel it pushed ahead presses back. The stain is drawn brown, red
+where pressed too hard, gone where wiped. Contact forces resolve a press, not a resting weight.
 """
 
 import numpy as np
@@ -25,8 +26,7 @@ def main():
     band = (20.0, 60.0)  # the push that wipes [N]
     # The stain: 100 mm of the towel's top face along y = -0.08, where a hand pressing down reaches it.
     stain = ("stain", lambda r: (abs(r[:, 1] + 0.08) < 0.008) & (abs(r[:, 0]) < 0.05) & (r[:, 2] > np.median(r[:, 2])))
-    # The right arm's joints [rad], its closed fingers 90 mm over the stain's near end, pointing
-    # down. Solved once with ``sim.arm("right").solve_q_full``; move the stain, solve again.
+    # The right arm's joints [rad], closed fingers 90 mm over the stain's near end (``solve_q_full``).
     over_stain = (0.5928, 2.1268, 1.87, -1.3133, 0.0003, 0.5928)
 
     forces = rss.coupler("one_way", contact_forces=True)  # one-way, and reading what each contact pushes
@@ -59,6 +59,7 @@ def main():
         def each_step() -> None:
             reading = wipe.update()
             push.value, wiped.value, hard.value = (round(reading[k], 2) for k in ("push", "wiped", "crushed"))
+            wipe.draw(studio.scene)  # the stain on the towel: brown, red where too hard, gone where wiped
 
         studio.each_step(each_step)
 
