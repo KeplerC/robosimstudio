@@ -27,7 +27,7 @@ dependencies = [
     # [sim] carries mujoco and mujoco-warp, which the default rigid solver needs
     # at runtime; newton imports them lazily, so a bare "newton" resolves and
     # then cannot step an arm.
-    "newton[sim]>=1.6,<1.7",
+    "newton[sim]>=1.7,<1.8",
     "numpy",
     # ModelBuilder.approximate_meshes(method="convex_hull") imports scipy.spatial
     # at call time, and every scene with a hand in it calls it.
@@ -189,7 +189,7 @@ override-dependencies = [
     "robosuite; sys_platform == 'never'",
     "gym; sys_platform == 'never'",
     "bddl; sys_platform == 'never'",
-    "mujoco~=3.12.0",
+    "mujoco~=3.15.0",
 ]
 
 # Skill registries a graph's subgraphs may name, in gap's own convention: a
