@@ -4,7 +4,7 @@
 
 You need [uv](https://docs.astral.sh/uv/). An NVIDIA GPU is needed only for the
 `medium` and `slow` tiers. Without one, `export UV_NO_GROUP=rtx` and add
-`--extra cpu` to the `uv run` lines below; see [Install](README.md#install).
+`--extra cpu` to the `uv run` lines below; see [Installation](examples/install.md#without-a-gpu).
 
 ```bash
 git clone https://github.com/robosimstudio/robosimstudio.git
