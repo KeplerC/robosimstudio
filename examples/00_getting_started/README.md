@@ -43,6 +43,22 @@ Source: [`01_core_concepts.py`](01_core_concepts.py)
 
 <!-- examples:end -->
 
+## No GPU?
+
+Every example here runs on a CPU, unchanged. Install the extra and run it as
+above; the scene picks the CPU by itself and prints one line saying so:
+
+```bash
+export UV_NO_GROUP=rtx
+uv run --extra cpu examples/00_getting_started/00_hello_world.py
+# [rss] cpu (no CUDA device) · CUDA graphs off · renderer tiled (cpu is not a CUDA device)
+```
+
+The arm and the cube run on MuJoCo's C library, and a cloth, rope or soft body
+runs on SuperDex. `build(device="cpu")` or `ROBOSIMSTUDIO_DEVICE=cpu` does the
+same on a machine that has a GPU. See [Install](../../README.md#install) for
+what a CPU cannot do.
+
 ## Scene, Sim and Ref
 
 A scene is three objects:

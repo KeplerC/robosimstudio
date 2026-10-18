@@ -24,6 +24,8 @@ RoboSimStudio is a Newton-native simulation toolkit. Packages:
 ## Checks
 
 - `uv run python scripts/testrun.py --tier fast`: no GPU, gates every commit.
+- `uv run --extra cpu --no-group rtx python scripts/testrun.py --tier cpu`: no
+  GPU; builds and steps scenes on a CPU (MuJoCo's C library, SuperDex).
 - `uv run --extra gap python scripts/testrun.py --tier medium`: needs the GPU;
   builds and steps scenes.
 - `uvx ruff@0.16.1 check . && uvx ruff@0.16.1 format . --check`.
