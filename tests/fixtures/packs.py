@@ -47,12 +47,12 @@ __all__ = [
 MATERIALS = Path(__file__).resolve().parents[2] / "robosimstudio_materials"
 """The sibling package, as it lies in this checkout."""
 
-NEEDS: dict[str, tuple[str, ...]] = {"paper": ("cloth",), "bag": ("cloth",), "brush": ("rod",)}
+NEEDS: dict[str, tuple[str, ...]] = {"paper": ("cloth",), "bag": ("cloth",), "brush": ("rod",), "tape": ("cloth",)}
 """Kind -> the kinds it is built on.
 
-``paper`` and ``bag`` extend cloth's spec, entity and measures, and ``brush`` builds
+``paper``, ``bag`` and ``tape`` extend cloth's spec, entity and measures, and ``brush`` builds
 its bristles with the rod kind's capsule chain and reads as a rod, so a tree that
-leaves cloth or the rope out has left paper and the bag or the brush out too:
+leaves cloth or the rope out has left paper, the bag and the tape or the brush out too:
 :func:`materials_without` drops a kind's dependents with it, and the stand-alone
 tests read this table for which kinds are expected to go. Nothing else leans on
 another kind.

@@ -69,6 +69,7 @@ NUMBERED = (
     "14_brush/01_scrub_scored.py",
     "15_suction/00_pick_a_plate.py",
     "15_suction/01_pick_scored.py",
+    "19_tape/00_peel_a_label.py",
 )
 """The numbered scripts that run on a base checkout: no flags, every parameter a
 local, two arms, one call to the studio. ``02_engines`` is here because its one
