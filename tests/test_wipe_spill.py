@@ -22,7 +22,7 @@ from tests.fixtures.grasp import drag_to_grasp, go, open_session, tick
 TIER = "medium"
 """One GPU: the example built once and stepped through its page for about 12 s of scene time."""
 
-PORT = 9620
+PORT = 9622
 SWEEP = 0.18
 """How far the hand is dragged toward the middle of the bench [m]: the puddle's far edge and 30 mm past it."""
 SPEED = 0.09
