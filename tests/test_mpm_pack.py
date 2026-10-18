@@ -162,11 +162,17 @@ class TestThePresets(unittest.TestCase):
         self.assertGreater(DOUGH.spec.yield_stress, 0.0)
         self.assertIn("83%", DOUGH.notes, "the measured retention is written down")
 
-    def test_the_stress_scale_is_one_for_newton_1_6(self) -> None:
-        from robosimstudio_materials.mpm import NEWTON_MPM_STRESS_SCALE, RICE
+    def test_the_stress_scale_halves_the_stresses_for_newton_1_7(self) -> None:
+        """Newton 1.7's changelog halves these four for a scene tuned on 1.6; nothing else moves."""
+        from robosimstudio_materials.mpm import DOUGH, HONEY, NEWTON_MPM_STRESS_SCALE
 
-        self.assertEqual(1.0, NEWTON_MPM_STRESS_SCALE)
-        self.assertEqual(RICE.spec.young_modulus, RICE.spec.custom_attributes()["mpm:young_modulus"])
+        self.assertEqual(0.5, NEWTON_MPM_STRESS_SCALE)
+        for preset in (DOUGH, HONEY):
+            written = preset.spec.custom_attributes()
+            for key in ("young_modulus", "yield_pressure", "yield_stress", "viscosity"):
+                self.assertEqual(0.5 * getattr(preset.spec, key), written[f"mpm:{key}"], key)
+            for key in ("poisson_ratio", "damping", "friction", "tensile_yield_ratio", "hardening"):
+                self.assertEqual(getattr(preset.spec, key), written[f"mpm:{key}"], key)
 
 
 class TestTheFlatNames(unittest.TestCase):

@@ -29,14 +29,17 @@ __all__ = [
     "ParticleMaterialSpec",
 ]
 
-NEWTON_MPM_STRESS_SCALE = 1.0
+NEWTON_MPM_STRESS_SCALE = 0.5
 """What a stress-valued preset is multiplied by before it reaches the solver.
 
-1.0 for Newton 1.6.0, whose implicit MPM takes ``young_modulus``,
-``yield_pressure`` and ``yield_stress`` as written. Newton 1.7 renormalised the
-stress inside the solver, so the same material needs half the value: the pin
-bump sets this to 0.5 and leaves every preset
-below reading as the pascals it names."""
+0.5 for Newton 1.7. Its implicit MPM fixed the stress normalisation (newton
+#4277: the transpose of the symmetric-part operator in
+``rheology_solver_kernels.py`` lost a stray factor of one half), so a given
+stress now pushes the grid twice as hard, and the 1.7 changelog says to halve
+``young_modulus``, ``yield_pressure``, ``yield_stress`` and ``viscosity`` for a
+scene tuned on 1.6. The presets below were measured on Newton 1.6.0, where the
+scale was 1.0; this keeps each reading as the pascals it names and behaving as
+it did there."""
 
 MPM_KEYS: tuple[str, ...] = (
     "young_modulus",
@@ -56,8 +59,8 @@ MPM_KEYS: tuple[str, ...] = (
 order ``SolverImplicitMPM.register_custom_attributes`` declares them. Each is
 ``model.mpm.<name>``, one float per particle."""
 
-_STRESS_KEYS = ("young_modulus", "yield_pressure", "yield_stress")
-"""The three attributes in pascals, which :data:`NEWTON_MPM_STRESS_SCALE` applies to."""
+_STRESS_KEYS = ("young_modulus", "yield_pressure", "yield_stress", "viscosity")
+"""The attributes in pascals (and pascal-seconds), which :data:`NEWTON_MPM_STRESS_SCALE` applies to."""
 
 
 @dataclass(frozen=True, kw_only=True)
