@@ -146,7 +146,7 @@ def _pipeline_factory(ctx: CouplerBuild, pairs: np.ndarray | None, *, particles:
 
     def make(view):
         kwargs: dict[str, Any] = {
-            "soft_contact_margin": float(collision.soft_contact_margin),
+            "soft_contact_gap": float(collision.soft_contact_margin),
             "enable_rigid_soft_full_surface_contact": bool(collision.full_surface_contact),
             "contact_matching": matching,
         }
@@ -351,7 +351,7 @@ def build_one_way(ctx: CouplerBuild) -> Any:
     soft_solver = build_solver(soft_spec, ctx.model, has_particles=bool(deformable.particles.size))
     collision = ctx.collision
     kwargs: dict[str, Any] = {
-        "soft_contact_margin": float(collision.soft_contact_margin),
+        "soft_contact_gap": float(collision.soft_contact_margin),
         "enable_rigid_soft_full_surface_contact": bool(collision.full_surface_contact),
     }
     if collision.contact_matching != "disabled":
