@@ -1,0 +1,477 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Where a scene runs, decided in one place: the device, the physics that follows it, the renderer.
+
+What :mod:`robosimstudio.machine` promises, with the machine patched -- the rule
+has to come out right on a GPU box and on a laptop without either being in the
+room -- and what the CPU adaptation of an arrangement does, read off the
+arrangement and the backends' registered facts with nothing built. The scenes
+themselves, built and stepped on a CPU, are :mod:`tests.test_cpu_scenes`.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import dataclasses
+import importlib.util
+import io
+import os
+import types
+import unittest
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+
+TIER = "fast"
+"""No GPU. Gates every commit."""
+
+
+def _device(alias: str, *, name: str = "NVIDIA L40S", arch: int = 89):
+    """A Warp device as the rule reads one."""
+    cuda = alias.startswith("cuda")
+    return types.SimpleNamespace(alias=alias, is_cuda=cuda, is_cpu=not cuda, name=name if cuda else "x86_64", arch=arch)
+
+
+@contextlib.contextmanager
+def _machine(*, gpu: bool, env: dict[str, str] | None = None):
+    """Warp as a machine with or without a GPU, and the two variables as given.
+
+    ``set_device`` is patched always: the rule calls it for ``ROBOSIMSTUDIO_DEVICE``,
+    and the real one would move every later test in this process onto a CPU.
+    """
+    devices = {"cpu": _device("cpu")}
+    if gpu:
+        devices.update({"cuda": _device("cuda:0"), "cuda:0": _device("cuda:0"), "cuda:1": _device("cuda:1")})
+
+    def get_device(name: Any = None):
+        if name is None:
+            return devices["cuda:0"] if gpu else devices["cpu"]
+        if not isinstance(name, str):
+            return name
+        if name not in devices:
+            raise RuntimeError(f"Invalid device identifier: {name}")
+        return devices[name]
+
+    variables = {"ROBOSIMSTUDIO_DEVICE": "", "ROBOSIMSTUDIO_RENDERER": "", **(env or {})}
+    with (
+        patch.dict(os.environ, variables),
+        patch("warp.get_device", side_effect=get_device),
+        patch("warp.is_cuda_available", return_value=gpu),
+        patch("warp.set_device") as set_device,
+        patch("robosimstudio.solvers.render.rtx_available", return_value=False),
+    ):
+        yield set_device
+
+
+class TestTheDeviceRule(unittest.TestCase):
+    """A name in code, else ``ROBOSIMSTUDIO_DEVICE``, else CUDA where there is one and the CPU where not."""
+
+    def test_the_machine_decides_when_nobody_does(self) -> None:
+        from robosimstudio.machine import platform
+
+        with _machine(gpu=True):
+            got = platform()
+        self.assertEqual((got.device, got.device_why), ("cuda:0", "NVIDIA L40S (sm_89)"))
+        with _machine(gpu=False):
+            got = platform()
+        self.assertEqual((got.device, got.device_why), ("cpu", "no CUDA device"))
+        self.assertTrue(got.is_cpu)
+        self.assertFalse(got.cuda_graphs)
+
+    def test_auto_and_nothing_name_nothing(self) -> None:
+        from robosimstudio.machine import platform
+
+        for device in ("auto", "", None, " auto "):
+            for env in ("", "auto"):
+                with _machine(gpu=True, env={"ROBOSIMSTUDIO_DEVICE": env}):
+                    self.assertEqual(platform(device).device, "cuda:0", (device, env))
+
+    def test_the_variable_wins_over_the_machine_and_moves_warp_with_it(self) -> None:
+        from robosimstudio.machine import platform
+
+        with _machine(gpu=True, env={"ROBOSIMSTUDIO_DEVICE": "cpu"}) as set_device:
+            got = platform()
+        self.assertEqual((got.device, got.device_why), ("cpu", "ROBOSIMSTUDIO_DEVICE=cpu"))
+        set_device.assert_called_once_with("cpu")
+
+    def test_a_name_in_code_wins_over_the_variable_and_leaves_warp_alone(self) -> None:
+        from robosimstudio.machine import platform
+
+        with _machine(gpu=True, env={"ROBOSIMSTUDIO_DEVICE": "cpu"}) as set_device:
+            got = platform("cuda:1")
+        self.assertEqual((got.device, got.device_why), ("cuda:1", "asked for"))
+        set_device.assert_not_called()
+
+    def test_a_device_this_machine_lacks_is_refused_by_name(self) -> None:
+        from robosimstudio.machine import platform
+
+        with _machine(gpu=False, env={"ROBOSIMSTUDIO_DEVICE": "cuda"}), self.assertRaises(ValueError) as caught:
+            platform()
+        self.assertIn("ROBOSIMSTUDIO_DEVICE=cuda", str(caught.exception))
+        self.assertIn("no CUDA device here", str(caught.exception))
+        with _machine(gpu=True), self.assertRaisesRegex(ValueError, "device='gpu'"):
+            platform("gpu")
+
+
+class TestTheRendererOnACpu(unittest.TestCase):
+    """The renderer runs where the physics does, so a CPU gets ``tiled``, and ``rtx`` named there fails by name."""
+
+    def choose(self, requested: str = "", *, env: str = ""):
+        from robosimstudio.solvers.render import choose_renderer
+
+        with _machine(gpu=False, env={"ROBOSIMSTUDIO_RENDERER": env}):
+            return choose_renderer(requested, device="cpu")
+
+    def test_a_cpu_is_tiled_because_it_is_a_cpu(self) -> None:
+        self.assertEqual(self.choose(), ("tiled", "cpu is not a CUDA device"))
+
+    def test_rtx_named_on_a_cpu_is_refused_rather_than_tried(self) -> None:
+        with self.assertRaisesRegex(ValueError, "runs on cuda only, and this scene is on cpu"):
+            self.choose("rtx")
+        with self.assertRaisesRegex(ValueError, "set by ROBOSIMSTUDIO_RENDERER"):
+            self.choose(env="rtx")
+
+    def test_tiled_and_a_dotted_path_are_names_a_cpu_takes(self) -> None:
+        self.assertEqual(self.choose("tiled"), ("tiled", "asked for"))
+        self.assertEqual(self.choose("my.renderers.Mine")[0], "my.renderers.Mine")
+
+    def test_the_backends_say_where_they_run(self) -> None:
+        from robosimstudio.solvers.render import backend_class
+
+        self.assertEqual(backend_class("rtx").devices, ("cuda",))
+        self.assertIn("cpu", backend_class("tiled").devices)
+
+    def test_a_bad_renderer_variable_waits_for_a_frame(self) -> None:
+        """A scene with no cameras still builds; the platform carries the reason, and asking raises."""
+        from robosimstudio.machine import platform
+
+        with _machine(gpu=False, env={"ROBOSIMSTUDIO_RENDERER": "rtx"}):
+            got = platform()
+            self.assertEqual(got.renderer, "")
+            self.assertIn("ROBOSIMSTUDIO_RENDERER", got.renderer_why)
+            self.assertIn("renderer unavailable", got.readout())
+            with self.assertRaises(ValueError):
+                got.renderer_for("")
+
+
+class TestTheReadout(unittest.TestCase):
+    """One line says everything, and a build prints it once."""
+
+    def test_the_line_names_the_device_what_changed_the_graphs_and_the_renderer(self) -> None:
+        from robosimstudio.machine import Platform
+
+        plat = Platform(
+            device="cpu", device_why="no CUDA device", renderer="tiled", renderer_why="cpu is not a CUDA device"
+        )
+        line = plat.with_notes(("GENERIC → CPU: ...",)).readout()
+        self.assertEqual(
+            line,
+            "cpu (no CUDA device) · GENERIC → CPU: ... · CUDA graphs off · renderer tiled (cpu is not a CUDA device)",
+        )
+        self.assertEqual(str(plat), plat.readout())
+
+    def test_an_unused_path_tracer_on_a_cpu_is_pointed_out(self) -> None:
+        from robosimstudio.machine import Platform
+
+        plat = Platform(device="cpu", device_why="x", renderer="tiled", renderer_why="y", rtx_installed=True)
+        self.assertIn("uv sync --no-group rtx", plat.readout())
+        on_gpu = dataclasses.replace(plat, device="cuda:0")
+        self.assertNotIn("--no-group rtx", on_gpu.readout())
+
+    def test_announce_says_a_line_once_unless_verbose(self) -> None:
+        from robosimstudio import machine
+
+        plat = machine.Platform(device="cpu", device_why="announce test", renderer="tiled", renderer_why="z")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            machine.announce(plat)
+            machine.announce(plat)
+            machine.announce(plat, verbose=True)
+            machine.announce(plat.with_notes(("changed",)))
+        self.assertEqual(out.getvalue().count("[rss] "), 3, out.getvalue())
+
+    def test_platform_of_prefers_what_the_thing_already_knows(self) -> None:
+        from robosimstudio.machine import Platform, platform_of
+
+        plat = Platform(device="cpu", device_why="kept", renderer="tiled", renderer_why="kept")
+        self.assertIs(platform_of(types.SimpleNamespace(platform=plat)), plat)
+
+
+class TestTheArrangementOnACpu(unittest.TestCase):
+    """GENERIC becomes CPU whole; anything else keeps its numbers and loses only what a CPU cannot run."""
+
+    def adapt(self, arrangement, *, is_cpu: bool = True):
+        from robosimstudio.scene.physics.devices import arrangement_for
+
+        return arrangement_for(arrangement, is_cpu=is_cpu)
+
+    def test_generic_becomes_cpu_and_says_so(self) -> None:
+        from robosimstudio.specs.physics import CPU, GENERIC
+
+        got, notes = self.adapt(GENERIC)
+        self.assertIs(got, CPU)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("GENERIC → CPU", notes[0])
+
+    def test_nothing_changes_on_a_gpu(self) -> None:
+        from robosimstudio.specs.physics import GENERIC
+
+        self.assertEqual(self.adapt(GENERIC, is_cpu=False), (GENERIC, ()))
+
+    def test_an_arrangement_a_cpu_can_run_is_left_alone(self) -> None:
+        from robosimstudio.specs.physics import CPU, MUJOCO_500HZ, backend
+
+        for arrangement in (MUJOCO_500HZ, CPU, MUJOCO_500HZ.with_backend("soft", backend("superdex", substeps=2))):
+            got, notes = self.adapt(arrangement)
+            self.assertIs(got, arrangement)
+            self.assertEqual(notes, ())
+
+    def test_vbd_is_replaced_by_domain_and_free_bodies_join_the_arm(self) -> None:
+        """The sponge's arrangement: GENERIC with its own SuperDex, VBD for everything else."""
+        from robosimstudio.specs.physics import GENERIC, backend
+
+        sponge = backend("superdex", substeps=2, feedback_dv_max=20.0)
+        arrangement = GENERIC.with_backend("soft", sponge)
+        got, notes = self.adapt(arrangement)
+        self.assertEqual(got.backend_for("articulated"), backend("mujoco"))
+        # The arm's own spec, so the cube and the arm are one MuJoCo island and not two.
+        self.assertEqual(got.backend_for("rigid"), got.backend_for("articulated"))
+        self.assertEqual(got.backend_for("soft"), sponge)
+        # Cloth and rope fell to "*" = VBD; they land on the arrangement's own SuperDex.
+        self.assertEqual(got.backend_for("cloth"), sponge)
+        self.assertEqual(got.backend_for("rod"), sponge)
+        self.assertEqual((got.control_hz, got.substeps, got.coupling), (60.0, 16, arrangement.coupling))
+        self.assertEqual(len(notes), 1)
+        self.assertIn("vbd has no CPU path", notes[0])
+        self.assertIn("everything else → mujoco", notes[0])
+
+    def test_genesis_on_a_cpu_becomes_superdex(self) -> None:
+        from robosimstudio.specs.physics import MUJOCO_500HZ, backend
+
+        got, notes = self.adapt(MUJOCO_500HZ.with_backend("cloth", backend("genesis", substeps=2)))
+        self.assertEqual(got.backend_for("cloth").solver, "superdex")
+        self.assertIn("genesis has no CPU path: cloth → superdex", notes[0])
+
+    def test_a_dotted_path_states_no_devices_and_is_kept(self) -> None:
+        from robosimstudio.specs.physics import MUJOCO_500HZ, backend
+
+        mine = MUJOCO_500HZ.with_backend("cloth", backend("newton.solvers.SolverVBD"))
+        self.assertEqual(self.adapt(mine), (mine, ()))
+
+
+class TestEachBackendOnACpu(unittest.TestCase):
+    """What an island's spec becomes when the model is on a CPU: its registered CPU kwargs, or a refusal."""
+
+    def on(self, spec, device: str = "cpu"):
+        from robosimstudio.scene.physics.devices import on_device
+
+        return on_device(spec, device, owner="thing", domain="cloth")
+
+    def test_mujoco_is_its_c_library(self) -> None:
+        from robosimstudio.specs.physics import backend
+
+        got = self.on(backend("mujoco", nconmax=512))
+        self.assertEqual(got.kwargs(), {"nconmax": 512, "use_mujoco_cpu": True, "use_mujoco_contacts": True})
+
+    def test_a_stated_kwarg_the_cpu_overrides_is_refused(self) -> None:
+        from robosimstudio.scene.physics import CompositionError
+        from robosimstudio.specs.physics import backend
+
+        for stated in ({"use_mujoco_cpu": False}, {"use_mujoco_contacts": False}):
+            with self.assertRaisesRegex(CompositionError, "on a CPU 'mujoco' runs with"):
+                self.on(backend("mujoco", **stated))
+
+    def test_a_backend_with_no_cpu_path_is_refused_naming_the_way_out(self) -> None:
+        from robosimstudio.scene.physics import CompositionError
+        from robosimstudio.specs.physics import backend
+
+        for solver in ("vbd", "genesis"):
+            with self.assertRaises(CompositionError) as caught:
+                self.on(backend(solver))
+            self.assertIn("rss.CPU", str(caught.exception))
+            self.assertIn("rss.backend('superdex', substeps=2)", str(caught.exception))
+
+    def test_superdex_xpbd_and_unknown_paths_pass_untouched(self) -> None:
+        from robosimstudio.specs.physics import backend
+
+        for spec in (backend("superdex", substeps=2), backend("xpbd"), backend("my.solvers.Mine")):
+            self.assertEqual(self.on(spec), spec)
+
+    def test_on_a_gpu_nothing_changes(self) -> None:
+        from robosimstudio.specs.physics import backend
+
+        for spec in (backend("mujoco"), backend("vbd"), backend("genesis")):
+            self.assertEqual(self.on(spec, "cuda:0"), spec)
+
+
+class TestTheCompilerRefusesWhatACpuCannotDo(unittest.TestCase):
+    """Refused before anything is built, by name, rather than inside a solver's importer."""
+
+    @dataclasses.dataclass(frozen=True)
+    class _Request:
+        physics: Any
+
+    def adapt(self, physics, *, num_worlds: int = 1, device: str = "cpu"):
+        from robosimstudio.machine import Platform
+        from robosimstudio.scene.compiler import _for_platform
+
+        plat = Platform(device=device, device_why="test", renderer="tiled", renderer_why="test")
+        return _for_platform(self._Request(physics), plat, num_worlds)
+
+    def test_generic_is_swapped_on_the_request(self) -> None:
+        from robosimstudio.specs.physics import CPU, GENERIC
+
+        request, notes = self.adapt(GENERIC)
+        self.assertIs(request.physics, CPU)
+        self.assertIn("GENERIC → CPU", notes[0])
+        request, notes = self.adapt(GENERIC, device="cuda:0")
+        self.assertIs(request.physics, GENERIC)
+        self.assertEqual(notes, ())
+
+    def test_more_worlds_than_mujocos_c_library_steps_is_refused(self) -> None:
+        from robosimstudio.scene.compiler import CannotReplicate
+        from robosimstudio.specs.physics import CPU
+
+        with self.assertRaisesRegex(CannotReplicate, "build num_worlds=1 on a CPU"):
+            self.adapt(CPU, num_worlds=2)
+        self.adapt(CPU, num_worlds=2, device="cuda:0")
+
+    def test_signed_distance_fields_are_refused(self) -> None:
+        from robosimstudio.scene.physics import CompositionError
+        from robosimstudio.specs.physics import CPU, CollisionSpec
+
+        with self.assertRaisesRegex(CompositionError, "force_sdf"):
+            self.adapt(dataclasses.replace(CPU, collision=CollisionSpec(force_sdf=True)))
+
+    @unittest.skipUnless(importlib.util.find_spec("superdex") is None, "SuperDex is installed here")
+    def test_without_superdex_the_note_names_the_extra(self) -> None:
+        from robosimstudio.specs.physics import GENERIC
+
+        _, notes = self.adapt(GENERIC)
+        self.assertIn("robosimstudio[cpu]", notes[-1])
+
+
+class TestTheRegisteredFacts(unittest.TestCase):
+    """What each backend says about devices is data, compared like the rest of its registration."""
+
+    def test_the_shipped_backends(self) -> None:
+        from robosimstudio.specs.physics import get_backend
+
+        mujoco = get_backend("mujoco")
+        self.assertEqual(mujoco.devices, ("cuda", "cpu"))
+        self.assertEqual(dict(mujoco.cpu_params), {"use_mujoco_cpu": True, "use_mujoco_contacts": True})
+        self.assertEqual(mujoco.cpu_max_worlds, 1)
+        self.assertEqual(get_backend("vbd").devices, ("cuda",))
+        self.assertEqual(get_backend("genesis").devices, ("cuda",))
+        self.assertIn("cpu", get_backend("superdex").devices)
+
+    def test_a_reregistration_differing_only_in_devices_is_refused(self) -> None:
+        from robosimstudio.specs.physics import register_backend
+
+        register_backend("test_platform_facts", cls="my.solvers.Facts", devices=("cuda",))
+        register_backend("test_platform_facts", cls="my.solvers.Facts", devices=("cuda",))
+        with self.assertRaises(ValueError):
+            register_backend("test_platform_facts", cls="my.solvers.Facts", devices=("cuda", "cpu"))
+        with self.assertRaisesRegex(ValueError, "devices are 'cuda' and 'cpu'"):
+            register_backend("test_platform_facts_2", cls="my.solvers.Facts", devices=("tpu",))
+
+    def test_cpu_is_a_flat_name_and_a_bench_name(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio.specs.physics import CPU
+        from robosimstudio_bench.taskbuild.arrangements import get_arrangement
+
+        self.assertIs(rss.CPU, CPU)
+        self.assertIs(get_arrangement("cpu@v1"), CPU)
+        self.assertTrue(callable(rss.platform))
+        self.assertEqual(
+            {domain for domain, spec in CPU.backends if spec.solver == "superdex"}, {"soft", "cloth", "rod"}
+        )
+
+    def test_the_mujoco_solver_is_found_by_class(self) -> None:
+        import newton
+
+        from robosimstudio.scene.physics.compose import PhysicsProgram
+
+        mujoco = MagicMock(spec=newton.solvers.SolverMuJoCo)
+        program = types.SimpleNamespace(
+            islands=[types.SimpleNamespace(name="superdex"), types.SimpleNamespace(name="arm")],
+            solver_of_island=lambda name: mujoco if name == "arm" else object(),
+        )
+        self.assertIs(PhysicsProgram.mujoco_solver.fget(program), mujoco)
+
+
+class TestMuJoCosCData(unittest.TestCase):
+    """The C data a CPU build steps, read in MuJoCo-Warp's convention, on a real MuJoCo model and no Warp."""
+
+    XML = """
+    <mujoco><option timestep="0.002"/>
+      <worldbody>
+        <geom name="floor" type="plane" size="1 1 0.1"/>
+        <body name="box" pos="0 0 0.1"><freejoint/><geom type="box" size="0.05 0.05 0.05" mass="2"/></body>
+      </worldbody>
+    </mujoco>"""
+
+    def solver(self):
+        import mujoco
+
+        model = mujoco.MjModel.from_xml_string(self.XML)
+        data = mujoco.MjData(model)
+        for _ in range(500):
+            mujoco.mj_step(model, data)
+        return types.SimpleNamespace(use_mujoco_cpu=True, mj_model=model, mj_data=data)
+
+    def test_a_resting_box_is_held_up_by_its_weight(self) -> None:
+        """The force on each pair's second geom, in world axes: the floor holds the 2 kg box up with 19.6 N."""
+        from robosimstudio.core import mjdata
+
+        geoms, forces, dist = mjdata.contacts(self.solver())
+        self.assertGreater(len(geoms), 0)
+        self.assertTrue(np.all(geoms[:, 1] == 1), geoms)  # the box is every pair's second geom
+        np.testing.assert_allclose(forces.sum(axis=0), [0.0, 0.0, 2.0 * 9.81], atol=0.05)
+        self.assertTrue(np.all(dist < 1e-3))
+
+    def test_options_and_gravity_compensation_land_on_the_stepped_model(self) -> None:
+        from robosimstudio.core import mjdata
+
+        solver = self.solver()
+        solver.mjw_model = None  # nothing to mirror into
+        self.assertTrue(mjdata.set_option(solver, "iterations", 7))
+        self.assertEqual(solver.mj_model.opt.iterations, 7)
+        self.assertFalse(mjdata.set_option(solver, "not_an_option", 1))
+        gravcomp = types.SimpleNamespace(assign=MagicMock())
+        solver.mjw_model = types.SimpleNamespace(body_gravcomp=gravcomp)
+        table = np.array([[0.0, 1.0]], dtype=np.float32)
+        mjdata.write_gravcomp(solver, table)
+        gravcomp.assign.assert_called_once_with(table)
+        self.assertEqual(mjdata.read_gravcomp(solver, 0, 1), 1.0)
+        with self.assertRaises(IndexError):
+            mjdata.read_gravcomp(solver, 1, 1)
+
+
+class TestTheRestFollowsTheDevice(unittest.TestCase):
+    def test_the_device_clock_times_a_cpu_by_the_wall(self) -> None:
+        from robosimstudio.core.profile import DeviceClock
+
+        clock = DeviceClock(device="cpu")
+        with clock.measure():
+            pass
+        self.assertEqual((clock.samples, clock.dropped), (1, 0))
+
+    def test_runs_and_the_bench_script_default_to_auto(self) -> None:
+        from robosimstudio.specs import JobSpec
+
+        self.assertEqual(JobSpec(name="t", task="t").device, "auto")
+        spec = importlib.util.spec_from_file_location("bench_run_platform", "scripts/bench_run.py")
+        run = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(run)
+        self.assertEqual(run.create_parser().parse_args(["--task", "t"]).device, "auto")
+
+    def test_the_runner_knows_the_cpu_tier(self) -> None:
+        spec = importlib.util.spec_from_file_location("testrun_platform", "scripts/testrun.py")
+        run = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(run)
+        self.assertIn("cpu", run.TIERS)
+
+
+if __name__ == "__main__":
+    unittest.main()

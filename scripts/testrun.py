@@ -13,6 +13,12 @@ The suite splits by what a test *needs*, not by what it is about:
 ``slow``
     A GPU and minutes. Full rollouts, routine baselines, render backends, capture
     cycles. Run by hand on a GPU machine, like ``medium``.
+``cpu``
+    No GPU, and real scenes: built and stepped on Warp's CPU device with MuJoCo's
+    C library and SuperDex, the way ``robosimstudio[cpu]`` runs them. Needs the
+    ``[cpu]`` extra; under a minute, about half of it Warp compiling its kernels
+    for the CPU the first time. Run with ``CUDA_VISIBLE_DEVICES`` emptied, so a
+    GPU machine proves what a machine without one does; CI runs it.
 
 The tier is declared by each module as a ``TIER`` constant and read **by AST**,
 never by importing -- so listing the slow tier costs nothing and does not
@@ -24,6 +30,7 @@ it is selecting is a selector nobody can run on a laptop.
     uv run python scripts/testrun.py --list
     uv run python scripts/testrun.py --tier fast
     uv run python scripts/testrun.py --tier slow -v
+    uv run --extra cpu --no-group rtx python scripts/testrun.py --tier cpu
 
 Modules are handed to ``python -m unittest``, which is the repo's runner --
 Newton's convention, and no plugin, no discovery magic, and no third dependency
@@ -34,11 +41,12 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 import pathlib
 import subprocess
 import sys
 
-TIERS = ("fast", "medium", "slow")
+TIERS = ("fast", "medium", "slow", "cpu")
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TESTS = ROOT / "tests"
 
@@ -123,7 +131,10 @@ def main(argv: list[str] | None = None) -> int:
 
     command = [sys.executable, "-m", "unittest", *names, *(["-v"] if args.verbose else []), *args.rest]
     print(f"$ {' '.join(command[:4])} ... ({len(names)} modules)")
-    return subprocess.run(command, cwd=ROOT, check=False).returncode
+    # The cpu tier hides every GPU, so a machine that has one runs exactly what
+    # a machine without one would: the device is picked, not forced.
+    env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""} if args.tier == "cpu" else None
+    return subprocess.run(command, cwd=ROOT, check=False, env=env).returncode
 
 
 if __name__ == "__main__":

@@ -179,6 +179,7 @@ def render_with_seg(sim: Any, scene: Any, *, camera: str = "", size: str = ""):
     cam = stills.camera_for(sim, scene, name=camera, size=size)
     sim.sync()
     names = sim.scene.handles.segmentation_names()
+    # Named, not the platform's pick: ``seg`` is a channel only ``tiled`` makes, and it makes it on any device.
     renderer = sim.make_renderer("tiled", cameras=[cam], channels=["seg"])
     try:
         seg = np.asarray(renderer.render(sim.state)[cam.name]["seg"]).astype(np.int32)
@@ -301,7 +302,8 @@ class Recorder:
         self.run_dir = Path(server.run_dir)
         self.video = self.run_dir / f"{name}.mp4"
         self.writer = VideoWriter(self.video, fps=self.fps)
-        # The ids come off the collider ray tracer; the picture is what Sim.render draws.
+        # The ids come off the collider ray tracer, named because only it makes ``seg``, on
+        # any device; the picture is what Sim.render draws, on the platform's renderer.
         self.renderer = self.sim.make_renderer("tiled", cameras=[self.cam], channels=["seg"])
         self.frames: list[dict] = []
         self.segs: list[np.ndarray] = []

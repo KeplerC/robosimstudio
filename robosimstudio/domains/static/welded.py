@@ -160,3 +160,11 @@ class WeldedFixture:
         solver = getattr(pipeline, "solver", None)
         if solver is not None:
             solver.notify_model_changed(int(newton.ModelFlags.JOINT_PROPERTIES))
+            # The notify refreshes MuJoCo-Warp's mocap rows only; a CPU build
+            # steps MuJoCo's C data, which needs the same rows copied in.
+            from robosimstudio.core.mjdata import sync_mocap
+
+            program = getattr(pipeline, "program", None)
+            mujoco = getattr(program, "mujoco_solver", None) if program is not None else None
+            if mujoco is not None:
+                sync_mocap(mujoco)

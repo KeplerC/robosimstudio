@@ -347,7 +347,8 @@ class CartesianServo:
         self.env = env
         self.facade = facade
         self.ik = ik
-        self.law = OscSetpoint(control_dt=1.0 / float(env.task.physics.control_hz))
+        # The rate the scene was built at, which on a CPU may not be the document's: GENERIC runs as CPU there.
+        self.law = OscSetpoint(control_dt=1.0 / float(env.pipeline.control_hz))
         self.base_speed_scale = self.law.speed_scale_for(getattr(env.task, "servo_speed_mps", None))
         """The task's declared servo speed as a factor on every move: ``min(1, servo_speed_mps / cruise)``.
 

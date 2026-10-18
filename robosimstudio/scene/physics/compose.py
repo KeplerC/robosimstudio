@@ -134,10 +134,16 @@ class PhysicsProgram:
 
     @property
     def mujoco_solver(self) -> Any | None:
-        """The MuJoCo solver, bare or inside the coupler, for a contact probe. ``None`` when there is none."""
+        """The MuJoCo solver, bare or inside the coupler, for a contact probe. ``None`` when there is none.
+
+        Found by class, not by the alias an arrangement used: the contact probe,
+        parking and live tuning need :class:`newton.solvers.SolverMuJoCo`'s own
+        tables, which a dotted path or a subclass has just as ``"mujoco"`` does.
+        """
         for island in self.islands:
-            if island.backend.solver == "mujoco":
-                return self.solver_of_island(island.name)
+            solver = self.solver_of_island(island.name)
+            if isinstance(solver, newton.solvers.SolverMuJoCo):
+                return solver
         return None
 
     # --------------------------------------------------------------- control
@@ -211,11 +217,9 @@ class PhysicsProgram:
                 setattr(solver, rule.apply.split(":", 1)[1], value)
                 return rule.ui.tier
             if rule.apply == "custom:mujoco_opt":
-                opt = getattr(getattr(solver, "mjw_model", None), "opt", None)
-                if opt is None or not hasattr(opt, param):
-                    return REBUILD
-                setattr(opt, param, type(getattr(opt, param))(value))
-                return RECAPTURE
+                from robosimstudio.core.mjdata import set_option
+
+                return RECAPTURE if set_option(solver, param, value) else REBUILD
             return REBUILD
         raise KeyError(f"unknown parameter path {path!r}")
 
@@ -239,8 +243,10 @@ class PhysicsProgram:
     def summary(self) -> str:
         lines = [f"physics: {self.manifest.coupler} over {len(self.islands)} island(s)"]
         for island in self.islands:
+            # "(C)": MuJoCo's C library, which is what a CPU build steps.
+            engine = island.backend.solver + (" (C)" if island.backend.get("use_mujoco_cpu") else "")
             lines.append(
-                f"  island {island.name}: {island.backend.solver} x{island.backend.substeps} -> "
+                f"  island {island.name}: {engine} x{island.backend.substeps} -> "
                 f"{list(island.entities)} ({island.bodies.size} bodies, {island.joints.size} joints, "
                 f"{island.particles.size} particles, {island.shapes.size or 'derived'} shapes)"
             )

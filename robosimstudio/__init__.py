@@ -111,9 +111,13 @@ _EXPORTS: dict[str, str] = {
     "register_coupler": "robosimstudio.specs.registries",
     "get_cell": "robosimstudio.scene",
     "list_cells": "robosimstudio.scene",
+    # Where it runs: the device, and the renderer that draws it.
+    "platform": "robosimstudio.machine",
+    "Platform": "robosimstudio.machine",
     # Saying how it is simulated.
     "GENERIC": "robosimstudio.specs",
     "MUJOCO_500HZ": "robosimstudio.specs",
+    "CPU": "robosimstudio.specs",
     "ArrangementSpec": "robosimstudio.specs",
     "CollisionSpec": "robosimstudio.specs",
     "SimRequirements": "robosimstudio.specs",

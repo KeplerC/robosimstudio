@@ -94,7 +94,8 @@ def ensure_initialized(threads: int = -1):
     except ImportError as error:
         raise ImportError(
             "the 'superdex' backend needs the superdex-physics wheel: install the [superdex] extra "
-            "(uv sync --extra superdex). It ships for Python 3.12 only."
+            "(uv sync --extra superdex), or [cpu] on a machine without a GPU, where SuperDex serves every "
+            "cloth, rope and soft body (pip install 'robosimstudio[cpu]'). It ships for Python 3.12 only."
         ) from error
     if not physics.is_initialized():
         physics.initialize(num_worker_threads=int(threads))

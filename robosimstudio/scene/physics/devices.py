@@ -1,0 +1,153 @@
+# SPDX-License-Identifier: Apache-2.0
+"""What an arrangement, and each backend in it, becomes on the device a scene is built on.
+
+On a GPU, nothing: every function here is the identity there. On a CPU, two
+things, at two moments, both from what the backends registered
+(:attr:`~robosimstudio.specs.physics.BackendInfo.devices`,
+:attr:`~robosimstudio.specs.physics.BackendInfo.cpu_params`) rather than from
+a list of names here:
+
+* **Before anything is built**, :func:`arrangement_for` adapts the arrangement.
+  :data:`~robosimstudio.specs.physics.GENERIC` -- what a scene gets when nobody
+  staged one -- becomes :data:`~robosimstudio.specs.physics.CPU`. Any other
+  arrangement is kept, except that a backend which cannot run on a CPU is
+  replaced by the one ``CPU`` uses for that domain. It has to happen this early
+  because the arrangement picks entity classes too: a sponge on SuperDex is a
+  different entity from a sponge on VBD.
+* **When islands form**, :func:`on_device` gives each backend its CPU kwargs --
+  ``use_mujoco_cpu=True`` for MuJoCo -- and refuses one that states otherwise or
+  that an entity names itself and cannot run there.
+
+Every change is returned as a sentence, and the build prints them on its
+platform line: the physics a scene runs is never different from what was
+written without the page saying how.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import Any
+
+from robosimstudio.specs.physics import CPU, GENERIC, ArrangementSpec, BackendSpec, get_backend
+
+from .errors import CompositionError
+
+__all__ = ["arrangement_for", "on_device", "runs_on_cpu"]
+
+
+def _is_cpu(device: Any) -> bool:
+    return str(getattr(device, "alias", device)) == "cpu"
+
+
+def runs_on_cpu(spec: BackendSpec) -> bool:
+    """Whether ``spec``'s backend may run on a CPU: it says so, or says nothing.
+
+    A backend that registered no devices -- a dotted path nobody registered, a
+    task's own solver -- is never refused: whoever wrote it knows, and its
+    constructor can say.
+    """
+    try:
+        info = get_backend(spec.solver)
+    except KeyError:
+        return True  # an unknown alias fails in the composer, by name
+    return not info.devices or "cpu" in info.devices
+
+
+def _domain_words(domains: list[str]) -> str:
+    words = ["everything else" if d == "*" else d for d in domains]
+    return ", ".join(words)
+
+
+def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[ArrangementSpec, tuple[str, ...]]:
+    """``arrangement`` as it runs on this device, and what changed, one sentence each.
+
+    On a CPU, :data:`GENERIC` becomes :data:`CPU` whole: nobody chose its
+    numbers, so the measured CPU ones serve better than GENERIC's own with VBD
+    swapped out. Any other arrangement keeps its rates, coupling and collision
+    law, and each backend that cannot run on a CPU is replaced by what ``CPU``
+    uses for the same domain -- and when that falls to the ``"*"`` entry, the
+    domains ``CPU`` routes specially (cloth, rope, soft) get their own entries,
+    so a towel that fell to VBD lands on SuperDex rather than on MuJoCo.
+
+    A replacement reuses the arrangement's own spec for the same solver where
+    it has one, so free bodies that were on VBD join the arm's MuJoCo island
+    instead of founding a second one beside it.
+    """
+    if not is_cpu:
+        return arrangement, ()
+    if arrangement == GENERIC:
+        return CPU, ("GENERIC → CPU: MuJoCo for the arm and rigid bodies, SuperDex for cloth, rope and soft bodies",)
+
+    table = list(arrangement.backends)
+    stated = dict(table)
+
+    def replacement(domain: str) -> BackendSpec:
+        wanted = CPU.backend_for(domain)
+        own = next((s for _, s in table if s.solver == wanted.solver and runs_on_cpu(s)), None)
+        return own or wanted
+
+    moved: dict[str, list[tuple[str, str]]] = {}
+    out: list[tuple[str, BackendSpec]] = []
+    for domain, spec in table:
+        if runs_on_cpu(spec):
+            out.append((domain, spec))
+            continue
+        sub = replacement(domain)
+        out.append((domain, sub))
+        moved.setdefault(spec.solver, []).append((domain, sub.solver))
+    fallback = stated.get("*")
+    if fallback is not None and not runs_on_cpu(fallback):
+        for domain, _ in CPU.backends:
+            if domain != "*" and domain not in stated:
+                sub = replacement(domain)
+                out.append((domain, sub))
+                moved.setdefault(fallback.solver, []).append((domain, sub.solver))
+    if not moved:
+        return arrangement, ()
+    notes = []
+    for solver, pairs in moved.items():
+        by_target: dict[str, list[str]] = {}
+        for domain, target in pairs:
+            by_target.setdefault(target, []).append(domain)
+        where = "; ".join(f"{_domain_words(domains)} → {target}" for target, domains in by_target.items())
+        notes.append(f"{solver} has no CPU path: {where}")
+    return replace(arrangement, backends=tuple(out)), tuple(notes)
+
+
+def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> BackendSpec:
+    """``spec`` as it is constructed on ``device``: with its backend's CPU kwargs on a CPU.
+
+    The identity on a GPU, and for a backend that registered no CPU kwargs.
+
+    Raises:
+        CompositionError: On a CPU, when the backend cannot run there -- which
+            reaches this point only for a backend an *entity* names, since
+            :func:`arrangement_for` already replaced the arrangement's own --
+            or when ``spec`` states a kwarg its CPU form sets otherwise
+            (``use_mujoco_contacts=False``, which MuJoCo's C backend would
+            ignore rather than refuse).
+    """
+    if not _is_cpu(device):
+        return spec
+    try:
+        info = get_backend(spec.solver)
+    except KeyError:
+        return spec
+    if info.devices and "cpu" not in info.devices:
+        instead = CPU.backend_for(domain)
+        raise CompositionError(
+            f"{owner!r} ({domain}) is on {spec.solver!r}, which runs on {' and '.join(info.devices)} only, and this "
+            f"scene is on a CPU. Stage rss.CPU, or put {domain!r} on rss.backend({instead.solver!r}"
+            f"{', substeps=2' if instead.substeps == 2 else ''}) -- or build on a GPU."
+        )
+    if not info.cpu_params:
+        return spec
+    stated = spec.kwargs()
+    for key, value in info.cpu_params:
+        if key in stated and stated[key] != value:
+            how = f" ({info.cpu_note})" if info.cpu_note else ""
+            raise CompositionError(
+                f"{owner!r} ({domain}) states {spec.solver}({key}={stated[key]!r}), but on a CPU {spec.solver!r} "
+                f"runs with {key}={value!r}{how}. Drop it, or build on a GPU."
+            )
+    return spec.with_(**dict(info.cpu_params))

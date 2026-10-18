@@ -1100,6 +1100,7 @@ class RendererRTX(RendererBase):
 
     name = "rtx"
     supported_channels = ("rgb", "depth")
+    devices = ("cuda",)  # OVRTX path traces on RT cores; there is no CPU path
 
     wants: tuple[str, ...] = (
         "finishes",

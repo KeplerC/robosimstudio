@@ -31,6 +31,7 @@ import numpy as np
 from robosimstudio.core.math import xform_from_matrix
 from robosimstudio.core.render.live import RenderBudget
 from robosimstudio.core.render.video import colorize_depth, colorize_labels
+from robosimstudio.machine import platform_of
 from robosimstudio.solvers.render import default_renderer
 
 from .panels import Panel
@@ -211,8 +212,8 @@ class PanelCamera(Panel):
         # The environment's own frames when it has a rig to read, else the
         # renderer. Not a choice: a page shows what the scene is photographed
         # as, and a picture is made with one renderer.
-        device = getattr(getattr(self.env, "model", None), "device", None)
-        self.backends = ((SOURCE_OBS,) if self.env.renderer is not None else ()) + (default_renderer(device),)
+        picked = platform_of(self.env).renderer or default_renderer(getattr(self.env.model, "device", None))
+        self.backends = ((SOURCE_OBS,) if self.env.renderer is not None else ()) + (picked,)
         self.backend = self.backend if self.backend in self.backends else self.backends[0]
 
         self._renderer = None

@@ -396,6 +396,10 @@ class DeviceClock:
     not completed, warp raises rather than blocking, and that sample is dropped
     -- a missing sample is a much better failure than a stalled loop.
 
+    On a CPU there are no events, and nothing to wait for: a CPU launch returns
+    when its work is done, so the wall time around the block *is* the device
+    time, and that is what is recorded.
+
     Args:
         device: Which device to record on; ``None`` takes warp's current one.
         depth: Event pairs in flight before the oldest is harvested.
@@ -426,6 +430,14 @@ class DeviceClock:
     @contextmanager
     def measure(self):
         """Record events around a block of device work."""
+        if wp.get_device(self.device).is_cpu:
+            start = time.perf_counter()
+            try:
+                yield
+            finally:
+                self.busy_seconds += time.perf_counter() - start
+                self.samples += 1
+            return
         pair = self._pair()
         # On this timer's OWN stream. ``wp.record_event`` records on warp's
         # current device's stream, which is only this timer's device when the
