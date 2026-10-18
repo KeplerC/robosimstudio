@@ -38,7 +38,8 @@ def main():
     # The square, with a 10 mm height window: the plate counts as in it resting, not carried over it.
     scene.add(rss.RegionSpec(name="square", frame="", xy_ranges=square, z_range=(0.0, 0.01)))
     sim = scene.build(control_mode="joint_position")
-    rss.view(sim)
+    # The drive panels and ``regions``, which draws the square on the bench: a bare scene's page leaves it out.
+    rss.view(sim, panels=("inspector", "overlay", "arm", "object", "regions"))
 
 
 if __name__ == "__main__":

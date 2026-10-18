@@ -51,7 +51,8 @@ def main():
         scrubbed = studio.gui.add_number("patch scrubbed (%)", 0.0, disabled=True)
         studio.each_step(lambda: setattr(scrubbed, "value", round(100.0 * brush.entity.scrubbed(lo, hi), 1)))
 
-    rss.view(sim, page=page)
+    # The drive panels and ``regions``, which draws the square on the bench: a bare scene's page leaves it out.
+    rss.view(sim, page=page, panels=("inspector", "overlay", "arm", "object", "regions"))
 
 
 if __name__ == "__main__":

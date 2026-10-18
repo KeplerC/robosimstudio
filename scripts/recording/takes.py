@@ -836,9 +836,9 @@ def _scrubbed(film) -> tuple[bool, str]:
 ROBOT_BRUSH = (
     Take(
         "examples/14_brush/00_scrub_the_bench.py",
-        # From in front of the bench, the brush end on: its bristles show under the fingers, the strokes run
-        # left to right across the square, and the narrower lens keeps the near wrist from looming.
-        camera=Orbit(Bench(0.04, -0.20, 0.09), distance=0.7, azimuth=-15.0, elevation=24.0, fov=40.0),
+        # From in front of the bench, 1.15 m off, the brush end on: its bristles show under the fingers,
+        # the strokes run left to right across the drawn square, and no link is near enough to loom.
+        camera=Orbit(Bench(0.03, -0.25, 0.06), distance=1.15, azimuth=-20.0, elevation=32.0, fov=30.0),
         warmup=1.0,  # the field settles under its sole before the first frame
         layout=Layout(collapse=("Simulation", "Arm: left")),
         budget=1_500_000,
@@ -934,7 +934,8 @@ def _landed(film) -> tuple[bool, str]:
 ROBOT_SUCTION = (
     Take(
         "examples/15_suction/00_pick_a_plate.py",
-        camera=Orbit(Bench(0.0, -0.21, 0.05), distance=0.8, azimuth=25.0, elevation=32.0),
+        # From in front of the bench, 1.2 m off: the plate, the drawn square and the carry between them.
+        camera=Orbit(Bench(0.0, -0.18, 0.06), distance=1.2, azimuth=25.0, elevation=32.0, fov=36.0),
         warmup=1.0,  # the plate settles flat before the first frame
         layout=Layout(collapse=("Simulation", "Arm: left")),
         budget=1_200_000,
