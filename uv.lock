@@ -4500,6 +4500,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+cpu = [
+    { name = "superdex-physics", marker = "(python_full_version < '3.13' and platform_machine != 'aarch64') or (python_full_version < '3.13' and sys_platform != 'linux')" },
+]
 curobo = [
     { name = "nvidia-curobo", extra = ["cu12"] },
 ]
@@ -4531,7 +4534,7 @@ rtx = [
     { name = "usd-core" },
 ]
 superdex = [
-    { name = "superdex-physics", marker = "python_full_version < '3.13'" },
+    { name = "superdex-physics", marker = "(python_full_version < '3.13' and platform_machine != 'aarch64') or (python_full_version < '3.13' and sys_platform != 'linux')" },
 ]
 usd = [
     { name = "newton", extra = ["importers"] },
@@ -4570,14 +4573,15 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.1" },
     { name = "scipy", specifier = ">=1.11.0" },
-    { name = "superdex-physics", marker = "python_full_version == '3.12.*' and extra == 'superdex'", specifier = "==1.0.*" },
+    { name = "superdex-physics", marker = "(python_full_version == '3.12.*' and platform_machine != 'aarch64' and extra == 'cpu') or (python_full_version == '3.12.*' and sys_platform != 'linux' and extra == 'cpu')", specifier = "==1.0.*" },
+    { name = "superdex-physics", marker = "(python_full_version == '3.12.*' and platform_machine != 'aarch64' and extra == 'superdex') or (python_full_version == '3.12.*' and sys_platform != 'linux' and extra == 'superdex')", specifier = "==1.0.*" },
     { name = "torch", marker = "extra == 'genesis'" },
     { name = "transformers", marker = "extra == 'gap'", specifier = ">=5.0" },
     { name = "trimesh", marker = "extra == 'genesis'", specifier = "<5" },
     { name = "usd-core", marker = "extra == 'rtx'" },
     { name = "viser", specifier = ">=1.0.30" },
 ]
-provides-extras = ["curobo", "dev", "gap", "genesis", "lerobot-feetech", "rtx", "superdex", "usd"]
+provides-extras = ["cpu", "curobo", "dev", "gap", "genesis", "lerobot-feetech", "rtx", "superdex", "usd"]
 
 [package.metadata.requires-dev]
 media = [

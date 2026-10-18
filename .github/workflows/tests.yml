@@ -1,8 +1,12 @@
 name: tests
 
-# The fast tier: no GPU. It checks the public surface, the bundled assets and
-# every example's shape. Scenes are built and stepped by the medium tier, which
-# needs an NVIDIA GPU and is run by hand on a GPU machine; no workflow runs it:
+# Two tiers, neither needing a GPU. The fast tier checks the public surface, the
+# bundled assets and every example's shape. The cpu tier builds and steps real
+# scenes the way `robosimstudio[cpu]` runs them -- MuJoCo's C library for the
+# arm and rigid bodies, SuperDex for the sponge, towel and cable, Newton's tiled
+# tracer for a picture -- with the rtx group left out, as a CPU install leaves
+# it. Scenes on a GPU are the medium tier, which needs an NVIDIA GPU and is run
+# by hand on a GPU machine; no workflow runs it:
 #   uv run python scripts/testrun.py --tier medium
 
 on:
@@ -32,3 +36,26 @@ jobs:
           cache-suffix: ${{ matrix.python-version }}
       - name: Fast tier
         run: uv run --extra dev --python ${{ matrix.python-version }} python scripts/testrun.py --tier fast
+
+  cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Nothing on a CPU uses the 1.8 GB path tracer the default group brings.
+      UV_NO_GROUP: rtx
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-suffix: cpu-3.12
+      # Warp compiles every kernel for the CPU on first use: the tier took 48 s
+      # cold and 23 s warm when measured. The key moves with the locked versions.
+      - name: Warp kernel cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/warp
+          key: warp-cpu-${{ hashFiles('uv.lock') }}
+      - name: cpu tier
+        run: uv run --extra cpu --extra dev --no-group rtx --python 3.12 python scripts/testrun.py --tier cpu
