@@ -44,10 +44,12 @@ HALF_THICKNESS = 0.003
 PRESS = 0.004
 """How far into the plate the cursor is put [m].
 
-Walked down at 50 mm/s the tool centre trails the cursor by 3.4 mm, and the panel puts the cursor back on
+Walked down at 50 mm/s the tool centre trails the cursor by 3.5 mm, and the panel puts the cursor back on
 the hand when a drag ends with the hand within ``POS_TOLERANCE`` (4 mm) of it. So a cursor put on the
-plate's top leaves the face 3.4 mm over it, too far to seal; put 2 mm in, 1.5 mm over; put 4 mm in, the
-cursor stays where it was put and the face comes down to 0.25 mm over (``probe_suction_fix.py``, GPU 3)."""
+plate's top leaves the face 3.5 mm over it, too far to seal; put 2 mm in, 1.5 mm over. Put 4 mm in, the face
+comes down onto the plate and stops there, 3.8 to 3.9 mm short of the cursor: inside the tolerance too, so
+the panel puts the cursor back on the hand, and the face rests on the plate with a seal gap under 0.02 mm
+(``press_down.py`` on ``00_pick_a_plate``, GPU 3, two runs each; at 4 mm also after the tilted try)."""
 
 LIFT, CARRY, SPEED = 0.08, 0.20, 0.10
 """The lift and the carry [m], and the cursor's walk [m/s]."""
