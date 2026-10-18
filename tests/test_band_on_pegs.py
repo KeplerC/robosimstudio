@@ -144,7 +144,7 @@ class TestTheHandHooksTheBandOnBothPegs(unittest.TestCase):
 class TestTheScoredTaskTurnsTrue(unittest.TestCase):
     """``01_band_on_pegs_scored``: the same gesture on the task's page, from the YAM's own home, and the goal.
 
-    The task's pegs are square bars with a ``rod`` feature (their two ends), so
+    The task's pegs are the example's cylinder posts with a ``rod`` feature (their two ends), so
     ``encircles`` holds the band to each peg's length, not to the line through it.
     """
 

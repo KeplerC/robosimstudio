@@ -11,7 +11,10 @@ the pads' friction.
 SuperDex drives the fingers as colliders by pose, and with ``feedback="off"`` its
 push on them does not reach MuJoCo, so the jaws go wherever they are commanded.
 The control is **Close**: commanded shut, the jaws close through the 22 mm cable
-(about 0 mm), which is why the example asks for **Grip amount** 0.80. The slider
+(about 0 mm), which is why the example asks for **Grip amount** 0.80. The cable
+still comes up behind a shut hand, 111 mm, riding on the fingertips inside its
+skin (``c_cable.py``): a hook, not a grasp, so the control reads the jaws and not
+the rise. The slider
 is dragged over 0.8 s, as on the page, not jumped: at 0.78 a jump overshot to
 20.0 mm and held while a drag settled at 21.9 mm and lifted nothing (``probe_a3``).
 """
@@ -143,7 +146,10 @@ class TestTheHandLiftsTheSuperdexCable(unittest.TestCase):
 
 @unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing steps the cable")
 class TestCloseCutsThroughIt(unittest.TestCase):
-    """The control: **Close** commands the jaws shut, and with nothing fed back they go there."""
+    """The control: **Close** commands the jaws shut, and with nothing fed back they go there.
+
+    The cable still rises with the hand, on the shut fingertips inside its skin (111 mm, ``c_cable.py``).
+    """
 
     def test_close_shuts_the_jaws_through_the_cable(self) -> None:
         run = _drive(1.0, PORTS[1])

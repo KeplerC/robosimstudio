@@ -20,11 +20,11 @@ A loose overhand knot in a rope lies on the bench between the two hands: drag ea
 A knot is a rope crossing itself, held apart where it crosses by its own contact
 (`self_contact`: SuperDex tests the rope's skin against itself). The pads hold the
 tails by friction, nothing pinned. Pulled to 490 mm across, the knot gives back 59
-of its 361 mm of rope and keeps its three crossings, the closest strands 0.2 mm
-into each other; with self-contact off one strand goes straight through another, a
-whole 12 mm, and one crossing is left (`tests/test_knot_pull`, GPU 1). BDF2 drew
-it to 239 mm but let a tail slide 88 mm through a hand (`probe_c3`). 20 to 45 ms
-a control step. Needs `[superdex]`.
+of its 361 mm of rope and keeps its three crossings, the closest strands 0.29 mm
+into each other on any step (`k_knot.py`); with self-contact off one strand goes
+straight through another, a whole 12 mm, and one crossing is left
+(`tests/test_knot_pull`, GPU 1). BDF2 drew it to 239 mm but let a tail slide 88 mm
+through a hand (`probe_c3`). 20 to 45 ms a control step. Needs `[superdex]`.
 
 ```bash
 uv run --extra superdex examples/17_knots/00_pull_knot_tight.py

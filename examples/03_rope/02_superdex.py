@@ -9,9 +9,11 @@ on MuJoCo. The cable is one centerline with a twist at every node, stiffness fro
 11 mm radius). SuperDex drives the fingers as colliders by pose and its push on
 them is not fed back: fed back, they closed through the cable at the default cap
 and, uncapped, swung from -27 to +103 mm and squirted it out (``probe_a2``). So
-**Close** shuts the jaws through it, and **Grip amount** 0.80 stops the blade tips
-at 19.2 mm on its 22, the pads 0.1 mm into its skin. Nothing is pinned: the middle
-rises 113 mm and slides 0.4 mm in the hand over 2 s, at 11 ms a control step
+**Close** shuts the jaws through it, to 0.0 mm; the cable still comes up 111 mm,
+but riding on the shut fingertips inside its skin, not held between the pads
+(``c_cable.py``). **Grip amount** 0.80 stops the blade tips at 19.2 mm on its 22,
+the pads 0.1 mm into its skin. Nothing is pinned: the middle rises 113 mm and
+slides 0.4 mm in the hand over 2 s, at 11 ms a control step
 (``tests/test_superdex_cable_robot``, GPU 1). Needs ``[superdex]``.
 """
 
