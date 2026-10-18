@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The brush kind as registered knowledge: domain, entity, materials, flat names, spec and measure, on the CPU.
+"""The brush kind as registered knowledge: kind, entity, materials, flat names, spec and measure, on the CPU.
 
 ``robosimstudio_materials/brush.py`` is one module built on the rod kind's
 capsule chain. What the registries and the library know of it before any scene
-is built is checked here, with no GPU: the domain and its fallback to the rod
+is built is checked here, with no GPU: the kind and its fallback to the rod
 layout, where ``GENERIC`` and ``BRUSH_60HZ`` route it, the presets, the flat
 names, the spec's validation and arithmetic, the coverage measure on tips laid
 out by hand, the atom and its handler, and the import law (the brush names the
