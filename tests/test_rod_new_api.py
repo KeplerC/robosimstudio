@@ -77,7 +77,11 @@ def _build(entity):
 
 
 def _build_the_old_way(spec):
-    """The chain as the entity built it before the migration, with the deprecated calls."""
+    """The chain as the entity built it before the migration, with the deprecated calls.
+
+    Wrapped by hand, as :func:`~robosimstudio_materials.rod.entity.add_capsule_chain`
+    wraps it: Newton 1.7's own wrapping roots either form with a free joint.
+    """
     import newton
     import warp as wp
     from newton.solvers import SolverVBD
@@ -93,7 +97,7 @@ def _build_the_old_way(spec):
             length=float(spec.length),
             num_segments=int(spec.segments),
         )
-        builder.add_rod(
+        _, joints = builder.add_rod(
             positions=points,
             quaternions=quats,
             radius=float(spec.radius),
@@ -112,8 +116,9 @@ def _build_the_old_way(spec):
             bend_stiffness=float(spec.bend_ke),
             bend_damping=float(spec.bend_kd),
             label=spec.name,
-            wrap_in_articulation=True,
+            wrap_in_articulation=False,
         )
+        builder.add_articulation(list(joints), label=f"{spec.name}_articulation")
     return builder.finalize(device="cpu")
 
 
