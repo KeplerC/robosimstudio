@@ -9,6 +9,12 @@ full-surface contact (`00_towel.py`, `04_your_own_cloth.py`). On a flat sheet,
 lower the fingertips to the bench, or the pads close over the edge. The arm
 feels no force from the cloth, so a fully shut hand passes through it.
 
+The coupler can still read that force: `coupler("one_way", contact_forces=True)`
+has Newton 1.7's VBD report what each contact pushes on its shape, and
+`contact_force(sim, "right")` sums it over a hand (`03_scrub_a_stain.py`). It
+reads a press, from the first touch on; it does not resolve a resting sheet's
+own weight.
+
 ![A click on the cloth pins a patch to a handle. Lift it, carry it, let go.](media/pinch_towel.webp)
 
 ![Two holds on two corners with Move together on: one drag carries the sheet flat.](media/move_together.webp)
@@ -64,6 +70,26 @@ uv run examples/01_cloth/02_engines.py
 ```
 
 Source: [`02_engines.py`](02_engines.py)
+
+## Scrub a stain
+
+![Scrub a stain](media/03_scrub_a_stain.webp)
+
+A towel with a stain along its middle under the right hand: press **Close**, drag the hand down onto the stain until **push** reads between 20 and 60 N, and drag it along the stain: only what it rubbed inside that band is wiped.
+
+The push is what the towel puts on the hand's colliders: Newton 1.7's VBD contact force, read
+through `coupler("one_way", contact_forces=True)`. The arm still goes where it is dragged, so it is
+the force the hand would feel: zero until the fingers touch, then, stroking, 32 N with the fingertips
+6 mm over the bench and 116 N at 4 mm, which the bench's own reading takes up to within a newton
+(`tests/test_scrub_a_stain.py`, GPU 5). A stroke that only brushes the stain wipes nothing, and
+one pressed past 60 N marks what it rubbed **too hard** instead. Contact forces resolve a press, not
+a weight: the towel lying still does not read its own 0.6 N on the bench.
+
+```bash
+uv run examples/01_cloth/03_scrub_a_stain.py
+```
+
+Source: [`03_scrub_a_stain.py`](03_scrub_a_stain.py)
 
 ## Your own cloth
 

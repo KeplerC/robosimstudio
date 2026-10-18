@@ -203,23 +203,6 @@ def _rolled_flat(film) -> tuple[bool, str]:
     )
 
 
-def _paper_folded(film) -> tuple[bool, str]:
-    """The sheet's fold, a third of the way along it, kept 1.5 rad once the hands had gone, and it lies in thirds."""
-    from robosimstudio.assetlib.semantics.snapshot import Snapshot
-    from robosimstudio.assetlib.vocabulary.measures import cloth_fold
-    from robosimstudio_materials.paper import crease_angle
-
-    sim = film.sim
-    sim["paper"].entity.update_probe(sim.state, sim.step_count)
-    snapshot = Snapshot(sim.make_context())
-    angle = float(crease_angle(snapshot, "paper", {"crease": {"axis": 1, "at": -0.20 + 0.297 / 3}})["angle"])
-    extent = float(cloth_fold(snapshot.ctx, "paper", axis=1)[0])
-    return (
-        angle >= 1.5 and extent < 0.75,
-        f"the fold kept {angle:.2f} rad (need 1.5), span {extent:.3f} (need under 0.75)",
-    )
-
-
 def _flap_shut(film) -> tuple[bool, str]:
     """The box flap's hinge kept 1.8 rad once the hand had gone, and its free edge rests no higher than the rim."""
     import math
@@ -827,48 +810,6 @@ DRAFTS = (
         warmup=3.0,  # the stack of loose links is still falling over at 1 s
         lift=0.12,
         radius=0.012,  # the one link the handle took: the links are loose, and the rest stay in the heap
-    ),
-    # Both hands: the left holds the far end down, the right carries the near edge over on the page's
-    # attachment box, the left stamps the fold flat. tests/test_fold_paper_robot.py drives the same path.
-    Take(
-        "examples/13_paper/00_fold_paper.py",
-        camera=Orbit(Bench(-0.03, -0.05, 0.08), distance=1.05, azimuth=-20.0, elevation=36.0),
-        warmup=0.5,
-        fps=10,
-        speed=2.0,  # a minute of scene: two hands, a carry and three stamps
-        budget=2_000_000,
-        layout=Layout(collapse=("Simulation", "Material", "Physics")),
-        beats=(
-            Wait(seconds=0.4, label="an A4 sheet between the two hands"),
-            Press(text="Close", within="Arm: left", label="Close both hands"),
-            Press(text="Close", within=RIGHT),
-            DragTo("left", Bench(0.05, 0.075, 0.072), seconds_per_m=3.0),
-            Drag("left", "z", to=Bench(z=0.005), seconds=0.8, label="the left hand holds the far end down"),
-            DragTo("right", Bench(0.05, -0.195, 0.072), seconds_per_m=3.0),
-            Drag("right", "z", to=Bench(z=0.010), seconds=0.8, label="the right hand onto the near edge"),
-            Toggle(text="Edge on the right hand", within="Crease", label="tick: the edge is pinned at the hand"),
-            Drag("right", "z", to=Bench(z=0.10), seconds=1.0, label="up"),
-            Drag("right", "y", to=Bench(y=-0.002), seconds=1.6, label="across"),
-            Drag("right", "z", to=Bench(z=0.014), seconds=1.0, label="and down onto the middle"),
-            Drag("right", "y", to=Bench(y=0.013), seconds=0.5, label="drawn on: the loop tightens"),
-            Drag("left", "z", to=Bench(z=0.06), seconds=0.5),
-            DragTo("left", Bench(-0.04, -0.07, 0.06), seconds_per_m=4.0),
-            *(
-                beat
-                for x in (-0.04, 0.03, 0.10)
-                for beat in (
-                    Drag("left", "x", to=Bench(x=x), seconds=0.4),
-                    Drag("left", "z", to=Bench(z=0.009), seconds=0.6, label="the left hand stamps the fold"),
-                    Wait(seconds=0.2),
-                    Drag("left", "z", to=Bench(z=0.05), seconds=0.4),
-                )
-            ),
-            Toggle(text="Edge on the right hand", within="Crease", label="untick: the edge is let go"),
-            Drag("right", "z", to=Bench(z=0.22), seconds=0.6, label="both hands lift"),
-            Drag("left", "z", to=Bench(z=0.22), seconds=0.6),
-            Wait(seconds=1.5, label="it stays folded"),
-        ),
-        expect=(Check(_paper_folded, needs=("paper",)),),
     ),
     # The hand, closed and pointing down, pushes the standing flap over and presses it into the box;
     # tests/test_box_flap_robot.py drives the same path through the panel.
@@ -1620,6 +1561,368 @@ ROBOT_TAPE = (
     ),
 )
 
+# =============================================================================
+# Contact: a fold carried by the pads, and a scrub read by its push
+# =============================================================================
+# Newton 1.7's VBD reports the force each rigid-soft contact puts on its shape, which the one-way
+# coupler reads with ``contact_forces``. The fold is carried by contact alone; the scrub's readout
+# is that force. tests/test_fold_paper_robot.py and tests/test_scrub_a_stain.py drive the same paths.
+
+FOLD = "examples/13_paper/00_fold_paper.py"
+FOLD_EDGE = -0.435
+"""The sheet's near edge in the bench frame [m]: 35 mm past the bench's right edge."""
+FOLD_CREASE = FOLD_EDGE + 0.297 / 3
+FOLD_PINCH = (-0.02, FOLD_EDGE + 0.0135)
+"""Where the jaws' middle closes on the overhang, bench frame [m]: 35 mm in from the corner, 13.5 in from the edge."""
+
+
+def _q(a, b):
+    """``a`` after ``b``, both xyzw."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+def _turn(axis, degrees):
+    s, c = math.sin(math.radians(degrees) / 2), math.cos(math.radians(degrees) / 2)
+    return (axis[0] * s, axis[1] * s, axis[2] * s, c)
+
+
+FOLD_JAWS = _q(_q(_turn((0, 1, 0), 10.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5))), _turn((0, 0, 1), 90.0))
+"""The right hand's pinch: the tool along +x tipped 10 degrees down, the jaws closing vertically."""
+
+
+def _fold_jaws(film):
+    """The right hand's jaws' middle [world]: the mean of its finger boxes, as tests/test_fold_paper_robot reads it."""
+    import newton
+    import numpy as np
+
+    from robosimstudio.core.math import quat_to_mat
+
+    sim = film.sim
+    index = sim.scene.embodiment.arms["right"]
+    body = sim.model.shape_body.numpy()
+    kinds = sim.model.shape_type.numpy()
+    boxes = [
+        s
+        for side in index.finger_bodies
+        for s in np.flatnonzero(np.isin(body, side))
+        if int(kinds[s]) == int(newton.GeoType.BOX)
+    ]
+    body_q, xform = sim.state.body_q.numpy(), sim.model.shape_transform.numpy()
+    return np.mean([body_q[body[s]][:3] + quat_to_mat(body_q[body[s]][3:7]) @ xform[s][:3] for s in boxes], axis=0)
+
+
+def _per_step(script, label: str) -> Do:
+    """Run ``script(film)``, a generator that yields once a control step, from the page's per-step hook.
+
+    What the tests do with :func:`tests.fixtures.grasp.go`, at the same resolution: the cursor is
+    walked a control step at a time at the test's speeds, rather than jumped once a film frame, so
+    the take is the test's drive and not an approximation of it.
+    """
+
+    def play(film):
+        steps = script(film)
+        state = {"done": False, "n": 0}
+
+        def hook():
+            if state["done"]:
+                return
+            try:
+                next(steps)
+                state["n"] += 1
+            except StopIteration:
+                state["done"] = True
+
+        film.session.each_step(hook)
+        while not state["done"]:
+            film.hold(1.0 / film.take.fps)
+        return {"control_steps": state["n"]}
+
+    return Do(fn=play, label=label)
+
+
+def _go(film, arm: str, target, speed: float, steps: int = 120, tolerance: float = 0.008, quat=None):
+    """:func:`tests.fixtures.grasp.go` as a generator: walk the cursor there at ``speed``, then wait for the hand."""
+    import numpy as np
+
+    panel = film.session.arms[arm]
+    # Through ``aim``, which moves the gizmo with the cursor: a cursor written behind the page's
+    # back leaves the browser's gizmo where it was, and the page writes that back.
+    quat = np.asarray(panel.cursor_quat if quat is None else quat, dtype=np.float64)
+    target = np.asarray(target, dtype=np.float64)
+    start = np.array(panel.cursor_pos, dtype=np.float64)
+    stride = float(speed) / float(film.session.env.request.physics.control_hz)
+    legs = max(1, int(np.ceil(np.linalg.norm(target - start) / stride)))
+    for k in range(1, legs + 1):
+        panel.aim(start + (target - start) * (k / legs), quat, moving=k < legs)
+        yield
+    panel.aim(target, quat, moving=False)
+    for _ in range(steps):
+        yield
+        if float(np.linalg.norm(panel.ik.ee_pose(film.sim.state)[0] - target)) < tolerance:
+            break
+
+
+def _jaws_to(film, point, speed: float, steps: int = 120, quat=None):
+    """Put the right hand's jaws' middle at ``point``: the cursor is the tool centre."""
+    import numpy as np
+
+    panel = film.session.arms["right"]
+    offset = _fold_jaws(film) - panel.ik.ee_pose(film.sim.state)[0]
+    yield from _go(film, "right", np.asarray(point) - offset, speed, steps, quat=quat)
+
+
+def _wait(n: int):
+    for _ in range(n):
+        yield
+
+
+def _fold_surface(film) -> float:
+    import numpy as np
+
+    rest = np.asarray(film.sim["paper"].particle_q, dtype=np.float64)
+    return float(np.median(rest[rest[:, 1] < film.bench((0.0, -0.40, 0.0))[1]][:, 2]))
+
+
+FOLD_STAMP = _q(_turn((0, 0, 1), -30.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)))
+"""The left hand's stamp: the tool along +x turned 30 degrees toward the fold, which it reaches that way."""
+
+
+def _fold_hold(film):
+    """The left hand onto the far end, its flat underside 3 mm into the bench."""
+    hold = film.bench((0.05, FOLD_EDGE + 0.262, 0.003))
+    yield from _go(film, "left", (hold[0], hold[1], 0.80), 0.15, steps=600, tolerance=0.004)
+    yield from _go(film, "left", hold, 0.06, steps=60, tolerance=0.004)
+
+
+def _fold_in(film):
+    """Jaws vertical, level with the overhang and short of its corner, then in along it."""
+    film.surface = _fold_surface(film)
+    panel = film.session.arms["right"]
+    yield from _go(film, "right", panel.ik.ee_pose(film.sim.state)[0], 0.05, steps=600, tolerance=0.004, quat=FOLD_JAWS)
+    corner, pinch = film.bench((-0.055 - 0.06, FOLD_PINCH[1], 0.0)), film.bench((*FOLD_PINCH, 0.0))
+    yield from _jaws_to(film, (corner[0], corner[1], film.surface), 0.06)
+    yield from _jaws_to(film, (pinch[0], pinch[1], film.surface), 0.05)
+
+
+def _fold_over(film):
+    """The carry on an arc about the fold line, the hand turning over with it; laid, drawn on, lifted clear."""
+    import numpy as np
+
+    pinch = film.bench((*FOLD_PINCH, 0.0))
+    crease = film.bench((0.0, FOLD_CREASE, 0.0))[1]
+    radius, z = crease - pinch[1], film.surface
+    for k in range(1, 13):
+        turn = math.pi * k / 12
+        quat = _q(FOLD_JAWS, _turn((0, 0, 1), -math.degrees(turn)))
+        point = (pinch[0], crease - radius * math.cos(turn), z + (radius + 0.015) * math.sin(turn))
+        yield from _jaws_to(film, point, 0.06, 120 if k < 12 else 60, quat=quat)
+    yield from _jaws_to(film, (pinch[0], crease + radius, z + 0.03), 0.03)
+    yield from _jaws_to(film, (pinch[0], crease + radius, z + 0.020), 0.02, 60)
+    yield from _wait(30)
+    yield from _jaws_to(film, (pinch[0], crease + radius + 0.03, z + 0.03), 0.03)
+    yield from _wait(20)
+    film.stamp_y = float(np.asarray(film.sim["paper"].particle_q)[:, 1].min()) + 0.02  # the loop's nose, plus 20 mm
+    yield from _jaws_to(film, (pinch[0], crease + radius + 0.03, z + 0.05), 0.02)
+
+
+def _fold_stamps(film):
+    """Up off the far end, turned toward the fold, and three stamps along it 20 mm in from the loop's nose."""
+    hold, y = film.bench((0.05, FOLD_EDGE + 0.262, 0.06)), film.stamp_y
+    up, down = film.bench((0.0, 0.0, 0.06))[2], film.bench((0.0, 0.0, 0.009))[2]
+    yield from _go(film, "left", hold, 0.08, quat=FOLD_STAMP)
+    for x in (0.0, 0.055, 0.11):
+        at = film.bench((x, 0.0, 0.0))[0]
+        yield from _go(film, "left", (at, y, up), 0.10)
+        yield from _go(film, "left", (at, y, down), 0.04, steps=40)
+        yield from _wait(15)
+        yield from _go(film, "left", (at, y, up), 0.06)
+
+
+def _fold_up(film):
+    """Up 25 mm with the jaws still shut: opening to half brings the lower pad 25 mm back down."""
+    import numpy as np
+
+    yield from _jaws_to(film, _fold_jaws(film) + np.array([0.0, 0.0, 0.025]), 0.02)
+
+
+def _fold_out(film):
+    """Out 40 mm past the edge with the jaws open, up 80 mm, and the left hand away."""
+    import numpy as np
+
+    yield from _jaws_to(film, _fold_jaws(film) + np.array([0.0, 0.04, 0.0]), 0.05)
+    yield from _jaws_to(film, _fold_jaws(film) + np.array([0.0, 0.0, 0.08]), 0.08)
+    yield from _go(film, "left", film.bench((0.11, -0.15, 0.12)), 0.08)
+
+
+def _paper_folded(film) -> tuple[bool, str]:
+    """The sheet's fold, a third of the way along it, kept 2.2 rad once the hands had gone, and it lies folded."""
+    from robosimstudio.assetlib.semantics.snapshot import Snapshot
+    from robosimstudio.assetlib.vocabulary.measures import cloth_fold
+    from robosimstudio_materials.paper import crease_angle
+
+    sim = film.sim
+    sim["paper"].entity.update_probe(sim.state, sim.step_count)
+    snapshot = Snapshot(sim.make_context())
+    line = {"crease": {"axis": 1, "at": film.bench((0.0, FOLD_CREASE, 0.0))[1]}}
+    angle = float(crease_angle(snapshot, "paper", line)["angle"])
+    extent = float(cloth_fold(snapshot.ctx, "paper", axis=1)[0])
+    return (
+        angle >= 2.2 and extent < 0.83,
+        f"the fold kept {angle:.2f} rad (need 2.2), span {extent:.3f} (need under 0.83)",
+    )
+
+
+SCRUB = "examples/01_cloth/03_scrub_a_stain.py"
+SCRUB_TIP = 0.0167
+"""The closed fingertips hang this far under the tool centre, pointing down [m]."""
+
+
+def _scrub_reading(film) -> dict:
+    labels = ("push (N)", "wiped (20-60 N)", "too hard")
+    handles = film.session.server.gui._gui_input_handle_from_uuid.values()
+    return {h.label: round(float(h.value), 2) for h in handles if getattr(h, "label", "") in labels}
+
+
+def _scrub_press(reads: float):
+    """Down from 10 mm over the towel until the page's **push** reads ``reads`` N, a control step at a time.
+
+    What the page asks a person to do, and what tests/test_scrub_a_stain.py does: the cursor is lowered
+    0.05 mm a control step, watching the readout. A height would not do: the push climbs 30 to 80 N a
+    millimetre, and the same 6.0 mm read 32 N in the test and 116 N in a take.
+    """
+
+    def script(film):
+        import numpy as np
+
+        panel = film.session.arms["right"]
+        x, y, _ = film.bench((-0.09, -0.08, 0.0))
+        z, floor = film.bench((0.0, 0.0, SCRUB_TIP + 0.010))[2], film.bench((0.0, 0.0, SCRUB_TIP))[2]
+        yield from _go(film, "right", (x, y, z), 0.05, steps=600, tolerance=0.004)
+        while _scrub_reading(film).get("push (N)", 0.0) < reads and z > floor:
+            z -= 0.00005
+            panel.aim(np.array([x, y, z]), panel.cursor_quat, moving=True)
+            yield
+        panel.aim(np.array([x, y, z]), panel.cursor_quat, moving=False)
+        yield from _wait(20)
+        film.scrub_z = z
+
+    return script
+
+
+def _scrub_along(film):
+    """Along the stain at the height the press stopped at, 200 control steps from 40 mm before it to 10 mm past."""
+    import numpy as np
+
+    panel = film.session.arms["right"]
+    (x0, y, _), x1 = film.bench((-0.09, -0.08, 0.0)), film.bench((0.06, 0.0, 0.0))[0]
+    for k in range(1, 201):
+        panel.aim(np.array([x0 + (x1 - x0) * k / 200, y, film.scrub_z]), panel.cursor_quat, moving=k < 200)
+        yield
+
+
+def _scrub_lift(film):
+    x1, y, _ = film.bench((0.06, -0.08, 0.0))
+    yield from _go(film, "right", (x1, y, film.scrub_z + 0.03), 0.05)
+
+
+def _keep_reading(name: str) -> Do:
+    def keep(film):
+        film.readings = {**getattr(film, "readings", {}), name: _scrub_reading(film)}
+        return film.readings[name]
+
+    return Do(fn=keep, label="")
+
+
+def _stain_wiped(film) -> tuple[bool, str]:
+    """The light stroke wiped nothing, the stroke inside the band wiped the stain, and the hard one marked it too hard."""
+    seen = getattr(film, "readings", {})
+    light, band, hard = (seen.get(k, {}) for k in ("light", "band", "hard"))
+    passed = (
+        light.get("wiped (20-60 N)", 1.0) == 0.0
+        and band.get("wiped (20-60 N)", 0.0) >= 0.8
+        and band.get("too hard", 1.0) == 0.0
+        and hard.get("too hard", 0.0) >= 0.5
+    )
+    return passed, f"light {light}, band {band}, hard {hard}"
+
+
+ROBOT_CONTACT = (
+    Take(
+        FOLD,
+        # From in front of the bench and to its right, 1.35 m off: the overhang, both hands, the
+        # carry's arc and the sheet in thirds all in view, the panel's Crease readouts beside them.
+        camera=Orbit(Bench(0.0, -0.22, 0.12), distance=1.40, azimuth=-25.0, elevation=34.0, fov=38.0),
+        warmup=0.5,
+        fps=8,
+        speed=2.0,  # two minutes of scene: two hands, a carry and three stamps
+        budget=2_000_000,
+        # The left arm's folder stays open: collapsed, its Close is not on the page to press, and the
+        # left hand held the far end open-fingered; the sheet slid 37 mm and no take folded.
+        layout=Layout(collapse=("Simulation", "Material", "Physics", "Visualization")),
+        beats=(
+            Fold(title="Simulation", open=False),
+            Fold(title="How to drive this", open=False),
+            Wait(seconds=0.4, label="an A4 sheet hangs 35 mm over the bench's right edge"),
+            Press(text="Close", within="Arm: left", label="Close the left hand"),
+            _per_step(_fold_hold, "it holds the far end down"),
+            _per_step(_fold_in, "the right hand down and in: the jaws straddle the overhanging corner"),
+            Press(text="Close", within=RIGHT, label="Close: the pads pinch the paper"),
+            Scroll(pixels=-600, seconds=0.4),  # back to the top: the Crease readouts lead the panel
+            Wait(seconds=0.6, mark="closed"),
+            _per_step(_fold_over, "carry the edge up and over, turning the hand over, and lay it on the middle"),
+            _per_step(_fold_stamps, "the left hand turns toward the fold and stamps it in three places"),
+            _per_step(_fold_up, "up 25 mm"),
+            Slider(text="Grip amount", value=0.5, seconds=0.6, within=RIGHT, label="Grip amount 0.5: the pads part"),
+            Scroll(pixels=-600, seconds=0.3),
+            Wait(seconds=0.3),
+            _per_step(_fold_out, "drawn out past the edge, and away"),
+            Wait(seconds=1.5, label="it stays folded"),
+        ),
+        expect=(Check(_paper_folded, needs=("paper",)),),
+    ),
+    Take(
+        SCRUB,
+        # In front of the bench and to its right, 1.25 m off and looking down past the forearm: the
+        # closed hand, the towel and the stain's line, the Scrub folder's push and wiped beside them.
+        camera=Orbit(Bench(0.05, -0.08, 0.04), distance=1.25, azimuth=-40.0, elevation=38.0, fov=38.0),
+        warmup=1.0,  # the towel lands from 20 mm
+        fps=8,
+        speed=1.0,  # three strokes of 3.3 s; a stroke drawn faster heaps the towel and pushes harder
+        budget=1_800_000,
+        layout=Layout(collapse=("Simulation", "Arm: left", "Visualization")),
+        beats=(
+            Fold(title="Simulation", open=False),
+            Fold(title="How to drive this", open=False),
+            Wait(seconds=0.5, label="the right hand over the stain's near end"),
+            Press(text="Close", within=RIGHT, label="Close"),
+            Scroll(pixels=-600, seconds=0.4),  # back to the top: the Scrub readouts lead the panel
+            Wait(seconds=0.4),
+            _per_step(_scrub_press(0.5), "down until the fingers touch the towel"),
+            _per_step(_scrub_along, "a light stroke: push under 20 N"),
+            _keep_reading("light"),
+            _per_step(_scrub_lift, ""),
+            _per_step(_scrub_press(20.0), "down until push reads 20 N, into the band"),
+            _per_step(_scrub_along, "the stroke wipes the stain"),
+            Wait(seconds=0.3, mark="wiped"),
+            _keep_reading("band"),
+            _per_step(_scrub_lift, ""),
+            _per_step(_scrub_press(90.0), "down until push reads 90 N, past the band"),
+            _per_step(_scrub_along, "too hard: marked, not wiped"),
+            _keep_reading("hard"),
+            _per_step(_scrub_lift, ""),
+            Wait(seconds=0.8),
+        ),
+        expect=(Check(_stain_wiped),),
+    ),
+)
+
 TAKES: tuple[Take, ...] = (
     *FINAL,
     *DRAFTS,
@@ -1628,6 +1931,7 @@ TAKES: tuple[Take, ...] = (
     *ROBOT_BRUSH,
     *ROBOT_SUCTION,
     *ROBOT_TAPE,
+    *ROBOT_CONTACT,
 )
 
 KEPT: dict[str, str] = {

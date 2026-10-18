@@ -14,19 +14,16 @@ through a line.
 
 ![Fold a sheet of paper](media/00_fold_paper.webp)
 
-An A4 sheet of copy paper between two YAM arms: close both hands, press the left one down on the far end, put the right one on the near edge and tick **Edge on the right hand**, carry the edge up, across and down onto the middle, stamp the fold flat with the left hand, untick, and the sheet stays folded in thirds.
+An A4 sheet hangs 35 mm over the bench's right edge: close the left hand and press the far end down, drag the right hand down and in so its jaws straddle the overhanging corner, press **Close**, carry the edge up and over while turning the hand over, lay it on the middle and draw it on and up 3 cm, stamp the fold with the left hand, set the right hand's **Grip amount** to 0.5 and draw it out past the edge: the sheet stays folded in thirds.
 
-The carry is an attachment grasp and the page says so: ticked, the row along the near edge is pinned at the
-right hand's frame, because the YAM's pads cannot pinch a sheet lying flat, nor one hanging over the bench's
-edge, where the inner finger cannot get under the drape. The rest is contact. The left hand pressing the far
-end keeps it within 0.4 mm through the carry (two drives, `tests/test_fold_paper_robot`, Newton 1.7);
-unheld, it slides 9 mm, 14 mm by the last stamp, and the fold still keeps 2.9 rad (three drives each,
-`fixprobe.py`, GPUs 1 and 6). The crease is the left hand's: the flat underside of its closed fingers stamps
-the loop at three places along the fold while the right hand still holds the edge down, and the hinges bent
-past the yield keep 2.3 to 3.1 rad over three drives (`foldletter.py`, GPU 7); pressed after the edge is let
-go, the loop rolls open instead (1.4). The **Crease** folder reads `crease_angle` through the fold line and
-`fold_extent` (the sheet's span over its flat span). Set `yield_angle` to 0 under **Material** and the
-same fold springs open.
+The pads hold the paper by friction alone, and the fold keeps 2.53 to 2.67 rad over 18 drives
+(`tests/test_fold_paper_robot`, its take, Newton 1.7). The overhang is what makes the pinch possible:
+a sheet lying flat gives the lower pad nothing to get under (seven top-down pinches raised it 0 mm),
+and the palm stops the jaws at the corner. The stamps need the edge still held and lifted clear: let
+go first and the stamped fold kept 1.0 rad; held 3 mm over the sheet, the stamps pushed it into the
+lower finger and the leaving hand dragged it 94 to 108 mm (`fold_contact.py`, GPUs 3 and 5). The
+**Crease** folder reads `crease_angle` and `fold_extent`; set `yield_angle` to 0 under
+**Material** and the same fold springs open.
 
 ```bash
 uv run examples/13_paper/00_fold_paper.py

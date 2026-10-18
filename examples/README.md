@@ -12,6 +12,10 @@
 |---|---|---|
 | <img src="01_cloth/media/00_towel.webp" width="240"> | <img src="01_cloth/media/01_fabrics.webp" width="240"> | <img src="01_cloth/media/02_engines.webp" width="240"> |
 
+| [Scrub a stain](01_cloth/03_scrub_a_stain.py) |
+|---|
+| <img src="01_cloth/media/03_scrub_a_stain.webp" width="240"> |
+
 ## [02 Soft-Body Simulation](02_soft/README.md)
 
 | [Sponge](02_soft/00_sponge.py) | [Tet mesh](02_soft/01_tet_mesh.py) | [Your own](02_soft/02_your_own_soft.py) |
