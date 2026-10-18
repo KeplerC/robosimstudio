@@ -51,6 +51,7 @@ EXAMPLES = ROOT / "examples"
 NUMBERED = (
     "01_cloth/00_towel.py",
     "01_cloth/02_engines.py",
+    "01_cloth/03_scrub_a_stain.py",
     "02_soft/01_tet_mesh.py",
     "04_extending/01_new_kind.py",
     "03_rope/00_cable.py",

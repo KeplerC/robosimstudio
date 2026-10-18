@@ -1085,10 +1085,9 @@ class ForceGatedWipe:
     ``band`` is wiped, one touched while it is above is marked pressed too hard. A hand that
     brushes the stain, or one that crushes it, wipes nothing.
 
-    The push gated on is the median of the last ``window`` control steps, not the last step's
-    alone: a stroke's push jumps for a step at a time, to 174 N in a stroke whose median was 4 N
-    and 734 N in one whose median was 107 (``tests/test_scrub_a_stain.py``), and one such step
-    would mark a light stroke too hard.
+    The push gated on is the median of the last ``window`` control steps, so that no one step's
+    reading decides what a stroke did: along a light stroke the readings went 7.5, 3.6 and 4.7 N
+    twenty steps apart (``tests/test_scrub_a_stain.py``).
 
     Args:
         sim: A scene that stages ``coupler("one_way", contact_forces=True)``.
@@ -1140,6 +1139,7 @@ class ForceGatedWipe:
     def reset(self) -> None:
         self.wiped[:] = False
         self.crushed[:] = False
+        self.recent.clear()
         self.raw.clear()
 
 
