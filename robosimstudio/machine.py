@@ -10,8 +10,12 @@ Two settings, one vocabulary, one rule::
 A name given in code wins over the environment, the environment wins over the
 machine, and ``auto`` (or nothing) names nothing at either level. A device chosen
 in code around the build -- ``with wp.ScopedDevice("cuda:1"):`` or
-``wp.set_device`` -- is a name given in code. The machine's answer is CUDA where
-there is a GPU and the CPU where there is not.
+``wp.set_device`` -- is a name given in code, except one: Warp keeps no record of
+an open scope, so a scope naming the device Warp would pick anyway
+(``ScopedDevice("cuda:0")`` on a GPU machine) cannot be told from no scope, and
+with the variable set it is the variable that wins. Pass ``device="cuda:0"`` to
+choose that one. The machine's answer is CUDA where there is a GPU and the CPU
+where there is not.
 
 **Physics has no setting of its own: it follows the device.** On a CPU every
 MuJoCo island runs MuJoCo's C library, nothing is captured into a CUDA graph,
@@ -45,7 +49,7 @@ import os
 from dataclasses import dataclass, replace
 from typing import Any
 
-__all__ = ["AUTO", "DEVICE_ENV", "Platform", "announce", "apply", "platform", "platform_of"]
+__all__ = ["AUTO", "DEVICE_ENV", "Platform", "announce", "apply", "gpu_label", "platform", "platform_of"]
 
 AUTO = "auto"
 """The name for "pick for me", for the device and the renderer alike."""
@@ -149,7 +153,8 @@ def _named(value: Any) -> Any:
     return value  # a warp.Device
 
 
-def _gpu_label(device: Any) -> str:
+def gpu_label(device: Any) -> str:
+    """A CUDA device as the readout names it: ``NVIDIA L40S (sm_89)``. Shared with the renderer's reasons."""
     return f"{device.name} (sm_{device.arch})"
 
 
@@ -159,7 +164,11 @@ rule can tell that apart from a device a caller chose in code."""
 
 
 def _chosen_in_code(wp: Any) -> Any:
-    """Warp's current device when code chose it -- a ``ScopedDevice`` or ``set_device`` -- else ``None``."""
+    """Warp's current device when code chose it -- a ``ScopedDevice`` or ``set_device`` -- else ``None``.
+
+    Read as "Warp's current device is not the one it would pick", which is all
+    Warp lets anyone see: a scope naming its preferred device looks like none.
+    """
     current = wp.get_device()
     if current.alias == wp.get_preferred_device().alias:
         return None
@@ -190,8 +199,12 @@ def _device(device: Any) -> tuple[str, str, bool]:
             ) from exc
         return resolved.alias, source, source != "asked for"
     current = wp.get_device()
+    if _SET_FOR_THE_VARIABLE and current.alias == _SET_FOR_THE_VARIABLE[-1]:
+        # Our own leftover from a build under the variable, which is gone now:
+        # not a choice anyone made, so the machine decides again.
+        current = wp.get_preferred_device()
     if current.is_cuda:
-        return current.alias, _gpu_label(current), False
+        return current.alias, gpu_label(current), False
     if wp.is_cuda_available():
         # A CPU while a GPU exists: an enclosing ``wp.ScopedDevice`` or
         # ``wp.set_device`` chose it, and that is honoured, as it always was.
@@ -242,14 +255,20 @@ def apply(plat: Platform) -> None:
     The variable is a setting for the whole process, so a build made under it
     makes its device Warp's default too: an array a caller allocates with no
     device named lands beside the model rather than on a GPU nobody asked for.
-    Here and not in :func:`platform`, which only answers.
+    A later build with the variable gone undoes it. Here and not in
+    :func:`platform`, which only answers.
     """
-    if not plat.from_env:
-        return
     import warp as wp
 
-    wp.set_device(plat.device)
-    _SET_FOR_THE_VARIABLE[:] = [plat.device]
+    if plat.from_env:
+        wp.set_device(plat.device)
+        _SET_FOR_THE_VARIABLE[:] = [plat.device]
+        return
+    if _SET_FOR_THE_VARIABLE and wp.get_device().alias == _SET_FOR_THE_VARIABLE[-1] != plat.device:
+        # The variable that set Warp's default is gone and this build is elsewhere:
+        # give Warp back the default it would pick.
+        wp.set_device(wp.get_preferred_device())
+        _SET_FOR_THE_VARIABLE.clear()
 
 
 def platform_of(env: Any) -> Platform:

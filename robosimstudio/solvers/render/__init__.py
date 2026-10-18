@@ -150,7 +150,9 @@ def rt_cores(device: Any = None) -> tuple[bool, str]:
         return False, f"no CUDA device ({exc})"
     if not gpu.is_cuda:
         return False, f"{gpu.alias} is not a CUDA device"
-    label = f"{gpu.name} (sm_{gpu.arch})"
+    from robosimstudio.machine import gpu_label
+
+    label = gpu_label(gpu)
     if gpu.arch not in RT_ARCHES or any(tag in gpu.name for tag in _NO_RT_NAMES):
         return False, f"{label} has no RT cores"
     return True, label

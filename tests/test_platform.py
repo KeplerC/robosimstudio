@@ -102,6 +102,21 @@ class TestTheDeviceRule(unittest.TestCase):
         set_device.assert_called_once_with("cpu")
         machine._SET_FOR_THE_VARIABLE.clear()
 
+    def test_a_default_set_for_the_variable_does_not_outlive_it(self) -> None:
+        """Built once under ROBOSIMSTUDIO_DEVICE=cpu, then the variable unset: the next auto build is the GPU's."""
+        from robosimstudio import machine
+
+        with _machine(gpu=True, env={"ROBOSIMSTUDIO_DEVICE": "cpu"}) as set_device:
+            machine.apply(machine.platform())
+        set_device.assert_called_once_with("cpu")
+        with _machine(gpu=True) as set_device:
+            with patch("warp.get_device", side_effect=lambda name=None: _device(name or "cpu")):
+                got = machine.platform()
+                self.assertEqual((got.device, got.device_why), ("cuda:0", "NVIDIA L40S (sm_89)"))
+                machine.apply(got)
+        self.assertEqual(set_device.call_args.args[0].alias, "cuda:0")
+        self.assertEqual(machine._SET_FOR_THE_VARIABLE, [])
+
     def test_a_device_scope_opened_in_code_wins_over_the_variable(self) -> None:
         """``with wp.ScopedDevice("cuda:1"): scene.build()`` builds on cuda:1, as ``device=None`` always did."""
         from robosimstudio.machine import platform
