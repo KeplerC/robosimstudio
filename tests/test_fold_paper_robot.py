@@ -9,7 +9,7 @@ page shows. Nothing is pinned to a hand: the right hand's pads pinch the corner 
 the sheet where it hangs over the bench's edge, carry the edge up and over while
 the hand turns over, and lay it on the middle; the left hand stamps the fold while
 the edge is still held; the right hand opens and leaves past the edge. The fold
-kept 2.53 to 2.67 rad over 18 drives and the sheet lies in thirds.
+kept 2.52 to 2.67 rad over 22 drives and the sheet lies in thirds.
 
 The test turns the coupler's contact forces on, so it can also say *how* the edge
 was held: the sheet pushes on both fingers while it is carried, and on neither
@@ -255,7 +255,8 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
 
     def test_the_stamps_shove_the_folded_sheet_but_leave_it_on_the_bench(self) -> None:
         # The left hand's three stamps push the whole folded sheet along the bench, away from the edge
-        # it overhung, and the fold rides with it: 45.9 and 47.3 mm in two drives of this test (GPU 3).
+        # it overhung, and the fold rides with it: 45.9, 47.3 and 55.2 mm in three drives of this test
+        # (GPUs 1 and 3).
         # The bound keeps the sheet's far end on the bench.
         self.assertGreater(self.shoved, 0.0, f"the far end moved {self.shoved * 1e3:.1f} mm")
         self.assertLess(self.shoved, 0.08, f"the stamps shoved the sheet {self.shoved * 1e3:.1f} mm along the bench")
@@ -271,7 +272,7 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
 
     def test_the_sheet_lies_folded_in_thirds(self) -> None:
         # A flat fold in thirds spans 0.67 of the sheet; the loop the stamps leave at the fold, and
-        # what they push the sheet, make it 0.69 to 0.78 over 18 drives (this test, its take, the
+        # what they push the sheet, make it 0.69 to 0.79 over 22 drives (this test, its take, the
         # take's path in this harness, fold_contact.py; GPUs 3 and 5), where the attachment's carry
         # left 0.6 to 0.75.
         extent = self.after[-1][1]
