@@ -49,13 +49,14 @@ runs, and 98% of a 6 mm puddle, which is thinner than the collider band. The
 grid does not see a thin puddle badly; a tilted face lets it under.
 
 A fifth, about pouring from a hand, measured in the pour example's scene with
-the YAM holding the cup (``robot_pour`` and ``tests/test_pour_honey``, GPU 1,
-RTX PRO 6000): **honey pours past a tilt, not gradually.** Tipped 117 degrees,
-all the YAM's wrist roll gives, it crept along the cup's wall and 17% was in
-the bowl after 12 s; at 130, 71% after 6 s; at 140 it left the cup in one mass
-within a second, 99% into the bowl. That mass lands from the lip at ~1.3 m/s,
-past what a 120 Hz step's collider band catches, and 0 to 8 of the 8,000
-particles of its leading edge went through the bench in seven pours.
+the YAM holding the cup (``robot_pour``, ``fixprobe.py`` and
+``tests/test_pour_honey``, GPUs 1 and 6, RTX PRO 6000): **how fast honey pours
+turns on a few degrees of tilt.** Tipped 123 degrees by the wrist's roll
+alone, it crept along the cup's wall and about 56% was in the bowl after 12 s;
+at 130, 77% after 6 s; at 140 it left the cup in one mass within a second, 99%
+into the bowl. That mass lands from the lip at ~1.3 m/s, past what a 120 Hz
+step's collider band catches, and 0 to 8 of the 8,000 particles of its leading
+edge went through the bench in seven pours.
 """
 
 from __future__ import annotations
