@@ -36,6 +36,7 @@ from .imports import (
     clear_texture_tints,
     expose_declared_colliders,
     is_textured,
+    is_transparent,
     strip_free_bodies,
     texture_box_geoms,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "expose_declared_colliders",
     "filter_self_collisions",
     "is_textured",
+    "is_transparent",
     "preserve_body_inertia",
     "set_body_mass",
     "slab_decomposition",

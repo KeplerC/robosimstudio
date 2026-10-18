@@ -547,10 +547,17 @@ class Entity:
 
         Only shapes this entity added are touched: a scene-declared object's
         appearance belongs to the asset that declared it.
+
+        A shape its asset stated fully transparent -- an MJCF ``rgba`` alpha of 0,
+        which MuJoCo does not draw -- loses its visible flag here, as an entity
+        with ``visible=False`` does. Every drawing path honours that flag, and the
+        studio's materials and the path tracer's finishes ignore the alpha (see
+        :func:`~robosimstudio.scene.build.imports.is_transparent`).
+        Collision, mass and the shape's body are left as they are.
         """
         from robosimstudio.core.render.finish import finish_for
         from robosimstudio.core.render.palette import default_for, is_build_order_color
-        from robosimstudio.scene.build.imports import is_textured
+        from robosimstudio.scene.build.imports import is_textured, is_transparent
 
         color = getattr(self.spec, "color", None)
         finish = getattr(self.spec, "finish", None)
@@ -560,7 +567,7 @@ class Entity:
         role = self.display_role
         fallback = default_for(role)
         for s in range(*self.range.shapes):
-            if not visible:
+            if not visible or is_transparent(builder, s):
                 builder.shape_flags[s] &= ~int(newton.ShapeFlags.VISIBLE)
             if not collide:
                 builder.shape_flags[s] &= ~int(newton.ShapeFlags.COLLIDE_SHAPES)
