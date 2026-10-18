@@ -52,6 +52,13 @@ cursor stays where it was put and the face comes down to 0.25 mm over (``probe_s
 LIFT, CARRY, SPEED = 0.08, 0.20, 0.10
 """The lift and the carry [m], and the cursor's walk [m/s]."""
 
+SET_DOWN = 0.002
+"""How far over the bench a held plate's underside is stopped before the cup lets go [m].
+
+The plate hangs under the cursor by the seal gap and the arm's sag, so walking the cursor back down the way
+it came up pressed the welded plate into the bench, and MuJoCo printed linesearch warnings until the cup let
+go. The walk down is measured on the plate instead (:func:`_set_down`)."""
+
 
 def _tilted(quat, degrees: float) -> np.ndarray:
     """``quat`` turned ``degrees`` about world x first, xyzw."""
@@ -85,6 +92,14 @@ def _down_onto(session, plate) -> float:
     return go(session, "right", np.array([lying[0], lying[1], top - PRESS]), speed=0.05, steps=120, tolerance=0.0)
 
 
+def _set_down(session, plate) -> float:
+    """Walk the cursor down until the held plate's underside is :data:`SET_DOWN` over the bench; that height [m]."""
+    over = float(plate.position[2]) - HALF_THICKNESS - float(BENCH[2])
+    _walk(session, "right", (0.0, 0.0, -(over - SET_DOWN)))
+    tick(session, 30)
+    return float(plate.position[2]) - HALF_THICKNESS - float(BENCH[2])
+
+
 def _pick(session, sim) -> dict:
     """The page's gesture: down, Vacuum, lift, carry toward the middle of the bench, down, untick, up."""
     panel, plate, cup = session.arms["right"], sim["plate"], sim.suction("right")
@@ -111,8 +126,7 @@ def _pick(session, sim) -> dict:
     _walk(session, "right", (0.0, CARRY, 0.0), watch=watch)
     tick(session, 30)
     out.update(drift=drift[0], held=held[0])
-    _walk(session, "right", (0.0, 0.0, -(LIFT + PRESS) + 0.004))
-    tick(session, 30)
+    out["set_down"] = _set_down(session, plate)
     panel.vacuum_request = False
     tick(session, 10)
     out["let_go"] = not cup.holding
@@ -163,6 +177,10 @@ class _Pick:
     def test_the_plate_rests_in_the_square(self) -> None:
         result = self.result
         self.assertTrue(result["finite"])
+        self.assertTrue(
+            0.0 < result["set_down"] < 2.0 * SET_DOWN,
+            f"the held plate was let go {result['set_down'] * 1e3:.1f} mm over the bench, not {SET_DOWN * 1e3:.0f}",
+        )
         self.assertTrue(result["let_go"], "the cup still holds the plate after Vacuum was unticked")
         centre = result["plate"]
         self.assertTrue(np.all(centre[:2] >= SQUARE_LO) and np.all(centre[:2] <= SQUARE_HI), f"plate at {centre}")
@@ -270,8 +288,7 @@ class TestTheTiersUnderLoad(unittest.TestCase):
             "sag": float(panel.cursor_pos[2] - panel.ik.ee_pose(session.env.state)[0][2]),
             "hand_rise": float(panel.ik.ee_pose(session.env.state)[0][2] - hand[2]),
         }
-        _walk(session, "right", (0.0, 0.0, -(LIFT + PRESS) + 0.004))
-        tick(session, 30)
+        out["set_down"] = _set_down(session, plate)
         cup.release()
         _walk(session, "right", (0.0, 0.0, 0.05))
         tick(session, 30)
