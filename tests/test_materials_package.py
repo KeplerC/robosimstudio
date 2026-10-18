@@ -420,6 +420,7 @@ class TestTheWheelShipsThePackage(unittest.TestCase):
             "robosimstudio_materials/soft.py",
             "robosimstudio_materials/rod/__init__.py",
             "robosimstudio_materials/paper.py",
+            "robosimstudio_materials/bag.py",
         ):
             self.assertIn(path, text)
         self.assertNotIn("_domain_packs", text)

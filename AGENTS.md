@@ -4,7 +4,7 @@ RoboSimStudio is a Newton-native simulation toolkit. Packages:
 
 - `robosimstudio/`: the core API; builds and steps scenes.
 - `robosimstudio_materials/`: the shipped kinds of deformable thing -- cloth,
-  soft bodies, the rope, paper, and the granular, liquid and dough materials on
+  soft bodies, the rope, paper, bags, and the granular, liquid and dough materials on
   the implicit MPM -- one module or package each; it imports only `robosimstudio`.
 - `robosimstudio_studio/`: a browser page over any scene.
 - `robosimstudio_bench/`: tasks and their scoring.
@@ -22,10 +22,10 @@ RoboSimStudio is a Newton-native simulation toolkit. Packages:
    [`examples/live/REFERENCE.md`](examples/live/REFERENCE.md#frames-and-units)).
 3. `examples/`: numbered scripts, shortest first. `robosimstudio_materials/cloth.py`,
    `robosimstudio_materials/soft.py`, `robosimstudio_materials/rod/`,
-   `robosimstudio_materials/paper.py` and `robosimstudio_materials/{granular,liquid,dough}.py`
-   (over the shared `robosimstudio_materials/mpm/`) are the shipped cloth, soft-body,
-   rope, paper and particle-material implementations; read them to see how each
-   works.
+   `robosimstudio_materials/paper.py`, `robosimstudio_materials/bag.py` and
+   `robosimstudio_materials/{granular,liquid,dough}.py` (over the shared
+   `robosimstudio_materials/mpm/`) are the shipped cloth, soft-body, rope, paper, bag
+   and particle-material implementations; read them to see how each works.
 
 ## Checks
 
