@@ -20,7 +20,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from tests.fixtures.packs import HAS_ROD_PACK, needs_rod_pack
+from tests.fixtures.packs import HAS_ROD_PACK, has_pack, needs_rod_pack
 
 TIER = "medium"
 
@@ -170,7 +170,7 @@ class TestAnEngineCanBeTaughtAKind(unittest.TestCase):
 
         self.assertIsNone(actor_builder("superdex", "strand"))
         # Two kinds are the library's own; the rope's is registered by its pack, where that is installed.
-        shipped = {"shell", "tet"} | ({"rod"} if HAS_ROD_PACK else set())
+        shipped = {"shell", "tet"} | ({"rod"} if HAS_ROD_PACK else set()) | ({"bag"} if has_pack("bag") else set())
         self.assertEqual(shipped, set(builders_for("superdex")), "exactly the installed kinds register")
 
     def test_a_third_party_can_teach_one(self) -> None:

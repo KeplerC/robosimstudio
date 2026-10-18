@@ -1,0 +1,189 @@
+# SPDX-License-Identifier: Apache-2.0
+"""``robosimstudio_materials/bag.py``: the surface a bag is built as, and what its measures read.
+
+No GPU and no engine. The bag's physics -- the layers resting a contact radius apart, a hand
+opening its mouth -- is driven through the examples' pages by
+``tests/test_open_a_bag.py``. Here:
+
+* **The surface.** Two layers share the nodes of the three sewn edges and nothing else, every
+  edge borders at most two triangles, no triangle appears twice (a duplicated corner triangle
+  sent SuperDex's solve to NaN on its first step), every normal points out of the bag, the
+  layers lie two contact radii apart at rest, and the top layer's lip is turned up by the angle
+  asked for.
+* **The measures**, on positions written by hand: the gap between the layers is signed and
+  ignores layers held apart, and the mouth's span and area are its rim's.
+* **The declarations**: every parameter the bag hands SuperDex is one its builder reads, every
+  field a shipped fabric states reaches the engine, and ``BAG_60HZ`` puts the bag on SuperDex
+  beside the soft kind, on one island.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import math
+import unittest
+
+import numpy as np
+
+TIER = "fast"
+"""Numpy and the spec classes only: nothing is built or stepped."""
+
+
+def _bag(**kwargs):
+    from robosimstudio_materials.bag import EntityBag, bag
+
+    entity = EntityBag(bag(**kwargs))
+    vertices, faces = entity.surface()
+    return entity, vertices, faces
+
+
+class TestTheSurface(unittest.TestCase):
+    """One surface, two layers, three sewn edges, one lip."""
+
+    def test_the_layers_share_the_sewn_edges_and_nothing_else(self) -> None:
+        entity, vertices, _ = _bag()
+        top, bottom = entity.top, entity.bottom
+        nx, ny = 24, 20
+        self.assertEqual((nx + 1 + 3, ny + 1), top.shape, "the top layer runs on three 10 mm rows as the lip")
+        self.assertEqual((nx + 1, ny + 1), bottom.shape)
+        sewn = np.zeros((nx + 1, ny + 1), dtype=bool)
+        sewn[0, :] = sewn[:, 0] = sewn[:, -1] = True
+        np.testing.assert_array_equal(top[: nx + 1][sewn], bottom[sewn])
+        self.assertFalse(set(top[: nx + 1][~sewn].ravel()) & set(bottom[~sewn].ravel()), "only the seams are shared")
+        self.assertEqual(len(vertices), len(set(top.ravel()) | set(bottom.ravel())), "every vertex is on a layer")
+
+    def test_the_mesh_is_a_surface_without_repeats(self) -> None:
+        _, _, faces = _bag()
+        self.assertEqual(len(faces), len(np.unique(np.sort(faces, axis=1), axis=0)), "a triangle is repeated")
+        edges = np.sort(np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]]), axis=1)
+        _, count = np.unique(edges, axis=0, return_counts=True)
+        self.assertEqual(2, count.max(), "an edge borders more than two triangles")
+
+    def test_every_normal_points_out_of_the_bag(self) -> None:
+        entity, vertices, faces = _bag()
+        tri = vertices[faces]
+        normal = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+        nx = 24
+        top_inner = set(entity.top[1:nx, 1:-1].ravel())
+        bottom_inner = set(entity.bottom[1:nx, 1:-1].ravel())
+        on_top = np.array([all(v in top_inner for v in f) for f in faces])
+        on_bottom = np.array([all(v in bottom_inner for v in f) for f in faces])
+        self.assertTrue(on_top.any() and on_bottom.any())
+        self.assertTrue(np.all(normal[on_top, 2] > 0.0), "the top layer faces up")
+        self.assertTrue(np.all(normal[on_bottom, 2] < 0.0), "the bottom layer faces down")
+
+    def test_the_layers_rest_two_radii_apart(self) -> None:
+        entity, vertices, _ = _bag()
+        radius = entity.spec.material.particle_radius
+        gap = vertices[entity.top[1:24, 1:-1], 2] - vertices[entity.bottom[1:24, 1:-1], 2]
+        np.testing.assert_allclose(gap, 2.0 * radius)
+
+    def test_the_lip_runs_on_from_the_top_layer_turned_up(self) -> None:
+        for angle in (1.3, 0.5):
+            with self.subTest(lip_angle=angle):
+                entity, vertices, _ = _bag(lip_angle=angle)
+                self.assertEqual(28, entity.top.shape[0])
+                step = vertices[entity.top[25, 10]] - vertices[entity.top[24, 10]]
+                self.assertAlmostEqual(angle, math.atan2(step[2], step[0]), places=6)
+                self.assertAlmostEqual(0.01, float(np.linalg.norm(step)), places=6)
+
+    def test_the_footprint_is_centred_on_its_pose(self) -> None:
+        entity, vertices, _ = _bag()
+        body = vertices[entity.bottom.ravel()]
+        np.testing.assert_allclose(body[:, :2].min(axis=0), (-0.12, -0.10), atol=1e-12)
+        np.testing.assert_allclose(body[:, :2].max(axis=0), (0.12, 0.10), atol=1e-12)
+
+
+class TestTheMeasures(unittest.TestCase):
+    """The gap, the mouth and the fold, on positions written by hand."""
+
+    def test_the_gap_is_signed_and_ignores_layers_held_apart(self) -> None:
+        from robosimstudio_materials.bag import layer_gap
+
+        entity, vertices, _ = _bag()
+        # Two radii, a little less beside the seams, where the bottom layer tilts up to meet the top.
+        rest = layer_gap(vertices, entity)
+        self.assertTrue(0.0075 < rest <= 0.008, rest)
+        crossed = vertices.copy()
+        crossed[entity.top[12, 10], 2] = vertices[entity.bottom[12, 10], 2] - 0.002
+        self.assertAlmostEqual(-0.002, layer_gap(crossed, entity), places=9)
+        held_open = crossed.copy()
+        held_open[entity.top[12, 10], 2] += 0.5
+        self.assertAlmostEqual(rest, layer_gap(held_open, entity), places=9, msg="a pair held apart has no say")
+
+    def test_the_mouth_reads_its_rim(self) -> None:
+        from robosimstudio_materials.bag import mouth_opening
+
+        entity, vertices, _ = _bag()
+        shut = mouth_opening(vertices, entity)
+        self.assertAlmostEqual(0.008, shut["height"], places=9)
+        # A band two radii tall between the inner nodes, tapering to the sewn corners over a cell.
+        self.assertAlmostEqual(0.008 * 0.19, shut["area"], places=9)
+        opened = vertices.copy()
+        # The top rim lifted into a half-ellipse 60 mm high over the 200 mm mouth.
+        rim = entity.top[24]
+        y = vertices[rim, 1]
+        opened[rim, 2] = vertices[entity.bottom[24], 2] + 0.06 * np.sqrt(np.clip(1.0 - (y / 0.1) ** 2, 0.0, 1.0))
+        out = mouth_opening(opened, entity)
+        self.assertAlmostEqual(0.06, out["height"], places=6)
+        self.assertAlmostEqual(math.pi * 0.1 * 0.06 / 2.0, out["area"], delta=0.0003)
+
+
+class TestTheDeclarations(unittest.TestCase):
+    """What the bag hands the engine, and where the arrangement puts it."""
+
+    def test_every_parameter_reaches_the_builder_and_every_stated_field_the_engine(self) -> None:
+        import robosimstudio_materials.bag as bag_module
+        from robosimstudio.specs.physics import actor_consumes
+        from robosimstudio_materials.cloth import ClothMaterialSpec
+
+        for fabric in ("CANVAS",):
+            with self.subTest(fabric=fabric):
+                material = getattr(bag_module, fabric)
+                entity, _, _ = _bag(material=material)
+                actor = entity.host_actor()
+                self.assertEqual("bag", actor.kind)
+                self.assertLessEqual(set(actor.params), set(actor_consumes("superdex", "bag")))
+                default = ClothMaterialSpec()
+                stated = {
+                    f.name
+                    for f in dataclasses.fields(material)
+                    if getattr(material, f.name) != getattr(default, f.name)
+                }
+                self.assertLessEqual(
+                    stated - {"shell"}, set(actor.params), "a stated field would never reach the engine"
+                )
+
+    def test_self_contact_is_the_specs_and_a_slab_is_refused(self) -> None:
+        from robosimstudio_materials.bag import CANVAS, bag
+        from robosimstudio_materials.cloth import TERRY_TOWELLING
+
+        for on in (True, False):
+            entity, _, _ = _bag(self_contact=on)
+            self.assertIs(on, entity.sim_requirements().self_contact)
+            self.assertIs(on, entity.host_actor().params["self_contact"])
+        with self.assertRaises(ValueError):
+            bag(material=TERRY_TOWELLING)
+        self.assertEqual(3, bag(lip=0.026).lip_cells)
+        self.assertEqual(0.0, CANVAS.thickness - 1.0e-3)
+
+    def test_the_arrangement_puts_the_bag_on_superdex_beside_the_soft_kind(self) -> None:
+        import robosimstudio as rss
+
+        table = dict(rss.BAG_60HZ.backends)
+        self.assertEqual("superdex", table["bag"].solver)
+        self.assertEqual(table["soft"], table["bag"], "one backend, so one island")
+        self.assertEqual("mujoco", table["articulated"].solver)
+        self.assertIs(rss.bag, __import__("robosimstudio_materials.bag", fromlist=["bag"]).bag)
+
+    def test_the_kind_and_its_atom_are_registered(self) -> None:
+        from robosimstudio.assetlib.semantics.atoms import ATOMS
+        from robosimstudio.specs.physics import get_domain
+
+        domain = get_domain("bag")
+        self.assertEqual(("bag", "cloth"), tuple(domain.reads))
+        self.assertIn("mouth_opening", ATOMS)
+
+
+if __name__ == "__main__":
+    unittest.main()
