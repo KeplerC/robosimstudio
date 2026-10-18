@@ -6,10 +6,11 @@ An A4 sheet of copy paper between two YAM arms: close both hands, press the left
 The carry is an attachment grasp and the page says so: ticked, the row along the near edge is
 pinned at the right hand's frame, because the YAM's pads cannot pinch a sheet lying flat, nor
 one hanging over the bench's edge, where the inner finger cannot get under the drape. The rest
-is contact. Unheld, the sheet slides 0.29 m along the bench ahead of its own fold; the left hand
-pressing the far end keeps it within 2 mm. The crease is the left hand's: the flat underside of
-its closed fingers stamps the loop at three places along the fold while the right hand still holds
-the edge down, and the hinges bent past the yield keep 2.3 to 3.1 rad over three drives
+is contact. The left hand pressing the far end keeps it within 0.3 mm through the carry; unheld,
+it slides 9 mm, 14 mm by the last stamp, and the fold still keeps 2.9 rad (three drives each,
+``fixprobe.py``, GPUs 1 and 6). The crease is the left hand's: the flat underside of its closed
+fingers stamps the loop at three places along the fold while the right hand still holds the edge
+down, and the hinges bent past the yield keep 2.3 to 3.1 rad over three drives
 (``foldletter.py``, GPU 7); pressed after the edge is let go, the loop rolls open instead (1.4). The
 **Crease** folder reads ``crease_angle`` through the fold line and ``fold_extent`` (the sheet's span
 over its flat span). Set ``yield_angle`` to 0 under **Material** and the same fold springs open.
@@ -44,8 +45,8 @@ def main():
     def page(studio):
         with studio.gui.add_folder("Crease"):
             hold = studio.gui.add_checkbox("Edge on the right hand", initial_value=False)
-            angle = studio.gui.add_number("crease_angle (rad)", 0.0, disabled=True)
-            extent = studio.gui.add_number("fold_extent", 1.0, disabled=True)
+            angle = studio.gui.add_number("crease_angle (rad)", 0.0, step=0.01, disabled=True)
+            extent = studio.gui.add_number("fold_extent", 1.0, step=0.01, disabled=True)
 
         def attach(_) -> None:  # the page's set grab, pinned to the right hand's frame: an attachment grasp
             grips = studio.deformables

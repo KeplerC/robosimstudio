@@ -824,7 +824,7 @@ DRAFTS = (
         expect=(Check(_paper_folded, needs=("paper",)),),
     ),
     # The hand, closed and pointing down, pushes the standing flap over and presses it into the box;
-    # tests/test_fold_paper_robot.py drives the same path through the panel.
+    # tests/test_box_flap_robot.py drives the same path through the panel.
     Take(
         "examples/13_paper/01_box_flap.py",
         camera=Orbit(Bench(-0.05, 0.03, 0.11), distance=0.85, azimuth=30.0, elevation=30.0),

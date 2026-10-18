@@ -3,15 +3,15 @@
 
 A carton-board flap standing open on the rim of a box and the left hand pointing down beside it: press **Close**, drag the hand toward the box to push the flap over, down to press it into the box, and up again, and it stays shut.
 
-The box is four slabs; the flap is a strip of CARDBOARD ``pinned`` on the far rim, standing up
-and leaning out 15 degrees as an opened carton's does, because a hand cannot lift one lying out
-level: the YAM's closed fingers stand 100 mm over their tips, the height of the box. Pushed over
-and pressed down near the hinge until its free edge is 74 mm under the rim, the hinge rows bend
-past the yield and keep 1.9 rad, so the flap comes back level when the hand lifts (5 mm under);
-pressed near its free end the board bends along its length instead, the hinge keeps 1.3 rad
-and the flap springs back up 26 degrees (``flapdrive.py``, GPU 7, RTX PRO 6000). Board this stiff
-needs VBD at 20 iterations instead of 5 (on the drape bench a 100 mm flap sags 19 % of its
-length at 5 and 5 % at 20), 40 ms per control step. The **Hinge** readout is ``crease_angle``.
+The box is four slabs; the flap is a strip of CARDBOARD ``pinned`` on the far rim, standing up and leaning out
+15 degrees as an opened carton's does, because a hand cannot lift one lying out level: the YAM's closed fingers
+stand 100 mm over their tips, the height of the box. Pushed over and pressed 55 mm out from the hinge until its
+free edge is 74 mm under the rim, the hinge rows bend past the yield and keep 1.9 rad, so the flap comes back
+level when the hand lifts (5 mm under, ``flapdrive.py``, GPU 7, RTX PRO 6000). Pressed to the same depth 75 mm
+out, the board bends along its length instead: the hinge keeps 1.6 rad and the flap springs back to 13 degrees
+over level, its edge 30 mm over the rim (two drives, ``fixprobe.py``, GPUs 1 and 6). Board this stiff needs VBD
+at 20 iterations instead of 5 (on the drape bench a 100 mm flap sags 19 % of its length at 5 and 5 % at 20),
+40 ms per control step. The **Hinge** readout is ``crease_angle``.
 """
 
 import math
@@ -55,7 +55,7 @@ def main():
 
     def page(studio):
         with studio.gui.add_folder("Hinge"):
-            angle = studio.gui.add_number("crease_angle (rad)", 0.0, disabled=True)
+            angle = studio.gui.add_number("crease_angle (rad)", 0.0, step=0.01, disabled=True)
 
         def each_step() -> None:
             sheet.update_probe(sim.state, sim.step_count)
