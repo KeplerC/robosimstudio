@@ -65,8 +65,6 @@ NUMBERED = (
     "12_dough/01_press_dough.py",
     "13_paper/00_fold_paper.py",
     "13_paper/01_box_flap.py",
-    "16_bags/00_open_a_bag.py",
-    "16_bags/01_open_a_bag_scored.py",
 )
 """The numbered scripts that run on a base checkout: no flags, every parameter a
 local, two arms, one call to the studio. ``02_engines`` is here because its one
@@ -87,16 +85,19 @@ SCRIPTS = (*NUMBERED, *ROPE)
 DEMOS = (
     "02_soft/00_sponge.py",
     "03_rope/02_superdex.py",
+    "16_bags/00_open_a_bag.py",
+    "16_bags/01_open_a_bag_scored.py",
     "17_knots/00_pull_knot_tight.py",
     "18_bands/00_band_on_pegs.py",
     "18_bands/01_band_on_pegs_scored.py",
 )
 """The multi-engine demos, which the ones above cannot stand in for: each needs a
 foreign engine, and each is the *acceptance* scene for one kind or feature on it
-(the sponge, the cable, the rope's knot, the closed rod's band). They are
-not in :data:`SCRIPTS` because none satisfies its rules on a base checkout --
-the sponge stands under a single-armed Panda where the scene scripts ship a
-bimanual robot, and the SuperDex cable needs the ``[superdex]`` extra to build."""
+(the sponge, the cable, the bag's self-contacting shell, the rope's knot, the
+closed rod's band). They are not in :data:`SCRIPTS` because none satisfies its
+rules on a base checkout -- the sponge stands under a single-armed Panda where
+the scene scripts ship a bimanual robot, and the SuperDex cable, bag, knot and
+band need the ``[superdex]`` extra to build."""
 
 HAS_ROPE = bool(ROPE)
 NO_ROPE = "the older rope scripts (examples/scenes/) are not in this tree"
