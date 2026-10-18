@@ -254,6 +254,7 @@ class PanelInspector(Panel):
                 gui.add_markdown(f"{heading}\n\n*{tunable.summary}*" if tunable.summary else heading)
                 binder = SpecBinder(tunable.spec)
                 binder.build(gui)
+                binder.set_disabled(getattr(tunable, "inert", ()))
                 self._binders.append((binder, tunable))
 
     # ------------------------------------------------------------------- drain

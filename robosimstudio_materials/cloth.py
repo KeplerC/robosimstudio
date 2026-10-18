@@ -723,21 +723,24 @@ class EntityCloth(ParticleMixin, Entity):
         """This sheet's material, as something a panel may tune while the scene runs.
 
         ``LiveMaterial`` writes a field into the model's material arrays, which VBD reads every
-        substep, so a write needs no notification. The spec is the one the sheet was built with.
+        substep, and into an island's own copy of them, so a write needs no notification; the contact
+        trio goes into the model's scalars. The spec is the one the sheet was built with. None on a
+        host engine: SuperDex copies a shell's material when it builds it, so nothing here would reach it.
         """
         from robosimstudio.core.tuning import Tunable
+        from robosimstudio.domains.capabilities import host_bridge
         from robosimstudio.scene.tuning import LiveMaterial, locate_cloth
 
-        del pipeline
-        if self.model is None:
+        if self.model is None or (pipeline is not None and host_bridge(pipeline, self.name) is not None):
             return ()
-        live = LiveMaterial(self.model, locate_cloth(self.model, self))
+        live = LiveMaterial(self.model, locate_cloth(self.model, self), pipeline)
         return (
             Tunable(
                 name="material",
                 spec=self.spec.material,
                 write=live.write_field,
                 summary=f"What {self.name} is made of.",
+                inert=live.inert(),
             ),
         )
 

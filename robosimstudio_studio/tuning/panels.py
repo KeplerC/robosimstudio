@@ -123,6 +123,7 @@ class PanelTune(Panel):
                 f"`{TIER_MARK['rebuild'].strip()}` needs rebuild &nbsp; rest lands next substep."
             )
             self.binder.build(gui)
+            self.binder.set_disabled(self.tuner.inert.get(self.tuner.selected, ()))
             self._save_name = gui.add_text("Name", initial_value=f"{self.tuner.selected or 'cloth'}_tuned")
             save = gui.add_button("Save as preset file")
             save.on_click(lambda _: setattr(self, "save_requested", True))
@@ -146,6 +147,7 @@ class PanelTune(Panel):
                 name, self.cloth_requested = self.cloth_requested, ""
                 self.tuner.select(name)
                 self.binder.set_spec(self.tuner.material)
+                self.binder.set_disabled(self.tuner.inert.get(self.tuner.selected, ()))
                 self._sync_preset()
                 self.refresh()
                 return

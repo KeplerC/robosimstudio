@@ -6,17 +6,18 @@ a cloth's constitutive parameters as Warp arrays -- ``tri_materials``,
 ``edge_bending_properties``, ``tet_materials``, ``particle_radius`` -- and VBD
 passes those arrays into its kernels on every colour group of every iteration of
 every substep, indexing them per element. Nothing is cached solver-side, and
-``ModelFlags`` has no entry for cloth material precisely because none is needed.
-So assigning into one of those arrays takes effect on the very next substep, and
-does so **even inside a captured CUDA graph**: a capture bakes the array's device
-pointer, not the numbers behind it. Moving a stiffness slider is a few hundred
-kilobytes of upload and nothing else.
+``ModelFlags`` has no entry for cloth material. So assigning into one of those
+arrays takes effect on the very next substep, and does so **even inside a captured
+CUDA graph**: a capture bakes the array's device pointer, not the numbers behind
+it. One catch: in a coupled scene Newton 1.7 may hand the cloth's island its own
+copy of these arrays, so each write is copied into that copy as well
+(:func:`~robosimstudio.core.tuning.reach_island_copies`).
 
 The write is **per cloth**, because those arrays are indexed per element and
 :func:`locate_cloth` selects the elements belonging to one entity. The
-model-wide tiers -- the soft-contact scalars, and everything consumed at build
-time -- are the studio's, in :mod:`robosimstudio_studio.tuning.apply`, which
-re-exports what is here so a panel sees one surface.
+soft-contact trio is model-wide scalars, written here too, and everything
+consumed at build time is the studio's, in :mod:`robosimstudio_studio.tuning.apply`,
+which re-exports what is here so a panel sees one surface.
 
 **It sits in ``scene`` because that is the lowest layer that can express it.**
 :func:`locate_cloth` takes a built :class:`~robosimstudio_materials.cloth`
@@ -34,9 +35,26 @@ from typing import Any
 
 import numpy as np
 
+from robosimstudio.core.tuning import reach_island_copies
 from robosimstudio.specs.params import LIVE, param_ui
 
-__all__ = ["ClothTarget", "LiveMaterial", "locate_cloth"]
+__all__ = ["CONTACT_SCALARS", "LIVE_FIELDS", "ClothTarget", "LiveMaterial", "locate_cloth", "write_live"]
+
+CONTACT_SCALARS = {"contact_ke": "soft_contact_ke", "contact_kd": "soft_contact_kd", "friction": "soft_contact_mu"}
+"""Material field -> the model scalar it sets. Model-wide, not per cloth: the last cloth written wins."""
+
+LIVE_FIELDS = (
+    "tri_ke",
+    "tri_ka",
+    "tri_kd",
+    "edge_ke",
+    "edge_kd",
+    "core_shear_modulus",
+    "core_lame_lambda",
+    "core_damping",
+    "particle_radius",
+)
+"""The fields :meth:`LiveMaterial.write_field` puts into the model's element arrays."""
 
 
 @dataclass(frozen=True)
@@ -103,7 +121,7 @@ def locate_cloth(model: Any, entity: Any) -> ClothTarget:
 
 
 class LiveMaterial:
-    """Writes the live-tier fields of a material into one cloth's arrays.
+    """Writes the live and contact fields of a material into one cloth's arrays and the model.
 
     Every write downloads the array fresh, edits this cloth's rows and uploads
     the whole thing. No host copy is kept between writes: the arrays are shared
@@ -112,9 +130,12 @@ class LiveMaterial:
     they were when it was taken.
     """
 
-    def __init__(self, model: Any, target: ClothTarget) -> None:
+    def __init__(self, model: Any, target: ClothTarget, pipeline: Any = None) -> None:
         self.model = model
         self.target = target
+        self.pipeline = pipeline
+        """The scene's pipeline: an island holding its own copy of an array gets each write too, and a
+        contact-scalar write drops a captured graph. ``None`` writes the model alone."""
 
     def _fetched(self, attr: str) -> np.ndarray | None:
         array = getattr(self.model, attr, None)
@@ -122,6 +143,7 @@ class LiveMaterial:
 
     def _flush(self, attr: str, values: np.ndarray) -> None:
         getattr(self.model, attr).assign(values)
+        reach_island_copies(self.pipeline, attr)
 
     def _write_rows(self, attr: str, rows: np.ndarray, column: int, value: float) -> bool:
         if not len(rows):
@@ -145,11 +167,12 @@ class LiveMaterial:
 
     # -------------------------------------------------------------- per field
     def write_field(self, name: str, value: Any) -> bool:
-        """Write one live field. Returns whether anything was actually written.
+        """Write one field. Returns whether anything was actually written.
 
-        ``False`` means the field has no elements to write to in this cloth --
-        a slab's core parameters on a membrane, bending on a mesh with no edges
-        -- which is information a panel can show rather than an error.
+        The live fields go into this cloth's rows; the contact trio into the model's scalars, dropping
+        a captured graph. ``False`` means the field has no elements to write to in this cloth -- a
+        slab's core parameters on a membrane, bending on a mesh with no edges -- or is not one this
+        writer knows, which a panel can show rather than an error.
         """
         t = self.target
         match name:
@@ -171,7 +194,21 @@ class LiveMaterial:
                 return self._write_rows("tet_materials", t.tets, 2, float(value))
             case "particle_radius":
                 return self._write_flat("particle_radius", t.particles, float(value))
+        scalar = CONTACT_SCALARS.get(name)
+        if scalar is not None:
+            # Model-wide scalars the solver is handed by value on every launch: a capture bakes them.
+            setattr(self.model, scalar, float(value))
+            if getattr(self.pipeline, "captured", False):
+                self.pipeline.invalidate_graph()
+            return True
         return False
+
+    def inert(self) -> tuple[str, ...]:
+        """The live fields with nothing in this cloth to write to: the core's on a membrane, the
+        bending pair on a mesh with no edges. A panel shows them read-only."""
+        t = self.target
+        empty = {"tri": not len(t.tris), "edge": not len(t.edges), "core": not len(t.tets)}
+        return tuple(name for name in LIVE_FIELDS if empty.get(name.split("_")[0], False))
 
     def write(self, spec: Any, *, only: str = "") -> tuple[str, ...]:
         """Write every live field of ``spec``, or just ``only``.
@@ -189,13 +226,22 @@ class LiveMaterial:
         costs a handful of small uploads, which is what a preset load wants;
         ``only`` is the single-slider path.
         """
-        written: list[str] = []
-        for f in fields(spec):
-            if only and f.name != only:
-                continue
-            described = param_ui(spec, f.name)
-            if described is None or described.tier != LIVE:
-                continue
-            if self.write_field(f.name, getattr(spec, f.name)):
-                written.append(f.name)
-        return tuple(written)
+        return write_live(spec, self.write_field, only=only)
+
+
+def write_live(spec: Any, write_field: Any, *, only: str = "") -> tuple[str, ...]:
+    """Write every live field of ``spec`` through ``write_field``, or just ``only``. Returns what landed.
+
+    ``write_field`` is ``(field, value) -> bool``: :meth:`LiveMaterial.write_field`, or an entity's
+    material :class:`~robosimstudio.core.tuning.Tunable`, which routes the fields its kind adds.
+    """
+    written: list[str] = []
+    for f in fields(spec):
+        if only and f.name != only:
+            continue
+        described = param_ui(spec, f.name)
+        if described is None or described.tier != LIVE:
+            continue
+        if write_field(f.name, getattr(spec, f.name)):
+            written.append(f.name)
+    return tuple(written)
