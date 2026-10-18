@@ -94,7 +94,9 @@ Isaac Sim.
 
 This module is where the private-attribute reach is *isolated*. It overrides
 ``ViewerRTX._add_camera_lights_and_render_product``, ``_render_and_display``,
-``_apply_ground_material`` and ``_log_triangles``, and touches ``viewer._rtx``,
+``_update_ovrtx_camera``, ``_apply_ground_material`` and ``_log_triangles``,
+writes through ``_write_runtime_attribute`` (Newton 1.7's route to OVRTX, which
+goes by its OVStage scene from OVRTX 0.4 on), and touches ``viewer._rtx``,
 ``viewer._render_product_path``, ``viewer._shape_to_batch``, ``viewer._meshes``
 and ``viewer.stage``. Nothing else in this package does, which is what the
 version pins are protecting: ``ovrtx`` to a release in the ``[rtx]`` extra,
@@ -512,15 +514,36 @@ def _viewer_class():
             return cache
 
         def _write_poses(self) -> None:
-            """Push the rig's camera transforms into the live renderer."""
-            from ovrtx import Semantic
+            """Push the rig's camera transforms into the live renderer.
 
-            self._rtx.write_attribute(
-                prim_paths=[self.camera_path(i) for i in range(len(self.rig))],
-                attribute_name="omni:xform",
-                tensor=np.stack([_usd_camera_matrix(self.poses[spec.name]) for spec in self.rig]),
-                semantic=Semantic.XFORM_MAT4x4,
+            Through Newton's own ``_write_runtime_attribute``, as its viewport
+            camera is written: OVRTX 0.4.1 takes runtime writes only through
+            the OVStage scene Newton 1.7 attaches it to, and refuses a direct
+            ``write_attribute`` while attached.
+            """
+            if not self.rig:
+                return
+            self._write_runtime_attribute(
+                [self.camera_path(i) for i in range(len(self.rig))],
+                "omni:xform",
+                np.stack([_usd_camera_matrix(self.poses[spec.name]) for spec in self.rig]),
+                is_matrix=True,
             )
+
+        def _update_ovrtx_camera(self):
+            """Newton's viewport camera, then the rig's poses and any live colours, in the frame's write window.
+
+            ``end_frame`` calls this from ``_update_scene``, between the step to
+            a new OVStage ordinal and the advance of the write floor past it: a
+            write made after that advance (in ``_render_and_display``, where the
+            poses went before Newton 1.7) lands on an ordinal the renderer has
+            already been told is complete.
+            """
+            super()._update_ovrtx_camera()
+            self._write_poses()
+            for path, tensor in getattr(self, "pending_colors", ()):
+                self._write_runtime_attribute([path], "primvars:displayColor", tensor, is_array=True)
+            self.pending_colors = []
 
         def step_rig(self) -> None:
             """One tracer pass over every product, synchronously.
@@ -528,24 +551,26 @@ def _viewer_class():
             Synchronous is the whole point. ``step_async`` is what makes a
             viewport smooth -- present the last frame, start the next -- and what
             makes an observation a frame stale, which for a camera that just
-            moved is a picture of where it used to be.
+            moved is a picture of where it used to be. On OVStage the pass reads
+            the ordinal the frame's writes went to.
             """
+            kwargs = {"ordinal": self._ovstage_ordinal} if getattr(self, "_use_ovstage", False) else {}
             self.outputs = self._rtx.step(
                 render_products={self.product_path(i) for i in range(len(self.rig))},
                 delta_time=1.0 / self.fps,
+                **kwargs,
             )
 
         def _render_and_display(self):
             """Replaces the viewport's own render, which nothing here reads.
 
-            ``end_frame`` calls this after pushing the frame's transforms, which
-            is the first moment ``self._rtx`` exists -- the renderer is created
-            inside the ``_init_ovrtx`` that the same call triggers -- and so the
-            first moment the camera poses can be written.
+            ``end_frame`` calls this after ``_update_scene`` has written the
+            frame's transforms and the rig's poses (:meth:`_update_ovrtx_camera`),
+            and the first call comes after the ``_init_ovrtx`` that creates
+            ``self._rtx``.
             """
             if self._rtx is None or self._should_close:
                 return
-            self._write_poses()
             self.step_rig()
 
     return _StudioViewerRTX
@@ -1360,7 +1385,9 @@ class RendererRTX(RendererBase):
                 for i in changed
                 if int(self.live_shapes[i]) in viewer.live_paths
             ]
-            viewer._rtx.write_array_attribute(prim_paths=paths, attribute_name="primvars:displayColor", tensors=tensors)
+            # Written by the viewer inside the frame's write window (its
+            # ``_update_ovrtx_camera``), not here between frames.
+            viewer.pending_colors = [*getattr(viewer, "pending_colors", ()), *zip(paths, tensors, strict=True)]
         self._live_cache = current
 
     def render(self, state: newton.State) -> FrameSet:

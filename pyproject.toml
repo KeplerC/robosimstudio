@@ -69,10 +69,14 @@ genesis = [
 ]
 # The OVRTX path-traced renderer. Pinned: its render-var names and readback API
 # are private surface. pyglet is here because Newton's viewer camera imports
-# pyglet.math at call time. A checkout run through uv installs it without being
-# asked -- the `rtx` group below -- and a GPU without RT cores renders with
-# `tiled` either way (robosimstudio.solvers.render.choose_renderer).
-rtx = ["ovrtx==0.4.0.*", "usd-core", "pyglet"]
+# pyglet.math at call time. Newton 1.7's ViewerRTX drives OVRTX 0.4 and newer
+# through OVStage's scene interface and refuses to start without it. OVStage
+# 0.1.1 is the oldest Newton accepts; ovrtx 0.4.0 cannot populate a stage
+# through it ("Stage reader/writer legacy interface is unavailable"), and 0.4.1
+# can. A checkout run through uv installs these without being asked -- the
+# `rtx` group below -- and a GPU without RT cores renders with `tiled` either
+# way (robosimstudio.solvers.render.choose_renderer).
+rtx = ["ovrtx==0.4.1.*", "ovstage==0.1.1.*", "usd-core", "pyglet"]
 # USD scene import.
 usd = ["newton[importers]"]
 # The Feetech motor bus behind leader-arm teleoperation.

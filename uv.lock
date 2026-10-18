@@ -3562,12 +3562,22 @@ wheels = [
 
 [[package]]
 name = "ovrtx"
-version = "0.4.0.346409"
+version = "0.4.1.364340"
 source = { registry = "https://pypi.nvidia.com/" }
 wheels = [
-    { url = "https://pypi.nvidia.com/ovrtx/ovrtx-0.4.0.346409-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:81d680e6592ffc72ccd87bf30b7ff49d2cb40b32f8fe5f05e597a22c80d8c68b" },
-    { url = "https://pypi.nvidia.com/ovrtx/ovrtx-0.4.0.346409-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:8d79eaa13fbee4eae14911047974e659585ec50327103de41cd37aedec369777" },
-    { url = "https://pypi.nvidia.com/ovrtx/ovrtx-0.4.0.346409-py3-none-win_amd64.whl", hash = "sha256:a2e6d9d05ca1b1e79dfa373d26605a6162c512ff1b84365ac4f2c9a39f25b5cc" },
+    { url = "https://pypi.nvidia.com/ovrtx/ovrtx-0.4.1.364340-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:38b33e5052b81572c11af317fd9f214b873a631ae727e448f6a6b990597c0320" },
+    { url = "https://pypi.nvidia.com/ovrtx/ovrtx-0.4.1.364340-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:597e09f34819f31a71fb919c9b0024c3b652588bdfa4d1858b2222f219d0ec09" },
+    { url = "https://pypi.nvidia.com/ovrtx/ovrtx-0.4.1.364340-py3-none-win_amd64.whl", hash = "sha256:f1a8e160912a503a5e536143f7bc1bca7048b3941a4c2756c5b661961bcb5752" },
+]
+
+[[package]]
+name = "ovstage"
+version = "0.1.1.355824"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/fd/a1650d436b3c304720236178848d4e7ad523a2b9f2b76918d7b902934cac/ovstage-0.1.1.355824-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:046aa360959bf5344d912470aaa11d3ec1fc750e28816e5239ce0438864c9863", size = 59799282, upload-time = "2026-08-05T20:07:10.538Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/2e/e5d03719d9ab8e412187be84efe11bc6b912eca02bd8dfb09a1bf522bbe4/ovstage-0.1.1.355824-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:b4affd9e5b23620ec71901a164df4ae373d25de2c76b9fae4d193d97aa2df0ec", size = 64302147, upload-time = "2026-08-05T20:06:18.013Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/d0/ff9124f524ffadc87f8893e99de1679e7c517ca6ceb60e0b870a284b71a3/ovstage-0.1.1.355824-py3-none-win_amd64.whl", hash = "sha256:fc8ae7fe950aa2ff8fd24643047f7156ffa1b9b384ce3f024ee2193929e21a3b", size = 35031430, upload-time = "2026-08-05T20:05:29.88Z" },
 ]
 
 [[package]]
@@ -4536,6 +4546,7 @@ lerobot-feetech = [
 ]
 rtx = [
     { name = "ovrtx" },
+    { name = "ovstage" },
     { name = "pyglet" },
     { name = "usd-core" },
 ]
@@ -4571,7 +4582,8 @@ requires-dist = [
     { name = "newton", extras = ["sim"], specifier = ">=1.7,<1.8" },
     { name = "numpy" },
     { name = "nvidia-curobo", extras = ["cu12"], marker = "extra == 'curobo'", git = "https://github.com/NVlabs/curobo.git?tag=v0.8.0" },
-    { name = "ovrtx", marker = "extra == 'rtx'", specifier = "==0.4.0.*", index = "https://pypi.nvidia.com/" },
+    { name = "ovrtx", marker = "extra == 'rtx'", specifier = "==0.4.1.*", index = "https://pypi.nvidia.com/" },
+    { name = "ovstage", marker = "extra == 'rtx'", specifier = "==0.1.1.*" },
     { name = "pydantic", marker = "extra == 'gap'" },
     { name = "pyglet", marker = "extra == 'rtx'" },
     { name = "pyroki", git = "https://github.com/chungmin99/pyroki.git?rev=95afccc22658c461ab1042a048ae4e9c24bc2a47" },
