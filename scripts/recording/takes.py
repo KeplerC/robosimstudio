@@ -1551,7 +1551,84 @@ ROBOT_SUCTION = (
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES, *ROBOT_BAGS, *ROBOT_BRUSH, *ROBOT_SUCTION)
+# The tape: the right hand takes the label's pull tab by contact and peels the label off the box, the
+# staircase tests/test_peel_a_label drives through the same arm panel: up 30 mm, then seven times back
+# 20 mm toward the right arm and up 10 mm.
+TAPE_TOP = 0.05
+"""The example's box top over the bench [m]."""
+TAPE_CLOSE = TAPE_TOP + 0.0125 + 0.004
+"""Where the tool centre closes: 4 mm over the middle of the 24 mm tab, the pads clear of the box top."""
+
+
+def _peeled(film) -> tuple[bool, str]:
+    """``00_peel_a_label``'s readout: the share of the label's bonds that have let go."""
+    label = film.sim["label"].entity
+    share = float(label.peeled())
+    front = 1000.0 * float(label.peel_front())
+    return share >= 0.8, f"{100.0 * share:.1f}% of the bonds let go, the front {front:.0f} mm along (the test asks 80%)"
+
+
+ROBOT_TAPE = (
+    Take(
+        "examples/19_tape/00_peel_a_label.py",
+        # From in front of the bench, the label running left to right across the frame, so its lift shows.
+        camera=Orbit(Bench(0.0, -0.10, 0.06), distance=0.9, azimuth=15.0, elevation=38.0, fov=36.0),
+        warmup=0.5,
+        # The page puts its Label folder first; expanding it last scrolls the sidebar back up to it.
+        layout=Layout(collapse=("Simulation", "Visualization", "Arm: left"), expand=("Label",)),
+        # 1.8 s of scene a second at 12 frames: the fourteen short drags and the waits for the hand
+        # between them ran 25 s of clip at 15, and 1.47 MB at the bottom of the quality ladder.
+        speed=1.8,
+        fps=12,
+        budget=1_200_000,
+        beats=(
+            Wait(seconds=0.4, label="a paper label on a box, its end in a blue pull tab under the right hand"),
+            Drag(
+                "right", "z", to=Bench(z=TAPE_CLOSE), seconds=1.2, label="drag the hand down: its jaws straddle the tab"
+            ),
+            Wait(seconds=0.3),
+            Press(text="Close", within=RIGHT, label="Close: the pads squeeze the tab"),
+            Wait(seconds=0.8, mark="closed"),
+            Drag(
+                "right", "z", to=Bench(z=TAPE_TOP + 0.03), seconds=1.0, label="drag it up 30 mm: the first rows let go"
+            ),
+            *(
+                beat
+                for k in range(1, 8)
+                for beat in (
+                    Drag(
+                        "right",
+                        "y",
+                        to=Bench(y=-0.04 - 0.02 * k),
+                        seconds=0.5,
+                        approach=0.3,
+                        label="back 20 mm toward the arm",
+                    ),
+                    Drag(
+                        "right",
+                        "z",
+                        to=Bench(z=TAPE_TOP + 0.03 + 0.01 * k),
+                        seconds=0.3,
+                        approach=0.3,
+                        label="and up 10 mm",
+                    ),
+                )
+            ),
+            Wait(seconds=1.0, mark="peeled", label="the last bonds let go: the label is off the box, which stayed put"),
+        ),
+        expect=(Check(_peeled, needs=("label",)),),
+    ),
+)
+
+TAKES: tuple[Take, ...] = (
+    *FINAL,
+    *DRAFTS,
+    *ROBOT_PARTICLES,
+    *ROBOT_BAGS,
+    *ROBOT_BRUSH,
+    *ROBOT_SUCTION,
+    *ROBOT_TAPE,
+)
 
 KEPT: dict[str, str] = {
     "16_bags/01_open_a_bag_scored": "the same bag, hands and gesture as 00_open_a_bag with a goal beside them; its clip is that one's",
@@ -1559,6 +1636,7 @@ KEPT: dict[str, str] = {
     "18_bands/01_band_on_pegs_scored": "the same pegboard, band and hook as 00_band_on_pegs with a goal beside them; its clip is that one's",
     "14_brush/01_scrub_scored": "the same brush, handle and square as 00_scrub_the_bench with a goal beside them; its clip is that one's",
     "15_suction/01_pick_scored": "the same plate, cup and square as 00_pick_a_plate with a goal beside them; its clip is that one's",
+    "19_tape/01_peel_a_label_scored": "the same box, label and peel as 00_peel_a_label with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

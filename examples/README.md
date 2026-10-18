@@ -111,6 +111,12 @@
 |---|---|
 | <img src="18_bands/media/00_band_on_pegs.webp" width="240"> | |
 
+## [19 Tape](19_tape/README.md)
+
+| [Peel a label](19_tape/00_peel_a_label.py) | [Peel a label, scored](19_tape/01_peel_a_label_scored.py) |
+|---|---|
+| <img src="19_tape/media/00_peel_a_label.webp" width="240"> | |
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |
