@@ -301,8 +301,40 @@ class TestEachBackendOnACpu(unittest.TestCase):
     def test_on_a_gpu_nothing_changes(self) -> None:
         from robosimstudio.specs.physics import backend
 
-        for spec in (backend("mujoco"), backend("vbd"), backend("genesis")):
+        for spec in (backend("mujoco"), backend("vbd"), backend("genesis"), backend("superdex", substeps=2)):
             self.assertEqual(self.on(spec, "cuda:0"), spec)
+
+    def test_a_cpu_only_solver_in_a_gpu_scene_must_be_a_host_engine(self) -> None:
+        """A host engine steps on the CPU beside any device; a solver on Newton's arrays steps where they are."""
+        from robosimstudio.scene.physics import CompositionError
+        from robosimstudio.specs.physics import backend, register_backend
+
+        register_backend("test_cpu_only_device", cls="my.solvers.OnTheArrays", devices=("cpu",))
+        register_backend("test_cpu_only_host", cls="my.solvers.OnTheHost", devices=("cpu",), host_engine=True)
+        with self.assertRaisesRegex(CompositionError, "host_engine=True"):
+            self.on(backend("test_cpu_only_device"), "cuda:0")
+        self.assertEqual(self.on(backend("test_cpu_only_host"), "cuda:0"), backend("test_cpu_only_host"))
+        self.assertEqual(self.on(backend("test_cpu_only_device"), "cpu"), backend("test_cpu_only_device"))
+
+    def test_a_gpu_scene_names_what_it_steps_on_the_cpu(self) -> None:
+        from robosimstudio.machine import Platform
+        from robosimstudio.scene.compiler import _on_the_host
+
+        program = types.SimpleNamespace(
+            islands=[
+                types.SimpleNamespace(
+                    is_host_engine=False, entities=("embodiment",), backend=types.SimpleNamespace(solver="mujoco")
+                ),
+                types.SimpleNamespace(
+                    is_host_engine=True, entities=("towel", "sponge"), backend=types.SimpleNamespace(solver="superdex")
+                ),
+            ]
+        )
+        gpu = Platform(device="cuda:0", device_why="x", renderer="tiled", renderer_why="y")
+        self.assertEqual(
+            _on_the_host(program, gpu), ("towel, sponge on superdex, stepped on the CPU each control step",)
+        )
+        self.assertEqual(_on_the_host(program, dataclasses.replace(gpu, device="cpu")), ())
 
 
 class TestTheCompilerRefusesWhatACpuCannotDo(unittest.TestCase):

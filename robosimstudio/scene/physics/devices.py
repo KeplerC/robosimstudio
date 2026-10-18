@@ -122,7 +122,11 @@ def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[Arra
 def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> BackendSpec:
     """``spec`` as it is constructed on ``device``: with its backend's CPU kwargs on a CPU.
 
-    The identity on a GPU, and for a backend that registered no CPU kwargs.
+    Otherwise the identity, and for a backend that registered no CPU kwargs.
+
+    On a GPU it refuses a CPU-only solver that is not a host engine: a host
+    engine (SuperDex) runs on the CPU beside any device, and is how a material
+    with no GPU path sits in a GPU scene.
 
     Raises:
         CompositionError: On a CPU, when the backend cannot run there -- which
@@ -132,11 +136,19 @@ def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> Bac
             (``use_mujoco_contacts=False``, which MuJoCo's C backend would
             ignore rather than refuse).
     """
-    if not _is_cpu(device):
-        return spec
     try:
         info = get_backend(spec.solver)
     except KeyError:
+        return spec
+    if not _is_cpu(device):
+        # A host engine runs on the CPU beside any device; a solver that steps
+        # Newton's arrays where they live has to be able to run there.
+        if info.devices and "cuda" not in info.devices and not info.host_engine:
+            raise CompositionError(
+                f"{owner!r} ({domain}) is on {spec.solver!r}, which runs on {' and '.join(info.devices)} only, and "
+                f"this scene is on {getattr(device, 'alias', device)}. Build it on a CPU (device='cpu'), or register "
+                "it as a host engine (register_backend(..., host_engine=True)) to step it on the CPU beside the GPU."
+            )
         return spec
     if info.devices and "cpu" not in info.devices:
         instead = CPU.backend_for(domain)

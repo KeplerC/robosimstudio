@@ -303,8 +303,6 @@ def compile_scene(
     request, notes = _for_platform(request, plat, num_worlds)
     if not plat.cuda_graphs:
         use_cuda_graph = False
-    plat = plat.with_notes(notes)
-    announce(plat, verbose=verbose)
 
     with wp.ScopedDevice(plat.device):
         if num_worlds == 1:
@@ -327,8 +325,24 @@ def compile_scene(
                 pipeline_cls=pipeline_cls,
                 episodes=episodes,
             )
+    plat = plat.with_notes((*notes, *_on_the_host(scene.program, plat)))
     scene.platform = plat
+    announce(plat, verbose=verbose)
     return scene
+
+
+def _on_the_host(program: PhysicsProgram | None, plat: Platform) -> tuple[str, ...]:
+    """One note per host-engine island of a GPU scene: what steps on the CPU beside it.
+
+    Nothing on a CPU, where everything does.
+    """
+    if program is None or plat.is_cpu:
+        return ()
+    return tuple(
+        f"{', '.join(island.entities)} on {island.backend.solver}, stepped on the CPU each control step"
+        for island in program.islands
+        if island.is_host_engine
+    )
 
 
 def _for_platform(request: SceneRequest, plat: Platform, num_worlds: int) -> tuple[SceneRequest, tuple[str, ...]]:

@@ -243,8 +243,11 @@ class PhysicsProgram:
     def summary(self) -> str:
         lines = [f"physics: {self.manifest.coupler} over {len(self.islands)} island(s)"]
         for island in self.islands:
-            # "(C)": MuJoCo's C library, which is what a CPU build steps.
+            # "(C)": MuJoCo's C library, which is what a CPU build steps. "(on the CPU)":
+            # a host engine, stepped on the CPU whatever device the model is on.
             engine = island.backend.solver + (" (C)" if island.backend.get("use_mujoco_cpu") else "")
+            if island.is_host_engine and str(self.model.device) != "cpu":
+                engine += " (on the CPU)"
             lines.append(
                 f"  island {island.name}: {engine} x{island.backend.substeps} -> "
                 f"{list(island.entities)} ({island.bodies.size} bodies, {island.joints.size} joints, "

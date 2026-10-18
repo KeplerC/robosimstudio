@@ -45,6 +45,22 @@ You can also choose instead of letting it pick:
 - `ROBOSIMSTUDIO_DEVICE` for a whole shell: `auto`, `cpu`, `cuda` or `cuda:1`.
 - `ROBOSIMSTUDIO_RENDERER` likewise: `auto`, `rtx` or `tiled`.
 
+The device is the scene's and the engine is the material's, so a material that
+only runs on a CPU can still sit in a GPU scene. SuperDex is a CPU engine. On a
+GPU it steps on the CPU once per control step, beside an arm and anything else
+that stays on the GPU in one captured CUDA graph, and the platform line names
+what it steps there:
+
+```python
+physics = rss.GENERIC.with_backend("cloth", rss.backend("superdex", substeps=2))   # every cloth
+rss.sheet(..., sim=rss.SimRequirements(domain="cloth",
+                                       backend=rss.backend("superdex", substeps=2)))  # one sheet
+```
+
+An engine of your own for such a material subclasses
+`robosimstudio.engines.host.SolverHost` and is registered with
+`register_backend(..., host_engine=True)`; it is then named the same two ways.
+
 ## Quick start
 
 We provide comprehensive examples in [`examples/`](https://github.com/robosimstudio/robosimstudio/tree/main/examples) to help you get started quickly. Alternatively, you can use a coding agent such as Codex or Claude Code to create a simulation environment by simply providing the following prompt:
