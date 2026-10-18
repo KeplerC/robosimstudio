@@ -121,6 +121,12 @@
 |---|---|
 | <img src="19_tape/media/00_peel_a_label.webp" width="240"> | |
 
+## [20 Cutting](20_cutting/README.md)
+
+| [Cut tofu](20_cutting/00_cut_tofu.py) | [Cut tofu, scored](20_cutting/01_cut_tofu_scored.py) |
+|---|---|
+| <img src="20_cutting/media/00_cut_tofu.webp" width="240"> | |
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |
