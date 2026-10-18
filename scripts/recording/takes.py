@@ -879,8 +879,8 @@ ROBOT_BRUSH = (
 PLATE_HALF = 0.003
 """The plate's half-thickness [m]: 6 mm thick."""
 INTO_PLATE = 0.003
-"""How far under the plate's top the gizmo is put [m]. The cup stops on the plate with its face 0.1 mm over
-it (the Seal readout's gap once ticked, inside the seal's 2 mm), and the panel reads the hand 6 mm behind
+"""How far under the plate's top the gizmo is put [m]. The cup stops on the plate with its face 0.1 to 0.2 mm
+over it (the Seal readout's gap once ticked, inside the seal's 2 mm), and the panel reads the hand 6 mm behind
 the gizmo: too far to put the gizmo back on the hand, so the arm keeps the face down on the plate."""
 SQUARE = (-0.11, -0.22, 0.11, 0.0)
 """``00_pick_a_plate``'s square in the bench frame [m]: x0, y0, x1, y1."""
