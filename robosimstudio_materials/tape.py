@@ -207,10 +207,10 @@ class TapeSpec(ClothSpec):
             builds no tab: the sheet is stuck along its whole length and nothing holds its end.
         tab_size: The tab's extents [m]: across the sheet, its thickness along the sheet (what the
             jaws close across) and its height off the face.
-        tab_mass: [kg]. 30 g, with :attr:`tab_hold` at 3 kN/m: in eight drives of the example the tab
-            stayed within 3.6 mm of where the pads took it through the whole peel. A 10 g tab clamped at
-            10 kN/m slid up to 9.5 mm, and out of the pads with 44% of the label off in one drive of
-            seven (``m9_drives.py``, ``m10_screen.py``, ``tests/test_peel_a_label``; GPUs 1 and 6).
+        tab_mass: [kg]. 30 g, with :attr:`tab_hold` at 3 kN/m: in 24 drives of the example, its jaws
+            damped, the tab stayed within 3.4 mm of where the pads took it through the whole peel
+            (``peel_probe.py``, GPUs 1 and 3). A 10 g tab clamped at 10 kN/m slid up to 9.5 mm, and out
+            of the pads with 44% of the label off in one drive of seven (``m9_drives.py``, GPUs 1 and 6).
         tab_friction: The tab's friction against what touches it: the pads and the face.
         tab_hold: Stiffness of each attachment that clamps the sheet's turned-up end in the tab [N/m].
             These never break. Softer than the 10 kN/m Newton defaults to, so the tab's own inertia, not
@@ -720,14 +720,14 @@ register_atom(
         calibration=AtomCalibration(
             positives=(
                 "examples/19_tape/00_peel_a_label, its tab taken by the right hand's pads, drawn up 30 mm and then "
-                "back 20 mm and up 10 mm seven times, reads 1.0 in eight drives, all 144 bonds (m10_screen.py, "
-                "GPUs 1 and 6).",
+                "back 20 mm and up 10 mm seven times, reads 1.0 in 24 drives of 24, all 144 bonds (peel_probe.py, "
+                "GPUs 1 and 3).",
             ),
             negatives=(
                 "The same label untouched reads 0, and so does the same drive with break_opening 0, a label that "
-                "never lets go: the pull goes into the box instead, the tab sliding out of the pads in 13 drives "
-                "of 14 or, once in 14, the hand dragging the box 45 mm by its label (never_dist.py, GPU 1; "
-                "tests/test_peel_a_label).",
+                "never lets go: the pull goes into the box instead, the tab sliding out of the pads in 10 drives "
+                "of 24 or, in the other 14, the hand dragging the box 46 mm by its label (peel_probe.py, GPUs 1 "
+                "and 3; tests/test_peel_a_label).",
             ),
             gate=None,
             bench="examples/19_tape/00_peel_a_label driven through its right arm panel, tests/test_peel_a_label.py",

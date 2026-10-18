@@ -21,7 +21,7 @@ TASK = """
 (define (problem peel_a_label)
   (:language peel the label off the box)
   (:staging (:scene bench_0728) (:embodiment yam_bimanual) (:physics tape_60hz@v1)
-            (:gripper-actuation (:ke 1500) (:kd 60)))
+            (:gripper-actuation (:ke 1500) (:kd 240)))
   (:objects box - parcel label - paper_label)
   (:goal (>= (peeled_fraction label) 0.8)))
 """

@@ -5,15 +5,16 @@ A paper label stuck on a box, its end in a blue pull tab under the right hand: d
 
 The grasp is contact: the pads squeeze the tab and nothing pins it to the hand. The label is a cloth
 held to the box by Newton 1.7 particle-body attachments, one per particle, and a bond lets go once the
-label has lifted 1 mm off the box, so the peel front travels with the hand. In eight drives all 144
-bonds let go, the tab stayed within 3.6 mm of where the pads took it and the free box moved 1.7 mm at
-most (``m10_screen.py``, ``tests/test_peel_a_label``). Tick **Never let go** and no bond lets go: the
-pull drags the box until the tab slides out of the pads (13 drives of 14), or, where the pads hold,
-drags the whole box 45 mm by its label (``never_dist.py``). The tab is rigid, because the pads cannot
-hold a cloth tab under the coupling the attachments need, and weighs 30 g, squeezed with 12 N: a 10 g
-tab at 8 N slid out of the pads in one drive of seven (``robosimstudio_materials/tape.py``). The
-**Label** folder reads ``peeled_fraction`` and the peel front. 38 ms a control step through the page
-(RTX PRO 6000).
+label has lifted 1 mm off the box, so the peel front travels with the hand. In 24 drives all 144 bonds
+let go, the tab stayed within 3.4 mm of where the pads took it and the free box moved 1.7 mm at most
+(``peel_probe.py``, two drives to a GPU). The jaws are damped to reach the tab in 0.4 s: shutting at
+8 mm a step they knocked it aside and closed on nothing in 3 of 116 closes (``peel_probe.py``,
+``peel_close.py``, the round-3 review). Tick **Never let go** and no bond lets go: the pull drags the
+box until the tab slides out of the pads (10 drives of 24), or, where the pads hold, drags the whole
+box 46 mm by its label (14 of 24). The tab is rigid, because the pads cannot hold a cloth tab under
+the coupling the attachments need, and weighs 30 g, squeezed with 12 N
+(``robosimstudio_materials/tape.py``). The **Label** folder reads ``peeled_fraction`` and the peel
+front. 38 ms a control step through the page (RTX PRO 6000).
 """
 
 import robosimstudio as rss
@@ -32,7 +33,8 @@ def main():
     # The right arm's joints [rad]: pointing down, jaws closing along y, the tool centre 100 mm over
     # the bench above the tab (``sim.arm("right").solve_q_full``).
     over_tab = (0.604, 2.485, 2.452, -1.539, 0.0, 0.604)
-    grip = rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=12.0)  # [N] per finger
+    # [N] per finger. Damped so the jaws reach the tab in 0.4 s: at kd 60 they hit it at 8 mm a step.
+    grip = rss.ActuationSpec(target_ke=1500.0, target_kd=240.0, effort_limit=12.0)
 
     yam = get_embodiment("yam_bimanual")
     left, right = yam.arms
