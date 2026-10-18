@@ -670,6 +670,19 @@ class ViewerStudio(newton.viewer.ViewerViser):
         self._static_skip_ok = False
         super().__init__(*args, **kwargs)
 
+    def _setup_gui(self) -> None:
+        """Add none of the folders Newton 1.7's ``ViewerViser`` opens at the top of its sidebar.
+
+        Newton 1.7 adds two, expanded, above everything a page declares: a **Simulation** folder
+        whose Pause, Step and Reset drive Newton's own example loop, and a fifteen-checkbox
+        **Visualization** folder. The studio steps itself, so on a studio page Newton's Pause set
+        ``is_paused()`` and every tick still stepped, and its Reset has no callback to call; the
+        studio's own Simulation folder is the one that pauses and resets. The Visualization folder
+        pushed every page's readouts below the fold, which is how the press-dough clip lost its
+        height readout. Newton 1.6 added neither. The handles stay empty, which Newton's own
+        per-frame sync already allows for.
+        """
+
     # ------------------------------------------------------------ what to draw
     def set_garments(self, garments: Sequence[GarmentVisual]) -> None:
         """Adopt the scene's declared deformables. Call after ``set_model``.

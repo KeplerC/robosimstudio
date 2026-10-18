@@ -103,6 +103,14 @@ class Viewer:
         """Whether the page is still open. The loop condition."""
         return self._viewer.is_running()
 
+    def should_step(self) -> bool:
+        """Whether the page's own **Pause** lets the next step run, or its **Step** asked for one.
+
+        Newton 1.7's viewer puts a Simulation folder with Pause, Step and Reset on this page; it only
+        records the clicks, and a loop that does not ask here steps through a pause.
+        """
+        return self._viewer.should_step()
+
     def show(self) -> None:
         """Draw the scene as it stands now.
 
@@ -166,8 +174,9 @@ def draw(sim: Any, *, port: int = 8080, steps: int | None = None, label: str = "
     with viewer(sim, port=port, label=label, share=share) as page:
         taken = 0
         while page.is_running() and (steps is None or taken < steps):
-            step()
-            taken += 1
+            if page.should_step():
+                step()
+                taken += 1
             page.show()
 
 
