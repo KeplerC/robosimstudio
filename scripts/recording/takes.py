@@ -1516,7 +1516,7 @@ ROBOT_TAPE = (
         camera=Orbit(Bench(0.0, -0.10, 0.06), distance=0.9, azimuth=15.0, elevation=38.0, fov=36.0),
         warmup=0.5,
         # The page puts its Label folder first; expanding it last scrolls the sidebar back up to it.
-        layout=Layout(collapse=("Simulation", "Visualization", "Arm: left"), expand=("Label",)),
+        layout=Layout(collapse=("Simulation", "Arm: left"), expand=("Label",)),
         # 1.8 s of scene a second at 12 frames: the fourteen short drags and the waits for the hand
         # between them ran 25 s of clip at 15, and 1.47 MB at the bottom of the quality ladder.
         speed=1.8,
@@ -1624,10 +1624,15 @@ def _per_step(script, label: str) -> Do:
 
     What the tests do with :func:`tests.fixtures.grasp.go`, at the same resolution: the cursor is
     walked a control step at a time at the test's speeds, rather than jumped once a film frame, so
-    the take is the test's drive and not an approximation of it.
+    the take is the test's drive and not an approximation of it. The pointer is put at rest first,
+    off the sidebar: the drive moves the gizmo from the server, and a pointer left on the button or
+    folder header it last pressed reads as a hand still on it.
     """
 
     def play(film):
+        left, top, width, height = film.page.js("canvasRect")
+        if math.dist(film.page.mouse, (left + width * 0.85, top + height * 0.85)) > 2.0:
+            film.page.rest(0.4)
         steps = script(film)
         state = {"done": False, "n": 0}
 
@@ -1818,19 +1823,29 @@ def _scrub_press(reads: float):
 
 
 def _scrub_along(film):
-    """Along the stain at the height the press stopped at, 200 control steps from 40 mm before it to 10 mm past."""
+    """Along the stain at the height the press stopped at, from 40 mm before it to 10 mm past, then on
+    15 mm more while easing 8 mm up off the towel, 0.75 mm a control step: tests/test_scrub_a_stain's
+    stroke. Stopped dead 10 mm past, the towel the stroke pushed ahead pressed back as the hand came to
+    rest, and a light stroke wiped the stain's last particle (take_path.py)."""
     import numpy as np
 
     panel = film.session.arms["right"]
-    (x0, y, _), x1 = film.bench((-0.09, -0.08, 0.0)), film.bench((0.06, 0.0, 0.0))[0]
-    for k in range(1, 201):
-        panel.aim(np.array([x0 + (x1 - x0) * k / 200, y, film.scrub_z]), panel.cursor_quat, moving=k < 200)
+    (x0, y, _), flat = film.bench((-0.09, -0.08, 0.0)), film.bench((0.06, 0.0, 0.0))[0]
+    end = flat + 0.015
+    n = round((end - x0) / 0.00075)
+    for k in range(1, n + 1):
+        x = x0 + (end - x0) * k / n
+        z = film.scrub_z + 0.008 * max(0.0, x - flat) / 0.015
+        panel.aim(np.array([x, y, z]), panel.cursor_quat, moving=k < n)
         yield
 
 
 def _scrub_lift(film):
-    x1, y, _ = film.bench((0.06, -0.08, 0.0))
-    yield from _go(film, "right", (x1, y, film.scrub_z + 0.03), 0.05)
+    """Straight up 30 mm from where the stroke left the towel."""
+    import numpy as np
+
+    panel = film.session.arms["right"]
+    yield from _go(film, "right", np.asarray(panel.cursor_pos) + np.array([0.0, 0.0, 0.03]), 0.05)
 
 
 def _keep_reading(name: str) -> Do:
@@ -1842,16 +1857,19 @@ def _keep_reading(name: str) -> Do:
 
 
 def _stain_wiped(film) -> tuple[bool, str]:
-    """The light stroke wiped nothing, the stroke inside the band wiped the stain, and the hard one marked it too hard."""
+    """The light stroke wiped nothing, the stroke inside the band wiped the stain, and the hard one, on
+    the stain cleaned back, marked it too hard and wiped none of it, lifted off included."""
     seen = getattr(film, "readings", {})
-    light, band, hard = (seen.get(k, {}) for k in ("light", "band", "hard"))
+    light, band, hard, off = (seen.get(k, {}) for k in ("light", "band", "hard", "lifted"))
     passed = (
         light.get("wiped (20-60 N)", 1.0) == 0.0
         and band.get("wiped (20-60 N)", 0.0) >= 0.8
         and band.get("too hard", 1.0) == 0.0
         and hard.get("too hard", 0.0) >= 0.5
+        and hard.get("wiped (20-60 N)", 1.0) == 0.0
+        and off.get("wiped (20-60 N)", 1.0) == 0.0
     )
-    return passed, f"light {light}, band {band}, hard {hard}"
+    return passed, f"light {light}, band {band}, hard {hard}, lifted {off}"
 
 
 ROBOT_CONTACT = (
@@ -1866,7 +1884,7 @@ ROBOT_CONTACT = (
         budget=2_000_000,
         # The left arm's folder stays open: collapsed, its Close is not on the page to press, and the
         # left hand held the far end open-fingered; the sheet slid 37 mm and no take folded.
-        layout=Layout(collapse=("Simulation", "Material", "Physics", "Visualization")),
+        layout=Layout(collapse=("Simulation", "Material", "Physics")),
         beats=(
             Fold(title="Simulation", open=False),
             Fold(title="How to drive this", open=False),
@@ -1890,14 +1908,16 @@ ROBOT_CONTACT = (
     ),
     Take(
         SCRUB,
-        # In front of the bench and to its right, 1.25 m off and looking down past the forearm: the
-        # closed hand, the towel and the stain's line, the Scrub folder's push and wiped beside them.
-        camera=Orbit(Bench(0.05, -0.08, 0.04), distance=1.25, azimuth=-40.0, elevation=38.0, fov=38.0),
+        # In front of the bench and well to its right, 1.25 m off: the whole working arm, the closed
+        # hand, the towel and the drawn stain, the Scrub folder's push and wiped beside them. From
+        # azimuth -40 the idle left arm's upper links ran along the top edge, drawn see-through by the
+        # page whether or not the room was drawn (cause not found); from -60 they are out of frame.
+        camera=Orbit(Bench(0.04, -0.10, 0.02), distance=1.25, azimuth=-60.0, elevation=36.0, fov=38.0),
         warmup=1.0,  # the towel lands from 20 mm
         fps=8,
-        speed=1.0,  # three strokes of 3.3 s; a stroke drawn faster heaps the towel and pushes harder
+        speed=1.0,  # three strokes of 3.7 s; a stroke drawn faster heaps the towel and pushes harder
         budget=1_800_000,
-        layout=Layout(collapse=("Simulation", "Arm: left", "Visualization")),
+        layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
             Fold(title="Simulation", open=False),
             Fold(title="How to drive this", open=False),
@@ -1907,17 +1927,19 @@ ROBOT_CONTACT = (
             Wait(seconds=0.4),
             _per_step(_scrub_press(0.5), "down until the fingers touch the towel"),
             _per_step(_scrub_along, "a light stroke: push under 20 N"),
+            _per_step(_scrub_lift, "up off the towel: nothing wiped"),
             _keep_reading("light"),
-            _per_step(_scrub_lift, ""),
             _per_step(_scrub_press(20.0), "down until push reads 20 N, into the band"),
             _per_step(_scrub_along, "the stroke wipes the stain"),
             Wait(seconds=0.3, mark="wiped"),
             _keep_reading("band"),
             _per_step(_scrub_lift, ""),
+            Press(text="Clean stain", within="Scrub", label="Clean stain: the stain is back"),
             _per_step(_scrub_press(90.0), "down until push reads 90 N, past the band"),
-            _per_step(_scrub_along, "too hard: marked, not wiped"),
+            _per_step(_scrub_along, "too hard: marked red, not wiped"),
             _keep_reading("hard"),
-            _per_step(_scrub_lift, ""),
+            _per_step(_scrub_lift, "lifted off: still nothing wiped"),
+            _keep_reading("lifted"),
             Wait(seconds=0.8),
         ),
         expect=(Check(_stain_wiped),),
