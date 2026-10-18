@@ -8,7 +8,8 @@ The right hand is put down until its open jaws straddle the pull tab, closes, is
 then seven times back 20 mm toward the right arm and up 10 mm. Nothing pins the tab to the hand: the
 pads squeeze it. The label peels row by row, the tab stays in the hand while it does and the box
 stays where it lay. Then the same label with ``break_opening`` set to 0, what the page's **Never let
-go** box writes: nothing peels and the tab slides out of the hand instead.
+go** box writes: nothing peels, and the pull goes into the box instead. Either the tab slides out of
+the pads or, when they hold it, the hand drags the whole box along by its label.
 """
 
 from __future__ import annotations
@@ -153,13 +154,17 @@ class TestALabelThatNeverLetsGoStaysStuck(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.got = _drive(CONTROL_PORT, unbreakable=True, stairs=STAIRS[:9])
 
-    def test_nothing_peels_and_the_tab_leaves_the_hand(self) -> None:
-        # Every bond held; the tab crept 16 mm in three steps and was out of the pads, 78 mm off, at the
-        # fourth, the label dragging the box (12 mm over all seven) (m12_ctrl.py).
+    def test_nothing_peels_and_the_pull_goes_into_the_box(self) -> None:
+        # Every bond held in 14 drives of 14 (never_dist.py, GPU 1). In 13 the label dragged the box
+        # 0.1 to 14.9 mm until the tab slid out of the pads, 80 to 104 mm off where they took it. In one
+        # the pads held (the tab within 2.7 mm) and the hand dragged the 0.5 kg box 45 mm by its label:
+        # two pads squeezing 12 N each at friction 0.8 can pull more than the box's 4.9 N weight. Either
+        # way the hand does not take the tab away from a box that stays put, which is what peeling is.
         self.assertEqual(0.0, self.got["peeled"][-1])
         self.assertEqual(self.got["bonds"], self.got["held"])
         slips = np.round(np.array(self.got["slips"]) * 1e3, 1)
-        self.assertGreater(max(self.got["slips"]), 0.03, f"tab slip {slips} mm")
+        went = max(*self.got["slips"], self.got["box_moved"])
+        self.assertGreater(went, 0.03, f"tab slip {slips} mm, box moved {self.got['box_moved'] * 1e3:.1f} mm")
 
 
 if __name__ == "__main__":
