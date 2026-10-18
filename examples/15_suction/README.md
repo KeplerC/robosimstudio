@@ -17,6 +17,8 @@ has a **Vacuum** box and a **Seal** readout; a graph switches the same cup with
 
 ## Pick up a plate
 
+![Pick up a plate](media/00_pick_a_plate.webp)
+
 A plate lying flat under the right hand's suction cup and a square 200 mm toward the middle of the bench: drag the hand down onto the plate, tick **Vacuum** in the right arm's panel, lift, carry it over the square and untick.
 
 The plate is 150 by 150 by 6 mm and 0.3 kg, flat on the bench, so a parallel

@@ -13,6 +13,8 @@ by a named handle on its own solver (`rss.brush(handle=...)` under
 
 ## Scrub a patch clean
 
+![Scrub a patch clean](media/00_scrub_the_bench.webp)
+
 A nylon dish brush stands on the bench under the right hand, which points down at its handle, beside a marked square: drag the hand down onto the handle, close, press the bristles to the bench and scrub the square.
 
 The brush is 400 bristles of four capsules each on VBD, rooted in a sole of
