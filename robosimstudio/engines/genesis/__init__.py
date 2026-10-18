@@ -23,6 +23,8 @@ BACKEND = register_backend(
     summary="Genesis's IPC coupler (libuipc): cloth and FEM bodies, co-simulated on the host; "
     "Newton islands lead, constraint reactions feed back.",
     host_engine=True,
+    # libuipc builds Engine("cuda"): there is no CPU Genesis here.
+    devices=("cuda",),
     # What each builder reads is declared beside it, per kind, in ``bridge.py``.
 )
 

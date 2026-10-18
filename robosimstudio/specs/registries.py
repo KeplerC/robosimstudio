@@ -464,6 +464,34 @@ class BackendInfo:
     couplers, its solver's ``step`` is a no-op inside the captured graph, and
     the real work runs as an eager per-control-step stage. False for every
     solver that integrates Newton's own state on the device."""
+    devices: tuple[str, ...] = ()
+    """The Warp device kinds the solver runs on: ``"cuda"``, ``"cpu"``, or both.
+
+    Empty means unknown, which is never refused -- the same convention as
+    :attr:`supports`, so a dotted-path solver nobody registered still builds on
+    whatever device it is asked to. A registered fact rather than a guess at
+    build time, because the answer is not "does it run" but "does it run at a
+    speed anyone would wait for": VBD's Warp kernels execute on a CPU, one
+    thread at a time, and a 1922-particle towel took 96 s for 20 control steps
+    there. It is registered CUDA-only for that reason, and a CPU scene that
+    names it is refused with the arrangement that serves it instead."""
+    cpu_params: tuple[tuple[str, Any], ...] = ()
+    """Constructor kwargs a build on a CPU device must have.
+
+    Filled in where an arrangement leaves them unstated and refused where it
+    states something else, so ``backend("mujoco")`` means MuJoCo's C library on a
+    CPU without the arrangement having to say so, and a stated
+    ``use_mujoco_contacts=False`` -- which MuJoCo's C backend ignores rather
+    than refuses -- is an error naming the parameter instead of different
+    physics."""
+    cpu_max_worlds: int = 0
+    """How many worlds the solver steps on a CPU; 0 is no limit.
+
+    MuJoCo's C backend holds one ``MjData``, so it is 1 there: a replicated
+    build is refused before the solver's own importer raises from deep inside
+    the conversion."""
+    cpu_note: str = ""
+    """How the solver runs on a CPU, in a few words, for the platform readout."""
 
     def __eq__(self, other: object) -> bool:  # schemas are mappings; compare them by content
         if not isinstance(other, BackendInfo):
@@ -480,6 +508,10 @@ class BackendInfo:
             self.consumes,
             self.maximal_coordinates,
             self.native_contacts,
+            self.devices,
+            self.cpu_params,
+            self.cpu_max_worlds,
+            self.cpu_note,
         ) == (
             other.alias,
             other.cls,
@@ -492,6 +524,10 @@ class BackendInfo:
             other.consumes,
             other.maximal_coordinates,
             other.native_contacts,
+            other.devices,
+            other.cpu_params,
+            other.cpu_max_worlds,
+            other.cpu_note,
         )
 
     def effective(self, spec: BackendSpec, *, has_particles: bool = True) -> BackendSpec:
@@ -553,6 +589,10 @@ def register_backend(
     consumes: Sequence[str] = (),
     maximal_coordinates: bool = False,
     native_contacts: bool = False,
+    devices: Sequence[str] = (),
+    cpu_params: Mapping[str, Any] | None = None,
+    cpu_max_worlds: int = 0,
+    cpu_note: str = "",
 ) -> BackendInfo:
     """Register a solver under an alias. Identical re-registration is accepted.
 
@@ -568,7 +608,15 @@ def register_backend(
         host_engine: Whether this backend is a foreign engine stepped on the
             host rather than a Newton solver stepped on the device -- see
             :attr:`BackendInfo.host_engine`.
+        devices: The device kinds it runs on (``"cuda"``, ``"cpu"``); empty
+            leaves it unknown -- see :attr:`BackendInfo.devices`.
+        cpu_params: Kwargs a CPU build must have -- see :attr:`BackendInfo.cpu_params`.
+        cpu_max_worlds: Worlds it steps on a CPU; 0 is no limit.
+        cpu_note: How it runs on a CPU, for the platform readout.
     """
+    unknown = set(devices) - {"cuda", "cpu"}
+    if unknown:
+        raise ValueError(f"backend {alias!r}: devices are 'cuda' and 'cpu', got {sorted(unknown)}")
     path = cls if isinstance(cls, str) else f"{cls.__module__}.{cls.__qualname__}"
     info = BackendInfo(
         alias=alias,
@@ -582,6 +630,10 @@ def register_backend(
         consumes=tuple(consumes),
         maximal_coordinates=bool(maximal_coordinates),
         native_contacts=bool(native_contacts),
+        devices=tuple(devices),
+        cpu_params=_frozen_params(dict(cpu_params or {})),
+        cpu_max_worlds=int(cpu_max_worlds),
+        cpu_note=str(cpu_note),
     )
     return BACKENDS.register(alias, info, origin=path)
 

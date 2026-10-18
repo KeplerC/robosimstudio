@@ -96,6 +96,10 @@ ALLOWED_STRINGS: dict[tuple[str, str], str] = {
         "which is not the rope and is read by threaded/encloses"
     ),
     ("domains/rigid/measures/geometry.py", "rod"): "the same feature kind, where its measures dispatch on it",
+    ("specs/arrangement.py", "rod"): (
+        "rss.CPU's backend table, routing the rope's domain to SuperDex by name as GENERIC routes 'soft': data, "
+        "not a branch, and an entry for a domain a tree without the pack never builds is never read"
+    ),
 }
 """``(library file, string) -> why`` for the rod-ish strings the library still uses as values.
 
