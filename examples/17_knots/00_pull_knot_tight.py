@@ -9,8 +9,8 @@ tails by friction, nothing pinned. Pulled to 490 mm across, the knot gives back 
 of its 361 mm of rope and keeps its three crossings, the closest strands 0.2 mm
 into each other; with self-contact off one strand goes straight through another, a
 whole 12 mm, and one crossing is left (``tests/test_knot_pull``, GPU 1). BDF2 drew
-it to 239 mm but let a tail slide 88 mm through a hand. 20 to 45 ms a control step.
-Needs ``[superdex]``.
+it to 239 mm but let a tail slide 88 mm through a hand (``probe_c3``). 20 to 45 ms
+a control step. Needs ``[superdex]``.
 """
 
 import numpy as np
