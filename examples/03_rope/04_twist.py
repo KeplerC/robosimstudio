@@ -50,7 +50,7 @@ def main():
     def page(studio):
         roll = studio.gui.add_slider("tip roll (turns)", min=0.0, max=2.0, step=0.05, initial_value=0.0)
         held = studio.gui.add_checkbox("hold the tips", initial_value=False)
-        readouts = {n: studio.gui.add_number(f"{n}: mid-cable twist (turns)", 0.0, disabled=True) for n in cables}
+        out = {n: studio.gui.add_number(f"{n}: mid-cable twist (turns)", 0.0, step=1e-3, disabled=True) for n in cables}
 
         def drive() -> None:
             body_q = np.asarray(sim.pipeline.snapshot.body_q)
@@ -59,7 +59,7 @@ def main():
                     cable.entity.roll(sim.pipeline, 2 * np.pi * roll.value)
                 else:  # the tips are the hands' (a release of a free tip does nothing)
                     cable.entity.pin(sim.pipeline, on=False)
-                readouts[name].value = round(twist_turns(body_q[cable.bodies[8:17], 3:7]), 3)  # the middle third
+                out[name].value = round(twist_turns(body_q[cable.bodies[8:17], 3:7]), 3)  # the middle third
 
         studio.each_step(drive)
 

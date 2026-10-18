@@ -56,7 +56,7 @@ def main():
     sim = scene.build(control_mode="joint_position")
 
     def page(studio):
-        out = studio.gui.add_number("straightness (1 = straight)", 1.0, disabled=True)
+        out = studio.gui.add_number("straightness (1 = straight)", 1.0, step=1e-3, disabled=True)
 
         def read() -> None:
             out.value = round(straightness(np.asarray(sim.pipeline.snapshot.body_q)[cable.bodies, :3]), 3)

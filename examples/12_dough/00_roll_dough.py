@@ -48,8 +48,8 @@ def main():
     floor = lump.entity.floor_z
 
     def page(studio):
-        area = studio.gui.add_number("footprint, vs settled", 1.0, disabled=True)
-        height = studio.gui.add_number("height (mm)", 0.0, disabled=True)
+        area = studio.gui.add_number("footprint, vs settled", 1.0, step=0.01, disabled=True)
+        height = studio.gui.add_number("height (mm)", 0.0, step=0.1, disabled=True)
 
         def each_step() -> None:
             points = lump.particle_q

@@ -33,8 +33,8 @@ def main():
     settled = heap_height(rest, floor)
 
     def page(studio):
-        kept = studio.gui.add_number("height, vs settled (%)", 100.0, disabled=True)
-        area = studio.gui.add_number("footprint, vs settled", 1.0, disabled=True)
+        kept = studio.gui.add_number("height, vs settled (%)", 100.0, step=0.1, disabled=True)
+        area = studio.gui.add_number("footprint, vs settled", 1.0, step=0.01, disabled=True)
 
         def each_step() -> None:
             points = lump.particle_q
