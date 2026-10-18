@@ -725,7 +725,9 @@ register_atom(
             ),
             negatives=(
                 "The same label untouched reads 0, and so does the same drive with break_opening 0, a label that "
-                "never lets go: the tab leaves the hand instead (tests/test_peel_a_label).",
+                "never lets go: the pull goes into the box instead, the tab sliding out of the pads in 13 drives "
+                "of 14 or, once in 14, the hand dragging the box 45 mm by its label (never_dist.py, GPU 1; "
+                "tests/test_peel_a_label).",
             ),
             gate=None,
             bench="examples/19_tape/00_peel_a_label driven through its right arm panel, tests/test_peel_a_label.py",
