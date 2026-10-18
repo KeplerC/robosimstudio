@@ -48,6 +48,7 @@ from robosimstudio.core.render.finish import Finish
 from robosimstudio.core.render.palette import FLOOR
 from robosimstudio.core.worlds import WorldMap
 from robosimstudio.machine import Platform, announce, platform
+from robosimstudio.machine import apply as apply_platform
 from robosimstudio.scene.physics.devices import arrangement_for
 from robosimstudio.scene.physics.world import REPLICATED_HOSTS
 from robosimstudio.specs import IDENTITY, Binding, CellSpec, EmbodimentSpec, Episode, Xform, replace
@@ -301,6 +302,7 @@ def compile_scene(
 
     plat = platform(device)
     request, notes = _for_platform(request, plat, num_worlds)
+    apply_platform(plat)
     if not plat.cuda_graphs:
         use_cuda_graph = False
 

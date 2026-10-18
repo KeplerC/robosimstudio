@@ -148,15 +148,17 @@ def after_notify(solver: Any, flags: int) -> int:
     placeholder into its damping from ``kp`` -- while those rows still hold the
     old values. So for :data:`RECONSTANT` flags the notify runs once more after
     the copy: everything it copies itself is unchanged by then, and its
-    ``mj_setConst`` now reads the rows the scene is meant to have. Nothing on a
-    GPU. Returns how many fields were copied.
+    ``mj_setConst`` now reads the rows the scene is meant to have. A
+    ``JOINT_PROPERTIES`` notify also carries the mocap poses across
+    (:func:`sync_mocap`). Nothing on a GPU. Returns how many fields were copied.
     """
-    copied = mirror_notify(solver, flags)
-    if copied:
-        import newton
+    import newton
 
-        if any(int(flags) & int(getattr(newton.ModelFlags, name, 0)) for name in RECONSTANT):
-            solver.notify_model_changed(int(flags))
+    copied = mirror_notify(solver, flags)
+    if copied and any(int(flags) & int(getattr(newton.ModelFlags, name, 0)) for name in RECONSTANT):
+        solver.notify_model_changed(int(flags))
+    if int(flags) & int(newton.ModelFlags.JOINT_PROPERTIES):
+        sync_mocap(solver)
     return copied
 
 

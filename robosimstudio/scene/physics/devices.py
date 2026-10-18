@@ -25,6 +25,7 @@ written without the page saying how.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import replace
 from typing import Any
 
@@ -90,17 +91,22 @@ def _registered_ancestor(path: str) -> BackendInfo | None:
     today), so naming a dotted path imports no engine it is unrelated to.
     """
     ENGINES.load()
-    candidates = [known for _, known in BACKENDS.items() if known.cpu_params]
-    if not candidates:
-        return None
+    candidates = tuple(known for _, known in BACKENDS.items() if known.cpu_params)
+    index = _ancestor_index(path, tuple(known.cls for known in candidates))
+    return candidates[index] if index >= 0 else None
+
+
+@functools.lru_cache(maxsize=256)
+def _ancestor_index(path: str, bases: tuple[str, ...]) -> int:
+    """Which of ``bases`` the class at ``path`` is or subclasses, or -1. Cached: a scene asks once per entity."""
     cls = _class_at(path)
     if cls is None:
-        return next((known for known in candidates if known.cls == path), None)
-    for known in candidates:
-        base = _class_at(known.cls)
+        return bases.index(path) if path in bases else -1
+    for index, base_path in enumerate(bases):
+        base = _class_at(base_path)
         if base is not None and issubclass(cls, base):
-            return known
-    return None
+            return index
+    return -1
 
 
 def runs_on_cpu(spec: BackendSpec) -> bool:
@@ -199,10 +205,11 @@ def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> Bac
             (``use_mujoco_contacts=False``, which MuJoCo's C backend would
             ignore rather than refuse).
     """
-    info = device_facts(spec)
-    if info is None:
-        return spec
     if not _is_cpu(device):
+        try:
+            info = get_backend(spec.solver)
+        except KeyError:
+            return spec
         # A host engine runs on the CPU beside any device; a solver that steps
         # Newton's arrays where they live has to be able to run there.
         if info.devices and "cuda" not in info.devices and not info.host_engine:
@@ -211,6 +218,9 @@ def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> Bac
                 f"this scene is on {getattr(device, 'alias', device)}. Build it on a CPU (device='cpu'), or register "
                 "it as a host engine (register_backend(..., host_engine=True)) to step it on the CPU beside the GPU."
             )
+        return spec
+    info = device_facts(spec)
+    if info is None:
         return spec
     if info.devices and "cpu" not in info.devices:
         instead = CPU.backend_for(domain)

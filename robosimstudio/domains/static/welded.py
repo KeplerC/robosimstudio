@@ -157,14 +157,17 @@ class WeldedFixture:
             bodies[body] = row
             state.body_q.assign(bodies)
 
-        solver = getattr(pipeline, "solver", None)
-        if solver is not None:
-            solver.notify_model_changed(int(newton.ModelFlags.JOINT_PROPERTIES))
-            # The notify refreshes MuJoCo-Warp's mocap rows only; a CPU build
-            # steps MuJoCo's C data, which needs the same rows copied in.
-            from robosimstudio.core.mjdata import sync_mocap
+        # Through the program, which on a CPU also carries the mocap rows into
+        # the C data MuJoCo's C library steps (core.mjdata.after_notify). Not
+        # core.tuning.notify: that drops a captured graph, and a reset that moves
+        # a fixture must not cost a re-capture -- the mocap rows are device
+        # memory the graph already reads.
+        flags = int(newton.ModelFlags.JOINT_PROPERTIES)
+        program = getattr(pipeline, "program", None)
+        if program is not None:
+            program.notify(flags)
+        elif getattr(pipeline, "solver", None) is not None:
+            from robosimstudio.core.mjdata import after_notify
 
-            program = getattr(pipeline, "program", None)
-            mujoco = getattr(program, "mujoco_solver", None) if program is not None else None
-            if mujoco is not None:
-                sync_mocap(mujoco)
+            pipeline.solver.notify_model_changed(flags)
+            after_notify(pipeline.solver, flags)

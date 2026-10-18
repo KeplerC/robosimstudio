@@ -636,10 +636,9 @@ class FleetEnv:
     @property
     def platform(self):
         """Where the fleet runs and what draws it: the compiled scene's, as on a serial ``Sim``."""
-        from robosimstudio.machine import platform
+        from robosimstudio.machine import platform_of
 
-        known = getattr(self.scene, "platform", None)
-        return known if known is not None else platform(self.model.device)
+        return platform_of(self.scene)
 
     @property
     def places_per_world(self) -> bool:

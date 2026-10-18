@@ -33,7 +33,7 @@ from robosimstudio.core.env import EnvBase
 from robosimstudio.core.render.base import RendererBase
 from robosimstudio.core.render.look import look_for
 from robosimstudio.core.render.spec import RenderSpec
-from robosimstudio.machine import Platform, platform
+from robosimstudio.machine import Platform, platform_of
 from robosimstudio.scene.parking import GravcompParking, parked_objects, restrict_contacts, scene_park_poses
 from robosimstudio.scene.ref import Ref
 from robosimstudio.scene.state import WorldState
@@ -176,8 +176,7 @@ class Sim(EnvBase):
         The compiler's answer (:attr:`CompiledScene.platform`); every renderer
         this object builds is chosen through it.
         """
-        known = getattr(self.scene, "platform", None)
-        return known if known is not None else platform(self.model.device)
+        return platform_of(self.scene)
 
     # ------------------------------------------------------------------ build
     def _resolve_cameras(self) -> tuple[CameraSpec, ...]:

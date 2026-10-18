@@ -8,8 +8,10 @@ Two settings, one vocabulary, one rule::
     ROBOSIMSTUDIO_RENDERER=tiled        # "auto" | "rtx" | "tiled" | a dotted path
 
 A name given in code wins over the environment, the environment wins over the
-machine, and ``auto`` (or nothing) names nothing at either level. The machine's
-answer is CUDA where there is a GPU and the CPU where there is not.
+machine, and ``auto`` (or nothing) names nothing at either level. A device chosen
+in code around the build -- ``with wp.ScopedDevice("cuda:1"):`` or
+``wp.set_device`` -- is a name given in code. The machine's answer is CUDA where
+there is a GPU and the CPU where there is not.
 
 **Physics has no setting of its own: it follows the device.** On a CPU every
 MuJoCo island runs MuJoCo's C library, nothing is captured into a CUDA graph,
@@ -43,7 +45,7 @@ import os
 from dataclasses import dataclass, replace
 from typing import Any
 
-__all__ = ["AUTO", "DEVICE_ENV", "Platform", "announce", "platform", "platform_of"]
+__all__ = ["AUTO", "DEVICE_ENV", "Platform", "announce", "apply", "platform", "platform_of"]
 
 AUTO = "auto"
 """The name for "pick for me", for the device and the renderer alike."""
@@ -77,6 +79,8 @@ class Platform:
             the compiler fills it in on the platform a scene keeps.
         rtx_installed: Whether ovrtx is importable, for the readout's hint on a
             CPU, where it is never used.
+        from_env: Whether the device came from :data:`DEVICE_ENV`, which a
+            build then makes Warp's default (:func:`apply`).
         graphs: Whether the build will capture its substep loop into a CUDA
             graph, once a build has said -- off on a CPU, and off on a GPU when
             the arrangement or ``build(use_cuda_graph=False)`` says so. ``None``
@@ -90,6 +94,7 @@ class Platform:
     notes: tuple[str, ...] = ()
     rtx_installed: bool = False
     graphs: bool | None = None
+    from_env: bool = False
 
     @property
     def is_cpu(self) -> bool:
@@ -148,12 +153,30 @@ def _gpu_label(device: Any) -> str:
     return f"{device.name} (sm_{device.arch})"
 
 
+_SET_FOR_THE_VARIABLE: list[str] = []
+"""The device :func:`apply` last made Warp's default for :data:`DEVICE_ENV`, so the
+rule can tell that apart from a device a caller chose in code."""
+
+
+def _chosen_in_code(wp: Any) -> Any:
+    """Warp's current device when code chose it -- a ``ScopedDevice`` or ``set_device`` -- else ``None``."""
+    current = wp.get_device()
+    if current.alias == wp.get_preferred_device().alias:
+        return None
+    if _SET_FOR_THE_VARIABLE and current.alias == _SET_FOR_THE_VARIABLE[-1]:
+        return None
+    return current
+
+
 def _device(device: Any) -> tuple[str, str, bool]:
     """``(alias, why, from_env)`` by the rule in the module docstring."""
     import warp as wp
 
     named, source = _named(device), "asked for"
     if named is None:
+        scoped = _chosen_in_code(wp)
+        if scoped is not None:
+            return scoped.alias, "Warp's current device", False
         named = _named(os.environ.get(DEVICE_ENV, ""))
         source = f"{DEVICE_ENV}={named}"
     if named is not None:
@@ -199,13 +222,6 @@ def platform(device: Any = AUTO, renderer: str = AUTO) -> Platform:
     from robosimstudio.solvers.render import choose_renderer, rtx_available
 
     alias, why, from_env = _device(device)
-    if from_env:
-        # The variable is a setting for the whole process, so it is Warp's
-        # default too: an array allocated with no device named lands beside the
-        # model rather than on a GPU nobody asked for.
-        import warp as wp
-
-        wp.set_device(alias)
     try:
         name, because = choose_renderer(renderer if _named(renderer) else "", device=alias)
     except (ValueError, ImportError) as exc:
@@ -216,7 +232,24 @@ def platform(device: Any = AUTO, renderer: str = AUTO) -> Platform:
         renderer=name,
         renderer_why=because,
         rtx_installed=rtx_available(),
+        from_env=from_env,
     )
+
+
+def apply(plat: Platform) -> None:
+    """What a *build* on ``plat`` does to the process: nothing, unless the device came from :data:`DEVICE_ENV`.
+
+    The variable is a setting for the whole process, so a build made under it
+    makes its device Warp's default too: an array a caller allocates with no
+    device named lands beside the model rather than on a GPU nobody asked for.
+    Here and not in :func:`platform`, which only answers.
+    """
+    if not plat.from_env:
+        return
+    import warp as wp
+
+    wp.set_device(plat.device)
+    _SET_FOR_THE_VARIABLE[:] = [plat.device]
 
 
 def platform_of(env: Any) -> Platform:

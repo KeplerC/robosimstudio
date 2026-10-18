@@ -405,9 +405,15 @@ class FleetRecorder:
         return task if task is not None else self.task
 
     def _sim_s(self, slot) -> float:
-        """Simulated seconds the world ran: its control steps at its control rate."""
-        physics = getattr(self._task_of(slot), "physics", None)
-        hz = float(getattr(physics, "control_hz", 0.0) or 0.0)
+        """Simulated seconds the world ran: its control steps at its control rate.
+
+        The fleet's rate as built where there is a fleet -- every document of a
+        wave builds the one model -- else the document's.
+        """
+        hz = float(getattr(getattr(self._fleet, "pipeline", None), "control_hz", 0.0) or 0.0)
+        if hz <= 0.0:
+            physics = getattr(self._task_of(slot), "physics", None)
+            hz = float(getattr(physics, "control_hz", 0.0) or 0.0)
         return int(getattr(slot, "steps", 0) or 0) / hz if hz > 0 else 0.0
 
     def _meta(self, slot, extra: dict[str, Any]) -> dict[str, Any]:

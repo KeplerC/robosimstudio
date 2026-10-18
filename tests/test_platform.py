@@ -43,6 +43,9 @@ def _machine(*, gpu: bool, env: dict[str, str] | None = None):
     if gpu:
         devices.update({"cuda": _device("cuda:0"), "cuda:0": _device("cuda:0"), "cuda:1": _device("cuda:1")})
 
+    def preferred():
+        return devices["cuda:0"] if gpu else devices["cpu"]
+
     def get_device(name: Any = None):
         if name is None:
             return devices["cuda:0"] if gpu else devices["cpu"]
@@ -56,6 +59,7 @@ def _machine(*, gpu: bool, env: dict[str, str] | None = None):
     with (
         patch.dict(os.environ, variables),
         patch("warp.get_device", side_effect=get_device),
+        patch("warp.get_preferred_device", side_effect=preferred),
         patch("warp.is_cuda_available", return_value=gpu),
         patch("warp.set_device") as set_device,
         patch("robosimstudio.solvers.render.rtx_available", return_value=False),
@@ -86,13 +90,26 @@ class TestTheDeviceRule(unittest.TestCase):
                 with _machine(gpu=True, env={"ROBOSIMSTUDIO_DEVICE": env}):
                     self.assertEqual(platform(device).device, "cuda:0", (device, env))
 
-    def test_the_variable_wins_over_the_machine_and_moves_warp_with_it(self) -> None:
-        from robosimstudio.machine import platform
+    def test_the_variable_wins_over_the_machine_and_a_build_moves_warp_with_it(self) -> None:
+        """Asking changes nothing; building under the variable makes its device Warp's default."""
+        from robosimstudio import machine
 
         with _machine(gpu=True, env={"ROBOSIMSTUDIO_DEVICE": "cpu"}) as set_device:
-            got = platform()
+            got = machine.platform()
+            set_device.assert_not_called()
+            machine.apply(got)
         self.assertEqual((got.device, got.device_why), ("cpu", "ROBOSIMSTUDIO_DEVICE=cpu"))
         set_device.assert_called_once_with("cpu")
+        machine._SET_FOR_THE_VARIABLE.clear()
+
+    def test_a_device_scope_opened_in_code_wins_over_the_variable(self) -> None:
+        """``with wp.ScopedDevice("cuda:1"): scene.build()`` builds on cuda:1, as ``device=None`` always did."""
+        from robosimstudio.machine import platform
+
+        with _machine(gpu=True, env={"ROBOSIMSTUDIO_DEVICE": "cpu"}):
+            with patch("warp.get_device", side_effect=lambda name=None: _device(name or "cuda:1")):
+                got = platform()
+        self.assertEqual((got.device, got.device_why), ("cuda:1", "Warp's current device"))
 
     def test_a_name_in_code_wins_over_the_variable_and_leaves_warp_alone(self) -> None:
         from robosimstudio.machine import platform
@@ -553,6 +570,30 @@ class TestWhatANotifyLeavesOutOfTheCModel(unittest.TestCase):
 
 
 class TestTheRestFollowsTheDevice(unittest.TestCase):
+    def test_a_joint_notify_carries_the_mocap_poses_into_the_c_data(self) -> None:
+        import newton
+
+        from robosimstudio.core import mjdata
+
+        solver = types.SimpleNamespace(use_mujoco_cpu=True)
+        with patch.object(mjdata, "sync_mocap") as sync, patch.object(mjdata, "mirror_notify", return_value=0):
+            mjdata.after_notify(solver, int(newton.ModelFlags.JOINT_PROPERTIES))
+            mjdata.after_notify(solver, int(newton.ModelFlags.SHAPE_PROPERTIES))
+        sync.assert_called_once_with(solver)
+
+    def test_a_plan_streams_at_the_rate_the_scene_was_built_at(self) -> None:
+        """On a CPU a GENERIC task steps at CPU's 50 Hz while its document says 60."""
+        from robosimstudio_policy_agent.planners.curobo import MotionBackendCuRobo
+
+        task = types.SimpleNamespace(physics=types.SimpleNamespace(control_hz=60.0))
+        built = types.SimpleNamespace(
+            env=types.SimpleNamespace(task=task, pipeline=types.SimpleNamespace(control_hz=50.0))
+        )
+        self.assertEqual(MotionBackendCuRobo._stream_hz(built), 50.0)
+        self.assertEqual(
+            MotionBackendCuRobo._stream_hz(types.SimpleNamespace(env=types.SimpleNamespace(task=task))), 60.0
+        )
+
     def test_the_device_clock_times_a_cpu_by_the_wall(self) -> None:
         from robosimstudio.core.profile import DeviceClock
 
