@@ -24,10 +24,10 @@ from unittest import mock
 import numpy as np
 
 TIER = "medium"
-"""Two builds of the example on one GPU, each driven through its page for about 14 s of scene time."""
+"""Three builds of the two band examples on one GPU, each driven through its page for about 14 s of scene time."""
 
 HAS_SUPERDEX = importlib.util.find_spec("superdex") is not None
-PORTS = (9783, 9784)
+PORTS = (9783, 9784, 9787)
 BENCH = np.array([0.6, 0.0, 0.75])
 """``bench_075``'s surface frame in world [m]."""
 FACE, Y = 0.10, -0.20
@@ -138,6 +138,47 @@ class TestTheHandHooksTheBandOnBothPegs(unittest.TestCase):
 
     def test_a_control_step_fits_a_live_page(self) -> None:
         self.assertLess(self.run_["ms"], 60.0, f"{self.run_['ms']:.1f} ms a control step")
+
+
+@unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing steps the band")
+class TestTheScoredTaskTurnsTrue(unittest.TestCase):
+    """``01_band_on_pegs_scored``: the same gesture on the task's page, from the YAM's own home, and the goal.
+
+    The task's pegs are square bars with a ``rod`` feature (their two ends), so
+    ``encircles`` holds the band to each peg's length, not to the line through it.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from tests.fixtures.examples import _run
+        from tests.fixtures.grasp import go, open_session, tick
+
+        cls.env, kwargs = _run("18_bands/01_band_on_pegs_scored.py")
+        sim = getattr(cls.env, "sim", cls.env)
+        session = open_session(cls.env, PORTS[2], kwargs.get("page"))
+        arm = session.arms["right"]
+        try:
+            tick(session, 90)
+            _, _, cls.before = cls.env.evaluate()
+            loop = np.asarray(sim["band"].particle_q, dtype=np.float64)
+            bottom = loop[np.argmin(loop[:, 2])] - BENCH
+            arm.cursor_quat = np.array([0.0, 0.70710678, 0.0, 0.70710678])  # level, pointing at the board
+            go(session, "right", BENCH + np.array([bottom[0] - 0.05, Y, bottom[2] + 0.02]), speed=0.1)
+            arm.grip_request = 1.0
+            tick(session, 45)
+            for _, target in _path(float(bottom[0]), float(bottom[2])):
+                go(session, "right", BENCH + target, speed=SPEED)
+            tick(session, 120)
+            _, _, cls.after = cls.env.evaluate()
+        finally:
+            session.teardown()
+
+    def test_the_goal_starts_half_met(self) -> None:
+        self.assertFalse(self.before["success"])
+        self.assertTrue(self.before["metrics"]["goal.0"], "the band does not start round the upper peg")
+
+    def test_the_goal_is_met(self) -> None:
+        self.assertTrue(self.after["success"], f"metrics: {self.after['metrics']}")
 
 
 @unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing steps the band")

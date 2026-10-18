@@ -126,6 +126,17 @@ class TestTheLoopMeasures(unittest.TestCase):
         self.assertTrue(encircles(hung, *peg), "with no length, the line is enough")
         self.assertFalse(encircles(hung + np.array([0.0, 0.2, 0.0]), *peg, 0.08), "beside the peg")
 
+    def test_a_peg_declared_as_a_rod_feature_is_held_to_its_two_ends(self) -> None:
+        """The goal's form: a ``rod`` feature's two ends in world, as the task's posts declare them."""
+        from robosimstudio_materials.rod.band import _encircles_rod
+
+        hung = _circle(32, 0.04, (0.0, -0.032, 0.0))[:, [2, 0, 1]] + np.array([0.06, 0.0, 0.0])
+        on = _encircles_rod(hung, {"axis": [[0.02, 0.0, 0.0], [0.10, 0.0, 0.0]], "radius": 0.006})
+        short = _encircles_rod(hung, {"axis": [[0.07, 0.0, 0.0], [0.10, 0.0, 0.0]], "radius": 0.006})
+        self.assertTrue(on["encircles"])
+        self.assertAlmostEqual(1.0, abs(on["turns"]), places=6)
+        self.assertFalse(short["encircles"], "in front of a 30 mm peg's tip")
+
     def test_encircles_is_an_atom_on_the_rod_substrate(self) -> None:
         import robosimstudio_materials.rod  # noqa: F401 -- registers it
         from robosimstudio.assetlib.semantics.atoms import get_atom

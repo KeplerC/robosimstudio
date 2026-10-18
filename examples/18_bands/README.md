@@ -33,4 +33,20 @@ uv run --extra superdex examples/18_bands/00_band_on_pegs.py
 
 Source: [`00_band_on_pegs.py`](00_band_on_pegs.py)
 
+## Hook a band, scored
+
+The same pegboard and band as a task document, with a goal that the band encircles both pegs: hook it from the upper peg onto the lower, and the goal turns true.
+
+The pegs are the example's posts declared with a `rod` feature, their two
+ends, so `encircles` holds the band to each peg's length: hanging in front of a
+peg's tip, round only the line through it, does not count. The embodiment is the
+YAM with `00_band_on_pegs`'s right-arm home, the hand in front of the band, and
+`tests/test_band_on_pegs` drives the hook there: the goal turns true. Needs `[superdex]`.
+
+```bash
+uv run --extra superdex examples/18_bands/01_band_on_pegs_scored.py
+```
+
+Source: [`01_band_on_pegs_scored.py`](01_band_on_pegs_scored.py)
+
 <!-- examples:end -->

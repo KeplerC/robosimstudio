@@ -1347,6 +1347,7 @@ TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES)
 
 KEPT: dict[str, str] = {
     "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
+    "18_bands/01_band_on_pegs_scored": "the same pegboard, band and hook as 00_band_on_pegs with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

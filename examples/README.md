@@ -91,9 +91,9 @@
 
 ## [18 Bands](18_bands/README.md)
 
-| [Hook a band on pegs](18_bands/00_band_on_pegs.py) |
-|---|
-| <img src="18_bands/media/00_band_on_pegs.webp" width="240"> |
+| [Hook a band on pegs](18_bands/00_band_on_pegs.py) | [Hook a band, scored](18_bands/01_band_on_pegs_scored.py) |
+|---|---|
+| <img src="18_bands/media/00_band_on_pegs.webp" width="240"> | |
 
 ## [Live Scene Editing](live/README.md)
 

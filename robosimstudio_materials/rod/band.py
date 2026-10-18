@@ -193,15 +193,16 @@ register_atom(
         fn=encircles,
         args=(
             ArgSpec(name="body", substrates=("rod",)),
-            ArgSpec(name="about", kinds=("axis",), reads="feature"),
+            ArgSpec(name="about", kinds=("axis", "rod"), reads="feature"),
         ),
         directions=("check", "observe"),
         returns=("encircles", "turns"),
         unit="turns",
         provenance=(
             "Designed here for the closed SuperDex rod (RodSpec.closed): a loop's winding about a line is an "
-            "integer, so the check is |turns| >= 0.5 with no calibration band; an axis feature that states a "
-            "length is held to the peg's span, past which a band in front of its tip would also count."
+            "integer, so the check is |turns| >= 0.5 with no calibration band; a rod feature (a peg's two ends) "
+            "or an axis that states a length is held to the peg's span, past which a band hanging in front of "
+            "its tip would also count."
         ),
     )
 )
@@ -220,4 +221,22 @@ def _encircles_axis(positions: np.ndarray, axis: dict) -> dict:
     return {
         "turns": loop_winding(positions, origin, direction),
         "encircles": encircles(positions, origin, direction, None if length is None else float(length)),
+    }
+
+
+@handler(
+    "encircles",
+    kinds=("", "rod"),
+    substrates=("rod", ""),
+    summary="Round a peg declared as a rod feature: its two ends, root first, so the band must be on it.",
+)
+def _encircles_rod(positions: np.ndarray, rod: dict) -> dict:
+    """A loop's points against a ``rod`` feature in world: ``axis`` is the peg's two ends."""
+    ends = np.asarray(rod["axis"], dtype=np.float64).reshape(2, 3)
+    span = ends[1] - ends[0]
+    length = float(np.linalg.norm(span))
+    reach = float(rod.get("radius", 0.0)) + 0.012  # the peg's radius, a cord's, and some
+    return {
+        "turns": loop_winding(positions, ends[0], span),
+        "encircles": encircles(positions, ends[0], span, length, reach=max(reach, 0.012)),
     }

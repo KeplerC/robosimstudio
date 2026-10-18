@@ -87,6 +87,7 @@ DEMOS = (
     "03_rope/02_superdex.py",
     "17_knots/00_pull_knot_tight.py",
     "18_bands/00_band_on_pegs.py",
+    "18_bands/01_band_on_pegs_scored.py",
 )
 """The multi-engine demos, which the ones above cannot stand in for: each needs a
 foreign engine, and each is the *acceptance* scene for one kind or feature on it
