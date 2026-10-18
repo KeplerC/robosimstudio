@@ -481,7 +481,7 @@ FINAL = (
     ),
     Take(
         "examples/03_rope/01_between_posts.py",
-        camera=Orbit(At("cable", dz=0.05), distance=0.75, azimuth=-35.0, elevation=25.0, fov=50.0),
+        camera=Orbit(At("cable", dz=0.08), distance=1.0, azimuth=-30.0, elevation=30.0, fov=50.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
@@ -785,7 +785,7 @@ DRAFTS = (
     # attachment box, the left stamps the fold flat. tests/test_fold_paper_robot.py drives the same path.
     Take(
         "examples/13_paper/00_fold_paper.py",
-        camera=Orbit(Bench(0.0, -0.05, 0.04), distance=0.95, azimuth=-15.0, elevation=40.0),
+        camera=Orbit(Bench(-0.03, -0.05, 0.08), distance=1.05, azimuth=-20.0, elevation=36.0),
         warmup=0.5,
         fps=10,
         speed=2.0,  # a minute of scene: two hands, a carry and three stamps
@@ -827,7 +827,7 @@ DRAFTS = (
     # tests/test_box_flap_robot.py drives the same path through the panel.
     Take(
         "examples/13_paper/01_box_flap.py",
-        camera=Orbit(Bench(-0.05, 0.03, 0.11), distance=0.85, azimuth=30.0, elevation=30.0),
+        camera=Orbit(Bench(-0.06, 0.05, 0.12), distance=1.05, azimuth=35.0, elevation=32.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: right")),
         beats=(
@@ -855,7 +855,7 @@ DRAFTS = (
     grasp("examples/06_tasks/02_episodes.py", "cube", camera=TASK_VIEW),
     Take(
         "examples/03_rope/00_cable.py",
-        camera=Camera(eye=(0.95, 0.20, 1.02), look_at=(0.55, 0.00, 0.80)),
+        camera=Orbit(Bench(-0.10, -0.08, 0.10), distance=0.9, azimuth=-30.0, elevation=30.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
@@ -875,9 +875,9 @@ DRAFTS = (
     ),
     Take(
         "examples/03_rope/03_cable_memory.py",
-        camera=Orbit(Bench(-0.05, -0.14, 0.0), distance=1.0, azimuth=30.0, elevation=60.0, fov=50.0),
+        camera=Orbit(Bench(-0.04, -0.13, 0.05), distance=0.95, azimuth=-30.0, elevation=38.0, fov=50.0),
         warmup=1.0,
-        budget=1_200_000,
+        budget=1_400_000,  # the whole arm in view: 1.2 MB held it only at quality 46
         layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
             Wait(seconds=0.5, label="the right hand over a cable with memory, a post beside it"),
@@ -898,7 +898,7 @@ DRAFTS = (
     ),
     Take(
         "examples/03_rope/04_twist.py",
-        camera=Orbit(Bench(0.04, 0.0, 0.14), distance=0.7, azimuth=10.0, elevation=45.0, fov=50.0),
+        camera=Orbit(Bench(0.02, 0.0, 0.17), distance=0.95, azimuth=12.0, elevation=34.0, fov=50.0),
         budget=1_500_000,  # two hands turning and two gizmos for 15 s
         warmup=1.0,
         layout=Layout(collapse=("Simulation",)),
