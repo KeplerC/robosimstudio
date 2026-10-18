@@ -17,28 +17,35 @@ measures: where its tips have been while down on the surface (:func:`scrubbed`).
 builds its own: a capsule lying on the sole, on VBD with the bristles, which
 then hold the grip up as a field does. The YAM cannot pinch that grip: a body
 on VBD that stands firm, squeezed by fingers on MuJoCo, is a stiff wall behind
-a one-step-lagged proxy, and in every one of the thirty-odd coupling variants
-``diag_grasp`` tried on a 12 x 12 field (proxy mass scale 1 to 1000, relaxed
-and Aitken feedback, lagged mode, ramped closing, contact stiffness 1e3 to 1e4
-and damping to 5e3, softer fields) the jaws were thrown open or the state blew
-up; a 2 x 2 field, which hardly holds the grip up, was held. Named instead
+a one-step-lagged proxy. Under ``GENERIC`` as shipped, the hand closing on a
+12 x 12 field's grip leaves the state non-finite, and a 2 x 2 field's grip
+slips out of the jaws as the hand rises (``grasp_own.py``). An earlier
+draft tried thirty-odd coupling variants on the 12 x 12 field, all with sticky
+contact matching and rigid contact history on (proxy mass scale 1 to 1000,
+relaxed and Aitken feedback, lagged mode, ramped closing, contact stiffness 1e3
+to 1e4 and damping to 5e3, softer fields), and in every one the jaws were
+thrown open or the state blew up (``diag_grasp``). Named instead
 (``rss.brush(handle="handle")``), any body already in the scene is the grip,
 and an ``rss.box`` under :data:`BRUSH_60HZ` is on the arm's solver, where the
-same hand holds it at 22.3 mm and lets it slip at most 0.11 mm through a 6 mm
-press and a 150 mm stroke (``probe_press``).
+same hand holds it at 22.3 mm and lets it slip at most 0.12 mm through a 6 mm
+press, a 20 mm lift and a 150 mm stroke (``press.py``).
 
 **What a named handle costs.** The welds from it to the strips drag the field
 along one way: Newton 1.6's VBD returns *contact* forces to the other solver
 and never joint forces (``SolverVBD.coupling_harvest_proxy_wrenches``). So a
-handle on MuJoCo fell 20.9 mm through its own bristles (``probe_xisland``) and
-is built gravity-compensated, it stays where a hand lets go of it, and the arm
-feels neither the press nor the bristles' drag: a press goes as deep as the
-hand goes. Pressed 6 mm, 400 nylon bristles bow up to 4.6 mm with their tips
-sliding up to 1.1 mm, none goes into the bench or up past the sole, and 1 s
-after a 25 mm lift every tip is within 0.024 mm of its rest place on its strip;
-soft ones bow 8.9 mm, their tips slide 11 mm, and they come back within 0.2
-(``probe_press``). Every measurement here is on an RTX PRO 6000, GPU 3, Newton
-1.6.0, graph-captured, beside the YAM on ``bench_075``.
+handle on MuJoCo is built gravity-compensated -- left without it, the handle
+of ``00_scrub_the_bench`` falls 28.9 mm through its own bristles to the bench
+within 1 s (``nogravcomp.py``) -- it stays where a hand lets go of it, and the
+arm feels neither the press nor the bristles' drag: a press goes as deep as the
+hand goes. Pressed 6 mm, 400 nylon bristles bow up to 4.8 mm with their tips
+sliding up to 1.3 mm, none goes into the bench or up past the sole, and 1 s
+after the hand lifts the brush 20 mm off the bench every tip is within 0.034 mm
+of its rest place on its strip; soft ones bow 9 mm, their tips slide 11 mm, and
+they come back within 0.18 mm (``press.py``). Every measurement here is on an
+RTX PRO 6000, GPU 3, Newton 1.6.0, graph-captured, beside the YAM on
+``bench_075``, two runs each, on :data:`~robosimstudio.specs.GENERIC` and
+:data:`BRUSH_60HZ` as they ship (no sticky contact matching, no rigid contact
+history) unless it says otherwise.
 
 **Contact.** Every shape of one brush shares a collision group of its own
 (Newton's negative groups collide with everything but their own number), so no
@@ -46,20 +53,26 @@ bristle meets another or the sole; bristle against bench, fixture and object
 stays. The bristles and the sole do not meet the robot either -- the hand meets
 the brush at the grip -- and a named handle does not meet its own bristles:
 with the scene's 100 mm contact gap each would be a contact pair to every
-capsule within reach, and a 5 x 5 field near the fingers overflowed their
-256-row per-body buffers in every substep it was stepped (``probe_brush``).
+capsule within reach. A 5 x 5 field on its own grip whose bristles and sole met
+the robot overflowed VBD's 256-row per-body contact buffer in every substep it
+was stepped, 630 to 1091 rows, the hand 80 to 100 mm over the bench, and not
+once with them kept apart (``overflow.py``).
 
 **Budget.** Every capsule is a body the coupled VBD iterates, and VBD solves a
 body's joints serially in one thread, so the bristles are welded to strips, a
-row each, rather than to one sole: 144 bristles welded to one body cost 34.3 ms
-a control step without the robot, and 13.0 ms on strips. Beside the YAM, 4
-segments, VBD at 5 iterations and 1 substep, on its own grip: 5 x 5 is 15.0 ms,
-8 x 8 17.1, 12 x 12 19.3, 16 x 16 21.8, 20 x 20 23.6 and 22 x 22 24.7; on a
-named handle 20 x 20 is 23.6, 22 x 22 24.4 and 24 x 24 25.6 (``probe_brush``).
-20 x 20 is the default: the largest square field with a millisecond to spare
-under 25 ms, where 22 x 22 is inside one run's spread of the line. At 20 x 20,
-10 iterations cost 38.8 ms, 20 cost 69.2 and 2 substeps 39.6, so neither is the
-default; the field stands on its own grip within 0.25 mm of where it was built.
+row each, rather than to one sole: without the robot, 144 bristles on one strip
+(a 1 x 144 field) cost 34.0 ms a control step, and 12 x 12 on twelve strips
+12.0 ms. Beside the YAM, 4 segments, VBD at 5 iterations and 1 substep, on its
+own grip under ``GENERIC``: 5 x 5 is 14.0 ms, 8 x 8 16.0, 12 x 12 18.1,
+16 x 16 20.7, 20 x 20 22.5 and 22 x 22 23.6; on a named handle under
+:data:`BRUSH_60HZ`, 20 x 20 is 22.4, 22 x 22 23.4 and 24 x 24 24.6
+(``cost.py``). 20 x 20 is the default, 2.5 ms under 25 ms on its own grip and
+2.6 ms on a named handle. 22 x 22 fits too, by 1.4 and 1.6 ms; it is not the
+default because every press, slip and scrub number here, in the examples and
+in their tests was measured on 400 bristles. At 20 x 20 on its own grip, 10
+iterations cost 37.8 ms, 20 cost 68.5 and 2 substeps 38.5, so none of them is
+the default; at 5 iterations and 1 substep the grip stands within 0.09 mm of
+where it was built and every tip within 1.2 mm.
 """
 
 from __future__ import annotations
@@ -176,8 +189,8 @@ NYLON = register_material(
         name="nylon_bristle",
         spec=BrushMaterialSpec(),
         notes=(
-            "A dish brush's nylon bristle: 400 of them hold the brush's own grip up within 0.25 mm, bow up to "
-            "4.6 mm under a 6 mm press and spring back within 0.024 (probe_brush, probe_press)."
+            "A dish brush's nylon bristle: 400 of them hold the brush's own grip up within 0.09 mm, bow up to "
+            "4.8 mm under a 6 mm press and spring back within 0.034 mm (cost.py, press.py)."
         ),
     )
 )
@@ -187,8 +200,8 @@ SOFT = register_material(
         spec=BrushMaterialSpec(bend_ke=1.0e-3, bend_kd=2.0e-5, friction=0.4, density=1300.0),
         notes=(
             "A paint brush's bristle, ten times easier to bend than nylon: a field of 144 cannot hold the "
-            "brush's own grip up and settles 12.7 mm under it; under a named handle 400 bow 8.9 mm in a 6 mm "
-            "press (probe_brush, probe_press)."
+            "brush's own grip up and settles 12.6 mm under it; under a named handle 400 bow 9 mm in a 6 mm "
+            "press (cost.py, press.py)."
         ),
     )
 )
@@ -1094,9 +1107,10 @@ PROXY_MASS_SCALE = 1000.0
 """How much heavier the bristles' solver sees a named handle than the arm's solver does.
 
 The strips are welded to the handle's mirror inside VBD, and that mirror is a
-body VBD moves: at the handle's own 53 g, a 6 mm downward step of the handle
-moved the strips 0.5 mm, the field pushing the mirror back up instead of the
-mirror pressing the field, and at this scale 5.8 mm (``diag_jointq``, GPU 3).
+body VBD moves: with the handle moved 12 mm down over half a second by writing
+its free-joint coordinates and velocity, at its own 53 g the strips went
+0.48 mm down with it, the field pushing the mirror back up instead of the
+mirror pressing the field, and at this scale 11.5 mm (``jointq.py``, GPU 3).
 The fingers meet nothing on VBD, so nothing else feels the scale."""
 
 BRUSH_60HZ = GENERIC.with_backend("rigid", GENERIC.backend_for("articulated")).with_(
@@ -1106,7 +1120,10 @@ BRUSH_60HZ = GENERIC.with_backend("rigid", GENERIC.backend_for("articulated")).w
 and its mirror on the bristles' solver :data:`PROXY_MASS_SCALE` times heavier.
 
 The bristles stay on ``vbd`` (GENERIC's ``"*"``), at its 5 iterations and 1
-substep, which is what the module docstring's budget was measured at."""
+substep, with no sticky contact matching and no rigid contact history. The
+module docstring's press numbers and its named-handle budget were measured on
+this arrangement as it ships, and its own-grip budget on ``GENERIC``, whose VBD
+entry this is."""
 
 TOUCHES = ("surface", "fixtures", "objects", "hands")
 """What a brush contacts unless it says otherwise: the bench, a fixture, a thing it scrubs, the fingers."""
@@ -1194,7 +1211,7 @@ register_atom(
         calibration=AtomCalibration(
             positives=(
                 "Three strokes of the examples' brush across their 100 mm square read 1.0 (tests/test_scrub_bench); "
-                "one stroke reads 0.85 (probe_press)."
+                "one stroke reads 0.85 (press.py)."
             ),
             negatives="The same brush pressed on the bench beside the square reads 0.0 (tests/test_scrub_bench).",
             gate=None,
