@@ -919,14 +919,25 @@ DRAFTS = (
         ),
         expect=(Check(_twisted, needs=("soft_twist", "stiff_twist")),),
     ),
-    handle(
+    Take(
         "examples/03_rope/02_superdex.py",
-        "cable",
-        Segment("cable", 0.5),
-        camera=Orbit(At("cable", dz=0.03), distance=0.75, azimuth=-25.0, elevation=25.0),
-        lift=0.08,
-        across=("x", 0.05),
         needs=("superdex",),
+        camera=Orbit(Bench(-0.10, -0.06, 0.10), distance=1.25, azimuth=-30.0, elevation=30.0, fov=40.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the right hand over the SuperDex cable's middle"),
+            # The cable's axis lies 11.2 mm up; the tool centre closes 10 mm over it, as in 00_cable.
+            Drag("right", "z", to=(0.550, -0.011, 0.771), seconds=1.2, label="drag the gizmo down onto it"),
+            Wait(seconds=0.3),
+            # Close would shut the jaws through it: SuperDex's push on the fingers is not fed back.
+            Slider(text="Grip amount", value=0.80, seconds=0.8, within=RIGHT, label="Grip amount 0.80: jaws on it"),
+            Wait(seconds=1.0, mark="closed"),
+            Drag("right", "z", to=(0.550, -0.011, 0.891), seconds=1.8, label="drag it up, slowly"),
+            Wait(seconds=2.0, mark="lifted", label="held by friction, nothing pinned"),
+        ),
+        # The node in the jaws. Measured 113 mm in tests/test_superdex_cable_robot.
+        expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.761)), 0.08, at="lifted"),),
     ),
     # 60 s of scene: four strokes at 3x read as a wipe and fit 2 MB; at 2x the clip was 2.6 MB at quality 46.
     routine(
