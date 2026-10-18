@@ -14,6 +14,7 @@ hand when a drag ends that close to it, so put the gizmo a little into the
 plate. Tick **Vacuum** once the face is down: ticked on the way down, the cup
 seals as soon as the face is within 2 mm and carries the plate about that far
 under it.
+
 The arm and the plate share one MuJoCo solver (``rss.MUJOCO_500HZ``), so the
 seal is a weld switched on inside the captured graph and the arm carries the
 plate's weight. Driven through the panel, the plate rides 198 mm with the cup
