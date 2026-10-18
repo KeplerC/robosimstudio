@@ -1028,7 +1028,9 @@ DRAFTS = (
             Drag("right", "x", to=Bench(0.082, -0.20, 0.105), seconds=1.2, label="in under it"),
             Drag("right", "z", to=Bench(0.082, -0.20, 0.120), seconds=0.5, label="up"),
             Drag("right", "x", to=Bench(-0.025, -0.20, 0.120), seconds=2.3, label="back out"),
-            Drag("right", "z", -0.05, seconds=1.0, label="and down, out of the way"),
+            # The gizmo's arrows and arcs reach 0.14 m along +x from the hand: from 25 mm off they sat over
+            # the lower peg and hid the band on it, so the hand goes on back until they end short of its tip.
+            Drag("right", "x", to=Bench(-0.13, -0.20, 0.120), seconds=1.2, label="and clear of the pegs"),
             Wait(seconds=2.0, label="stretched round both pegs"),
         ),
         expect=(Check(_band_on_both, needs=("band",)),),
@@ -1359,26 +1361,25 @@ ROBOT_PARTICLES = (
 )
 
 ROBOT_BAGS: tuple[Take, ...] = (
-    # The left hand closed on the bag's closed end, the right pinching the top layer's lip by contact and
-    # opening the mouth; tests/test_open_a_bag.py drives the same path through the panel.
+    # The right hand pinching the top layer's lip by contact and opening the mouth, nothing holding the bag
+    # down; tests/test_open_a_bag.py drives the same path through the panel. Seen from the mouth's side and
+    # a little in front, so the opening shows under the hand: the gizmo's arrows and arcs point +x, +y, +z.
     Take(
         "examples/16_bags/00_open_a_bag.py",
-        camera=Orbit(Bench(0.0, -0.06, 0.09), distance=1.2, azimuth=-68.0, elevation=28.0, fov=40.0),
+        camera=Orbit(Bench(0.0, -0.10, 0.04), distance=0.95, azimuth=-80.0, elevation=25.0, fov=38.0),
         warmup=0.5,
-        layout=Layout(collapse=("Simulation",)),
+        layout=Layout(collapse=("Simulation", "Arm: left")),
         beats=(
             Wait(seconds=0.4, label="a canvas bag, its lip turned up toward the right hand"),
-            Press(text="Close", within="Arm: left", label="Close the left hand"),
-            Drag("left", "z", to=Bench(z=0.019), seconds=1.0, label="drag it down onto the closed end"),
             Drag(
-                "right", "z", to=Bench(z=0.02), seconds=1.2, label="the right hand down: its open jaws straddle the lip"
+                "right", "z", to=Bench(z=0.025), seconds=1.2, label="drag the hand down: its open jaws straddle the lip"
             ),
             Wait(seconds=0.3),
             Press(text="Close", within=RIGHT, label="Close: the pads pinch the lip"),
             Wait(seconds=1.0, mark="closed"),
-            Drag("right", "z", to=Bench(z=0.12), seconds=1.6, label="drag it up"),
-            Drag("right", "y", to=Bench(y=-0.077), seconds=1.0, label="and back over the bag: the mouth opens"),
-            Wait(seconds=1.5, mark="open", label="the two layers stay apart"),
+            Drag("right", "z", to=Bench(z=0.08), seconds=1.2, label="drag it up to 80 mm"),
+            Drag("right", "y", to=Bench(y=-0.065), seconds=1.5, label="and back over the bag: the mouth opens"),
+            Wait(seconds=2.0, mark="open", label="nothing holds the bag down; its layers stay apart"),
         ),
         expect=(Check(_bag_open, needs=("bag",)),),
     ),
