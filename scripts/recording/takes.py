@@ -241,6 +241,20 @@ def _flap_shut(film) -> tuple[bool, str]:
     )
 
 
+def _band_on_both(film) -> tuple[bool, str]:
+    """The band is round both pegs of the board and stretched there, the hand gone."""
+    import numpy as np
+
+    from robosimstudio_materials.rod.band import encircles
+
+    ref = film.sim["band"]
+    points = np.asarray(ref.particle_q, dtype=np.float64)
+    pegs = {"upper": (0.26, 0.08), "lower": (0.135, 0.05)}  # the example's heights and lengths [m]
+    on = {n: encircles(points, (0.7, -0.2, 0.75 + z), (-1.0, 0.0, 0.0), length) for n, (z, length) in pegs.items()}
+    stretch = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum()) / float(ref.entity.spec.length)
+    return all(on.values()) and stretch > 1.1, f"round {on}, stretch {stretch:.3f} (need both, over 1.1)"
+
+
 def _sprang_back(film) -> tuple[bool, str]:
     """The span's middle is back where it hung before the hand took it."""
     key = str(Segment("cable", 0.5))
@@ -938,6 +952,29 @@ DRAFTS = (
         ),
         # The node in the jaws. Measured 113 mm in tests/test_superdex_cable_robot.
         expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.761)), 0.08, at="lifted"),),
+    ),
+    Take(
+        "examples/18_bands/00_band_on_pegs.py",
+        needs=("superdex",),
+        budget=1_300_000,  # 17 s with the whole arm in view: 966 KB at quality 46 at the default
+        camera=Orbit(Bench(0.03, -0.20, 0.17), distance=1.0, azimuth=-62.0, elevation=28.0, fov=40.0),
+        warmup=1.5,  # the band settles on the upper peg
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="a band on the upper peg, the right hand in front of it"),
+            Press(text="Close", within=RIGHT, label="Close: the shut jaws are the hook"),
+            Wait(seconds=0.6),
+            # tests/test_band_on_pegs's path, at about its 50 mm/s: through the loop, down past the
+            # lower peg, in under it to 1 mm off the board, up, and back out along the jaws.
+            Drag("right", "x", to=Bench(0.030, -0.20, 0.201), seconds=1.2, label="into the loop"),
+            Drag("right", "z", to=Bench(0.030, -0.20, 0.105), seconds=2.2, label="down past the lower peg"),
+            Drag("right", "x", to=Bench(0.082, -0.20, 0.105), seconds=1.2, label="in under it"),
+            Drag("right", "z", to=Bench(0.082, -0.20, 0.120), seconds=0.5, label="up"),
+            Drag("right", "x", to=Bench(-0.025, -0.20, 0.120), seconds=2.3, label="back out"),
+            Drag("right", "z", -0.05, seconds=1.0, label="and down, out of the way"),
+            Wait(seconds=2.0, label="stretched round both pegs"),
+        ),
+        expect=(Check(_band_on_both, needs=("band",)),),
     ),
     # 60 s of scene: four strokes at 3x read as a wipe and fit 2 MB; at 2x the clip was 2.6 MB at quality 46.
     routine(

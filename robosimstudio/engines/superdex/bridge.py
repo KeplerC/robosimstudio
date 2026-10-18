@@ -1304,13 +1304,17 @@ class SuperdexBridge:
         handle_fn = getattr(actor, "get_handle", None)
         handle = handle_fn() if callable(handle_fn) else actor
         constraints = []
+        # A builder whose actor has fewer nodes than particles states ``nodes``: a
+        # closed rod's last particle is its seam, node 0 drawn again.
+        wrap = int(entry["nodes"]) if "nodes" in entry else None
         for node, target in zip(np.asarray(nodes, dtype=np.int64), np.asarray(targets, dtype=np.float64), strict=True):
+            local = int(node - entry["start"])
             constraints.append(
                 scene.create_deformable_node_position_constraint(
                     stiffness=float(stiffness),
                     damping=float(damping),
                     saturation=-1.0,
-                    node_index=int(node - entry["start"]),
+                    node_index=local % wrap if wrap else local,
                     position=[float(v) for v in target],
                     actor=handle,
                 )

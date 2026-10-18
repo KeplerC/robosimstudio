@@ -83,6 +83,12 @@
 | [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
 |---|---|
 
+## [18 Bands](18_bands/README.md)
+
+| [Hook a band on pegs](18_bands/00_band_on_pegs.py) |
+|---|
+| <img src="18_bands/media/00_band_on_pegs.webp" width="240"> |
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |

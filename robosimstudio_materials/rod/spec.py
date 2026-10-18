@@ -238,6 +238,17 @@ class RodSpec:
     hung 26 mm off the bench at a clip's foot, measured). Read by the SuperDex
     implementation, which builds the rod at this shape and moves it onto
     :attr:`nodes` before the first step."""
+    closed: bool = False
+    """Whether the rod is a **loop**: :attr:`nodes` go round once and the last
+    joins the first, with no ends -- a rubber band, an O-ring, a drive belt.
+
+    Needs :attr:`nodes` (three or more, the first not repeated at the end), and
+    then :attr:`segments` is the number of nodes, one element per node, and
+    :attr:`length` the perimeter, closing leg included. Read by the foreign-engine
+    rod, whose polyline can be periodic (SuperDex closes it with an element from
+    the last node to the first, and its tubular skin with it); the capsule chain
+    has two ends and refuses one. No :attr:`anchors`, :attr:`joins` or
+    :attr:`stress_free`: a loop has no end to clamp, mould or straighten."""
     joins: tuple[tuple[str, str, float], ...] = ()
     """``((end, entity, length), ...)``: the last ``length`` metres of the rod at
     ``end`` (``"start"`` or ``"end"``) are moulded into ``entity`` -- a cable
@@ -249,14 +260,24 @@ class RodSpec:
 
     def __post_init__(self) -> None:
         if self.nodes is None:
+            if self.closed:
+                raise ValueError(f"rod {self.name!r}: a closed rod needs nodes, the loop it goes round")
             return
         pts = np.asarray(self.nodes, dtype=np.float64).reshape(-1, 3)
-        if len(pts) < 2:
-            raise ValueError(f"rod {self.name!r}: nodes needs at least two points, got {len(pts)}")
+        if len(pts) < (3 if self.closed else 2):
+            raise ValueError(
+                f"rod {self.name!r}: nodes needs at least {3 if self.closed else 2} points, got {len(pts)}"
+            )
+        if self.closed:
+            if self.anchors or self.joins or self.stress_free is not None:
+                raise ValueError(f"rod {self.name!r}: a closed rod has no end to anchor, join or straighten")
+            pts = np.vstack([pts, pts[:1]])  # the closing leg counts toward the length and the elements
         legs = np.diff(pts, axis=0)
         norms = np.linalg.norm(legs, axis=1)
         if not np.all(norms > 0.0):
-            raise ValueError(f"rod {self.name!r}: nodes has a zero-length leg")
+            raise ValueError(
+                f"rod {self.name!r}: nodes has a zero-length leg (a closed rod's first node is not repeated)"
+            )
         # Frozen, so the echoes are written the one way a frozen dataclass allows.
         object.__setattr__(self, "length", float(norms.sum()))
         object.__setattr__(self, "segments", int(len(pts) - 1))

@@ -192,7 +192,7 @@ class TestTheMultiEngineDemos(unittest.TestCase):
 
     def test_each_demo_stages_its_engine_for_the_domain_it_is_about(self) -> None:
         """Static, so it holds whichever wheels are present: the arrangement is data."""
-        for name, engine in zip(DEMOS, ("superdex", "superdex"), strict=True):
+        for name, engine in zip(DEMOS, ("superdex",) * len(DEMOS), strict=True):
             with self.subTest(demo=name):
                 text = (EXAMPLES / name).read_text()
                 ast.parse(text)
