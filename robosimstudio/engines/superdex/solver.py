@@ -56,6 +56,11 @@ class SolverSuperdex(SolverHost):
             for the engine's 4.
         linear_iterations: A cap on the linear solver's iterations per Newton
             step, or ``None`` for the engine's own (it ran 1000 per contact).
+        integration: The engine's time integrator by name (``"backward_euler"``,
+            the engine's own, or ``"bdf2"``...), or ``None`` to leave it.
+            Backward Euler damps every motion a little each step; BDF2 is second
+            order and damps less, so a rod swings and springs back more as a real
+            one does, at the same cost per step.
     """
 
     def open(
@@ -80,6 +85,7 @@ class SolverSuperdex(SolverHost):
         preconditioner: str | None = None,
         newton_iterations: int | None = None,
         linear_iterations: int | None = None,
+        integration: str | None = None,
     ) -> Any:
         """The SuperDex bridge, with the island-wide scalars folded into the recipe.
 
@@ -111,4 +117,5 @@ class SolverSuperdex(SolverHost):
             preconditioner=preconditioner,
             newton_iterations=newton_iterations,
             linear_iterations=linear_iterations,
+            integration=integration,
         )

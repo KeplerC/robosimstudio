@@ -155,7 +155,7 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
             "linear_rotational_inertia": float(spec.density) * 2.0 * second_moment,
             "stiffness_damping": float(spec.stiffness_damping),
             "friction": float(spec.mu_cable) ** 0.5,
-            "self_contact": bool(self.sim_requirements().self_contact),
+            "self_contact": bool(spec.self_contact or self.sim_requirements().self_contact),
             "contact_padding": float(spec.contact_gap),
             "contact_penalty": float(spec.contact_penalty),
             "skin": bool(spec.skin),

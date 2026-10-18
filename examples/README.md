@@ -83,6 +83,12 @@
 | [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
 |---|---|
 
+## [17 Knots](17_knots/README.md)
+
+| [Pull a knot tight](17_knots/00_pull_knot_tight.py) |
+|---|
+| <img src="17_knots/media/00_pull_knot_tight.webp" width="240"> |
+
 ## [18 Bands](18_bands/README.md)
 
 | [Hook a band on pegs](18_bands/00_band_on_pegs.py) |

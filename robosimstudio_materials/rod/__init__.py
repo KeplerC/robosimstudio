@@ -16,6 +16,8 @@ leave it out. Each module reaches the library by registering:
   ``height`` and ``speed``, by ``register_atom`` and ``handler``;
 * ``band`` -- a closed rod (a band, an O-ring), its two materials and the
   ``encircles`` atom;
+* ``knot`` -- an overhand knot's nodes and the measures a knot answers
+  (``crossings``, ``knot_length``, ``self_clearance``);
 * ``materials`` -- the rod material kind and its preset;
 * ``latch`` -- the grasp latch's kernel and device state. No registry: the entity
   uses it, and a repro bundle copies it.
@@ -35,6 +37,7 @@ from robosimstudio.specs.physics import register_domain
 
 from . import actor as _actor  # noqa: F401 -- registers how a rod actor is read, and how SuperDex builds one
 from . import band as _band  # noqa: F401 -- registers encircles; band() and the band materials
+from . import knot as _knot  # noqa: F401 -- registers crossings; overhand() and the knot measures
 from . import latch as _latch
 from . import materials as _materials  # noqa: F401 -- registers the rod material kind and its preset
 from . import measures as _measures  # noqa: F401 -- registers winding_turns and straightness

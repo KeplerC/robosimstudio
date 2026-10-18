@@ -238,6 +238,16 @@ class RodSpec:
     hung 26 mm off the bench at a clip's foot, measured). Read by the SuperDex
     implementation, which builds the rod at this shape and moves it onto
     :attr:`nodes` before the first step."""
+    self_contact: bool = False
+    """Whether the rod touches itself: a strand pulled across another is pushed back
+    instead of passing through it, so a knot stays a knot.
+
+    Read by the foreign-engine rod (SuperDex tests the rod's skin against itself,
+    segments within one and a half radii of each other along it left out); the
+    capsule chain's own collision filter decides for it. Also set by an asset's
+    ``SimRequirements.self_contact``. Off by default: it costs a broad phase over
+    the rod's own samples every Newton iteration, which a cable that never folds
+    back on itself does not need."""
     closed: bool = False
     """Whether the rod is a **loop**: :attr:`nodes` go round once and the last
     joins the first, with no ends -- a rubber band, an O-ring, a drive belt.
