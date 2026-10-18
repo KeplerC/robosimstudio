@@ -65,10 +65,13 @@ __all__ = [
     "ClothSpec",
     "EntityCloth",
     "EntityHeldCloth",
+    "ForceGatedWipe",
     "HeldClothSpec",
     "ReferenceFabric",
     "Selector",
     "bending_length_from_droop",
+    "contact_force",
+    "contact_shapes",
     "crease_of",
     "droop_curve",
     "elastica_droop",
@@ -1031,6 +1034,113 @@ def contact_thickness(material) -> float:
         return 0.0
     standoff = 2.0 * float(material.particle_radius)
     return float(material.thickness) + standoff if material.is_slab else standoff
+
+
+def contact_shapes(sim, name: str) -> np.ndarray:
+    """The shapes a contact readout sums for ``name``: an arm's hand, or a thing's own shapes.
+
+    An arm name (``"right"``) is its tool link and fingers, the bodies a hand touches a sheet
+    with; anything else is matched on the shape labels, ``"table"`` being the bench's top.
+
+    Raises:
+        KeyError: When ``name`` is neither an arm nor a shape label.
+    """
+    shape_body = np.asarray(sim.model.shape_body.numpy())
+    robot = getattr(sim.scene, "embodiment", None)
+    if robot is not None and name in getattr(robot, "arms", {}):
+        return np.flatnonzero(np.isin(shape_body, np.asarray(robot.gripper_bodies(name), dtype=np.int64)))
+    labels = [str(label) for label in sim.model.shape_label]
+    found = [i for i, label in enumerate(labels) if label == name or label.startswith(f"{name}/")]
+    if not found:
+        raise KeyError(f"no arm and no shape called {name!r}")
+    return np.asarray(found, dtype=np.int64)
+
+
+def contact_force(sim, name: str) -> np.ndarray:
+    """What a sheet pushes on ``name`` with over the last substep [N, world ``(3,)``].
+
+    The rigid-soft contact forces Newton 1.7's VBD reports (``CONTACT_F``), summed over
+    :func:`contact_shapes`. A hand pressing a sheet down reads ``+z``. The scene must stage
+    ``rss.coupler("one_way", contact_forces=True)``.
+
+    What it is good for, measured with the closed YAM hand pressing the terry towel
+    (``force_towel.py``, GPU 5, Newton 1.7): zero until the hand touches, then rising with the
+    press, and the bench's reading moving by what the hand puts in to within a newton: 17.5 N for
+    the hand's 18.4, 201.4 for its 201.3, over the last 4 mm of a press. What it is not good for is a sheet's
+    resting weight (``force_rest.py``): the towel lying still reads 100 to 140 times its weight on
+    the bench and an 80 gsm sheet 0.27 of it, with or without full-surface contact and at any
+    contact damping. A few grams per particle is a penetration near float32's resolution at bench
+    height, which VBD's few iterations do not balance. Read changes in it, and forces of a newton
+    or more.
+    """
+    forces = sim.pipeline.program.solver.shape_contact_forces()
+    return forces[contact_shapes(sim, name)].sum(axis=0)
+
+
+class ForceGatedWipe:
+    """A stain on a sheet that a hand scrubs off only while it presses inside a force band.
+
+    Each :meth:`update` reads the hand's push into the sheet (:func:`contact_force`, its ``z``)
+    and the particles the hand is touching; a stain particle touched while the push is inside
+    ``band`` is wiped, one touched while it is above is marked pressed too hard. A hand that
+    brushes the stain, or one that crushes it, wipes nothing.
+
+    The push gated on is the median of the last ``window`` control steps, not the last step's
+    alone: a stroke's push jumps for a step at a time, to 174 N in a stroke whose median was 4 N
+    and 734 N in one whose median was 107 (``tests/test_scrub_a_stain.py``), and one such step
+    would mark a light stroke too hard.
+
+    Args:
+        sim: A scene that stages ``coupler("one_way", contact_forces=True)``.
+        cloth: The sheet's name.
+        stain: The particle set on it that is the stain, from :attr:`ClothSpec.particle_sets`.
+        arm: The hand that scrubs.
+        band: ``(least, most)`` push [N] that wipes.
+        window: Control steps the push is the median of.
+    """
+
+    def __init__(self, sim, cloth: str, stain: str, arm: str, band: tuple[float, float], window: int = 7) -> None:
+        self.sim = sim
+        self.band = (float(band[0]), float(band[1]))
+        self.stain = np.asarray(sim[cloth].entity.sets[f"{cloth}/{stain}"], dtype=np.int64)
+        self.hand = contact_shapes(sim, arm)
+        self.wiped = np.zeros(len(self.stain), dtype=bool)
+        self.crushed = np.zeros(len(self.stain), dtype=bool)
+        self.window = max(1, int(window))
+        self.recent: list[float] = []
+        self.raw: list[float] = []
+        self.push = 0.0
+
+    def touched(self) -> np.ndarray:
+        """The stain particles the hand is touching: a corner of a record against it that carries force."""
+        corners, shape, force = self.sim.pipeline.program.solver.soft_contact_records()
+        live = np.isin(shape, self.hand) & (np.linalg.norm(force, axis=1) > 1.0e-6)
+        hit = corners[live].ravel()
+        return np.isin(self.stain, hit[hit >= 0])
+
+    def update(self) -> dict[str, float]:
+        """Read the push, mark what the hand touched, and return the readout."""
+        forces = self.sim.pipeline.program.solver.shape_contact_forces()
+        now = float(forces[self.hand, 2].sum())
+        self.raw.append(now)
+        self.recent = [*self.recent, now][-self.window :]
+        self.push = float(np.median(self.recent))
+        least, most = self.band
+        if self.push >= least:
+            touched = self.touched()
+            if self.push <= most:
+                self.wiped |= touched
+            else:
+                self.crushed |= touched
+        return self.readout()
+
+    def readout(self) -> dict[str, float]:
+        return {"push": self.push, "wiped": float(self.wiped.mean()), "crushed": float(self.crushed.mean())}
+
+    def reset(self) -> None:
+        self.wiped[:] = False
+        self.crushed[:] = False
+        self.raw.clear()
 
 
 def _pairs(snapshot, cloth: str, panel: dict[str, Any]) -> np.ndarray:

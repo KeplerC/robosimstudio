@@ -249,6 +249,24 @@ def build_admm(ctx: CouplerBuild) -> Any:
     return SolverCoupledADMM(model=ctx.model, entries=ctx.entries(SolverCoupled.Entry), coupling=config)
 
 
+@wp.kernel
+def _sum_soft_contact_forces(
+    count: wp.array[int],
+    shape: wp.array[int],
+    offset: int,
+    contact_f: wp.array[wp.spatial_vector],
+    out: wp.array[wp.vec3],
+):
+    """Sum the live rigid-soft records' forces by the shape each was against."""
+    tid = wp.tid()
+    if tid >= count[0]:
+        return
+    s = shape[tid]
+    if s < 0:
+        return
+    wp.atomic_add(out, s, wp.spatial_top(contact_f[offset + tid]))
+
+
 class SolverOneWay:
     """Two solvers over one model, the rigid one leading: a kinematic mirror, no feedback.
 
@@ -273,15 +291,26 @@ class SolverOneWay:
     couples one way with full-surface contact, or two ways without it; the
     arrangement says which, and both are data.
 
+    The contact forces are the one thing the arm can still read back. With
+    ``contact_forces`` the deformable solver evaluates, on every substep, the
+    force each rigid-soft contact record puts on its shape -- Newton 1.7's VBD
+    ``CONTACT_F`` observable, at the final iterate, without changing the solve
+    -- and :meth:`shape_contact_forces` sums the last substep's records by
+    shape. Nothing feeds them back: the arm still goes where it is told, so the
+    force a hand reads is the force it *would* feel, which is what a page
+    readout or a force-gated measure wants and what a stalled finger cannot
+    get from this coupler.
+
     Args:
         model: The shared model.
         rigid: The rigid solver, built over the whole model.
         soft: The deformable solver, built over the whole model in external-rigid mode.
         collision: The pipeline the deformable solver's contacts come from.
         names: ``(rigid island name, deformable island name)``.
+        contact_forces: Ask the deformable solver for its contact forces every substep.
     """
 
-    def __init__(self, model, rigid, soft, collision, names: tuple[str, str]) -> None:
+    def __init__(self, model, rigid, soft, collision, names: tuple[str, str], *, contact_forces: bool = False) -> None:
         self.model = model
         self.rigid = rigid
         self.soft = soft
@@ -291,6 +320,85 @@ class SolverOneWay:
         self.device = model.device
         # Allocated here, not on the first step: a step may be captured into a graph.
         self._body_q_prev = wp.clone(model.body_q) if model.body_count else None
+        self.observables = None
+        self._shape_forces = None
+        if contact_forces:
+            self.enable_contact_forces()
+
+    def enable_contact_forces(self) -> None:
+        """Ask the deformable solver for its contact forces from the next substep on.
+
+        Call it before the scene's step is first captured into a graph, which is its first
+        step: a captured graph replays the step as it was, and one captured without the
+        forces keeps writing none. ``coupler("one_way", contact_forces=True)`` calls it at build.
+        """
+        if self.observables is not None:
+            return
+        kind = self.soft.ObservableKind.CONTACT_F
+        if kind not in getattr(self.soft, "supported_observables", frozenset()):
+            raise CompositionError(
+                f"contact forces need a deformable solver that reports CONTACT_F; {type(self.soft).__name__} does not"
+            )
+        self.observables = self.soft.observables({kind}, contacts=self.contacts)
+        self._shape_forces = wp.zeros(max(1, int(self.model.shape_count)), dtype=wp.vec3, device=self.device)
+
+    def shape_contact_forces(self) -> np.ndarray:
+        """The soft contacts' force on each shape over the last substep [N], ``(shape_count, 3)`` in world.
+
+        A row is the sum of every rigid-soft record against that shape: particle,
+        edge and face records alike, each the reaction to the force the shape put
+        on the soft side, so a hand pressing a towel down reads ``+z`` here and
+        the bench under it ``-z``. Static shapes have rows like any other. Soft
+        self-contact is not in it. A press reads true, a resting sheet's weight
+        does not: :func:`robosimstudio_materials.cloth.contact_force` has the
+        measurements.
+
+        Raises:
+            RuntimeError: When the coupler was built without ``contact_forces``.
+        """
+        if self.observables is None:
+            raise RuntimeError(
+                'this one_way coupler reads no contact forces: stage coupler("one_way", contact_forces=True)'
+            )
+        self._shape_forces.zero_()
+        contacts = self.contacts
+        if contacts.soft_contact_max > 0:
+            wp.launch(
+                _sum_soft_contact_forces,
+                dim=contacts.soft_contact_max,
+                inputs=[
+                    contacts.soft_contact_count,
+                    contacts.soft_contact_shape,
+                    int(contacts.rigid_contact_max),
+                    self.observables.contact_f,
+                ],
+                outputs=[self._shape_forces],
+                device=self.device,
+            )
+        return self._shape_forces.numpy()[: int(self.model.shape_count)].astype(np.float64)
+
+    def soft_contact_records(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The last substep's live rigid-soft records: ``(corners, shape, force)``.
+
+        ``corners`` is ``(n, 3)`` particle indices, ``-1`` past the record's own
+        (one for a particle record, two for an edge, three for a face); ``shape``
+        the shape each was against; ``force`` the force on that shape [N, world],
+        the rows :meth:`shape_contact_forces` sums. A record is detected inside the
+        pipeline's gap before anything touches, so a zero force is a near miss,
+        not a contact.
+        """
+        if self.observables is None:
+            raise RuntimeError(
+                'this one_way coupler reads no contact forces: stage coupler("one_way", contact_forces=True)'
+            )
+        contacts = self.contacts
+        n = int(contacts.soft_contact_count.numpy()[0])
+        n = min(n, int(contacts.soft_contact_max))
+        offset = int(contacts.rigid_contact_max)
+        corners = contacts.soft_contact_indices.numpy()[:n]
+        shape = contacts.soft_contact_shape.numpy()[:n]
+        force = self.observables.contact_f.numpy()[offset : offset + n, :3].astype(np.float64)
+        return np.asarray(corners).reshape(n, 3), np.asarray(shape), force
 
     def solver(self, name: str):
         return {self.names[0]: self.rigid, self.names[1]: self.soft}[name]
@@ -307,7 +415,7 @@ class SolverOneWay:
         if self._body_q_prev is None:
             self.rigid.step(state_in, state_out, control, None, dt)
             self.collision.collide(state_in, self.contacts)
-            self.soft.step(state_in, state_out, control, self.contacts, dt)
+            self.soft.step(state_in, state_out, control, self.contacts, dt, observables=self.observables)
             return
         wp.copy(self._body_q_prev, state_in.body_q)
         self.rigid.step(state_in, state_out, control, None, dt)
@@ -316,7 +424,7 @@ class SolverOneWay:
         self.collision.collide(state_in, self.contacts)
         # And VBD's friction is the pad's motion from ``state_in`` to ``state_out``, so put it back.
         wp.copy(state_in.body_q, self._body_q_prev)
-        self.soft.step(state_in, state_out, control, self.contacts, dt)
+        self.soft.step(state_in, state_out, control, self.contacts, dt, observables=self.observables)
 
     def notify_model_changed(self, flags) -> None:
         for inner in (self.rigid, self.soft):
@@ -357,7 +465,10 @@ def build_one_way(ctx: CouplerBuild) -> Any:
     if collision.contact_matching != "disabled":
         kwargs["contact_matching"] = collision.contact_matching
     pipeline = newton.CollisionPipeline(ctx.model, **kwargs)
-    return SolverOneWay(ctx.model, rigid_solver, soft_solver, pipeline, (rigid.name, deformable.name))
+    forces = bool(ctx.spec.get("contact_forces", False))
+    return SolverOneWay(
+        ctx.model, rigid_solver, soft_solver, pipeline, (rigid.name, deformable.name), contact_forces=forces
+    )
 
 
 class SolverCosim:
