@@ -36,6 +36,7 @@ __all__ = [
     "clear_texture_tints",
     "expose_declared_colliders",
     "is_textured",
+    "is_transparent",
     "strip_free_bodies",
     "texture_box_geoms",
 ]
@@ -246,6 +247,21 @@ def is_textured(builder: newton.ModelBuilder, shape: int) -> bool:
     """
     src = builder.shape_source[shape]
     return src is not None and getattr(src, "texture", None) is not None
+
+
+def is_transparent(builder: newton.ModelBuilder, shape: int) -> bool:
+    """Whether the asset this shape came from asked for it not to be drawn.
+
+    An MJCF ``rgba`` whose alpha is 0 means *not rendered* to MuJoCo, and Newton's
+    importer keeps that alpha as ``shape_opacity``. The studio's materials and the
+    path tracer's finishes take a shape's colour and not its alpha, so a shape its
+    own file hid drew as a solid block. The YAM's two wrist-camera meshes are the
+    case: ``rgba="0 0 0 0"``, drawn as a black box beside each wrist.
+
+    Only a stated 0 counts; a fraction is a translucency, which is drawing.
+    """
+    opacity = getattr(builder, "shape_opacity", None)
+    return opacity is not None and float(opacity[shape]) <= 0.0
 
 
 def texture_box_geoms(builder: newton.ModelBuilder, source: str, *, verbose: bool = False) -> int:
