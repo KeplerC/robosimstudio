@@ -83,6 +83,12 @@
 | [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
 |---|---|
 
+## [16 Bags](16_bags/README.md)
+
+| [Open a bag](16_bags/00_open_a_bag.py) | [Open a bag, scored](16_bags/01_open_a_bag_scored.py) |
+|---|---|
+| <img src="16_bags/media/00_open_a_bag.webp" width="240"> | |
+
 ## [17 Knots](17_knots/README.md)
 
 | [Pull a knot tight](17_knots/00_pull_knot_tight.py) |

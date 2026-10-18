@@ -257,9 +257,10 @@ class TestTheActorKindSetIsOpen(unittest.TestCase):
         imported one first. A checkout without the pack has the library's two.
         """
         from robosimstudio.engines.geometry import ACTOR_KINDS
-        from tests.fixtures.packs import HAS_ROD_PACK
+        from tests.fixtures.packs import HAS_ROD_PACK, has_pack
 
-        self.assertEqual(sorted(["shell", "tet", *(["rod"] if HAS_ROD_PACK else [])]), ACTOR_KINDS.names())
+        packs = [*(["rod"] if HAS_ROD_PACK else []), *(["bag"] if has_pack("bag") else [])]
+        self.assertEqual(sorted(["shell", "tet", *packs]), ACTOR_KINDS.names())
 
     def test_a_shell_is_read_as_its_triangles_reindexed_to_zero(self):
         from robosimstudio.engines.geometry import actor_geometry
