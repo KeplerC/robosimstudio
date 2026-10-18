@@ -1624,17 +1624,15 @@ def _per_step(script, label: str) -> Do:
 
     What the tests do with :func:`tests.fixtures.grasp.go`, at the same resolution: the cursor is
     walked a control step at a time at the test's speeds, rather than jumped once a film frame, so
-    the take is the test's drive and not an approximation of it. The pointer is put at rest first,
-    off the sidebar: the drive moves the gizmo from the server, and a pointer left on the button or
-    folder header it last pressed reads as a hand still on it.
+    the take is the test's drive and not an approximation of it. The drive moves the gizmo from the
+    server, so the pointer is kept on it (:func:`_point_on_gizmo`), not left on the button or folder
+    header it last pressed, which reads as a hand still on it.
     """
 
     def play(film):
-        left, top, width, height = film.page.js("canvasRect")
-        if math.dist(film.page.mouse, (left + width * 0.85, top + height * 0.85)) > 2.0:
-            film.page.rest(0.4)
         steps = script(film)
         state = {"done": False, "n": 0}
+        memo: dict = {}
 
         def hook():
             if state["done"]:
@@ -1647,10 +1645,51 @@ def _per_step(script, label: str) -> Do:
 
         film.session.each_step(hook)
         while not state["done"]:
+            _point_on_gizmo(film, memo)
             film.hold(1.0 / film.take.fps)
         return {"control_steps": state["n"]}
 
     return Do(fn=play, label=label)
+
+
+def _point_on_gizmo(film, memo: dict, glide_px: float = 150.0) -> None:
+    """Put the pointer on the arrow of the gizmo the drive is moving, the arrow most along its motion.
+
+    Once a film frame, before it is stepped: the arm whose cursor moved most since the last frame
+    is the one being driven, and the pointer sits 0.6 of the way along that gizmo's arrow, where a
+    drag would press it, following it as it goes. It moves at most ``glide_px`` a frame, so it glides
+    there from the sidebar and from arrow to arrow; an arrow is changed only when another lies at
+    least 0.3 nearer the motion, so an arc does not flick it between two. No button is pressed: the
+    drive, not the browser, moves the gizmo.
+    """
+    import numpy as np
+
+    now = {arm: np.asarray(panel.cursor_pos, dtype=np.float64) for arm, panel in film.session.arms.items()}
+    last, memo["at"] = memo.get("at", now), now
+    moved = {arm: float(np.linalg.norm(now[arm] - last[arm])) for arm in now}
+    arm = max(moved, key=moved.get)
+    if moved[arm] > 1.0e-4:
+        if memo.get("arm") != arm:
+            memo.pop("axis", None)
+        memo["arm"], memo["dir"] = arm, (now[arm] - last[arm]) / moved[arm]
+    if "arm" not in memo:
+        return
+    axes = film.page.js("gizmoAxes", f"/studio/{memo['arm']}/cursor")
+    if not axes:
+        return
+    along = [abs(float(np.dot(a["world_dir"], memo["dir"]))) for a in axes]
+    best, held = int(np.argmax(along)), memo.get("axis")
+    if held is None or held >= len(axes) or along[best] > along[held] + 0.3:
+        memo["axis"] = held = best
+    (ox, oy), (tx, ty) = axes[held]["origin"], axes[held]["tip"]
+    x, y = ox + 0.6 * (tx - ox), oy + 0.6 * (ty - oy)
+    left, top, width, height = film.page.js("canvasRect")
+    if not (left <= x <= left + width and top <= y <= top + height):
+        return
+    mx, my = film.page.mouse
+    gap = math.dist((mx, my), (x, y))
+    k = min(1.0, glide_px / gap) if gap > 0.0 else 1.0
+    film.page._move(mx + (x - mx) * k, my + (y - my) * k)
 
 
 def _go(film, arm: str, target, speed: float, steps: int = 120, tolerance: float = 0.008, quat=None):
@@ -1857,19 +1896,22 @@ def _keep_reading(name: str) -> Do:
 
 
 def _stain_wiped(film) -> tuple[bool, str]:
-    """The light stroke wiped nothing, the stroke inside the band wiped the stain, and the hard one, on
-    the stain cleaned back, marked it too hard and wiped none of it, lifted off included."""
+    """The light stroke wiped nothing, the hard one marked the stain too hard and wiped none of it,
+    lifted off included, and the stroke inside the band, on the stain cleaned back, wiped it: the
+    clip ends on the wiped stain with nothing too hard."""
     seen = getattr(film, "readings", {})
-    light, band, hard, off = (seen.get(k, {}) for k in ("light", "band", "hard", "lifted"))
+    light, hard, off, band, done = (seen.get(k, {}) for k in ("light", "hard", "lifted", "band", "done"))
     passed = (
         light.get("wiped (20-60 N)", 1.0) == 0.0
-        and band.get("wiped (20-60 N)", 0.0) >= 0.8
-        and band.get("too hard", 1.0) == 0.0
         and hard.get("too hard", 0.0) >= 0.5
         and hard.get("wiped (20-60 N)", 1.0) == 0.0
         and off.get("wiped (20-60 N)", 1.0) == 0.0
+        and band.get("wiped (20-60 N)", 0.0) >= 0.8
+        and band.get("too hard", 1.0) == 0.0
+        and done.get("wiped (20-60 N)", 0.0) >= 0.8
+        and done.get("too hard", 1.0) == 0.0
     )
-    return passed, f"light {light}, band {band}, hard {hard}, lifted {off}"
+    return passed, f"light {light}, hard {hard}, lifted {off}, band {band}, at the end {done}"
 
 
 ROBOT_CONTACT = (
@@ -1918,6 +1960,8 @@ ROBOT_CONTACT = (
         speed=1.0,  # three strokes of 3.7 s; a stroke drawn faster heaps the towel and pushes harder
         budget=1_800_000,
         layout=Layout(collapse=("Simulation", "Arm: left")),
+        # The two controls first and the task last, so the clip ends on the wiped stain: a light
+        # stroke, a hard one marked red, Clean stain, then the stroke inside the band.
         beats=(
             Fold(title="Simulation", open=False),
             Fold(title="How to drive this", open=False),
@@ -1926,21 +1970,21 @@ ROBOT_CONTACT = (
             Scroll(pixels=-600, seconds=0.4),  # back to the top: the Scrub readouts lead the panel
             Wait(seconds=0.4),
             _per_step(_scrub_press(0.5), "down until the fingers touch the towel"),
-            _per_step(_scrub_along, "a light stroke: push under 20 N"),
-            _per_step(_scrub_lift, "up off the towel: nothing wiped"),
+            _per_step(_scrub_along, "a light stroke: push under 20 N, nothing wiped"),
+            _per_step(_scrub_lift, "up off the towel"),
             _keep_reading("light"),
-            _per_step(_scrub_press(20.0), "down until push reads 20 N, into the band"),
-            _per_step(_scrub_along, "the stroke wipes the stain"),
-            Wait(seconds=0.3, mark="wiped"),
-            _keep_reading("band"),
-            _per_step(_scrub_lift, ""),
-            Press(text="Clean stain", within="Scrub", label="Clean stain: the stain is back"),
             _per_step(_scrub_press(90.0), "down until push reads 90 N, past the band"),
             _per_step(_scrub_along, "too hard: marked red, not wiped"),
             _keep_reading("hard"),
             _per_step(_scrub_lift, "lifted off: still nothing wiped"),
             _keep_reading("lifted"),
-            Wait(seconds=0.8),
+            Press(text="Clean stain", within="Scrub", label="Clean stain: the red marks are cleared"),
+            _per_step(_scrub_press(20.0), "down until push reads 20 N, inside the band"),
+            _per_step(_scrub_along, "the stroke inside the band wipes the stain"),
+            _keep_reading("band"),
+            _per_step(_scrub_lift, "up off the towel"),
+            _keep_reading("done"),
+            Wait(seconds=1.5, mark="wiped", label="the stain is wiped: wiped 1.0, too hard 0"),
         ),
         expect=(Check(_stain_wiped),),
     ),

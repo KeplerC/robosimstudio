@@ -8,10 +8,11 @@ hand rubbed it while the push sat inside a band. This drives the example's own
 arm panel through :mod:`tests.fixtures.grasp`, nothing pinned or written to a
 joint, and holds the readout to physics first: nothing until the fingers touch,
 more the deeper they press, and what the hand puts in coming out of the bench's
-own reading. Then the three strokes the page promises: one that only
-brushes the stain wipes none of it, one inside the band wipes it, and one pressed
-past the band marks it too hard and wipes none; lifting the hand straight up off any
-of them wipes nothing more, because only a hand sliding along the towel rubs.
+own reading. Then the three strokes the page promises, in the order its clip
+shows them: one that only brushes the stain wipes none of it, one pressed past the
+band marks it too hard and wipes none, and one inside the band, on the stain cleaned
+back, wipes it; lifting the hand straight up off any of them wipes nothing more,
+because only a hand sliding along the towel rubs.
 """
 
 from __future__ import annotations
@@ -39,13 +40,14 @@ DEPTHS = (0.0055, 0.0045, 0.0035)
 """Fingertip heights over the bench for the static presses [m]. Held still the hand first reads
 the towel at 5.5 mm (2.3 N; nothing at 6.5); stroking, at 7.2 (1.9 N), the stroke heaping the
 towel in front of the fingers."""
-STROKES = {"brush": 0.5, "band": 20.0, "hard": 90.0}
+STROKES = {"brush": 0.5, "hard": 90.0, "band": 20.0}
 """What **push** reads [N] when the hand stops going down for each stroke, the way the page asks for
 it: a height is a poor stand-in, because the push climbs 30 to 80 N a millimetre and a towel settled
 a little less stands a little taller (the same 6.0 mm read 32 N here and 116 N in a take). Lowered
 0.05 mm a control step, the hand stops a little past the reading it was asked for, and a stroke
-pushes harder than the press it started from (11, 29 and 132 N for these three), so each target
-sits low in its range."""
+pushes harder than the press it started from (11, 114 and 31 N for these three, GPU 3), so each
+target sits low in its range. They run in the clip's order, the stroke inside the band last, on the
+stain cleaned back after the hard one."""
 CLEAR = 0.04
 """How far before the stain each stroke starts along x [m]: the hand goes down away from it, so the
 push's climb through the band touches none of it."""
