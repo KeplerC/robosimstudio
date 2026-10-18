@@ -43,7 +43,7 @@ within 1 s (``nogravcomp.py``) -- it stays where a hand lets go of it, and the
 arm feels neither the press nor the bristles' drag: a press goes as deep as the
 hand goes. Pressed 6 mm, 400 nylon bristles bow up to 4.8 mm with their tips
 sliding up to 1.4 mm, none goes into the bench or up past the sole, and 1 s
-after the hand lifts the brush 20 mm off the bench every tip is within 0.034 mm
+after the hand lifts the brush 20 mm off the bench every tip is within 0.036 mm
 of its rest place on its strip; soft ones bow 9 mm, their tips slide 11 mm, and
 they come back within 0.18 mm (``press.py``). Every measurement here is on an
 RTX PRO 6000, GPU 3, Newton 1.6.0, graph-captured, beside the YAM on
@@ -194,7 +194,7 @@ NYLON = register_material(
         spec=BrushMaterialSpec(),
         notes=(
             "A dish brush's nylon bristle: 400 of them hold the brush's own grip up within 0.09 mm, bow up to "
-            "4.8 mm under a 6 mm press and spring back within 0.034 mm (cost.py, press.py)."
+            "4.8 mm under a 6 mm press and spring back within 0.036 mm (cost.py, press.py)."
         ),
     )
 )
