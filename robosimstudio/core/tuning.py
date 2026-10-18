@@ -115,6 +115,8 @@ def notify(pipeline: Any, flags: int) -> None:
     if program is not None:
         program.notify(int(flags))
     else:
+        from .mjdata import after_notify
+
         for solver in (
             getattr(pipeline, "solver", None),
             getattr(pipeline, "solver_rigid", None),
@@ -122,6 +124,7 @@ def notify(pipeline: Any, flags: int) -> None:
         ):
             if solver is not None:
                 solver.notify_model_changed(int(flags))
+                after_notify(solver, int(flags))
     if getattr(pipeline, "captured", False):
         pipeline.invalidate_graph()
 

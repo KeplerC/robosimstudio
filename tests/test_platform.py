@@ -170,6 +170,13 @@ class TestTheReadout(unittest.TestCase):
         )
         self.assertEqual(str(plat), plat.readout())
 
+    def test_graphs_read_what_the_build_will_do(self) -> None:
+        from robosimstudio.machine import Platform
+
+        gpu = Platform(device="cuda:0", device_why="x", renderer="tiled", renderer_why="y")
+        self.assertIn("CUDA graphs on", gpu.readout())
+        self.assertIn("CUDA graphs off", dataclasses.replace(gpu, graphs=False).readout())
+
     def test_an_unused_path_tracer_on_a_cpu_is_pointed_out(self) -> None:
         from robosimstudio.machine import Platform
 
@@ -195,6 +202,25 @@ class TestTheReadout(unittest.TestCase):
 
         plat = Platform(device="cpu", device_why="kept", renderer="tiled", renderer_why="kept")
         self.assertIs(platform_of(types.SimpleNamespace(platform=plat)), plat)
+
+
+def _mujoco_of_my_own():
+    import newton
+
+    class MuJoCoOfMyOwn(newton.solvers.SolverMuJoCo):
+        """A task's own MuJoCo, named by dotted path: it inherits MuJoCo's CPU facts."""
+
+    MuJoCoOfMyOwn.__module__ = __name__
+    return MuJoCoOfMyOwn
+
+
+def __getattr__(name: str):
+    # Built on first use, so importing this module imports no solver.
+    if name == "MuJoCoOfMyOwn":
+        cls = _mujoco_of_my_own()
+        globals()[name] = cls
+        return cls
+    raise AttributeError(name)
 
 
 class TestTheArrangementOnACpu(unittest.TestCase):
@@ -291,6 +317,21 @@ class TestEachBackendOnACpu(unittest.TestCase):
                 self.on(backend(solver))
             self.assertIn("rss.CPU", str(caught.exception))
             self.assertIn("rss.backend('superdex', substeps=2)", str(caught.exception))
+
+    def test_mujoco_by_dotted_path_is_its_c_library_too(self) -> None:
+        """Only the device facts follow the class: a dotted path is still handed exactly what it states."""
+        from robosimstudio.scene.physics.devices import device_facts
+        from robosimstudio.specs.physics import backend
+
+        spec = backend("newton.solvers.SolverMuJoCo", nconmax=64)
+        self.assertEqual(device_facts(spec).cpu_max_worlds, 1)
+        self.assertEqual(self.on(spec).kwargs(), {"nconmax": 64, "use_mujoco_cpu": True, "use_mujoco_contacts": True})
+        # By class, not by spelling: the module it is defined in, and a subclass of it.
+        defined = backend("newton._src.solvers.mujoco.solver_mujoco.SolverMuJoCo")
+        self.assertEqual(device_facts(defined).cpu_max_worlds, 1)
+        subclass = backend("tests.test_platform.MuJoCoOfMyOwn")
+        self.assertTrue(self.on(subclass).get("use_mujoco_cpu"))
+        self.assertEqual(device_facts(backend("tests.test_platform.TestTheReadout")).cpu_params, ())
 
     def test_superdex_xpbd_and_unknown_paths_pass_untouched(self) -> None:
         from robosimstudio.specs.physics import backend
@@ -480,6 +521,35 @@ class TestMuJoCosCData(unittest.TestCase):
         self.assertEqual(mjdata.read_gravcomp(solver, 0, 1), 1.0)
         with self.assertRaises(IndexError):
             mjdata.read_gravcomp(solver, 1, 1)
+
+
+class TestWhatANotifyLeavesOutOfTheCModel(unittest.TestCase):
+    """Newton regenerates a shape's friction into MuJoCo-Warp's model and stops there; the C model needs it too."""
+
+    def solver(self, *, cpu: bool = True):
+        import mujoco
+
+        model = mujoco.MjModel.from_xml_string(TestMuJoCosCData.XML)
+        friction = np.tile(np.array([[0.05, 0.005, 0.0001]]), (model.ngeom, 1))[None]  # [world, geom, 3]
+        warp_side = types.SimpleNamespace(geom_friction=types.SimpleNamespace(numpy=lambda: friction))
+        return types.SimpleNamespace(use_mujoco_cpu=cpu, mj_model=model, mjw_model=warp_side)
+
+    def test_a_shape_notify_reaches_the_c_model(self) -> None:
+        import newton
+
+        from robosimstudio.core.mjdata import mirror_notify
+
+        solver = self.solver()
+        self.assertEqual(mirror_notify(solver, int(newton.ModelFlags.SHAPE_PROPERTIES)), 1)
+        np.testing.assert_allclose(solver.mj_model.geom_friction[:, 0], 0.05)
+
+    def test_other_flags_and_a_gpu_copy_nothing(self) -> None:
+        import newton
+
+        from robosimstudio.core.mjdata import mirror_notify
+
+        self.assertEqual(mirror_notify(self.solver(), int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES)), 0)
+        self.assertEqual(mirror_notify(self.solver(cpu=False), int(newton.ModelFlags.SHAPE_PROPERTIES)), 0)
 
 
 class TestTheRestFollowsTheDevice(unittest.TestCase):

@@ -41,17 +41,26 @@ _hidden = unittest.mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_DEVICE": "cpu"})
 """What hides the GPU when the runner did not: the rule's own variable, for this module only."""
 
 
+_device_before: list = []
+"""Warp's default device before this module ran: the variable moves it, and a run of several modules must get it back."""
+
+
 def setUpModule() -> None:
     """Hide the GPU by the rule's own variable when the runner did not hide it by the driver's."""
     import warp as wp
 
+    _device_before.append(wp.get_device())
     if wp.is_cuda_available():
         _hidden.start()
 
 
 def tearDownModule() -> None:
+    import warp as wp
+
     with contextlib.suppress(RuntimeError):  # never started
         _hidden.stop()
+    if _device_before:
+        wp.set_device(_device_before.pop())
 
 
 def _arm_and_cube(physics=None, *, at=(-0.143, -0.115, 0.1)):
@@ -145,8 +154,65 @@ class TestTheArmAndACubeOnTheDefaultArrangement(unittest.TestCase):
         self.assertLess(ik.pose_errors(q, target, quat)[0], 0.002)
 
 
+class TestLiveTuningOnACpu(unittest.TestCase):
+    """A friction or a gain changed while the scene runs reaches the model ``mj_step`` reads.
+
+    Newton's notify regenerates both into MuJoCo-Warp's model, which a CPU never
+    steps, and copies neither into the C one; measured before the copy, the cube's
+    friction stayed 1.0 and the arm's gain 650.
+    """
+
+    def test_friction_and_gains_reach_the_c_model(self) -> None:
+        import newton
+
+        import robosimstudio as rss
+
+        scene, _ = _arm_and_cube(rss.MUJOCO_500HZ, at=(0.2, 0.1, 0.05))
+        sim = scene.build()
+        try:
+            solver = sim.pipeline.program.mujoco_solver
+            shapes = [int(s) for s in sim.scene.objects["cube"].shapes]
+            geom_to_shape = solver.mjc_geom_to_newton_shape.numpy()[0]
+            geoms = [g for g, s in enumerate(geom_to_shape) if int(s) in shapes]
+            mu = sim.model.shape_material_mu.numpy()
+            mu[shapes] = 0.05
+            sim.model.shape_material_mu.assign(mu)
+            sim.pipeline.program.notify(int(newton.ModelFlags.SHAPE_PROPERTIES))
+            np.testing.assert_allclose(solver.mj_model.geom_friction[geoms, 0], 0.05)
+
+            gain = float(solver.mj_model.actuator_gainprm[0, 0])
+            ke = sim.model.joint_target_ke.numpy()
+            sim.model.joint_target_ke.assign(ke * 2.0)
+            sim.pipeline.program.notify(int(newton.ModelFlags.JOINT_DOF_PROPERTIES))
+            self.assertAlmostEqual(float(solver.mj_model.actuator_gainprm[0, 0]), 2.0 * gain, places=3)
+        finally:
+            sim.close()
+
+
 class TestParkingOnACpu(unittest.TestCase):
     """A parked body is held by the C model's gravity compensation, the row ``mj_step`` reads."""
+
+    def test_without_a_gravity_compensated_body_parking_refuses(self) -> None:
+        """MuJoCo's C library skips the pass when it compiled none; a parked cube would fall reading 1.0.
+
+        Refused where a body is parked; reading a row stays fine.
+        """
+        import robosimstudio as rss
+        from robosimstudio.scene.parking import GravcompParking
+
+        scene = rss.Scene(cell="bench_075")
+        scene.add(rss.box(name="cube", half=(0.025, 0.025, 0.025), at=(0.2, 0.1, 0.05)))
+        sim = scene.build()
+        try:
+            parking = GravcompParking(sim.pipeline.program.mujoco_solver, sim.model, sim.scene.worlds)
+            body = int(sim.scene.objects["cube"].body)
+            self.assertEqual(parking.row(0, body), 0.0)
+            parking.apply()  # nothing parked: nothing to refuse
+            parking.set(0, [body])
+            with self.assertRaisesRegex(RuntimeError, "no gravity-compensated body"):
+                parking.apply()
+        finally:
+            sim.close()
 
     def test_a_parked_cube_hangs_where_it_was_put(self) -> None:
         import newton

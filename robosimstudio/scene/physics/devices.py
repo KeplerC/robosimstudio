@@ -28,15 +28,79 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from robosimstudio.specs.physics import CPU, GENERIC, ArrangementSpec, BackendSpec, get_backend
+from robosimstudio.specs.physics import (
+    BACKENDS,
+    CPU,
+    ENGINES,
+    GENERIC,
+    ArrangementSpec,
+    BackendInfo,
+    BackendSpec,
+    get_backend,
+)
 
 from .errors import CompositionError
 
-__all__ = ["arrangement_for", "on_device", "runs_on_cpu"]
+__all__ = ["arrangement_for", "device_facts", "on_device", "runs_on_cpu"]
 
 
 def _is_cpu(device: Any) -> bool:
     return str(getattr(device, "alias", device)) == "cpu"
+
+
+def device_facts(spec: BackendSpec) -> BackendInfo | None:
+    """The registered facts about where ``spec``'s solver runs, or ``None`` for an unknown alias.
+
+    A dotted path is an anonymous backend -- no defaults, no schema -- except
+    here: a path naming a registered backend's class carries what that backend
+    needs to run *correctly* on a CPU -- its ``cpu_params`` and world limit -- so
+    ``backend("newton.solvers.SolverMuJoCo")`` runs MuJoCo's C library there as
+    ``backend("mujoco")`` does, rather than MuJoCo-Warp on Warp's CPU device with
+    no one-world limit. Never its refusal: a dotted path is an explicit choice,
+    which is what makes ``newton.solvers.SolverVBD`` the way to run VBD on a CPU
+    anyway. And nothing else: what it is handed stays exactly what it states.
+    """
+    try:
+        info = get_backend(spec.solver)
+    except KeyError:
+        return None
+    if info.devices or "." not in spec.solver:
+        return info
+    named = _registered_ancestor(spec.solver)
+    if named is None:
+        return info
+    return replace(info, cpu_params=named.cpu_params, cpu_max_worlds=named.cpu_max_worlds, cpu_note=named.cpu_note)
+
+
+def _class_at(path: str) -> type | None:
+    import importlib
+
+    module, _, name = path.rpartition(".")
+    try:
+        found = getattr(importlib.import_module(module), name)
+    except (ImportError, AttributeError, ValueError):
+        return None
+    return found if isinstance(found, type) else None
+
+
+def _registered_ancestor(path: str) -> BackendInfo | None:
+    """The registered backend with CPU facts whose class ``path`` is, or subclasses -- by class, not by spelling.
+
+    Only backends that registered ``cpu_params`` are imported to ask (MuJoCo,
+    today), so naming a dotted path imports no engine it is unrelated to.
+    """
+    ENGINES.load()
+    candidates = [known for _, known in BACKENDS.items() if known.cpu_params]
+    if not candidates:
+        return None
+    cls = _class_at(path)
+    if cls is None:
+        return next((known for known in candidates if known.cls == path), None)
+    for known in candidates:
+        base = _class_at(known.cls)
+        if base is not None and issubclass(cls, base):
+            return known
+    return None
 
 
 def runs_on_cpu(spec: BackendSpec) -> bool:
@@ -46,9 +110,8 @@ def runs_on_cpu(spec: BackendSpec) -> bool:
     task's own solver -- is never refused: whoever wrote it knows, and its
     constructor can say.
     """
-    try:
-        info = get_backend(spec.solver)
-    except KeyError:
+    info = device_facts(spec)
+    if info is None:
         return True  # an unknown alias fails in the composer, by name
     return not info.devices or "cpu" in info.devices
 
@@ -136,9 +199,8 @@ def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> Bac
             (``use_mujoco_contacts=False``, which MuJoCo's C backend would
             ignore rather than refuse).
     """
-    try:
-        info = get_backend(spec.solver)
-    except KeyError:
+    info = device_facts(spec)
+    if info is None:
         return spec
     if not _is_cpu(device):
         # A host engine runs on the CPU beside any device; a solver that steps

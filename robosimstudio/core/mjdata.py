@@ -10,12 +10,17 @@ prevents is the quiet kind: a contact probe reading ``mjw_data`` on a CPU gets
 the first frame's contacts forever, a parked body whose ``mjw_model`` row was
 set to 1.0 falls anyway, and neither raises.
 
-What Newton mirrors itself and what it does not, read off its source:
+What Newton mirrors itself and what it does not, read off its source (1.6):
 ``notify_model_changed`` regenerates the ``mjw_model`` rows and copies world 0
-into ``mj_model`` for inertial, body and DOF properties -- so a write that also
-lands in the Newton attribute survives a later notify on either device -- but
-the joint-property path writes ``mjw_data.mocap_pos`` / ``mocap_quat`` only.
-:func:`sync_mocap` is that missing copy.
+into ``mj_model`` for inertial, body, DOF and joint properties -- so a write that
+also lands in the Newton attribute survives a later notify on either device --
+and leaves out everything else it regenerates: a shape's friction, solref,
+margin and pose, a site, an actuator's gains (which the joint-DOF path writes
+too, for a joint target's stiffness), a tendon. :func:`mirror_notify` is that
+copy, and :func:`after_notify` runs it after every notify the program sends. The joint-property path
+writes ``mjw_data.mocap_pos`` / ``mocap_quat`` only; :func:`sync_mocap` is that
+one. Measured before the copy: a cube's friction set to 0.05 left the C model's
+at 1.0, and a doubled joint stiffness left its actuator gain at 650.
 
 ``mujoco`` is imported inside the function that needs it, as every optional
 backend in this tree is.
@@ -27,7 +32,39 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["contacts", "host_side", "read_gravcomp", "set_option", "sync_mocap", "write_gravcomp"]
+__all__ = [
+    "after_notify",
+    "contacts",
+    "host_side",
+    "mirror_notify",
+    "read_gravcomp",
+    "set_option",
+    "sync_mocap",
+    "write_gravcomp",
+]
+
+RECONSTANT = ("JOINT_DOF_PROPERTIES", "ACTUATOR_PROPERTIES", "TENDON_PROPERTIES")
+"""Flags whose notify ends in ``mj_setConst`` on a CPU, before :func:`mirror_notify` can copy the rows it reads."""
+
+MIRRORED: dict[str, tuple[str, ...]] = {
+    "SHAPE_PROPERTIES": (
+        "geom_friction", "geom_gap", "geom_margin", "geom_pos", "geom_quat", "geom_size",
+        "geom_solimp", "geom_solmix", "geom_solref", "site_pos", "site_quat", "site_size",
+    ),
+    "JOINT_DOF_PROPERTIES": ("actuator_biasprm", "actuator_gainprm"),
+    "ACTUATOR_PROPERTIES": (
+        "actuator_actrange", "actuator_biasprm", "actuator_cranklength", "actuator_ctrlrange",
+        "actuator_dynprm", "actuator_forcerange", "actuator_gainprm", "actuator_gear",
+    ),
+    "TENDON_PROPERTIES": (
+        "tendon_actfrcrange", "tendon_armature", "tendon_damping", "tendon_frictionloss", "tendon_margin",
+        "tendon_range", "tendon_solimp_fri", "tendon_solimp_lim", "tendon_solref_fri", "tendon_solref_lim",
+        "tendon_stiffness",
+    ),
+}  # fmt: skip
+"""``newton.ModelFlags`` name -> the ``mjw_model`` fields Newton's notify regenerates for it and does not copy
+into the C model on a CPU. Read off ``SolverMuJoCo._update_*_properties``; pair properties are absent because
+Newton skips their update on a CPU altogether."""
 
 
 def host_side(solver: Any) -> bool:
@@ -71,6 +108,56 @@ def read_gravcomp(solver: Any, world: int, mjc_body: int) -> float:
             raise IndexError(f"MuJoCo's C backend steps one world; there is no world {world}")
         return float(solver.mj_model.body_gravcomp[int(mjc_body)])
     return float(solver.mjw_model.body_gravcomp.numpy()[int(world), int(mjc_body)])
+
+
+def mirror_notify(solver: Any, flags: int) -> int:
+    """After ``notify_model_changed(flags)``: copy what it regenerated into the C model a CPU build steps.
+
+    World 0 of each :data:`MIRRORED` field the flags cover. Nothing on a GPU,
+    where the regenerated rows are the ones stepped. Returns how many fields
+    were copied, for a test.
+    """
+    if not host_side(solver):
+        return 0
+    import newton
+
+    copied = 0
+    for flag, fields in MIRRORED.items():
+        if not int(flags) & int(getattr(newton.ModelFlags, flag, 0)):
+            continue
+        for name in fields:
+            source = getattr(solver.mjw_model, name, None)
+            target = getattr(solver.mj_model, name, None)
+            if source is None or target is None or not hasattr(source, "numpy"):
+                continue
+            values = np.asarray(source.numpy())
+            if values.ndim == np.ndim(target) + 1:
+                values = values[0]
+            if values.size != np.size(target):
+                continue
+            target[:] = values.reshape(np.shape(target))
+            copied += 1
+    return copied
+
+
+def after_notify(solver: Any, flags: int) -> int:
+    """Finish ``solver.notify_model_changed(flags)`` on a CPU: copy what it left out, then let it recompute.
+
+    Newton's CPU notify ends in ``mj_setConst``, which derives constants from the
+    actuator and tendon rows -- and resolves a position actuator's ``dampratio``
+    placeholder into its damping from ``kp`` -- while those rows still hold the
+    old values. So for :data:`RECONSTANT` flags the notify runs once more after
+    the copy: everything it copies itself is unchanged by then, and its
+    ``mj_setConst`` now reads the rows the scene is meant to have. Nothing on a
+    GPU. Returns how many fields were copied.
+    """
+    copied = mirror_notify(solver, flags)
+    if copied:
+        import newton
+
+        if any(int(flags) & int(getattr(newton.ModelFlags, name, 0)) for name in RECONSTANT):
+            solver.notify_model_changed(int(flags))
+    return copied
 
 
 def sync_mocap(solver: Any) -> None:

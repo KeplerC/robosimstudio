@@ -132,8 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     command = [sys.executable, "-m", "unittest", *names, *(["-v"] if args.verbose else []), *args.rest]
     print(f"$ {' '.join(command[:4])} ... ({len(names)} modules)")
     # The cpu tier hides every GPU, so a machine that has one runs exactly what
-    # a machine without one would: the device is picked, not forced.
-    env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""} if args.tier == "cpu" else None
+    # a machine without one would: the device is picked, not forced -- which is
+    # also why a shell's own ROBOSIMSTUDIO_DEVICE / _RENDERER is cleared for it.
+    cpu = {"CUDA_VISIBLE_DEVICES": "", "ROBOSIMSTUDIO_DEVICE": "", "ROBOSIMSTUDIO_RENDERER": ""}
+    env = {**os.environ, **cpu} if args.tier == "cpu" else None
     return subprocess.run(command, cwd=ROOT, check=False, env=env).returncode
 
 

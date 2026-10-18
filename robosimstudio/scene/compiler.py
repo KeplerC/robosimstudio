@@ -325,7 +325,8 @@ def compile_scene(
                 pipeline_cls=pipeline_cls,
                 episodes=episodes,
             )
-    plat = plat.with_notes((*notes, *_on_the_host(scene.program, plat)))
+    graphs = bool(getattr(scene.pipeline, "use_cuda_graph", plat.cuda_graphs)) and plat.cuda_graphs
+    plat = replace(plat.with_notes((*notes, *_on_the_host(scene.program, plat))), graphs=graphs)
     scene.platform = plat
     announce(plat, verbose=verbose)
     return scene
@@ -360,17 +361,15 @@ def _for_platform(request: SceneRequest, plat: Platform, num_worlds: int) -> tup
     import dataclasses
     import importlib.util
 
-    from robosimstudio.specs.physics import get_backend
-
     from .physics import CompositionError
+    from .physics.devices import device_facts
 
     physics = request.physics
     adapted, notes = arrangement_for(physics, is_cpu=True)
     if num_worlds > 1:
         for _, spec in adapted.backends:
-            try:
-                info = get_backend(spec.solver)
-            except KeyError:
+            info = device_facts(spec)
+            if info is None:
                 continue
             if info.cpu_max_worlds and num_worlds > info.cpu_max_worlds:
                 raise CannotReplicate(

@@ -162,10 +162,19 @@ class PhysicsProgram:
         return dict(getattr(self.solver, "hosts", {}) or {})
 
     def notify(self, flags: int) -> None:
-        """Tell every solver that part of the model changed."""
+        """Tell every solver that part of the model changed.
+
+        On a CPU, then finishes the job for every MuJoCo island
+        (:func:`robosimstudio.core.mjdata.after_notify`): a friction or a gain
+        changed live must reach the C model ``mj_step`` reads.
+        """
         if not flags:
             return
+        from robosimstudio.core.mjdata import after_notify
+
         self.solver.notify_model_changed(int(flags))
+        for solver in self.solvers().values():
+            after_notify(solver, int(flags))
 
     def reset(self, state: newton.State, *, flags: Any = None, world_mask: Any = None) -> None:
         """Reset every solver's internal buffers (warm starts, contact anchors)."""

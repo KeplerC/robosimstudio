@@ -172,6 +172,19 @@ class GravcompParking:
 
     def apply(self) -> None:
         """Write the table: authored values everywhere, 1.0 on every parked row, both arrays."""
+        if any(self._parked.values()) and mjdata.host_side(self.solver):
+            if int(getattr(self.solver.mj_model, "ngravcomp", 1)) == 0:
+                # MuJoCo's C library counts gravity-compensated bodies when it
+                # compiles and skips the whole pass when there are none --
+                # MuJoCo-Warp does not -- so a row set to 1.0 would read back 1.0
+                # and hold nothing up. Here, not at construction: reading a row
+                # (Sim.gravcomp) is fine with none.
+                raise RuntimeError(
+                    "parking holds a body up with gravity compensation, and MuJoCo's C library (the CPU path) "
+                    "compiled this scene with no gravity-compensated body, so it skips gravity compensation "
+                    "entirely: a parked body would fall. A robot with gravcomp authored (every shipped one) "
+                    "turns it on; or build on a GPU"
+                )
         tiled = self._base.copy()
         flat = self._attribute_base.copy() if self._attribute_base is not None else None
         for world, bodies in self._parked.items():

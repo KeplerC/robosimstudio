@@ -52,8 +52,9 @@ DEVICE_ENV = "ROBOSIMSTUDIO_DEVICE"
 """The environment variable that names the device for a whole shell or machine.
 
 ``auto``, ``cpu``, ``cuda`` or ``cuda:N``. A device given in code wins over it.
-Set to a CPU on a machine with a GPU, it is how a GPU box runs exactly what a
-CPU-only one would, which is what the ``cpu`` test tier does."""
+Set to a CPU on a machine with a GPU, it runs what a CPU-only machine would. (The
+``cpu`` test tier hides the GPUs from the driver instead, so it proves the
+automatic path.)"""
 
 _RTX_HINT = "ovrtx is installed and unused on a CPU: uv sync --no-group rtx frees 1.8 GB"
 
@@ -76,6 +77,10 @@ class Platform:
             the compiler fills it in on the platform a scene keeps.
         rtx_installed: Whether ovrtx is importable, for the readout's hint on a
             CPU, where it is never used.
+        graphs: Whether the build will capture its substep loop into a CUDA
+            graph, once a build has said -- off on a CPU, and off on a GPU when
+            the arrangement or ``build(use_cuda_graph=False)`` says so. ``None``
+            from :func:`platform`, which only knows the device allows one.
     """
 
     device: str
@@ -84,6 +89,7 @@ class Platform:
     renderer_why: str
     notes: tuple[str, ...] = ()
     rtx_installed: bool = False
+    graphs: bool | None = None
 
     @property
     def is_cpu(self) -> bool:
@@ -114,7 +120,8 @@ class Platform:
     def readout(self) -> str:
         """Everything on one line: device, what was adapted, graphs, renderer."""
         parts = [f"{self.device} ({self.device_why})", *self.notes]
-        parts.append("CUDA graphs " + ("on" if self.cuda_graphs else "off"))
+        captured = self.cuda_graphs if self.graphs is None else self.graphs
+        parts.append("CUDA graphs " + ("on" if captured else "off"))
         if self.renderer:
             parts.append(f"renderer {self.renderer} ({self.renderer_why})")
         else:

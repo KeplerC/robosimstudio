@@ -51,7 +51,7 @@ GPU it steps on the CPU once per control step, beside an arm and anything else
 that stays on the GPU in one captured CUDA graph, and the platform line names
 what it steps there:
 
-```python
+```
 physics = rss.GENERIC.with_backend("cloth", rss.backend("superdex", substeps=2))   # every cloth
 rss.sheet(..., sim=rss.SimRequirements(domain="cloth",
                                        backend=rss.backend("superdex", substeps=2)))  # one sheet
