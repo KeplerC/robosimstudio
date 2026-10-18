@@ -17,18 +17,22 @@ measures: where its tips have been while down on the surface (:func:`scrubbed`).
 builds its own: a capsule lying on the sole, on VBD with the bristles, which
 then hold the grip up as a field does. The YAM cannot pinch that grip: a body
 on VBD that stands firm, squeezed by fingers on MuJoCo, is a stiff wall behind
-a one-step-lagged proxy. Under ``GENERIC`` as shipped, the hand closing on a
-12 x 12 field's grip leaves the state non-finite, and a 2 x 2 field's grip
-slips out of the jaws as the hand rises (``grasp_own.py``). An earlier
-draft tried thirty-odd coupling variants on the 12 x 12 field, all with sticky
-contact matching and rigid contact history on (proxy mass scale 1 to 1000,
-relaxed and Aitken feedback, lagged mode, ramped closing, contact stiffness 1e3
-to 1e4 and damping to 5e3, softer fields), and in every one the jaws were
-thrown open or the state blew up (``diag_grasp``). Named instead
-(``rss.brush(handle="handle")``), any body already in the scene is the grip,
-and an ``rss.box`` under :data:`BRUSH_60HZ` is on the arm's solver, where the
-same hand holds it at 22.3 mm and lets it slip at most 0.12 mm through a 6 mm
-press, a 20 mm lift and a 150 mm stroke (``press.py``).
+a one-step-lagged proxy. Under ``GENERIC`` as shipped, the hand closing with
+its tool centre 10 mm over the grip's axis leaves a 12 x 12 field's state
+non-finite; closing 2.5 mm higher, the state stays finite but the jaws shut on
+nothing and the grip falls off the bench. A 2 x 2 field's grip slips out of the
+jaws, in some runs as they close and in others as the hand rises
+(``grasp_own.py``). An earlier draft tried thirty-odd coupling variants on the
+12 x 12 field, all with sticky contact matching and rigid contact history on
+(proxy mass scale 1 to 1000, relaxed and Aitken feedback, lagged mode, ramped
+closing, contact stiffness 1e3 to 1e4 and damping to 5e3, softer fields), and
+in every one the jaws were thrown open or the state blew up (``diag_grasp``).
+Named instead (``rss.brush(handle="handle")``), any body already in the scene
+is the grip, and an ``rss.box`` under :data:`BRUSH_60HZ` is on the arm's
+solver, where the same hand holds it at 22.3 mm. Read every tick, the handle
+slips at most 0.12 mm in the fingers while the hand presses 6 mm, lifts 20 mm
+and strokes 150 mm; it peaks at 0.17 mm in the ticks after the stroke stops and
+eases to 0.14 mm over the next 40 (``brush_probe.py``).
 
 **What a named handle costs.** The welds from it to the strips drag the field
 along one way: Newton 1.6's VBD returns *contact* forces to the other solver
@@ -38,7 +42,7 @@ of ``00_scrub_the_bench`` falls 28.9 mm through its own bristles to the bench
 within 1 s (``nogravcomp.py``) -- it stays where a hand lets go of it, and the
 arm feels neither the press nor the bristles' drag: a press goes as deep as the
 hand goes. Pressed 6 mm, 400 nylon bristles bow up to 4.8 mm with their tips
-sliding up to 1.3 mm, none goes into the bench or up past the sole, and 1 s
+sliding up to 1.4 mm, none goes into the bench or up past the sole, and 1 s
 after the hand lifts the brush 20 mm off the bench every tip is within 0.034 mm
 of its rest place on its strip; soft ones bow 9 mm, their tips slide 11 mm, and
 they come back within 0.18 mm (``press.py``). Every measurement here is on an
