@@ -1588,12 +1588,13 @@ def _q(a, b):
     )
 
 
-def _turn(axis, degrees):
+def _about(axis, degrees):
+    """A quaternion (x, y, z, w) turning ``degrees`` about the unit ``axis``; not the arm-gizmo ``_turn`` above."""
     s, c = math.sin(math.radians(degrees) / 2), math.cos(math.radians(degrees) / 2)
     return (axis[0] * s, axis[1] * s, axis[2] * s, c)
 
 
-FOLD_JAWS = _q(_q(_turn((0, 1, 0), 10.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5))), _turn((0, 0, 1), 90.0))
+FOLD_JAWS = _q(_q(_about((0, 1, 0), 10.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5))), _about((0, 0, 1), 90.0))
 """The right hand's pinch: the tool along +x tipped 10 degrees down, the jaws closing vertically."""
 
 
@@ -1690,7 +1691,7 @@ def _fold_surface(film) -> float:
     return float(np.median(rest[rest[:, 1] < film.bench((0.0, -0.40, 0.0))[1]][:, 2]))
 
 
-FOLD_STAMP = _q(_turn((0, 0, 1), -30.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)))
+FOLD_STAMP = _q(_about((0, 0, 1), -30.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)))
 """The left hand's stamp: the tool along +x turned 30 degrees toward the fold, which it reaches that way."""
 
 
@@ -1720,7 +1721,7 @@ def _fold_over(film):
     radius, z = crease - pinch[1], film.surface
     for k in range(1, 13):
         turn = math.pi * k / 12
-        quat = _q(FOLD_JAWS, _turn((0, 0, 1), -math.degrees(turn)))
+        quat = _q(FOLD_JAWS, _about((0, 0, 1), -math.degrees(turn)))
         point = (pinch[0], crease - radius * math.cos(turn), z + (radius + 0.015) * math.sin(turn))
         yield from _jaws_to(film, point, 0.06, 120 if k < 12 else 60, quat=quat)
     yield from _jaws_to(film, (pinch[0], crease + radius, z + 0.03), 0.03)
