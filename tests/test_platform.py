@@ -317,6 +317,13 @@ class TestEachBackendOnACpu(unittest.TestCase):
         got = self.on(backend("mujoco", nconmax=512))
         self.assertEqual(got.kwargs(), {"nconmax": 512, "use_mujoco_cpu": True, "use_mujoco_contacts": True})
 
+    def test_past_its_world_limit_mujoco_is_left_as_stated(self) -> None:
+        """compile_scene refuses that build; composed directly, MuJoCo-Warp on Warp's CPU device is what steps it."""
+        from robosimstudio.scene.physics.devices import on_device
+        from robosimstudio.specs.physics import backend
+
+        self.assertEqual(on_device(backend("mujoco"), "cpu", owner="arm", domain="*", num_worlds=3), backend("mujoco"))
+
     def test_a_stated_kwarg_the_cpu_overrides_is_refused(self) -> None:
         from robosimstudio.scene.physics import CompositionError
         from robosimstudio.specs.physics import backend
@@ -325,15 +332,23 @@ class TestEachBackendOnACpu(unittest.TestCase):
             with self.assertRaisesRegex(CompositionError, "on a CPU 'mujoco' runs with"):
                 self.on(backend("mujoco", **stated))
 
-    def test_a_backend_with_no_cpu_path_is_refused_naming_the_way_out(self) -> None:
+    def test_an_entity_naming_a_backend_with_no_cpu_path_is_refused_naming_the_way_out(self) -> None:
+        """Its entity class was chosen for that engine, so nothing can stand in for it."""
         from robosimstudio.scene.physics import CompositionError
+        from robosimstudio.scene.physics.devices import on_device
         from robosimstudio.specs.physics import backend
 
         for solver in ("vbd", "genesis"):
             with self.assertRaises(CompositionError) as caught:
-                self.on(backend(solver))
+                on_device(backend(solver), "cpu", owner="thing", domain="cloth", declared=True)
             self.assertIn("rss.CPU", str(caught.exception))
             self.assertIn("rss.backend('superdex', substeps=2)", str(caught.exception))
+
+    def test_an_arrangements_backend_composed_directly_on_a_cpu_runs(self) -> None:
+        """compile_scene replaces it before the build; a caller composing by hand chose it, and VBD runs, slowly."""
+        from robosimstudio.specs.physics import backend
+
+        self.assertEqual(self.on(backend("vbd")), backend("vbd"))
 
     def test_mujoco_by_dotted_path_is_its_c_library_too(self) -> None:
         """Only the device facts follow the class: a dotted path is still handed exactly what it states."""

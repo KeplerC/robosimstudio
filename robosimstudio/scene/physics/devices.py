@@ -188,7 +188,9 @@ def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[Arra
     return replace(arrangement, backends=tuple(out)), tuple(notes)
 
 
-def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> BackendSpec:
+def on_device(
+    spec: BackendSpec, device: Any, *, owner: str, domain: str, declared: bool = False, num_worlds: int = 1
+) -> BackendSpec:
     """``spec`` as it is constructed on ``device``: with its backend's CPU kwargs on a CPU.
 
     Otherwise the identity, and for a backend that registered no CPU kwargs.
@@ -197,11 +199,24 @@ def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> Bac
     engine (SuperDex) runs on the CPU beside any device, and is how a material
     with no GPU path sits in a GPU scene.
 
+    Args:
+        declared: Whether an entity named ``spec`` itself (``sim=SimRequirements(backend=...)``)
+            rather than the arrangement serving its domain. Only that is refused
+            on a CPU for having no CPU path: the entity class was chosen for
+            that engine, so nothing can stand in for it, while an arrangement's
+            backend reached here either was replaced by :func:`arrangement_for`
+            before the build -- every build through ``compile_scene`` -- or was
+            handed to ``compose`` directly by a caller who chose it, and runs,
+            slowly.
+        num_worlds: Worlds in the model. Past the backend's ``cpu_max_worlds``
+            its CPU kwargs are not applied: ``compile_scene`` refuses such a
+            build, so only a direct ``compose`` reaches here with one, and the
+            only engine that steps it is the one stated -- MuJoCo-Warp on Warp's
+            CPU device rather than MuJoCo's one-world C library.
+
     Raises:
-        CompositionError: On a CPU, when the backend cannot run there -- which
-            reaches this point only for a backend an *entity* names, since
-            :func:`arrangement_for` already replaced the arrangement's own --
-            or when ``spec`` states a kwarg its CPU form sets otherwise
+        CompositionError: On a CPU, when an entity-declared backend cannot run
+            there, or when ``spec`` states a kwarg its CPU form sets otherwise
             (``use_mujoco_contacts=False``, which MuJoCo's C backend would
             ignore rather than refuse).
     """
@@ -222,14 +237,14 @@ def on_device(spec: BackendSpec, device: Any, *, owner: str, domain: str) -> Bac
     info = device_facts(spec)
     if info is None:
         return spec
-    if info.devices and "cpu" not in info.devices:
+    if declared and info.devices and "cpu" not in info.devices:
         instead = CPU.backend_for(domain)
         raise CompositionError(
             f"{owner!r} ({domain}) is on {spec.solver!r}, which runs on {' and '.join(info.devices)} only, and this "
             f"scene is on a CPU. Stage rss.CPU, or put {domain!r} on rss.backend({instead.solver!r}"
             f"{', substeps=2' if instead.substeps == 2 else ''}) -- or build on a GPU."
         )
-    if not info.cpu_params:
+    if not info.cpu_params or (info.cpu_max_worlds and int(num_worlds) > info.cpu_max_worlds):
         return spec
     stated = spec.kwargs()
     for key, value in info.cpu_params:

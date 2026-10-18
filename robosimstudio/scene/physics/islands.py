@@ -158,6 +158,7 @@ def partition(
     """
     groups: dict[BackendSpec, Island] = {}
     statics: list[Node] = []
+    num_worlds = int(worlds.num_worlds) if worlds is not None else 1
 
     for node in graph.nodes.values():
         if get_domain(node.domain).world_fixed:
@@ -172,7 +173,14 @@ def partition(
             )
         # Before grouping, so two entities whose specs are equal stay in one
         # island once both carry the device's kwargs.
-        spec = on_device(spec, model.device, owner=node.name, domain=node.domain)
+        spec = on_device(
+            spec,
+            model.device,
+            owner=node.name,
+            domain=node.domain,
+            declared=node.sim.backend is not None,
+            num_worlds=num_worlds,
+        )
         info = get_backend(spec.solver)
         if info.supports:
             needed = [k for k in get_domain(node.domain).state if k != "shapes" and node.has(k)]
@@ -199,7 +207,7 @@ def partition(
                 "the scene declares no entity with dynamics and the arrangement names no '*' backend, "
                 "so there is nothing to solve and nothing to solve it with"
             )
-        spec = on_device(spec, model.device, owner="the model", domain="*")
+        spec = on_device(spec, model.device, owner="the model", domain="*", num_worlds=num_worlds)
         if not (model.body_count or model.joint_count or model.particle_count):
             # Distinct from the case above, and worth its own sentence: there the
             # arrangement was short an entry, here the *scene* has nothing in it
