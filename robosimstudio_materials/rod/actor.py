@@ -123,29 +123,39 @@ def build_rod_actor(
     del particle_q, tet_indices, tet_materials  # the shared reader takes them off the model
     geom = actor_geometry(bridge.model, {**record, "kind": "rod"})
     start, count, params, rest = geom.start, geom.count, geom.params, geom.rest
+    closed = bool(params.get("closed", False))
+    # A closed rod's last particle is its seam, node 0 drawn twice
+    # (EntityRodSuperdex.nodes): the engine builds the loop from the others.
+    ring = rest[:-1] if closed else rest
     # ``rest`` is where the nodes start; the actor is built at its stress-free
     # shape, which is the same polyline unless the entity states another.
-    free = np.asarray(params["stress_free"], dtype=np.float64) if "stress_free" in params else rest
+    free = np.asarray(params["stress_free"], dtype=np.float64) if "stress_free" in params else ring
 
     radius = float(params.get("radius", 0.005))
+    if closed and len(ring) < 3:
+        raise ValueError(f"rod {record.get('name')!r}: a closed loop needs at least 3 nodes, got {len(ring)}")
     if bool(params.get("skin", True)):
         # Contact on a tubular skin embedded on the polyline (as the engine's
         # tendon example builds a rod). Centerline samples alone let the axis
         # rest on the surface: +0.91 mm clearance for an 11 mm cable that
         # should show +11.0. The simulation mesh is still the polyline, so the
         # read-back is unchanged.
-        axes = transported_frames(free)
+        # A loop has one element per node, the last running back to node 0, and
+        # one frame axis per element: transported round the closed polyline.
+        axes = transported_frames(np.vstack([free, free[:1]]) if closed else free)
         np_real = np.float64 if physics.uses_double_precision() else np.float32
         model = physics.experimental.generate_tubular_rod_model_data(
             nodes=free.astype(np_real),
             element_frame_axes=axes.astype(np_real),
             radius=radius,
             num_cross_section_segments=int(params.get("skin_segments", 8)),
-            is_closed_loop=False,
+            is_closed_loop=closed,
         )
         shape = physics.create_model_shape(model)
     else:
-        segments = np.stack([np.arange(count - 1), np.arange(1, count)], axis=1).astype(np.int32)
+        nodes = len(ring)
+        segments = np.stack([np.arange(nodes), (np.arange(nodes) + 1) % nodes], axis=1).astype(np.int32)
+        segments = segments if closed else segments[:-1]
         shape = physics.create_mesh_shape(
             nodes_per_element=2,
             coordinates=free.ravel().astype(np.float64),
@@ -196,7 +206,7 @@ def build_rod_actor(
 
     reference = np.asarray(actor.get_mesh().coordinates, dtype=np.float64).reshape(-1, 3)
     stride = max(1, len(np.asarray(actor.get_displacements())) // max(1, len(reference)))
-    if free is not rest:
+    if free is not ring:
         teleport_rod(bridge, record, actor, rest, stride)
 
     anchors = np.asarray(params.get("anchors", ()), dtype=np.int64)
@@ -206,8 +216,9 @@ def build_rod_actor(
         actor.add_boundary_condition_dofs_world_permanent(dof_indices=dofs, dof_values_world=values)
 
     def read_nodes() -> np.ndarray:
-        """Rest plus the translation half of each node's degrees of freedom."""
-        return reference + np.asarray(actor.get_displacements()).reshape(-1, stride)[:, :3]
+        """Rest plus the translation half of each node's degrees of freedom; a loop's seam after them."""
+        nodes = reference + np.asarray(actor.get_displacements()).reshape(-1, stride)[:, :3]
+        return np.vstack([nodes, nodes[:1]]) if closed else nodes
 
     np_real = np.float64 if physics.uses_double_precision() else np.float32
     return {
@@ -216,6 +227,7 @@ def build_rod_actor(
         "read": read_nodes,
         "start": start,
         "count": count,
+        "nodes": len(reference),
         "prev": rest.astype(np_real).copy(),
     }
 
@@ -319,6 +331,7 @@ CONSUMES = (
     "anchor_twists",
     "anchors",
     "axial_stiffness",
+    "closed",
     "contact_padding",
     "contact_penalty",
     "contact_smoothing",

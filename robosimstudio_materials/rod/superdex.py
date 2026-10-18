@@ -82,11 +82,19 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
 
     # -------------------------------------------------------------- phase 1
     def nodes(self) -> np.ndarray:
-        """The centerline at rest, ``[segments + 1, 3]``, in world coordinates."""
+        """The centerline at rest, ``[segments + 1, 3]``, in world coordinates.
+
+        A closed rod's last row is its first node again, the **seam**: one more
+        particle than the engine has nodes, written from node 0 every step. The
+        page draws a centerline as a tube swept along its particles and the rod
+        measures walk them in order, and both close the loop with no special
+        case because the polyline they are handed is already closed.
+        """
         # The spec's rest polyline (stated, or straight), lifted into the world.
-        return np.asarray(
+        nodes = np.asarray(
             [self.placed((*node, 0.0, 0.0, 0.0, 1.0))[:3] for node in self.spec.rest_polyline()], dtype=np.float64
         )
+        return np.vstack([nodes, nodes[:1]]) if self.spec.closed else nodes
 
     def stress_free_nodes(self) -> np.ndarray:
         """:attr:`RodSpec.stress_free` as nodes: the same legs as :meth:`nodes`, in the stated shape."""
@@ -147,7 +155,7 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
             "linear_rotational_inertia": float(spec.density) * 2.0 * second_moment,
             "stiffness_damping": float(spec.stiffness_damping),
             "friction": float(spec.mu_cable) ** 0.5,
-            "self_contact": bool(self.sim_requirements().self_contact),
+            "self_contact": bool(spec.self_contact or self.sim_requirements().self_contact),
             "contact_padding": float(spec.contact_gap),
             "contact_penalty": float(spec.contact_penalty),
             "skin": bool(spec.skin),
@@ -155,6 +163,8 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
         }
         if spec.skin_samples:
             params["skin_samples"] = str(spec.skin_samples)
+        if spec.closed:
+            params["closed"] = True
         if spec.stress_free is not None:
             params["stress_free"] = self.stress_free_nodes().tolist()
         for key in ("contact_threshold", "contact_smoothing", "friction_falloff"):
@@ -251,6 +261,8 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
         body_q = np.asarray(state.body_q.numpy() if hasattr(state.body_q, "numpy") else state.body_q)
         grip, hand_pos, _hand_quat = self.hand_tcp(arm, body_q)
         nodes = self.positions(state)
+        if self.spec.closed:
+            nodes = nodes[:-1]  # the seam is node 0 drawn twice; the engine has no node behind it
         local = self.nearest_to(nodes, hand_pos, at=at)
         if local < 0:
             return -1

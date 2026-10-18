@@ -337,6 +337,12 @@ class EntityRod(Centerline, Entity):
 
     def build(self, builder: newton.ModelBuilder, episode) -> None:
         spec = self.spec
+        if spec.closed:
+            # Refused rather than built open: a capsule chain has two ends.
+            raise NotImplementedError(
+                f"rod {spec.name!r}: a closed rod (a band, an O-ring) is built by the foreign-engine rod; route the "
+                "'rod' kind to backend('superdex')"
+            )
         if spec.joins:
             # Refused rather than ignored: a capsule chain has no node to weld.
             raise NotImplementedError(

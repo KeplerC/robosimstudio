@@ -82,9 +82,16 @@ then covers the numbered scripts alone."""
 
 SCRIPTS = (*NUMBERED, *ROPE)
 
-DEMOS = ("02_soft/00_sponge.py", "03_rope/02_superdex.py")
+DEMOS = (
+    "02_soft/00_sponge.py",
+    "03_rope/02_superdex.py",
+    "17_knots/00_pull_knot_tight.py",
+    "18_bands/00_band_on_pegs.py",
+    "18_bands/01_band_on_pegs_scored.py",
+)
 """The multi-engine demos, which the ones above cannot stand in for: each needs a
-foreign engine, and each is the *acceptance* scene for one kind on it. They are
+foreign engine, and each is the *acceptance* scene for one kind or feature on it
+(the sponge, the cable, the rope's knot, the closed rod's band). They are
 not in :data:`SCRIPTS` because none satisfies its rules on a base checkout --
 the sponge stands under a single-armed Panda where the scene scripts ship a
 bimanual robot, and the SuperDex cable needs the ``[superdex]`` extra to build."""

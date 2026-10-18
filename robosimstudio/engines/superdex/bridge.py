@@ -234,6 +234,8 @@ class SuperdexBridge:
             mirror, which the engine adds only against a point-cloud actor (a
             rod). 0 keeps the engine's own. See :func:`build_mirror_actors`.
         mirror_exact_boxes: Mirror boxes as exact ``BOX`` colliders, not SDFs.
+        integration: The engine's time integrator by name (``"bdf2"``...), or
+            ``None`` for its backward Euler. See ``SolverSuperdex.open``.
 
     **Actor builders.** Each recipe actor is built by whatever
     :func:`~robosimstudio.engines.geometry.register_actor_builder` holds for
@@ -290,6 +292,7 @@ class SuperdexBridge:
         preconditioner: str | None = None,
         newton_iterations: int | None = None,
         linear_iterations: int | None = None,
+        integration: str | None = None,
     ) -> None:
         physics = ensure_initialized(threads)
         self.physics = physics
@@ -315,7 +318,7 @@ class SuperdexBridge:
         for world in range(self.num_worlds):
             scene = physics.create_scene(f"rss:{island}" if self.num_worlds == 1 else f"rss:{island}#w{world}")
             scene.set_gravity(gravity)
-            self._tune_solver(scene, linear_solver, preconditioner, newton_iterations, linear_iterations)
+            self._tune_solver(scene, linear_solver, preconditioner, newton_iterations, linear_iterations, integration)
             self.scenes.append(scene)
         # One lane per world at tick time: a world's mirrors are posed and its
         # scene stepped on a thread of its own. Both calls release the GIL, and
@@ -443,8 +446,9 @@ class SuperdexBridge:
         preconditioner: str | None,
         iterations: int | None,
         linear_iterations: int | None = None,
+        integration: str | None = None,
     ) -> None:
-        """The engine's linear solve, by name, or its own choice where ``None``.
+        """The engine's linear solve and time integrator, by name, or its own choice where ``None``.
 
         The engine picks ``AUTO`` with a per-actor preconditioner, which is
         right for foam. Against stiff polymer (E ~ 1e8-1e9) under 1e10 penalties
@@ -453,9 +457,11 @@ class SuperdexBridge:
         at the default, 145 ms at ``CG`` + ``BLOCK_JACOBI``, 179 ms at
         ``MINRES``, and 8.1 s at the sparse direct ``LDLT``.
         """
-        if linear is None and preconditioner is None and iterations is None and linear_iterations is None:
+        if all(v is None for v in (linear, preconditioner, iterations, linear_iterations, integration)):
             return
         params = scene.get_solver_params()
+        if integration is not None:
+            params.integration_method = getattr(self.physics.IntegrationMethod, str(integration).upper())
         if linear is not None:
             params.linear_solver.solver_type = getattr(self.physics.LinearSolverType, str(linear).upper())
         if preconditioner is not None:
@@ -1304,13 +1310,17 @@ class SuperdexBridge:
         handle_fn = getattr(actor, "get_handle", None)
         handle = handle_fn() if callable(handle_fn) else actor
         constraints = []
+        # A builder whose actor has fewer nodes than particles states ``nodes``: a
+        # closed rod's last particle is its seam, node 0 drawn again.
+        wrap = int(entry["nodes"]) if "nodes" in entry else None
         for node, target in zip(np.asarray(nodes, dtype=np.int64), np.asarray(targets, dtype=np.float64), strict=True):
+            local = int(node - entry["start"])
             constraints.append(
                 scene.create_deformable_node_position_constraint(
                     stiffness=float(stiffness),
                     damping=float(damping),
                     saturation=-1.0,
-                    node_index=int(node - entry["start"]),
+                    node_index=local % wrap if wrap else local,
                     position=[float(v) for v in target],
                     actor=handle,
                 )

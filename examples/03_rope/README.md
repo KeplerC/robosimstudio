@@ -51,13 +51,18 @@ Source: [`01_between_posts.py`](01_between_posts.py)
 
 ![Cable on SuperDex](media/02_superdex.webp)
 
-The same cable spec stepped by another engine: a Cosserat rod on SuperDex, beside arms that stay on MuJoCo.
+The same cable stepped by another engine, a Cosserat rod on SuperDex: drag the right hand down onto it, slide **Grip amount** to 0.80 so the jaws close on it, and drag the hand up.
 
-One entry in the physics arrangement routes the `rod` kind to SuperDex. The
-cable becomes one centerline with a twist at every node, and its stiffness is
-read from `young_modulus` instead of the capsule chain's stretch and bend
-stiffness. Newton still holds its particles, so the page drags it the same way.
-Needs the `[superdex]` extra (Python 3.12).
+One entry in the arrangement routes the `rod` kind to SuperDex; the arms stay
+on MuJoCo. The cable is one centerline with a twist at every node, stiffness from
+`young_modulus`, contact on a tubular skin (its axis rests 11.2 mm up for an
+11 mm radius). SuperDex drives the fingers as colliders by pose and its push on
+them is not fed back: fed back, they closed through the cable at the default cap
+and, uncapped, swung from -27 to +103 mm and squirted it out (`probe_a2`). So
+**Close** shuts the jaws through it, and **Grip amount** 0.80 stops the blade tips
+at 19.2 mm on its 22, the pads 0.1 mm into its skin. Nothing is pinned: the middle
+rises 113 mm and slides 0.4 mm in the hand over 2 s, at 11 ms a control step
+(`tests/test_superdex_cable_robot`, GPU 1). Needs `[superdex]`.
 
 ```bash
 uv run --extra superdex examples/03_rope/02_superdex.py
