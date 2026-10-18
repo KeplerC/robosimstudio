@@ -22,12 +22,14 @@ Everything here is a check the port learned to make the hard way:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 import newton
 import numpy as np
 import warp as wp
 
 from robosimstudio.core.builder import restate_body_attribute, set_body_attribute
+from robosimstudio.core.suction import Suction
 from robosimstudio.paths import resolve_asset
 from robosimstudio.robots.registry import resolve_gripper
 from robosimstudio.scene.build.bodies import preserve_body_inertia
@@ -39,6 +41,23 @@ from robosimstudio.specs import IDENTITY as _IDENTITY_XFORM
 from robosimstudio.specs import ArmSpec, EmbodimentSpec, GripperSpec
 
 __all__ = ["ArmIndex", "EntityEmbodiment"]
+
+
+def _in_last_articulation(builder: newton.ModelBuilder, body: int) -> bool:
+    """Whether ``body`` belongs to the articulation the builder added last.
+
+    Newton's own rule for ``parent_body``: a hand may only be welded onto the
+    most recently added articulation. Read off ``articulation_start``, which
+    holds each articulation's first joint, and the joint whose child is the body.
+    A body no articulation claims (a free body) is not in the last one.
+    """
+    starts = [int(v) for v in builder.articulation_start]
+    if not starts:
+        return True
+    joints = [j for j in range(builder.joint_count) if int(builder.joint_child[j]) == int(body)]
+    if not joints:
+        return False
+    return int(joints[0]) >= starts[-1]
 
 
 def _limb_bodies(joint_parent, joint_child, joints: Sequence[int], seed_joints: Sequence[int]) -> set[int]:
@@ -210,6 +229,10 @@ class EntityEmbodiment(Entity):
         self.arms: dict[str, ArmIndex] = {}
         self.iks: dict[str, ArmIK] = {}
         self.grippers: dict[str, Gripper] = {}
+        self.suctions: dict[str, Suction] = {}
+        """Per arm whose hand is a vacuum cup, its :class:`~robosimstudio.core.suction.Suction`, filled at bind."""
+        self._suction_rows: dict[str, dict[int, int]] = {}
+        self._suction_owners: dict[int, str] = {}
         self.bodies: np.ndarray = np.zeros(0, dtype=np.int32)
         """Every body in this robot's tree, filled at bind."""
         self.arm_shapes: tuple[tuple[int, ...], ...] = ()
@@ -470,13 +493,14 @@ class EntityEmbodiment(Entity):
           on ``tape_peel @ ur5`` and 0.000 mm with the restate. Restating 1.0
           on a hand whose file already declares it changes nothing.
 
-        A multi-root asset is refused rather than half-welded: Newton allows only
-        the most recently added articulation as ``parent_body``, so on a robot
-        whose file declares two arms the second arm's hand would attach and the
-        first arm's would raise. Both YAM cells are that shape. Splitting such an
-        asset per arm is what would lift this, and until somebody does,
-        ``registry.admits`` refuses the pairing with this reason rather than
-        letting the compiler discover it.
+        On a multi-root asset only the arm declared last can take a hand: Newton
+        allows only the most recently added articulation as ``parent_body``, so
+        on a robot whose file declares two arms the second arm's hand attaches
+        and the first arm's would raise. Both YAM cells are that shape. A hand
+        named on the last arm's own :attr:`~robosimstudio.specs.ArmSpec.gripper`
+        is welded (``yam_bimanual_suction``'s cup); a hand for any other arm is
+        refused here with that reason, and ``registry.admits`` refuses a hand
+        named for the whole robot before the compiler gets this far.
         """
         wanted = [(arm, hand) for arm in self.spec.arms if (hand := self.hands.get(arm.name)) and hand.asset]
         if not wanted:
@@ -485,15 +509,17 @@ class EntityEmbodiment(Entity):
         # scene's furniture first, and a stage that arrives as an articulation
         # would otherwise be counted as one of the arm's.
         roots = sum(1 for j in range(self.range.joints[0], builder.joint_count) if int(builder.joint_parent[j]) < 0)
-        if roots > 1:
-            raise RuntimeError(
-                f"{self.spec.name}: cannot weld a hand onto an asset that declares {roots} articulation roots -- "
-                "Newton accepts only the most recently added articulation as a weld parent, so one arm would take "
-                "its hand and the other would not. Split the asset per arm first."
-            )
         ctrl_source = builder.custom_attributes.get("mujoco:ctrl_source")
         for arm, hand in wanted:
-            if self.spec.gripper_actuation is None and hand.actuation is None:
+            parent = self._wrist_body(builder, arm, hand)
+            if roots > 1 and not _in_last_articulation(builder, parent):
+                raise RuntimeError(
+                    f"{self.spec.name}: cannot weld hand {hand.name!r} onto arm {arm.name!r} of an asset that "
+                    f"declares {roots} articulation roots -- Newton accepts only the most recently added "
+                    "articulation as a weld parent, and this arm is not it. Put the hand on the arm the asset "
+                    "declares last, or split the asset per arm."
+                )
+            if hand.finger_names and self.spec.gripper_actuation is None and hand.actuation is None:
                 # Switching the hand's own actuator to JOINT_TARGET below is what
                 # stops it fighting the joint target -- and it also means nothing
                 # drives the jaw unless somebody states gains. A limp hand that
@@ -511,15 +537,18 @@ class EntityEmbodiment(Entity):
                     f"{self.spec.name} {arm.name}: hand {hand.name!r} is attached as {path.suffix!r}; "
                     "the weld imports MJCF only"
                 )
-            parent = self._wrist_body(builder, arm, hand)
             joint_start = builder.joint_count
             body_start = builder.body_count
             actuators_before = 0 if ctrl_source is None else len(ctrl_source.values)
+            # The arm's word on where its flange is wins over the hand's: a hand
+            # measured against one flange names it (mount_body) and carries the
+            # transform; a hand that bolts to anything leaves it to the arm.
+            mount = arm.gripper_mount if arm.gripper_mount is not None else hand.mount_xform
             builder.add_mjcf(
                 str(path),
                 xform=wp.transform(
-                    wp.vec3(*(float(v) for v in hand.mount_xform[:3])),
-                    wp.quat(*(float(v) for v in hand.mount_xform[3:7])),
+                    wp.vec3(*(float(v) for v in mount[:3])),
+                    wp.quat(*(float(v) for v in mount[3:7])),
                 ),
                 scale=hand.asset.scale,
                 floating=False,
@@ -540,6 +569,61 @@ class EntityEmbodiment(Entity):
             # A hand hanging off a wrist sags -- the third bullet above.
             set_body_attribute(builder, "mujoco:gravcomp", 1.0, range(body_start, builder.body_count))
             self._drive_by_target(builder, arm, hand, joint_start)
+
+    def after_scene_built(self, builder: newton.ModelBuilder, entities: Sequence[Any]) -> None:
+        """Couple each vacuum cup to every part the scene built: one disabled weld row per part.
+
+        Called by the compiler once every entity has built and before the model
+        is finalized, the only window in which both ends of a weld exist and rows
+        can still be added. A part is a dynamic body of another entity with a box
+        or mesh shape, the faces a cup can seal on. The rows are MuJoCo weld
+        equalities on Newton's own ``mujoco:equality_constraint`` table, pad as
+        body 1 and part as body 2, switched off;
+        :class:`~robosimstudio.core.suction.Suction` turns one on at hold with
+        the pose the part has under the face then.
+        """
+        cups = [(arm, hand) for arm in self.spec.arms if (hand := self.hands.get(arm.name)) and hand.suction_pad]
+        if not cups:
+            return
+        from newton.solvers import SolverMuJoCo
+
+        kinematic = int(newton.BodyFlags.KINEMATIC)
+        flat = (int(newton.GeoType.BOX), int(newton.GeoType.MESH), int(newton.GeoType.CONVEX_MESH))
+        faced = {int(builder.shape_body[s]) for s in range(builder.shape_count) if int(builder.shape_type[s]) in flat}
+        owners: dict[int, str] = {}
+        for entity in entities:
+            span = getattr(getattr(entity, "range", None), "bodies", None)
+            if entity is self or span is None:
+                continue
+            for b in range(*span):
+                if b in faced and float(builder.body_mass[b]) > 0.0 and not (int(builder.body_flags[b]) & kinematic):
+                    owners[b] = entity.name
+        # Every attribute of the row's frequency is written, so finalize has no
+        # column to pad with defaults and nothing to warn about.
+        defaults = {
+            key: attr.default
+            for key, attr in builder.custom_attributes.items()
+            if getattr(attr, "frequency", None) == "mujoco:equality_constraint"
+        }
+        for arm, hand in cups:
+            pad = label_index(builder.body_label, hand.suction_pad)
+            rows: dict[int, int] = {}
+            for part in owners:
+                values = {
+                    **defaults,
+                    "mujoco:equality_constraint_type": int(SolverMuJoCo.EqType.WELD),
+                    "mujoco:equality_constraint_objtype": 1,  # mjOBJ_BODY
+                    "mujoco:equality_constraint_body1": int(pad),
+                    "mujoco:equality_constraint_body2": int(part),
+                    "mujoco:equality_constraint_torquescale": 1.0,
+                    "mujoco:equality_constraint_label": f"{self.spec.name}/{arm.name}/suction/{builder.body_label[part]}",
+                    "mujoco:equality_constraint_enabled": False,
+                    "mujoco:equality_constraint_world": builder.current_world,
+                }
+                indices = builder.add_custom_values(**values)
+                rows[int(part)] = int(indices["mujoco:equality_constraint_type"])
+            self._suction_rows[arm.name] = rows
+        self._suction_owners = owners
 
     def _wrist_body(self, builder: newton.ModelBuilder, arm: ArmSpec, hand: GripperSpec) -> int:
         """The body a hand bolts to, by the same precedence ``bind`` uses.
@@ -1208,7 +1292,38 @@ class EntityEmbodiment(Entity):
                     action_closed_at_high=hand.action_closed_at_high if hand else True,
                 )
 
+            if hand is not None and hand.suction_pad:
+                self.suctions[arm.name] = Suction(
+                    model,
+                    arm=arm.name,
+                    pad_body=label_index(body_labels, hand.suction_pad),
+                    pad_radius=float(hand.pad_radius),
+                    rows=self._suction_rows.get(arm.name, {}),
+                    owners=self._suction_owners,
+                )
+
         self._home_target = self.home_target_q()
+
+    # -------------------------------------------------------------- phase 3
+    @property
+    def adds_substep_kernels(self) -> bool:
+        """Whether this robot puts a kernel in the substep: only a vacuum cup's wrench does.
+
+        The compiler's replication refusal reads it, so a robot without a cup
+        replicates and one with a cup is refused by name: the cup's wrench and
+        weld rows address world 0 alone.
+        """
+        return any(hand is not None and hand.suction_pad for hand in self.hands.values())
+
+    def contribute_hooks(self, hooks) -> None:
+        """Each vacuum cup's wrench kernel, so it is in the graph from the first capture."""
+        for suction in self.suctions.values():
+            suction.contribute_hooks(hooks)
+
+    def on_scene_ready(self, pipeline) -> None:
+        """Each vacuum cup finds the solver that carries its weld rows."""
+        for suction in self.suctions.values():
+            suction.attach(pipeline)
 
     # ---------------------------------------------------------------- runtime
     def home_joint_q(self) -> np.ndarray:
@@ -1252,6 +1367,8 @@ class EntityEmbodiment(Entity):
 
     def reset(self, pipeline, episode) -> None:
         del episode
+        for suction in self.suctions.values():
+            suction.reset()
         for name, gripper in self.grippers.items():
             # The command that *produces* the home aperture, which is 0 (open)
             # for every hand that starts open and is not for one that does not.

@@ -1,0 +1,22 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- A single-cup vacuum hand, authored for this repository (see assets/PROVENANCE.md): a flange
+     and a stem on the mount body, a bellows and a 30 mm face on the pad body. The approach axis
+     is +z; the pad body's origin IS the face, 60 mm from the mount, so a weld or a seal test
+     anchored on the pad body is anchored where the rubber meets the part. Masses are stated per
+     geom (70 g in all) rather than derived from each geom's volume at a default density. -->
+<mujoco model="suction_cup">
+  <compiler angle="radian"/>
+  <default>
+    <geom condim="3" friction="0.8 0.005 0.0001"/>
+  </default>
+  <worldbody>
+    <body name="suction_mount" pos="0 0 0">
+      <geom name="suction_flange" type="cylinder" size="0.018 0.004" pos="0 0 0.004" mass="0.040" rgba="0.25 0.25 0.27 1"/>
+      <geom name="suction_stem" type="cylinder" size="0.006 0.023" pos="0 0 0.031" mass="0.020" rgba="0.62 0.62 0.64 1"/>
+      <body name="suction_pad" pos="0 0 0.060">
+        <geom name="suction_bellows" type="cylinder" size="0.011 0.003" pos="0 0 -0.009" mass="0.004" rgba="0.10 0.10 0.10 1"/>
+        <geom name="suction_face" type="cylinder" size="0.015 0.003" pos="0 0 -0.003" mass="0.006" rgba="0.10 0.10 0.10 1"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>
