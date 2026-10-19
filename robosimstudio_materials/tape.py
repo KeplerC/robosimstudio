@@ -681,15 +681,24 @@ def _nearest_box(
     return hit
 
 
+_FLUSH = wp.constant(wp.float32(1.0e-5))
+"""How far past a box's half extent a point still lies over the face [m], 0.01 mm: a sheet laid flush with an
+edge lies on it. Its float32 vertices land up to 8e-9 m past the edge, and tested with no allowance a label
+covering the example's box top lost a row of 11 of its 143 bonds, and on a box off the origin a row and a
+column, 23; bonded on the edge, all 143 held 60 substeps of CPU VBD (``flush.py``, ``flush_step.py``). Seated
+on the edge 0.01 mm past it, 0.5 mm off the face, a bond's normal tilts 1.1 degrees and it starts 0.1 um into
+its lift."""
+
+
 @wp.struct
 class _Seat:
     """Where a point would rest on the box under it, in the body's frame: what :func:`_seat_on` finds.
 
     ``shape`` is the box, -1 with none; ``over`` whether the point lies over the face, within its
-    extent; ``face`` the face's outward normal; ``gap`` the point's distance off the box's surface
-    less the box's margin [m], so a particle presses ``radius - gap`` into the contact; ``thick`` the
-    contact thickness, the particle's radius plus that margin [m]; and ``anchor`` the point on the
-    surface under it, ``thick`` off it along ``face``, where VBD's contact rests the particle.
+    extent and :data:`_FLUSH`; ``face`` the face's outward normal; ``gap`` the point's distance off the
+    box's surface less the box's margin [m], so a particle presses ``radius - gap`` into the contact;
+    ``thick`` the contact thickness, the particle's radius plus that margin [m]; and ``anchor`` the point
+    on the surface under it, ``thick`` off it along ``face``, where VBD's contact rests the particle.
     """
 
     shape: int
@@ -712,9 +721,9 @@ def _seat_on(
     """The seat on the body's box nearest a point in the body's frame: every kernel that places a bond calls this.
 
     A point lies over a face when at most one of its coordinates in the box's frame is past the box's
-    half extent: over that face, or inside the box. Past an edge or a corner nothing is under it, and
-    the box's nearest point is that edge, its normal tilted between the faces: a vertex 5 mm past the
-    top's edge and 0.5 mm over it gets ``(0.995, 0, 0.1)``.
+    half extent, by more than :data:`_FLUSH`: over that face, or inside the box. Past an edge or a corner
+    nothing is under it, and the box's nearest point is that edge, its normal tilted between the faces:
+    a vertex 5 mm past the top's edge and 0.5 mm over it gets ``(0.995, 0, 0.1)``.
     """
     seat = _Seat()
     seat.shape = _nearest_box(local, boxes, shape_transform, shape_scale, shape_margin)
@@ -729,7 +738,7 @@ def _seat_on(
     n_shape = wp.vec3(g[0], g[1], g[2])
     past = int(0)
     for i in range(3):
-        if wp.abs(inside[i]) > half[i]:
+        if wp.abs(inside[i]) > half[i] + _FLUSH:
             past += 1
     seat.over = past <= 1
     seat.face = wp.transform_vector(frame, n_shape)

@@ -476,8 +476,9 @@ class TestNothingUnderItMakesNoBond(unittest.TestCase):
     HALF = (0.05, 0.06, 0.025)
     """The example's 100 x 120 x 50 mm box, its centre 25 mm up."""
 
-    def _label(self, material, *, stuck: bool, at: tuple[float, float, float]):
-        """A 40 x 95 mm label without a tab, its corner at ``at``, over the box, built and bound on the CPU."""
+    def _label(self, material, *, stuck: bool, at: tuple[float, float, float], centre=(0.0, 0.0, 0.025), **kwargs):
+        """A label without a tab, 40 x 95 mm unless ``kwargs`` say otherwise, its corner at ``at``, over the box
+        centred at ``centre``, built and bound on the CPU."""
         from types import SimpleNamespace
 
         import newton
@@ -486,9 +487,9 @@ class TestNothingUnderItMakesNoBond(unittest.TestCase):
         from robosimstudio_materials.tape import EntityTape, tape
 
         builder = newton.ModelBuilder()
-        box = builder.add_body(xform=wp.transform((0.0, 0.0, 0.025), wp.quat_identity()), label="box")
+        box = builder.add_body(xform=wp.transform(centre, wp.quat_identity()), label="box")
         builder.add_shape_box(box, hx=self.HALF[0], hy=self.HALF[1], hz=self.HALF[2])
-        label = EntityTape(tape(name="label", on="box", at=at, material=material, stuck=stuck, tab=0.0))
+        label = EntityTape(tape(name="label", on="box", at=at, material=material, stuck=stuck, tab=0.0, **kwargs))
         label.build(builder, None)
         model = builder.finalize(device="cpu")
         label._bind_bonds(SimpleNamespace(model=model))
@@ -504,10 +505,12 @@ class TestNothingUnderItMakesNoBond(unittest.TestCase):
             (0.055, 0.065, 0.0255),  # past its corner
             (0.0505, 0.0, 0.01),  # over the +x side, below the top
             (0.0, 0.0, 0.02),  # inside, under the top
+            (0.05 + 1.0e-8, 0.06 + 1.0e-8, 0.0255),  # on the top's corner, a float32 rounding past it
+            (0.05002, 0.0, 0.0255),  # 0.02 mm past the +x edge
         ]
         over, box = over_a_face(points, [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)], [self.HALF], [0.0])
-        np.testing.assert_array_equal([True, True, False, False, True, True], over)
-        np.testing.assert_array_equal(np.zeros(6), box)
+        np.testing.assert_array_equal([True, True, False, False, True, True, True, False], over)
+        np.testing.assert_array_equal(np.zeros(8), box)
         over, box = over_a_face(points[:1], np.zeros((0, 7)), np.zeros((0, 3)), np.zeros(0))
         self.assertFalse(over[0], "no box: nothing is under it")
         self.assertEqual(-1, box[0])
@@ -536,6 +539,25 @@ class TestNothingUnderItMakesNoBond(unittest.TestCase):
                 label._reset_bonds()
                 np.testing.assert_array_equal(over, model.attachment_particle_body_enabled.numpy()[label.bonds])
                 self.assertEqual(0.0, label.peeled())
+
+    def test_a_label_laid_flush_with_the_edges_bonds_on_them(self) -> None:
+        """Covering the box's top exactly: its edge vertices lie on the edges, up to float32's rounding past them,
+        and every one bonds, as on the example's box and on one off the origin. Tested past the extent with no
+        allowance, a row of 11 went unbonded on the example's box, a row and a column (23) on the other
+        (``flush.py``, ``flush_step.py``); bonded, all 143 held 60 substeps of CPU VBD."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            for centre in ((0.0, -0.08, 0.025), (0.41, -0.083, 0.025)):
+                with self.subTest(adhesion=material.adhesion, centre=centre):
+                    corner = (centre[0] - self.HALF[0], centre[1] - self.HALF[1], centre[2] + self.HALF[2] + 0.0005)
+                    size = (2 * self.HALF[0], 2 * self.HALF[1])
+                    label, model = self._label(
+                        material, stuck=True, at=corner, centre=centre, size=size, cells=(10, 12)
+                    )
+                    self.assertEqual(143, len(label.bonds))
+                    self.assertTrue(label.made.all(), f"{int((~label.made).sum())} vertices on an edge went unbonded")
+                    self.assertTrue(model.attachment_particle_body_enabled.numpy()[label.bonds].all())
 
     def test_a_label_pressed_past_the_edge_bonds_only_over_the_face(self) -> None:
         """Pressed 0.1 mm into the top, its last column 0.1 mm past the edge: the 20 vertices there bonded to
