@@ -11,6 +11,7 @@ atom and says success.
 
 from __future__ import annotations
 
+import importlib.util
 import unittest
 
 import numpy as np
@@ -21,6 +22,8 @@ from tests.fixtures.grasp import go, open_session, tick
 TIER = "medium"
 """One GPU: the task built once and driven through its page for about 7 s of scene."""
 
+HAS_SUPERDEX = importlib.util.find_spec("superdex") is not None
+
 PORT = 9763
 Z = 0.728
 """``bench_0728``'s work surface [m]."""
@@ -28,6 +31,7 @@ TOOL_DOWN = (0.0, 1.0, 0.0, 0.0)
 """The YAM's tool pointing down, jaws closing along world y: the turn a person gives the right gizmo first."""
 
 
+@unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing steps the bag")
 class TestTheTaskGoalTurnsTrue(unittest.TestCase):
     """The right hand turned down, the bag opened as in 00: ``evaluate`` reports the goal met."""
 

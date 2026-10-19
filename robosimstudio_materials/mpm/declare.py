@@ -17,10 +17,9 @@ here registers; the task does, under its own name.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import ClassVar
 
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.states import StateSpec
 from robosimstudio.assetlib.sim import SimRequirements, contacts_with
 
@@ -30,16 +29,6 @@ __all__ = ["Dough", "Heap", "Liquid", "ParticleBody"]
 
 TOUCHES = ("surface", "fixtures", "objects", "hands")
 """What a particle body contacts unless it says otherwise: the bench, a tray, a tool, the fingers."""
-
-
-@dataclass(frozen=True)
-class _Spec:
-    """A build factory returning one spec, as a value, so two declarations of one type compare equal."""
-
-    spec: Any
-
-    def __call__(self) -> Any:
-        return self.spec
 
 
 class ParticleBody:
@@ -83,13 +72,16 @@ class ParticleBody:
                 f"{cls.__name__}.from_spec: {spec.name!r} is built by {spec.entity!r}, a {domain} body, "
                 f"not a {cls.DOMAIN} one"
             )
+        # A mesh is counted by its fill, at build, so its summary states no count.
+        count = spec.particle_count
+        body = f"a {domain} body of {spec.shape} shape" + ("" if count is None else f", {count} particles")
         return AssetRecord(
             name=name,
-            summary=summary or f"a {domain} body of {spec.shape} shape, {spec.particle_count} particles",
+            summary=summary or body,
             tags=tuple(tags) or (domain,),
             states=tuple(states),
             sim=SimRequirements(domain=domain, contacts=contacts_with(*touches), notes=notes),
-            build=_Spec(spec),
+            build=SpecFactory(spec),
         )
 
 

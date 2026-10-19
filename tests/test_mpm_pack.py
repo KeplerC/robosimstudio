@@ -266,6 +266,73 @@ class TestTheSpecs(unittest.TestCase):
         np.testing.assert_array_equal(jittered, again, "the jitter is seeded from the name")
         self.assertFalse(np.array_equal(jittered, box))
 
+    def test_a_body_weighs_its_material_over_the_region_it_fills(self) -> None:
+        """The wipe's puddle: 6 mm deep at 2.5 mm is two layers of 3 mm, so a particle stands for 18.75 mm^3, not 15.6.
+
+        Its mass and its radius both follow the cell: Newton's implicit MPM
+        reads a particle's volume as ``8 r^3`` and its density as the mass over
+        that, so the two together keep the solver's density the material's.
+        """
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm.entity import EntityParticleBody
+
+        spec = rss.liquid(name="ketchup", size=(0.10, 0.10, 0.006), material="ketchup")
+        density = float(spec.material.density)
+        self.assertEqual(3200, spec.particle_count)
+        self.assertAlmostEqual(0.0025 * 0.0025 * 0.003, spec.particle_volume, places=15)
+        self.assertAlmostEqual(density * 0.10 * 0.10 * 0.006, spec.mass, places=9)
+        builder = newton.ModelBuilder()
+        entity = EntityParticleBody(spec)
+        entity.build(builder, None)
+        mass = np.asarray(builder.particle_mass, dtype=np.float64)
+        radius = np.asarray(builder.particle_radius, dtype=np.float64)
+        self.assertEqual(3200, len(mass))
+        self.assertAlmostEqual(density * 0.10 * 0.10 * 0.006, float(mass.sum()), places=9)
+        np.testing.assert_allclose(8.0 * radius**3, spec.particle_volume, rtol=1e-9)
+        np.testing.assert_allclose(mass / (8.0 * radius**3), density, rtol=1e-9)
+        self.assertAlmostEqual(float(mass[0]), entity.particle_mass, places=12)
+        self.assertAlmostEqual(float(radius[0]), entity.particle_radius, places=12)
+
+    def test_the_drawn_radius_is_the_models(self) -> None:
+        """The puddle's points and its surface take the 1.33 mm the model holds, not half the 2.5 mm spacing."""
+        from types import SimpleNamespace
+
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm.entity import EntityParticleBody
+
+        spec = rss.liquid(name="ketchup", size=(0.10, 0.10, 0.006), material="ketchup", render="surface")
+        builder = newton.ModelBuilder()
+        body = EntityParticleBody(spec)
+        body.build(builder, None)
+        model = builder.finalize(device="cpu")
+        radius = float(model.particle_radius.numpy()[0])
+        self.assertAlmostEqual(0.5 * (0.0025 * 0.0025 * 0.003) ** (1.0 / 3.0), radius, places=9)
+        self.assertAlmostEqual(radius, body.handle(model).point_radius, places=9)
+        body.solver = SimpleNamespace(
+            config=SimpleNamespace(voxel_size=0.004), model=SimpleNamespace(device="cpu", world_count=1)
+        )
+        body._install_surface()
+        self.assertAlmostEqual(radius, body.surface.radius, places=9)
+
+    def test_a_mesh_is_not_counted_before_it_is_filled(self) -> None:
+        """``size`` is ignored for a mesh, so a count, a mass or a summary off it would be the default box's."""
+        import robosimstudio as rss
+        from robosimstudio.specs.asset import AssetSpec
+        from robosimstudio_materials.mpm import Heap
+
+        spec = rss.heap(name="filled", shape="mesh", asset=AssetSpec(path="meshes/never_loaded.obj"))
+        self.assertIsNone(spec.particle_count)
+        self.assertIsNone(spec.mass)
+        summary = Heap.from_spec(spec, name="filled_heap").summary
+        self.assertEqual("a granular body of mesh shape", summary)
+        self.assertEqual(
+            "a granular body of box shape, 27648 particles", Heap.from_spec(rss.heap(), name="box_heap").summary
+        )
+
     def test_the_material_fields_are_described_with_their_tiers(self) -> None:
         from robosimstudio.specs.params import REBUILD, RECAPTURE, iter_params, undescribed
         from robosimstudio_materials.mpm import MPM_KEYS, ParticleBodySpec, ParticleMaterialSpec
@@ -277,6 +344,97 @@ class TestTheSpecs(unittest.TestCase):
             self.assertEqual(RECAPTURE, tiers[key], key)
         body = {f.name: ui.tier for f, ui in iter_params(ParticleBodySpec)}
         self.assertEqual(REBUILD, body["particle_spacing"])
+
+
+class TestTheContainerMargins(unittest.TestCase):
+    def test_a_container_is_matched_by_its_whole_name(self) -> None:
+        """``cup`` takes its body's shapes and its world-fixed collision parts, never ``cup_holder``'s or ``cup_2``'s."""
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm.entity import DEFAULT_CONTAINER_MARGIN, EntityParticleBody
+
+        builder = newton.ModelBuilder()
+        cup, holder = builder.add_body(label="cup"), builder.add_body(label="cup_holder")
+        shapes = {
+            label: builder.add_shape_box(body=body, hx=0.01, hy=0.01, hz=0.01, label=label)
+            for body, label in (
+                (cup, "cup"),
+                (cup, "cup_floor"),
+                (-1, "cup_collision_00"),
+                (holder, "cup_holder"),
+                (-1, "cup_2"),
+                (-1, "cup_2_collision_00"),
+            )
+        }
+        pool = EntityParticleBody(rss.liquid(name="h", material="honey", containers=("cup",)))
+        pool._apply_container_margins(builder)
+        given = {label for label, s in shapes.items() if builder.shape_margin[s] == DEFAULT_CONTAINER_MARGIN}
+        self.assertEqual({"cup", "cup_floor", "cup_collision_00"}, given)
+        self.assertEqual(3, sum(builder.shape_margin[s] == 0.0 for s in shapes.values()))
+
+    def test_a_static_containers_convex_hulls_are_its_own(self) -> None:
+        """Newton labels the hulls past a decomposition's first ``<label>_convex_<i>``; each gets the margin.
+
+        ``approximate_meshes(method="coacd")`` over a 100 mm U of three slabs
+        welded to the world gave ``bowl`` and ``bowl_convex_1`` to
+        ``bowl_convex_26``, all on body -1 (Newton 1.6.0's builder). Matched by
+        the whole name alone, only the first hull had a margin and a liquid
+        leaked through the other 26.
+        """
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm.entity import DEFAULT_CONTAINER_MARGIN, EntityParticleBody
+
+        builder = newton.ModelBuilder()
+        labels = (
+            "bowl",
+            "bowl_convex_1",
+            "bowl_convex_26",
+            "bowl_collision",
+            "bowl_collision_01_convex_2",
+            "bowl_2",
+            "bowl_2_convex_1",
+            "bowl_holder_convex_1",
+        )
+        shapes = {label: builder.add_shape_box(body=-1, hx=0.01, hy=0.01, hz=0.01, label=label) for label in labels}
+        pool = EntityParticleBody(rss.liquid(name="h", material="honey", containers=("bowl",)))
+        pool._apply_container_margins(builder)
+        given = {label for label, s in shapes.items() if builder.shape_margin[s] == DEFAULT_CONTAINER_MARGIN}
+        self.assertEqual(set(labels[:5]), given)
+
+
+class TestTheCupMesh(unittest.TestCase):
+    def test_the_mesh_is_written_beside_its_name_and_renamed_onto_it(self) -> None:
+        """Two processes building one cup share the cache file; neither may read it half written."""
+        import os
+        import pathlib
+        import tempfile
+        from unittest import mock
+
+        import trimesh
+
+        from robosimstudio_materials.liquid import cup
+
+        export = trimesh.Trimesh.export
+        writes = []
+
+        def recorded(mesh, file_obj=None, *args, **kwargs):
+            path = pathlib.Path(file_obj)
+            writes.append((path, sorted(p.name for p in path.parent.iterdir())))
+            return export(mesh, file_obj, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_CACHE": root}):
+            with mock.patch.object(trimesh.Trimesh, "export", recorded):
+                spec = cup(inner=(0.031, 0.032, 0.033), wall=0.005)
+            final = pathlib.Path(spec.asset.path)
+            ((written, present),) = writes
+            self.assertNotEqual(final, written, "the mesh was exported straight onto the name others read")
+            self.assertEqual(final.parent, written.parent, "a rename is atomic only within one directory")
+            self.assertNotIn(final.name, present, "the final name existed before the mesh was whole")
+            self.assertEqual([final.name], sorted(p.name for p in final.parent.iterdir()), "no temporary file is left")
+            self.assertGreater(len(trimesh.load(final, force="mesh").faces), 0)
 
 
 class TestTheRecords(unittest.TestCase):

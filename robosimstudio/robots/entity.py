@@ -233,6 +233,8 @@ class EntityEmbodiment(Entity):
         """Per arm whose hand is a vacuum cup, its :class:`~robosimstudio.core.suction.Suction`, filled at bind."""
         self._suction_rows: dict[str, dict[int, int]] = {}
         self._suction_owners: dict[int, str] = {}
+        self._hand_bodies: dict[str, tuple[int, int]] = {}
+        """Per arm whose hand is welded on, the body range that hand's import added."""
         self.bodies: np.ndarray = np.zeros(0, dtype=np.int32)
         """Every body in this robot's tree, filled at bind."""
         self.arm_shapes: tuple[tuple[int, ...], ...] = ()
@@ -573,7 +575,25 @@ class EntityEmbodiment(Entity):
                     ctrl_source.values[a] = target
             # A hand hanging off a wrist sags -- the third bullet above.
             set_body_attribute(builder, "mujoco:gravcomp", 1.0, range(body_start, builder.body_count))
+            self._hand_bodies[arm.name] = (body_start, builder.body_count)
             self._drive_by_target(builder, arm, hand, joint_start)
+
+    def _hand_body(self, labels: Sequence[str], arm: ArmSpec, name: str) -> int:
+        """The body ``name`` of the hand on ``arm``: looked up in that hand's own import first.
+
+        Two arms carrying the same welded hand import its labels twice, so a
+        name the hand gives (its pad, its tool centre) matches once per arm in
+        the whole model and once in its own import. A hand the arm's asset
+        already contains, or a name its import does not hold once, is looked up
+        in the whole model as before.
+        """
+        span = self._hand_bodies.get(arm.name)
+        if span is not None:
+            lo, hi = span
+            hits = [lo + i for i, label in enumerate(labels[lo:hi]) if label.split("/")[-1] == name]
+            if len(hits) == 1:
+                return hits[0]
+        return label_index(labels, name)
 
     def after_scene_built(self, builder: newton.ModelBuilder, entities: Sequence[Any]) -> None:
         """Couple each vacuum cup to every part the scene built: one disabled weld row per part.
@@ -611,7 +631,7 @@ class EntityEmbodiment(Entity):
             if getattr(attr, "frequency", None) == "mujoco:equality_constraint"
         }
         for arm, hand in cups:
-            pad = label_index(builder.body_label, hand.suction_pad)
+            pad = self._hand_body(builder.body_label, arm, hand.suction_pad)
             rows: dict[int, int] = {}
             for part in owners:
                 values = {
@@ -1223,7 +1243,10 @@ class EntityEmbodiment(Entity):
             # difference between a Robotiq folded into panda_link7 and a YAM
             # gripper with a body of its own.
             tcp_body = (hand.tcp_body if hand else "") or arm.ee_body_name
-            index.ee_body = label_index(body_labels, tcp_body) if tcp_body else int(joint_child[arm_j[-1]])
+            if hand is not None and hand.tcp_body:
+                index.ee_body = self._hand_body(body_labels, arm, tcp_body)
+            else:
+                index.ee_body = label_index(body_labels, tcp_body) if tcp_body else int(joint_child[arm_j[-1]])
             index.base_body = (
                 label_index(body_labels, arm.base_body_name) if arm.base_body_name else int(joint_parent[arm_j[0]])
             )
@@ -1301,7 +1324,7 @@ class EntityEmbodiment(Entity):
                 self.suctions[arm.name] = Suction(
                     model,
                     arm=arm.name,
-                    pad_body=label_index(body_labels, hand.suction_pad),
+                    pad_body=self._hand_body(body_labels, arm, hand.suction_pad),
                     pad_radius=float(hand.pad_radius),
                     rows=self._suction_rows.get(arm.name, {}),
                     owners=self._suction_owners,

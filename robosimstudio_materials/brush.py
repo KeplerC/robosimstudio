@@ -91,7 +91,7 @@ import numpy as np
 import warp as wp
 
 from robosimstudio.assetlib.materials import MaterialRecord, get_material, register_material, register_material_kind
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
 from robosimstudio.assetlib.semantics.states import StateSpec
@@ -107,7 +107,7 @@ from robosimstudio.specs.physics import GENERIC, register_domain
 # The rod kind minted the ``rod`` layout this one reads as, so it is imported
 # before the chain below names it; the builder helper is the one a cable is
 # built with.
-from robosimstudio_materials.rod import add_capsule_chain
+from robosimstudio_materials.rod import add_capsule_chain, rod_slot_dofs
 
 __all__ = [
     "BRUSH_60HZ",
@@ -544,6 +544,44 @@ def _floor_inertia(builder: newton.ModelBuilder, bodies) -> None:
         builder.body_inv_inertia[b] = wp.mat33(*np.linalg.inv(floored).ravel().tolist())
 
 
+def _free_coord(builder: newton.ModelBuilder, body: int) -> int:
+    """The first coordinate of the free joint ``body`` hangs on, or -1 for a body on none (a fixed handle)."""
+    free = int(newton.JointType.FREE)
+    for j in range(builder.joint_count):
+        if int(builder.joint_child[j]) == int(body) and int(builder.joint_type[j]) == free:
+            return int(builder.joint_q_start[j])
+    return -1
+
+
+def _z_axes(quats) -> np.ndarray:
+    """``(N, 3)`` local +z axes in world of ``(N, 4)`` xyzw quaternions, normalising as ``quat_to_mat`` does.
+
+    The third column of :func:`~robosimstudio.core.math.quat_to_mat` over the
+    whole array at once, with its identity for a quaternion of zero length.
+    """
+    q = np.asarray(quats, dtype=np.float64).reshape(-1, 4)
+    x, y, z, w = q.T
+    n = np.einsum("ij,ij->i", q, q)
+    s = np.divide(2.0, n, out=np.zeros_like(n), where=n >= 1.0e-12)
+    return np.stack([s * (x * z + y * w), s * (y * z - x * w), 1.0 - s * (x * x + y * y)], axis=1)
+
+
+def _carried(poses: np.ndarray, start: np.ndarray, end: np.ndarray) -> np.ndarray:
+    """``(N, 7)`` poses moved rigidly with a body that went from pose ``start`` to pose ``end``."""
+    from robosimstudio.core.math import mat_to_quat, quat_multiply, quat_to_mat
+
+    poses, start, end = (np.asarray(v, dtype=np.float64) for v in (poses, start, end))
+    turn = quat_to_mat(end[3:7]) @ quat_to_mat(start[3:7]).T
+    q = mat_to_quat(turn)
+    # The turn's quaternion times each pose's, as a matrix on the right-hand factor: the
+    # product is linear in it, so the library's product with each basis quaternion is a column.
+    left = np.stack([quat_multiply(q, basis) for basis in np.eye(4)], axis=1)
+    out = np.empty_like(poses)
+    out[:, :3] = (poses[:, :3] - start[:3]) @ turn.T + end[:3]
+    out[:, 3:7] = poses[:, 3:7] @ left.T
+    return out
+
+
 _GROUPS = itertools.count(2)
 """Collision groups handed to brushes, one each, negated: ``-2``, ``-3``, ... (``-1`` is Newton's
 "collide with everything", ``0`` nothing, ``1`` what every other shape carries)."""
@@ -564,6 +602,8 @@ class EntityBrush(Entity):
         """The grip: the brush's own, or the named handle's body."""
         self.coord_start: int = -1
         """The own grip's free-joint coordinates; -1 for a named handle, which its own entity restores."""
+        self._handle_coord: int = -1
+        """A named handle's free-joint coordinates, where its reset writes the episode's pose; -1 otherwise."""
         self.bodies: np.ndarray = np.zeros(0, dtype=np.int32)
         self.shapes: np.ndarray = np.zeros(0, dtype=np.int32)
         self.joints: np.ndarray = np.zeros(0, dtype=np.int32)
@@ -654,6 +694,7 @@ class EntityBrush(Entity):
             body = self._named_body(builder, spec.handle)
             pose = builder.body_q[body]
             self.handle_body, self.coord_start = body, -1
+            self._handle_coord = _free_coord(builder, body)
             # On another solver its support cannot come back from the bristles
             # (see the module docstring), so there it holds itself up.
             from robosimstudio.core.builder import set_body_attribute
@@ -838,26 +879,6 @@ class EntityBrush(Entity):
         """Every bristle capsule's shape: this brush's shapes but the plastic ones."""
         return np.setdiff1d(self.shapes, self.handle_shapes).astype(np.int32)
 
-    def _slot_dofs(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """The bristle joints' dof rows per slot ``(stretch, shear, bend, twist)``, as ``add_rod`` orders them.
-
-        The rod joints are this brush's joints with four dofs; the welds and the
-        own grip's free joint are told apart by their count.
-        """
-        starts = self.model.joint_qd_start.numpy()
-        types = self.model.joint_type.numpy()
-        slots: tuple[list[int], list[int], list[int], list[int]] = ([], [], [], [])
-        for j in (int(v) for v in self.joints):
-            if int(types[j]) == int(newton.JointType.FREE):
-                continue
-            begin = int(starts[j])
-            end = int(starts[j + 1]) if j + 1 < len(starts) else begin
-            if end - begin != 4:
-                continue
-            for slot, rows in enumerate(slots):
-                rows.append(begin + slot)
-        return tuple(np.asarray(rows, dtype=np.int64) for rows in slots)
-
     # -------------------------------------------------------------- phase 3
     def contribute_hooks(self, hooks) -> None:
         """Mark the lattice under every down tip, after every solve."""
@@ -922,49 +943,75 @@ class EntityBrush(Entity):
     def reset(self, pipeline, episode, *, world: int = 0) -> None:
         """This world's strips, bristles and own grip back on their build pose, at rest, and its lattice cleared.
 
-        A named handle is its own entity's to restore; the strips go back to
-        where its build pose holds them.
+        A named handle is its own entity's to restore, and an episode may put it
+        somewhere other than where it was built. Its reset runs first (it was
+        built first) and writes that pose into the joint coordinates, so the
+        strips and bristles go back to their build pose on the handle, carried
+        to where the handle is now. The handle's body is put there too: the
+        kinematics pass after the entities places the strips' welds from it,
+        and would otherwise place them from where the last episode left it.
         """
         del episode
         if self._rest_body_q is None:
             return
         rows = self._global(self.bodies, world)
+        rest = self._rest_body_q[rows]
+        handle: tuple[int, np.ndarray] | None = None
+        if self._handle_coord >= 0:
+            row = int(self._global([self.handle_body], world)[0])
+            c = self._handle_coord if self.worlds is None else int(self.worlds.coord(self._handle_coord, world))
+            placed = pipeline.state_0.joint_q.numpy()[c : c + 7]
+            rest = _carried(rest, self._rest_body_q[row], placed)
+            handle = (row, placed)
         starts = [self.coord_start] if self.coord_start >= 0 else list(self.strip_coords)
         coords = np.concatenate([np.arange(c, c + 7, dtype=np.int64) for c in starts]) if starts else None
         if coords is not None and self.worlds is not None:
             coords = np.asarray([self.worlds.coord(int(c), world) for c in coords], dtype=np.int64)
+        joint_rest = None
+        if coords is not None and self._rest_joint_q is not None:
+            joint_rest = self._rest_joint_q[coords]
+            if handle is not None and self.coord_start < 0:
+                # A strip's free joint holds its body's pose, so it is carried with the handle as the body is:
+                # left at the build pose, the kinematics pass would put the strips back where they were built.
+                index = {int(b): i for i, b in enumerate(self.bodies)}
+                joint_rest = rest[[index[int(b)] for b in self.strip_bodies]].reshape(-1)
         for state in (pipeline.state_0, pipeline.state_1):
             body_q = state.body_q.numpy()
-            body_q[rows] = self._rest_body_q[rows]
+            body_q[rows] = rest
+            if handle is not None:
+                body_q[handle[0]] = handle[1]
             state.body_q.assign(body_q)
             body_qd = state.body_qd.numpy()
             body_qd[rows] = 0.0
             state.body_qd.assign(body_qd)
-            if coords is not None and self._rest_joint_q is not None:
+            if joint_rest is not None:
                 joint_q = state.joint_q.numpy()
-                joint_q[coords] = self._rest_joint_q[coords]
+                joint_q[coords] = joint_rest
                 state.joint_q.assign(joint_q)
         if world == 0:
             # A teleport leaves the coupled solver holding last episode's contact
-            # anchors and warm starts.
+            # anchors and warm starts. ``flags=0`` clears those and nothing else:
+            # by default the solvers also put every joint coordinate back to the
+            # model's, which undid each entity reset before this one, the
+            # handle's episode pose among them.
             reset_solvers = getattr(pipeline, "reset_solvers", None)
             if reset_solvers is not None:
-                reset_solvers()
+                reset_solvers(flags=0)
         self.clear_scrub(world)
 
     # ---------------------------------------------------------------- reading
     def scrub_grid(self, world: int = 0) -> ScrubGrid:
-        """This world's coverage lattice, read back from the device."""
+        """This world's coverage lattice, read back from the device: its own slab and no other world's."""
         grid = self._lattice()
         out = ScrubGrid(origin=grid.origin, cell=grid.cell, nx=grid.nx, ny=grid.ny)
         if self._grid_device is not None:
             size = grid.nx * grid.ny
-            flat = self._grid_device.numpy()[world * size : (world + 1) * size]
+            flat = self._grid_device[world * size : (world + 1) * size].numpy()
             out.cells = np.asarray(flat, dtype=np.int32).reshape(grid.ny, grid.nx)
         return out
 
     def clear_scrub(self, world: int | None = None) -> None:
-        """Forget where the tips have been, in one world or all."""
+        """Forget where the tips have been, in one world or all, zeroing that slab on the device."""
         if self._grid_device is None:
             return
         if world is None:
@@ -972,9 +1019,7 @@ class EntityBrush(Entity):
             return
         grid = self._lattice()
         size = grid.nx * grid.ny
-        flat = self._grid_device.numpy()
-        flat[world * size : (world + 1) * size] = 0
-        self._grid_device.assign(flat)
+        self._grid_device[world * size : (world + 1) * size].zero_()
 
     def scrubbed(self, lo, hi, *, world: int = 0) -> float:
         """The share of the patch ``[lo, hi]`` (world x, y [m]) this world's tips have scrubbed."""
@@ -989,11 +1034,8 @@ class EntityBrush(Entity):
 
     def tip_positions(self, body_q, *, world: int = 0) -> np.ndarray:
         """``(count, 3)`` tip points in world [m], from a read-back ``body_q`` (whole or one world's)."""
-        from robosimstudio.core.math import quat_to_mat
-
         poses = self._template_body_q(body_q, world)[self.tips]
-        axes = np.stack([quat_to_mat(q[3:7])[:, 2] for q in poses]) if len(poses) else np.zeros((0, 3))
-        return poses[:, :3] + axes * float(self.half_height)
+        return poses[:, :3] + _z_axes(poses[:, 3:7]) * float(self.half_height)
 
     def read(self, form: str, snapshot):
         """The tips as this brush's ``points``: where it touches the world."""
@@ -1027,7 +1069,8 @@ class EntityBrush(Entity):
         if self.model is None:
             return ()
         out = []
-        stretch, shear, bend, twist = self._slot_dofs()
+        # The bristles' rod joints, a slot each; the welds and an own grip's free joint are not among them.
+        stretch, shear, bend, twist = rod_slot_dofs(self.model, self.joints)
         capsules = self.bristle_shapes
         if len(bend):
 
@@ -1149,16 +1192,6 @@ TOUCHES = ("surface", "fixtures", "objects", "hands")
 """What a brush contacts unless it says otherwise: the bench, a fixture, a thing it scrubs, the fingers."""
 
 
-@dataclass(frozen=True)
-class _Spec:
-    """A build factory returning one spec, as a value, so two declarations of one type compare equal."""
-
-    spec: Any
-
-    def __call__(self) -> Any:
-        return self.spec
-
-
 class Brush:
     """Constructors for a brush's asset record, from the spec that places one."""
 
@@ -1193,7 +1226,7 @@ class Brush:
             tags=tuple(tags),
             states=tuple(states),
             sim=SimRequirements(domain="brush", contacts=contacts_with(*touches), notes=notes),
-            build=_Spec(spec),
+            build=SpecFactory(spec),
         )
 
 

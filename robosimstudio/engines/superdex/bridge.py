@@ -138,6 +138,20 @@ def _root_reader(actor):
     return read
 
 
+def _named(enum: Any, name: str, option: str) -> Any:
+    """The member of one of the engine's enums that ``name`` spells, in any case.
+
+    An unknown name is refused with the names there are, not a bare
+    ``AttributeError`` from deep inside the build. ``COUNT`` is the enum's own
+    sentinel, not an option.
+    """
+    members = {key: value for key, value in enum.__members__.items() if key != "COUNT"}
+    member = members.get(str(name).upper())
+    if member is None:
+        raise ValueError(f"superdex {option} {name!r} is not one of {', '.join(k.lower() for k in members)}")
+    return member
+
+
 def _contact_params(physics, params: dict, *, penalty: float, friction: float, padding: float) -> Any:
     """One actor's SuperDex ``ContactParams`` from its host params.
 
@@ -248,7 +262,7 @@ class SuperdexBridge:
     ``count`` and ``prev`` (the rest positions, in the engine's precision) --
     and may use what the bridge offers every builder: :attr:`physics`,
     :attr:`model`, :attr:`recipe`, :meth:`scene_of`, :meth:`actor_root`,
-    :meth:`contact_params`, and :attr:`actors`, the entries built before it
+    :meth:`root_reader`, :meth:`contact_params`, and :attr:`actors`, the entries built before it
     (each stamped with its ``entity`` and ``world``).
 
     **One scene per world.** A replicated model superimposes its worlds at the
@@ -461,12 +475,12 @@ class SuperdexBridge:
             return
         params = scene.get_solver_params()
         if integration is not None:
-            params.integration_method = getattr(self.physics.IntegrationMethod, str(integration).upper())
+            params.integration_method = _named(self.physics.IntegrationMethod, integration, "integration")
         if linear is not None:
-            params.linear_solver.solver_type = getattr(self.physics.LinearSolverType, str(linear).upper())
+            params.linear_solver.solver_type = _named(self.physics.LinearSolverType, linear, "linear_solver")
         if preconditioner is not None:
-            params.linear_solver.preconditioner_type = getattr(
-                self.physics.PreconditionerType, str(preconditioner).upper()
+            params.linear_solver.preconditioner_type = _named(
+                self.physics.PreconditionerType, preconditioner, "preconditioner"
             )
         if iterations is not None:
             params.non_linear_solver.max_iter = int(iterations)
@@ -692,10 +706,22 @@ class SuperdexBridge:
 
         Every world has its own scene, so an actor keeps its own rest
         coordinates and node positions read back *local* mean the Newton world
-        frame -- there is nothing to translate on the way in or out.
+        frame -- there is nothing to translate on the way in or out. That is
+        this bridge's builders' rule; a builder registered from outside may set
+        another root (a bag's is its centroid) and reads through it, and
+        :meth:`place_actor` writes through whichever root an actor has.
         """
         del record
         return self.physics.TransformRT()
+
+    def root_reader(self, actor: Any) -> Any:
+        """A ``read`` for an actor's entry: its nodes in the world, through its root as it stands.
+
+        The method form of the module's own reader, the rule :meth:`place_actor`
+        writes by, so a builder outside this bundle that sets another root (a
+        bag's is its centroid) reads back the way a placement is written.
+        """
+        return _root_reader(actor)
 
     def contact_params(self, params: dict, *, penalty: float, friction: float, padding: float) -> Any:
         """One actor's engine ``ContactParams`` from its host params; see :func:`_contact_params`.
@@ -1391,14 +1417,20 @@ class SuperdexBridge:
         one.
 
         ``positions`` is this actor's nodes in the Newton world frame, in the
-        order the model holds them. Local **is** world for every actor this
-        bridge builds -- recentering is off and the root is identity -- which is
-        the same assumption every read-back above already makes.
+        order the model holds them. They are written through the actor's own
+        root transform: identity for every actor this bridge's builders make
+        (recentering is off), so local **is** world there, and the centroid for
+        a bag, whose builder (``robosimstudio_materials.bag``) solves about its
+        own middle in float32 and reads back through the root (:meth:`root_reader`).
 
         Velocities go to zero and ``prev`` is refreshed from what the engine
         reports back, because a teleport is not motion: the first speed reading
         after one must not be the jump. The mirrors are marked for teleport for
         the same reason ``restore_rest`` marks them.
+
+        A rod is refused by name, as a body on a rigid core is: the engine takes
+        node positions on a soft body or a shell only, and a rod's builder moves
+        its nodes once, as it is built, by holding them.
         """
         rows = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
         touched: list[dict] = []
@@ -1406,13 +1438,20 @@ class SuperdexBridge:
         for entry in self.actors_by_world.get(int(world), ()):
             if entry.get("entity") != str(entity):
                 continue
+            if "skinned" not in entry and entry["actor"].get_type() == self.physics.ActorType.ROD:
+                # Asked anyway, the engine raises from inside ("CDisplacementSlice ... required"), open or closed.
+                raise NotImplementedError(
+                    f"{entity!r} is a rod: SuperDex sets the nodes of a soft body or a shell only, "
+                    "so a rod starts where its spec lays it"
+                )
             if len(rows) != int(entry["count"]):
                 raise ValueError(f"{entity!r} in world {world} has {entry['count']} nodes, given {len(rows)}")
             actor = entry["actor"]
             if "skinned" in entry:
                 # Its nodes are the skeleton's pose plus a deformation; a placement is a skeleton pose.
                 raise NotImplementedError(f"{entity!r} has a rigid core: place it by its skeleton, not its nodes")
-            actor.set_node_positions_local(rows.ravel())
+            rot, offset = _root_matrix(actor)  # local -> world, so world -> local is its inverse
+            actor.set_node_positions_local(((rows - offset) @ rot).ravel())
             actor.set_node_velocities_local(np.zeros(rows.size, dtype=np.float64))
             touched.append(entry)
             moved = True

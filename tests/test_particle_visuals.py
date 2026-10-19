@@ -133,5 +133,74 @@ class TestTheStudioResolvesAParticleBody(unittest.TestCase):
         self.assertEqual(visual.color, (0.9, 0.1, 0.1))
 
 
+class TestOneSurfacerForEveryParticleKind(unittest.TestCase):
+    """The MPM kinds' surface is a :class:`ParticleSurfacer` at the solver's resolution, with the one margin rule."""
+
+    def test_the_default_margin_is_twice_the_kernel_the_padding_and_a_tile(self) -> None:
+        from robosimstudio.core.render.particles import ParticleSurfacer
+
+        surfacer = ParticleSurfacer(0.001)
+        self.assertEqual((0.001, 0.006), (surfacer.voxel_size, surfacer.options["kernel_radius"]))
+        self.assertAlmostEqual(0.022, surfacer.margin)
+
+    def test_an_mpm_body_surfaces_through_it_at_the_solvers_voxel(self) -> None:
+        """0.45 of a 4 mm voxel, a kernel of three of those, and sixteen of them as the margin, as before."""
+        import robosimstudio as rss
+        from robosimstudio.core.render.particles import ParticleSurfacer
+        from robosimstudio_materials.mpm.entity import EntityParticleBody
+
+        entity = EntityParticleBody(rss.dough(name="d", render="surface"))
+        entity.solver = SimpleNamespace(
+            config=SimpleNamespace(voxel_size=0.004), model=SimpleNamespace(device="cpu", world_count=1)
+        )
+        entity._install_surface()
+        surfacer = entity.surface
+        self.assertIsInstance(surfacer, ParticleSurfacer)
+        self.assertAlmostEqual(0.00125, surfacer.radius)
+        self.assertAlmostEqual(0.0018, surfacer.voxel_size)
+        self.assertAlmostEqual(0.0054, surfacer.options["kernel_radius"])
+        self.assertAlmostEqual(16 * 0.0018, surfacer.margin)
+
+
+class TestASurfaceNodeKeepsItsFaces(unittest.TestCase):
+    """The page's surface node, over a scene that records what viser would have been sent."""
+
+    def _viewer(self):
+        from robosimstudio_studio.garments import ViewerStudio
+
+        added = []
+
+        def add_mesh_simple(name, *, vertices, faces, **kwargs):
+            handle = SimpleNamespace(vertices=vertices, faces=faces, visible=kwargs.get("visible", True))
+            added.append(handle)
+            return handle
+
+        viewer = ViewerStudio.__new__(ViewerStudio)
+        viewer._qualify = lambda name: name
+        viewer._garment_nodes, viewer._garment_hidden = {}, {}
+        viewer._server = SimpleNamespace(scene=SimpleNamespace(add_mesh_simple=add_mesh_simple))
+        return viewer, added
+
+    verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=np.float32)
+
+    def test_new_faces_over_as_many_vertices_replace_the_node(self) -> None:
+        """Two triangles over four vertices either way, split along the other diagonal: the counts match, the faces do not."""
+        viewer, added = self._viewer()
+        viewer._draw_surface_node("/s", self.verts, np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int32), (9, 9, 9), False)
+        flipped = np.array([[0, 1, 3], [0, 3, 2]], dtype=np.int32)
+        viewer._draw_surface_node("/s", self.verts + 0.1, flipped, (9, 9, 9), False)
+        self.assertEqual(2, len(added), "the regrown faces were not sent")
+        np.testing.assert_array_equal(flipped, viewer._garment_nodes["/s"].faces)
+        np.testing.assert_allclose(self.verts + 0.1, viewer._garment_nodes["/s"].vertices)
+
+    def test_the_same_faces_move_the_vertices_in_place(self) -> None:
+        viewer, added = self._viewer()
+        faces = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int32)
+        viewer._draw_surface_node("/s", self.verts, faces, (9, 9, 9), False)
+        viewer._draw_surface_node("/s", self.verts + 0.1, faces.copy(), (9, 9, 9), False)
+        self.assertEqual(1, len(added), "an unchanged mesh was re-added rather than moved")
+        np.testing.assert_allclose(self.verts + 0.1, added[0].vertices)
+
+
 if __name__ == "__main__":
     unittest.main()

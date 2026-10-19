@@ -11,6 +11,7 @@ facts, read here without the library, a GPU or a browser.
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -89,6 +90,19 @@ class TestTheTakeTable(unittest.TestCase):
         for clip in clips:
             with self.subTest(clip=str(clip.relative_to(REPO))):
                 self.assertTrue(key(clip) in owed, f"{key(clip)}: no take films this clip and no reason keeps it")
+
+    def test_every_take_of_a_superdex_script_says_it_needs_the_extra(self) -> None:
+        """A script whose docstring says it needs ``[superdex]`` is listed with it: ``--list`` prints ``needs``."""
+        for take in TAKES:
+            script = REPO / take.example
+            if not script.is_file():
+                continue
+            doc = " ".join((ast.get_docstring(ast.parse(script.read_text())) or "").split())
+            if re.search(r"Needs (the )?``\[superdex\]``", doc):
+                with self.subTest(take=take.key):
+                    self.assertIn(
+                        "superdex", take.needs, f"{take.example} needs [superdex]; its take says {take.needs}"
+                    )
 
     def test_reading_the_table_imports_nothing_heavy(self) -> None:
         """The table is read here and by ``--list`` on machines with no GPU and no browser."""

@@ -167,6 +167,100 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual(3, bag(lip=0.026).lip_cells)
         self.assertEqual(0.0, CANVAS.thickness - 1.0e-3)
 
+    def test_a_declared_sim_states_the_engines_self_contact_as_it_states_the_scenes(self) -> None:
+        """The record's requirements are what the scene is composed from, so the shell collides as they say."""
+        from robosimstudio.specs.physics import SimRequirements
+
+        for on in (True, False):
+            with self.subTest(declared=on):
+                entity, _, _ = _bag(self_contact=not on, sim=SimRequirements(domain="bag", self_contact=on))
+                self.assertIs(on, entity.sim_requirements().self_contact)
+                self.assertIs(on, entity.host_actor().params["self_contact"])
+
+    def test_the_record_states_the_requirements_the_bag_runs(self) -> None:
+        """``Bag.from_spec`` reads the spec as the entity does: a declared ``sim`` first, else its self-contact."""
+        from robosimstudio.specs.physics import SimRequirements
+        from robosimstudio_materials.bag import Bag, EntityBag, bag
+
+        for on in (True, False):
+            for declared in (None, SimRequirements(domain="bag", self_contact=on)):
+                with self.subTest(self_contact=on, declared=declared is not None):
+                    spec = bag(
+                        name="pouch", cells=(4, 4), self_contact=on if declared is None else not on, sim=declared
+                    )
+                    record = Bag.from_spec(spec, name="pouch")
+                    runs = EntityBag(spec).sim_requirements()
+                    self.assertIs(runs.self_contact, record.sim.self_contact)
+                    self.assertIs(on, record.sim.self_contact)
+                    if declared is not None:
+                        self.assertEqual(declared, record.sim)
+
+    def test_a_bag_one_cell_across_is_refused(self) -> None:
+        """One cell across, every node up to the mouth is sewn: the two layers would be one surface twice."""
+        from robosimstudio_materials.bag import bag
+
+        for cells in ((4, 1), (0, 4)):
+            with self.subTest(cells=cells), self.assertRaisesRegex(ValueError, r"bag 'pouch': cells needs"):
+                bag(name="pouch", cells=cells)
+        _, _, faces = _bag(cells=(1, 2))
+        self.assertEqual(len(faces), len(np.unique(np.sort(faces, axis=1), axis=0)), "a triangle is repeated")
+
+    def test_a_bag_leaves_newtons_soft_contact_to_the_sheet_newton_simulates(self) -> None:
+        """A VBD towel and a bag on SuperDex: the bag, applied after the towel, writes nothing over it."""
+        from types import SimpleNamespace
+
+        from robosimstudio_materials.cloth import TERRY_TOWELLING, ClothSpec, EntityCloth
+
+        model = SimpleNamespace(soft_contact_ke=0.0, soft_contact_kd=0.0, soft_contact_mu=0.0)
+        EntityCloth(ClothSpec(name="towel", material=TERRY_TOWELLING)).apply_model_materials(model)
+        entity, _, _ = _bag()
+        entity.apply_model_materials(model)
+        towel = (TERRY_TOWELLING.contact_ke, TERRY_TOWELLING.contact_kd, TERRY_TOWELLING.friction)
+        self.assertEqual(towel, (model.soft_contact_ke, model.soft_contact_kd, model.soft_contact_mu))
+
+    def test_the_settle_runs_at_the_substeps_it_states_or_the_runs_own(self) -> None:
+        """As a soft body settles: ``settle_substeps`` 0 steps plainly, more steps inside ``substeps_at``."""
+        import contextlib
+
+        class Pipeline:
+            def __init__(self) -> None:
+                self.steps, self.at, self.sim_time, self.step_count = [], [], 1.0, 7
+
+            @contextlib.contextmanager
+            def substeps_at(self, substeps: int):
+                self.at.append(substeps)
+                yield
+
+            def step(self) -> None:
+                self.steps.append(len(self.at))
+
+        for substeps, at in ((0, []), (4, [4])):
+            with self.subTest(settle_substeps=substeps):
+                pipeline = Pipeline()
+                entity, _, _ = _bag(settle_frames=3, settle_substeps=substeps)
+                entity.settle(pipeline)
+                self.assertEqual(at, pipeline.at)
+                self.assertEqual(3, len(pipeline.steps))
+                self.assertEqual((0.0, 0), (pipeline.sim_time, pipeline.step_count))
+
+    def test_only_superdex_builds_a_bag_and_it_builds_the_layers_inactive(self) -> None:
+        """On GENERIC the bag's kind falls to VBD, which would leave the inactive layers frozen: refused."""
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio.scene.registry import resolve_entity_class
+        from robosimstudio_materials.bag import EntityBagSuperdex, bag
+
+        spec = bag(name="pouch", cells=(4, 4))
+        with self.assertRaisesRegex(NotImplementedError, r"pouch.*backend\('superdex'\)"):
+            resolve_entity_class(spec, rss.GENERIC)(spec).build(newton.ModelBuilder(), None)
+        cls = resolve_entity_class(spec, rss.BAG_60HZ)
+        self.assertIs(EntityBagSuperdex, cls)
+        builder = newton.ModelBuilder()
+        cls(spec).build(builder, None)
+        active = [int(f) & int(newton.ParticleFlags.ACTIVE) for f in builder.particle_flags]
+        self.assertTrue(builder.particle_count > 0 and not any(active), "SuperDex's bag is left to SuperDex")
+
     def test_the_arrangement_puts_the_bag_on_superdex_beside_the_soft_kind(self) -> None:
         import robosimstudio as rss
 
@@ -176,6 +270,17 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual("mujoco", table["articulated"].solver)
         self.assertIs(rss.bag, __import__("robosimstudio_materials.bag", fromlist=["bag"]).bag)
 
+    def test_the_arrangement_keeps_every_other_route_generic_has(self) -> None:
+        """Rebuilt from scratch, it sent a heap, a pool and a lump beside the bag to VBD rather than the MPM."""
+        import robosimstudio as rss
+        from robosimstudio.specs import GENERIC
+
+        for domain, spec in GENERIC.backends:
+            if domain != "soft":
+                with self.subTest(domain=domain):
+                    self.assertEqual(spec, rss.BAG_60HZ.backend_for(domain))
+        self.assertEqual((rss.BAG_60HZ.control_hz, rss.BAG_60HZ.substeps), (GENERIC.control_hz, GENERIC.substeps))
+
     def test_the_kind_and_its_atom_are_registered(self) -> None:
         from robosimstudio.assetlib.semantics.atoms import ATOMS
         from robosimstudio.specs.physics import get_domain
@@ -183,6 +288,47 @@ class TestTheDeclarations(unittest.TestCase):
         domain = get_domain("bag")
         self.assertEqual(("bag", "cloth"), tuple(domain.reads))
         self.assertIn("mouth_opening", ATOMS)
+
+
+class TestTheEngineActor(unittest.TestCase):
+    """The bag's SuperDex actor, against a stand-in engine: no wheel, no scene."""
+
+    def test_its_nodes_read_back_through_its_root_as_a_placement_writes_them(self) -> None:
+        """One rule for both ways: a root turned a quarter about z turns what the bag reads."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from robosimstudio.engines.superdex.bridge import SuperdexBridge
+        from robosimstudio_materials.bag import build_bag_actor
+
+        class Arr:
+            def __init__(self, a) -> None:
+                self.a = np.asarray(a)
+
+            def numpy(self):
+                return self.a
+
+        entity, vertices, faces = _bag(cells=(4, 4))
+        local = np.array([[0.01, 0.0, 0.0]] * len(vertices))
+        actor = mock.Mock()
+        actor.get_node_positions_local.return_value = local.ravel()
+        half = math.sqrt(0.5)
+        actor.get_root_transform.return_value = SimpleNamespace(
+            rotation=np.array([0.0, 0.0, half, half]), translation=[0.6, 0.0, 0.75]
+        )
+        physics = mock.MagicMock()
+        physics.uses_double_precision.return_value = False
+        physics.experimental.create_shell_actor.return_value = actor
+        bridge = SimpleNamespace(
+            physics=physics,
+            model=SimpleNamespace(particle_q=Arr(vertices), tri_indices=Arr(faces), tri_count=len(faces)),
+            contact_params=lambda *args, **kwargs: None,
+            scene_of=lambda world: None,
+            root_reader=lambda a: SuperdexBridge.root_reader(bridge, a),
+        )
+        record = {"name": "bag", "particle_start": 0, "particle_count": len(vertices)}
+        entry = build_bag_actor(bridge, {**record, "params": entity.host_actor().params})
+        np.testing.assert_allclose(entry["read"](), np.tile([0.6, 0.01, 0.75], (len(vertices), 1)), atol=1e-12)
 
 
 if __name__ == "__main__":

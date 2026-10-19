@@ -54,7 +54,19 @@ from .semantics.states import StateSpec, state_to_dict
 from .semantics.substrates import is_substrate, reads_as
 from .sim import SimRequirements, sim_to_dict
 
-__all__ = ["AssetRecord", "asset_to_dict"]
+__all__ = ["AssetRecord", "SpecFactory", "asset_to_dict"]
+
+
+@dataclass(frozen=True)
+class SpecFactory:
+    """An :attr:`AssetRecord.build` that returns one spec. A value, so two declarations of a
+    type compare by the spec they build: the same cube declared twice is one asset, and two
+    different cubes under one name are a clash, where two lambdas would compare by their name."""
+
+    spec: Any
+
+    def __call__(self) -> Any:
+        return self.spec
 
 
 @dataclass(frozen=True, kw_only=True)
