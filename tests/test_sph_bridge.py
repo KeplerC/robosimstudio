@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Genesis's SPH bridge on its own: where spilled water rests, and what an empty mirror reads while it turns.
+"""Genesis's SPH bridge on its own: where spilled water rests, what a mirror off its centre reads, and the box's walls.
 
-``tests/test_pour_water.py`` is the bridge in the example's scene; these are two
+``tests/test_pour_water.py`` is the bridge in the example's scene; these are
 things that scene never does. Water on a void cell has nothing under it but the
-ground plane, which the bridge does not build as a body; and the cup is boxes,
-whose centre of mass is their origin, so a mesh mirror turned off its centre is
-never harvested there.
+ground plane, which the bridge does not build as a body; the cup is boxes, whose
+centre of mass is their origin, so a mesh mirror off its centre is never harvested
+there; and its water never reaches the solver's box.
 
 Needs the ``[genesis]`` extra, which lives in a virtual environment of its own
 (``pyproject.toml``); it skips without it, as ``tests/test_genesis.py`` does.
@@ -19,7 +19,7 @@ import unittest
 import numpy as np
 
 TIER = "medium"
-"""One GPU, the [genesis] extra: a 64-particle scene, and two bridges built by hand."""
+"""One GPU, the [genesis] extra: a 64-particle scene, and three bridges built by hand."""
 
 
 def _importable(module: str) -> bool:
@@ -158,6 +158,37 @@ class TestWaterOnAMirrorOffItsCentre(unittest.TestCase):
         com = self.origin + self.model.body_com.numpy()[self.body].astype(np.float64)
         centre = self.origin + np.array([0.05, 0.0, 0.0])
         np.testing.assert_allclose(torque, np.cross(centre - com, force), atol=1.0e-3 * abs(force[2]))
+
+
+@unittest.skipUnless(HAS_GENESIS, "the [genesis] extra is not installed")
+class TestWaterAtTheSolversWallIsSaid(unittest.TestCase):
+    """Genesis holds a particle at its box's face, so water carried past ``sph_reach`` stops at a wall nobody drew:
+    the bridge says so, once, naming the island and the reach."""
+
+    def test_a_box_the_water_outgrows_is_warned_once(self) -> None:
+        import newton
+
+        from robosimstudio.engines.genesis import sph
+
+        builder = newton.ModelBuilder()
+        count = _water(builder, np.array([0.0, 0.0, 0.05]))
+        model = builder.finalize()
+        recipe = {
+            "island": "tight",
+            "control_hz": 60.0,
+            "sph_reach": 0.004,
+            "sph_reach_down": 0.01,
+            "actors": [{"particle_start": 0, "particle_count": count, "kind": "sph", "name": "water", "params": {}}],
+            "mirrors": [],
+        }
+        bridge = sph.SphBridge(model, recipe, substeps=20, precision="32")
+        state, dt = model.state(), 1.0 / 60.0
+        with self.assertLogs(sph.log, "WARNING") as logs:
+            for _ in range(60):
+                bridge.tick(state, dt)
+        said = [line for line in logs.output if "sph_reach" in line]
+        self.assertEqual(1, len(said), logs.output)
+        self.assertIn("'tight'", said[0])
 
 
 if __name__ == "__main__":

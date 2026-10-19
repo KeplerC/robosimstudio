@@ -315,6 +315,23 @@ class TestTheLiquidCouplerArithmetic(unittest.TestCase):
         np.testing.assert_allclose(_angular_velocity(start, end, 0.01), [0.0, -2.0, 0.0], atol=1e-9)
         np.testing.assert_allclose(_angular_velocity(start, start, 0.01), np.zeros(3))
 
+    def test_water_at_the_boxs_side_is_said_and_on_its_floor_is_not(self):
+        """Genesis holds a particle at its box's face. The floor is the ground, or where spilled water is meant to rest;
+        a side or the top is a wall nothing in the scene draws."""
+        from robosimstudio.engines.genesis import sph
+
+        bridge = object.__new__(sph.SphBridge)
+        bridge.recipe, bridge.spacing, bridge._at_wall = {"island": "water", "sph_reach": 0.5}, 0.004, False
+        bridge._box = (np.array([-0.5, -0.5, 0.002]), np.array([0.5, 0.5, 0.6]))
+        with self.assertNoLogs(sph.log, "WARNING"):
+            bridge._check_walls("water", np.array([[0.0, 0.0, 0.002], [0.3, -0.4, 0.002]]))
+        self.assertFalse(bridge._at_wall)
+        with self.assertLogs(sph.log, "WARNING") as logs:
+            bridge._check_walls("water", np.array([[0.0, 0.0, 0.002], [0.3, -0.5, 0.002]]))
+        self.assertTrue(bridge._at_wall, "said once: the tick stops looking")
+        for word in ("'water'", "1 of 2", "sph_reach=0.5"):
+            self.assertIn(word, logs.output[0])
+
 
 class TestTheSolverIsAHostSolver(unittest.TestCase):
     def test_it_inherits_the_shared_contract(self):

@@ -213,6 +213,9 @@ class SphBridge:
         self.spacing = spacing[0]
         shapes = iter_mirrors(model, recipe.get("mirrors", ()))
         lo, hi = self._domain(geoms, [float(g.local[2]) for g in shapes if g.kind == "plane"])
+        self._box = (lo, hi)
+        self._at_wall = False
+        """Whether water has reached the box's sides or top, which is said once (:meth:`_check_walls`)."""
         flags = dict.fromkeys(
             ("rigid_mpm", "rigid_pbd", "rigid_fem", "mpm_sph", "mpm_pbd", "fem_mpm", "fem_sph"), False
         )
@@ -413,9 +416,37 @@ class SphBridge:
 
         for entry in self.actors:
             positions = np.asarray(entry["entity"].get_particles_pos().cpu()).reshape(-1, 3)
+            if not self._at_wall:
+                self._check_walls(entry["name"], positions)
             entry["prev"] = rig.write_particles(
                 state, entry["geom"].start, entry["geom"].count, positions, dt, entry["prev"]
             )
+
+    def _check_walls(self, name: str, positions: np.ndarray) -> None:
+        """Say, once, that water has reached the SPH box's sides or top, where Genesis holds it.
+
+        Genesis clamps a particle that crosses its box to the face it crossed
+        (``CubeBoundary.impose_pos_vel``), so water carried ``sph_reach`` past where it
+        rested stops at a wall nothing in the scene draws. The floor is left out: it
+        is the ground, or where water that falls off the bench is meant to rest
+        (``sph_reach_down``). Read off the particles the tick already brings back.
+        """
+        lo, hi = self._box
+        slack = 0.01 * self.spacing
+        held = np.any(positions[:, :2] <= lo[:2] + slack, axis=1) | np.any(positions >= hi - slack, axis=1)
+        if not held.any():
+            return
+        self._at_wall = True
+        log.warning(
+            "genesis island %r: %d of %d particles of %r reached the SPH solver's box, which holds them where they "
+            "stand: it reaches sph_reach=%g m past the liquids' rest bounds sideways and up. State a larger sph_reach "
+            "on backend('genesis', ...) if water goes that far. Said once.",
+            self.recipe.get("island"),
+            int(held.sum()),
+            len(positions),
+            name,
+            float(self.recipe.get("sph_reach", 0.5)),
+        )
 
     def _harvest(self, targets: dict[int, np.ndarray]) -> None:
         """Each two-way mirror's force: its mass times the velocity the water gave its centre of mass, over the step.
