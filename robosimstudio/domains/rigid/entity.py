@@ -37,6 +37,12 @@ from robosimstudio.specs import ObjectSpec
 
 __all__ = ["EntityRigid"]
 
+WELD_TOLERANCE = 1.0e-5
+"""How far an episode's pose may sit from a static object's weld and still be where it was built.
+
+In metres, and per quaternion component. The weld is read back off the builder in
+float32, so this is that rounding, not a move."""
+
 
 class EntityRigid(Entity):
     """One manipulable rigid body.
@@ -80,6 +86,7 @@ class EntityRigid(Entity):
         self.dof_start: int = -1
         self.weld_joint: int = -1
         """The fixed joint from the world that holds a static object, ``-1`` for a free one."""
+        self._welded_at: np.ndarray | None = None
         self.shapes: np.ndarray = np.zeros(0, dtype=np.int32)
         self.obb: ObbGrasp | None = None
         self.init_pose = np.asarray(spec.pose, dtype=np.float64)
@@ -450,7 +457,38 @@ class EntityRigid(Entity):
         ``tests/test_a_static_box_stays_put.py`` measures.
         """
         body, self.weld_joint = weld_to_world(builder, xform, label=self.spec.name)
+        self._welded_at = np.asarray(builder.body_q[body], dtype=np.float64)
         return body
+
+    def move_refusal(self, pose) -> str:
+        """Why this object cannot stand at ``pose`` (world, xyz + xyzw) in the model it was built into, or ``""``.
+
+        Only a static object has a reason. It stands where its model welded it,
+        and nothing writes the weld again: the joint has no coordinates for
+        :meth:`reset` to write, and neither this entity nor a fleet's wave places
+        a world's copy of it. So an episode that put it anywhere else used to run
+        with it where the build's episode stood it, and say nothing.
+
+        Placing it per episode through the mocap channel
+        (:meth:`~robosimstudio.domains.static.welded.WeldedFixture.place_welded`)
+        is not done. That channel is MuJoCo's, and a static the coupled solver
+        mirrors into a deformable's island takes its proxy when the island is
+        built, before any reset (:class:`~robosimstudio.domains.static.entity.PlacedAtBuild`).
+        """
+        if self._welded_at is None:
+            return ""
+        pose = np.asarray(pose, dtype=np.float64).reshape(-1)[:7]
+        at = self._welded_at
+        turned = min(np.abs(pose[3:] - at[3:]).max(), np.abs(pose[3:] + at[3:]).max())
+        if np.abs(pose[:3] - at[:3]).max() <= WELD_TOLERANCE and turned <= WELD_TOLERANCE:
+            return ""
+        where = ", ".join(f"{v:.4f}" for v in at[:3])
+        asked = ", ".join(f"{v:.4f}" for v in pose[:3])
+        return (
+            f"object {self.spec.name!r} is static, welded where its model was built, at ({where}) "
+            f"facing {tuple(round(float(v), 4) for v in at[3:])}, and this episode stands it at ({asked}) "
+            f"facing {tuple(round(float(v), 4) for v in pose[3:])}"
+        )
 
     def _add_primitive(self, builder: newton.ModelBuilder, pose) -> None:
         """A body made from a primitive, with no file behind it.
@@ -1070,7 +1108,22 @@ class EntityRigid(Entity):
 
         Only its own coordinates are touched, so resetting one object never
         disturbs another or the arm.
+
+        A static object has none, and an episode that moves it is refused by name
+        (:meth:`move_refusal`): the model it would run in welded it elsewhere.
+
+        Raises:
+            ValueError: When this episode moves a static object.
         """
+        if self.weld_joint >= 0:
+            refusal = self.move_refusal(self._placed(self._episode_pose(episode)))
+            if refusal:
+                raise ValueError(
+                    f"{refusal}. A weld has no coordinates for a reset to write, so a layout that moves a static "
+                    "object needs a model of its own: name object_poses (or object_xforms) in the sampler's "
+                    "(:model-key-fields ...), or drop static=True"
+                )
+            return
         if self.coord_start < 0:
             return
         # The remembered start pose stays in the frame the *spec* stated it in,

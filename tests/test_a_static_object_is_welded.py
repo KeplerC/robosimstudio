@@ -36,6 +36,11 @@ TIER = "fast"
 
 POSE = (0.1, -0.2, 0.3)
 
+MOVED = {"object_poses": {"box": (POSE[0] + 0.05, POSE[1], POSE[2], 0.0)}}
+TURNED = {"object_poses": {"box": (*POSE, 0.5)}}
+STAYS = {"object_poses": {"box": (*POSE, 0.0)}}
+"""Three episodes for ``box``: 50 mm along x, turned half a radian, and where it was built."""
+
 ROOT = Path(__file__).resolve().parents[1]
 
 WIPE_THE_BAR = ROOT / "examples" / "08_demos" / "wipe_the_bar"
@@ -66,7 +71,9 @@ def _world_joints(model, body: int) -> list[int]:
     return [int(j) for j in np.flatnonzero((children == body) & (parents == -1))]
 
 
-class TestAStaticObjectIsWelded(unittest.TestCase):
+class _ThreePaths(unittest.TestCase):
+    """A primitive, a mesh file and a geometry-only USD stage, each a 10 cm cube named ``box`` at :data:`POSE`."""
+
     @classmethod
     def setUpClass(cls) -> None:
         import trimesh
@@ -87,6 +94,8 @@ class TestAStaticObjectIsWelded(unittest.TestCase):
             return ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=static)
         return ObjectSpec(name="box", asset=AssetSpec(path=str(path)), pose=POSE, static=static, obb_grasp=False)
 
+
+class TestAStaticObjectIsWelded(_ThreePaths):
     def test_each_build_path_bolts_it_to_the_world_where_it_stands(self) -> None:
         for how in self.paths:
             with self.subTest(how=how):
@@ -112,6 +121,49 @@ class TestAStaticObjectIsWelded(unittest.TestCase):
                 self.assertEqual([int(newton.JointType.FREE)], [int(model.joint_type.numpy()[j]) for j in joints])
                 self.assertEqual(int(newton.BodyFlags.DYNAMIC), int(model.body_flags.numpy()[entity.body]))
                 self.assertEqual(0, entity.coord_start)
+
+
+class TestAnEpisodeThatMovesAStaticObjectIsRefused(_ThreePaths):
+    """A static object stands where its model welded it, so an episode that moves it is refused by name.
+
+    The weld has no coordinates, so ``EntityRigid.reset`` returned early and the
+    object stood at the build episode's pose whatever a later episode on the same
+    model said, and a fleet's wave stood every world's copy there. On a GPU,
+    ``tests/test_a_static_box_stays_put.py`` runs both, and the way out the
+    refusal names.
+    """
+
+    def test_a_reset_refuses_an_episode_that_moves_or_turns_it(self) -> None:
+        for how in self.paths:
+            entity, _ = _built(self._spec(how, static=True))
+            for name, episode in (("moved", MOVED), ("turned", TURNED)):
+                with self.subTest(how=how, episode=name), self.assertRaisesRegex(ValueError, "'box' is static"):
+                    entity.reset(None, episode)
+
+    def test_a_reset_takes_an_episode_that_leaves_it_where_it_was_built(self) -> None:
+        for how in self.paths:
+            with self.subTest(how=how):
+                entity, _ = _built(self._spec(how, static=True))
+                for episode in (None, STAYS, {"object_poses": {"other": (0.0, 0.0, 0.0, 1.0)}}):
+                    entity.reset(None, episode)
+
+    def test_a_wave_refuses_a_world_whose_episode_moves_it(self) -> None:
+        from types import SimpleNamespace
+
+        from robosimstudio.scene.compiler import CannotReplicate
+        from robosimstudio_bench.envs.fleet import FleetEnv
+
+        entity, _ = _built(self._spec("primitive", static=True))
+        wave = SimpleNamespace(
+            scene=SimpleNamespace(objects={"box": entity}),
+            world_document=lambda world: SimpleNamespace(full_name="doc"),
+            _declared_for=lambda document: {"box": entity.declared_q},
+        )
+        wave.episodes = [STAYS, None, STAYS]
+        FleetEnv._check_statics(wave)
+        wave.episodes = [STAYS, MOVED]
+        with self.assertRaisesRegex(CannotReplicate, "world 1 runs 'doc', and object 'box' is static"):
+            FleetEnv._check_statics(wave)
 
 
 class TestNoStaticBodyIsWeldedTwice(unittest.TestCase):

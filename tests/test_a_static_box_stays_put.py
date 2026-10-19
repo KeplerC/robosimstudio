@@ -32,7 +32,7 @@ from contextlib import redirect_stdout
 import numpy as np
 
 TIER = "medium"
-"""A GPU: three scenes built, two beside the YAM, each stepped a second or two."""
+"""A GPU: three scenes built, two beside the YAM, each stepped a second or two; then four task builds."""
 
 OVER_BRUSH = (0.0, 2.149, 1.879, -1.3, 0.0, 0.0)
 """The right arm's joints [rad]: tool centre 100 mm over the bench at (0.025, -0.31), pointing down."""
@@ -67,6 +67,33 @@ def _build(scene, **kwargs):
 
 def _at(ref) -> np.ndarray:
     return np.asarray(ref.position, dtype=np.float64)
+
+
+MOVES = (0.0, 0.08)
+"""Where the two episodes of :data:`BLOCK_TASK` stand the static block in x, from its declared place [m]."""
+
+BLOCK_TASK = """
+(define (problem static_block_{name})
+  (:staging (:scene bench_075) (:embodiment panda) (:physics mujoco_500hz@v1) (:max-steps 50)
+            (:episodes (:count 2) (:sampler {sampler}){keys}))
+  (:objects block - static_block_40mm)
+  (:goal (<= (speed block) 0.02)))
+"""
+"""A 40 mm static block beside the Panda, on MuJoCo, over two episodes."""
+
+
+def _moves_the_block(task, episode_id, rng) -> dict:
+    del task, rng
+    return {"object_poses": {"block": (MOVES[episode_id % 2], -0.1, 0.02, 0.0)}}
+
+
+def _held_x(sim, entity, world: int = 0) -> float:
+    """Where MuJoCo holds a static body in x, in one world: its mocap position [m]."""
+    solver = sim.pipeline.program.mujoco_solver
+    worlds = getattr(sim, "worlds", None)
+    body = worlds.body(entity.body, world) if worlds is not None else entity.body
+    mjc = int(np.flatnonzero(solver.mjc_body_to_newton.numpy()[world] == body)[0])
+    return float(solver.mjw_data.mocap_pos.numpy()[world, int(solver.mj_model.body_mocapid[mjc])][0])
 
 
 class TestAStaticBoxBesideTheYamUnderGeneric(unittest.TestCase):
@@ -190,6 +217,90 @@ class TestATowelOverAStaticBox(unittest.TestCase):
             self.sim.run(5).sync()
         self.assertTrue(self.sim.state_is_finite())
         np.testing.assert_allclose(_at(self.cube), self.cube_at, atol=1.0e-6)
+
+
+class TestAnEpisodeThatMovesAStaticBox(unittest.TestCase):
+    """A static block whose two episodes stand it 80 mm apart, beside the Panda on MuJoCo.
+
+    The weld has no coordinates and nothing placed a world's copy of it, so both
+    used to run with the block where episode 0 put it, 80 mm short of where
+    episode 1 asked: serially, on one model reused because the two episodes' model
+    keys are equal, and in world 1 of a two-world fleet (``d3_probe.py``). Both
+    are refused by name now, and the way out the refusal names works.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import robosimstudio as rss
+        from robosimstudio.assetlib import register_asset
+        from robosimstudio.domains.rigid import Body
+        from robosimstudio_bench.taskbuild.lower import register_sampler
+
+        register_sampler("static_block_moves", _moves_the_block)
+        block = rss.box(name="block", half=(0.02,) * 3, at=(0.0, -0.1, 0.02), static=True)
+        register_asset(Body.from_spec(block, name="static_block_40mm"))
+
+    @staticmethod
+    def _task(name: str, sampler: str = "static_block_moves", keys: str = ""):
+        import robosimstudio_bench as bench
+
+        return bench.task(BLOCK_TASK.format(name=name, sampler=sampler, keys=keys))
+
+    @staticmethod
+    def _quiet(make):
+        with redirect_stdout(io.StringIO()):
+            return make()
+
+    def test_a_serial_env_refuses_the_episode_that_moves_it(self) -> None:
+        import robosimstudio_bench as bench
+
+        env = self._quiet(lambda: bench.Env(self._task("serial")))
+        try:
+            self._quiet(lambda: env.reset(0))
+            with self.assertRaisesRegex(ValueError, "'block' is static.*model-key-fields"):
+                self._quiet(lambda: env.reset(1))
+        finally:
+            env.close()
+
+    def test_named_a_model_key_field_each_layout_builds_its_own_model(self) -> None:
+        import robosimstudio_bench as bench
+
+        env = self._quiet(lambda: bench.Env(self._task("keyed", keys=" (:model-key-fields object_poses)")))
+        try:
+            for episode, x in enumerate(MOVES):
+                self._quiet(lambda episode=episode: env.reset(episode))
+                self.assertAlmostEqual(SURFACE[0] + x, _held_x(env, env["block"].entity), places=5)
+        finally:
+            env.close()
+
+    def test_a_fleet_refuses_the_world_whose_episode_moves_it(self) -> None:
+        from robosimstudio.scene.compiler import CannotReplicate
+        from robosimstudio_bench.envs.fleet import FleetEnv
+        from robosimstudio_bench.run.fleet import plan_waves
+
+        task = self._task("fleet")
+        fleet = self._quiet(lambda: FleetEnv(task, num_worlds=2))
+        try:
+            (wave,) = plan_waves(task, [0, 1], 2)
+            with self.assertRaisesRegex(CannotReplicate, "world 1 runs .*'block' is static"):
+                fleet.reset_wave(wave)
+        finally:
+            fleet.close()
+
+    def test_a_fleet_whose_episodes_leave_it_in_place_holds_it_there_in_every_world(self) -> None:
+        from robosimstudio_bench.envs.fleet import FleetEnv
+        from robosimstudio_bench.run.fleet import plan_waves
+
+        task = self._task("fixed", sampler="fixed")
+        fleet = self._quiet(lambda: FleetEnv(task, num_worlds=2))
+        try:
+            (wave,) = plan_waves(task, [0, 1], 2)
+            self._quiet(lambda: fleet.reset_wave(wave))
+            entity = fleet.scene.objects["block"]
+            for world in range(2):
+                self.assertAlmostEqual(SURFACE[0], _held_x(fleet, entity, world), places=5)
+        finally:
+            fleet.close()
 
 
 if __name__ == "__main__":
