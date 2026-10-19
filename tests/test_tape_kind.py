@@ -197,6 +197,28 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual([], spec.problems())
         self.assertEqual("peeled_fraction", dispatch("peeled_fraction", ("",), ("tape",)).atom)
 
+    def test_a_strip_stuck_to_nothing_shows_its_adhesive_read_only(self) -> None:
+        from unittest import mock
+
+        import robosimstudio as rss
+        from robosimstudio.core.tuning import Tunable
+        from robosimstudio_materials.cloth import EntityCloth
+        from robosimstudio_materials.tape import ADHESIVE_FIELDS, EntityTape
+
+        cloth = Tunable(
+            name="material", spec=rss.tapes.PAPER_LABEL, write=lambda name, value: True, inert=("core_damping",)
+        )
+        for bonds, inert in ((0, ("core_damping", *ADHESIVE_FIELDS)), (144, ("core_damping",))):
+            with self.subTest(bonds=bonds):
+                entity = EntityTape(rss.tape(name="label", on="box" if bonds else ""))
+                entity.bonds = np.arange(bonds, dtype=np.int32)
+                with mock.patch.object(EntityCloth, "tunables", return_value=(cloth,)):
+                    (material,) = entity.tunables()
+                self.assertEqual(inert, material.inert)
+                self.assertEqual(bool(bonds), material.write("tack", 2.0e6))
+                self.assertEqual(bool(bonds), material.write("break_opening", 0.002))
+                self.assertTrue(material.write("tri_ke", 500.0), "the cloth's own fields still land")
+
     def test_the_handler_reads_the_entitys_bonds(self) -> None:
         from types import SimpleNamespace
 

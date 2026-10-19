@@ -488,14 +488,21 @@ class EntityTape(EntityCloth):
 
     # -------------------------------------------------------------- phase 2
     def tunables(self, pipeline=None):
-        """Cloth's material tunable, with the adhesive's two fields routed to the bonds."""
+        """Cloth's material tunable, with the adhesive's two fields routed to the bonds.
+
+        A strip stuck to nothing has no bonds for either to reach, so there both are inert and a write
+        lands nothing.
+        """
         base = super().tunables(pipeline)
         if not base:
             return base
         (material,) = base
         inner = material.write
+        loose = not len(self.bonds)
 
         def write(name: str, value: Any) -> bool:
+            if name in ADHESIVE_FIELDS and loose:
+                return False
             if name == "tack":
                 self.write_tack(float(value))
                 return True
@@ -504,7 +511,8 @@ class EntityTape(EntityCloth):
                 return True
             return inner(name, value)
 
-        return (replace(material, write=write),)
+        inert = (*material.inert, *ADHESIVE_FIELDS) if loose else material.inert
+        return (replace(material, write=write, inert=inert),)
 
     def write_break_opening(self, opening: float) -> None:
         """Set how far a bond's particle may lift before it lets go [m]; 0 never lets go. LIVE: the kernel
