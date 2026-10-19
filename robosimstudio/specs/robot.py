@@ -331,6 +331,15 @@ class GripperSpec:
             that dies on ``'wrist_3_link' matched 0 labels`` -- a true statement
             about labels that tells a reader nothing about the pairing.
         mount_xform: The hand's root pose in :attr:`mount_body`'s frame.
+        suction_pad: Body label of a vacuum cup's face, or empty for a hand that
+            holds with fingers. Set, the hand holds by sealing that face onto a
+            flat part and nothing here about fingers applies: no finger joints,
+            no jaw gap, no grasp-by-contact test. The face is the body's origin
+            with its normal along the body's +z -- the convention the shipped
+            ``suction_cup.xml`` states and :mod:`robosimstudio.core.suction`
+            reads -- and :attr:`pad_radius` is the cup's radius, the footprint
+            a seal needs under it. :attr:`tcp_body` names the same body, so the
+            tool-centre point every solver drives is the face's centre.
         actuation: The hand's own servo gains, or ``None`` to leave the import's.
             Here because they are a fact about the linkage rather than about the
             robot: the 2F-85's are derived from *its* five geared joints, and the
@@ -377,6 +386,7 @@ class GripperSpec:
     asset: AssetSpec | None = None
     mount_body: str = ""
     mount_xform: Xform = IDENTITY
+    suction_pad: str = ""
     actuation: ActuationSpec | None = None
 
     @property
@@ -385,8 +395,12 @@ class GripperSpec:
 
         One place, because the rule ``span or 2 * (open_width or 0.04)`` was
         written out twice -- in the compiler and in ``registry.admits`` -- and a
-        rule spelled twice is a rule that will disagree once.
+        rule spelled twice is a rule that will disagree once. A vacuum cup
+        (:attr:`suction_pad`) closes across nothing, so its span is 0 and every
+        grasp-fit test refuses it rather than reading the 80 mm fallback.
         """
+        if self.suction_pad:
+            return 0.0
         return float(self.span) or 2.0 * (float(self.open_width) or 0.04)
 
     @property
@@ -461,6 +475,7 @@ class GripperSpec:
             finger_bodies=tuple(tuple(fmt(n) for n in side) for side in self.finger_bodies),
             tcp_body=fmt(self.tcp_body),
             mount_body=fmt(self.mount_body),
+            suction_pad=fmt(self.suction_pad),
         )
 
 
@@ -507,6 +522,13 @@ class ArmSpec:
             arm. Empty falls through to :attr:`EmbodimentSpec.gripper`, so a
             bimanual robot with one kind of hand states it once.
         home_q: Home joint positions [rad or m]. Empty leaves the import's own.
+        gripper_mount: Where an attached hand's root sits in this arm's wrist
+            frame, when the arm says rather than the hand. ``None`` takes the
+            hand's own :attr:`GripperSpec.mount_xform`, which is right for a
+            hand measured against one flange and names it; a hand with no
+            flange of its own -- a vacuum cup that bolts to anything -- leaves
+            that at identity, and the arm carrying it states where its flange
+            is, since that is a fact about the arm's wrist.
         home_gripper_q: Where the *fingers* start, per driven finger joint.
             Empty starts them at the hand's own full-open coordinates, which is
             what every robot here did before this field existed.
@@ -527,6 +549,7 @@ class ArmSpec:
     ee_body_name: str = ""
     base_body_name: str = ""
     gripper: str = ""
+    gripper_mount: Xform | None = None
     home_q: tuple[float, ...] = ()
     home_gripper_q: tuple[float, ...] = ()
 

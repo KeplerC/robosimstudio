@@ -96,7 +96,8 @@ Notes:
 - A scene needs at least one thing that moves, or `build()` raises.
 
 The registered robots are `panda`, `panda_robotiq`, `panda_robotiq_roll`,
-`yam_bimanual`, `yam_i2rt` and `yam_i2rt_arena_narrow`.
+`yam_bimanual`, `yam_bimanual_suction` (a vacuum cup on the right arm),
+`yam_i2rt` and `yam_i2rt_arena_narrow`.
 
 ## Placing things
 

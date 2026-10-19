@@ -44,7 +44,7 @@ from robosimstudio_bench.goals.goal import about_key, leaves, placements
 from .refusal import ToolRefusal
 from .types import quat_wxyz, se3_of_xform, vec3
 
-__all__ = ["GoalCursor", "register_goal_cursor", "register_sim_tools"]
+__all__ = ["GoalCursor", "Vacuum", "register_goal_cursor", "register_sim_tools", "register_vacuum"]
 
 
 def _grasp_heading_deg(long_axis_yaw: float) -> float:
@@ -79,6 +79,7 @@ def register_sim_tools(registry, env, bus: Bus) -> None:
         # than letting a second registration win silently.
         registry.register_callable(name, fn, summary=summary, tags=("privileged",))
     register_attachment(registry, env, bus)
+    register_vacuum(registry, env, bus)
 
 
 def register_attachment(registry, env, bus: Bus) -> ClothAttachment | None:
@@ -111,6 +112,29 @@ def register_attachment(registry, env, bus: Bus) -> ClothAttachment | None:
         tags=("privileged",),
     )
     return attachment
+
+
+def register_vacuum(registry, env, bus: Bus) -> Vacuum | None:
+    """Register ``sim.vacuum``, if the robot carries a suction hand.
+
+    Conditional on the robot for the reason :func:`register_attachment` is
+    conditional on the cell: "does this robot have a cup" is a fact about the
+    hardware, and a robot with jaws only gets no tool rather than one that
+    raises the first time a graph believes it.
+
+    Returns the tool, or ``None`` when no arm has a cup.
+    """
+    embodiment = getattr(getattr(env, "scene", None), "embodiment", None)
+    if not getattr(embodiment, "suctions", None):
+        return None
+    tool = Vacuum(env, bus)
+    registry.register_callable(
+        "sim.vacuum",
+        tool.vacuum,
+        summary="Switch a suction hand's vacuum on or off, and say whether it sealed and on what.",
+        tags=("privileged",),
+    )
+    return tool
 
 
 def register_goal_cursor(registry, env, bus: Bus) -> GoalCursor:
@@ -1068,6 +1092,102 @@ class ClothAttachment:
                 continue
             position, quat = env.arm(arm_name).ee_pose(env.state)
             dragger.set_target(position, quat)
+
+
+class Vacuum:
+    """A suction hand's vacuum, switched by a graph: the rigid counterpart of :class:`ClothAttachment`.
+
+    The same :class:`~robosimstudio.core.suction.Suction` the page's
+    **Vacuum** box switches, so a graph and a person hold a plate the same way:
+    the cup seals onto the part under its face when the face is within 2 mm of
+    it and square to it within 15 degrees, and lets go when switched off.
+
+    **Privileged, though a vacuum is real hardware.** A real cup reports one
+    bit, its pressure switch, which is ``sealed``. The gap, the tilt and the
+    name of what it sealed on are read off the simulator, and the hold itself is
+    a weld or a spring rather than air. A graph that routes on ``sealed`` alone
+    is the part that would transfer.
+
+    Args:
+        env: The toolkit-layer environment.
+        bus: The bus whose owner thread every switch runs on.
+    """
+
+    def __init__(self, env, bus: Bus) -> None:
+        self.env = env
+        self.bus = bus
+
+    def vacuum(self, on: bool = True, arm: str = "", object_name: str = "", tier: str = "auto") -> dict[str, Any]:
+        """Switch one cup's vacuum on or off.
+
+        Args:
+            on: True seals onto the part under the face (or ``object_name``) and
+                holds it; False lets go.
+            arm: Which hand. Empty takes the first arm with a cup, *not* the
+                work arm: on ``yam_bimanual_suction`` the work arm is the left,
+                which has jaws.
+            object_name: The part to seal on. Empty takes whatever is under
+                the cup, which is what a real vacuum does.
+            tier: ``"auto"``, ``"weld"`` or ``"wrench"``; see
+                :meth:`~robosimstudio.core.suction.Suction.hold`.
+
+        Returns:
+            ``on``, ``sealed``, ``held`` (the part's name, or empty), ``gap_m``,
+            ``tilt_deg``, ``tier``, ``arm``, ``why``. A refusal is ``sealed``
+            false with the gap and tilt that refused it and ``why`` in a
+            sentence, which is what a graph routes on rather than lifting air.
+        """
+
+        def switch() -> dict[str, Any]:
+            suctions = self.env.scene.embodiment.suctions
+            name = arm or next(iter(suctions))
+            if name not in suctions:
+                raise ToolRefusal(f"no suction hand on arm {name!r}; the cups are on {sorted(suctions)}")
+            if tier not in ("auto", "weld", "wrench"):
+                raise ToolRefusal(f"tier must be 'auto', 'weld' or 'wrench', not {tier!r}")
+            cup = suctions[name]
+            if not on:
+                cup.release()
+                return {
+                    "on": False,
+                    "sealed": False,
+                    "held": "",
+                    "gap_m": float("nan"),
+                    "tilt_deg": float("nan"),
+                    "tier": "",
+                    "arm": name,
+                    "why": "",
+                }
+            body = None
+            if object_name:
+                entity = self.env.scene.by_name.get(object_name)
+                body = getattr(entity, "body", None)
+                if body is None or int(body) < 0:
+                    raise ToolRefusal(f"{object_name!r} is not a rigid body in this scene")
+            try:
+                report = cup.hold(body, tier=tier)
+            except RuntimeError as error:
+                raise ToolRefusal(str(error)) from error
+            return {
+                "on": True,
+                "sealed": bool(report.sealed),
+                "held": self._name_of(cup.held),
+                "gap_m": float(report.gap_m),
+                "tilt_deg": float(np.degrees(report.tilt_rad)),
+                "tier": cup.tier,
+                "arm": name,
+                "why": report.why,
+            }
+
+        return self.bus.call(switch)
+
+    def _name_of(self, body: int) -> str:
+        if body < 0:
+            return ""
+        for name, entity in self.env.scene.by_name.items():
+            if getattr(entity, "body", None) == body:
+                return name
+        return ""
 
 
 class GoalCursor:
