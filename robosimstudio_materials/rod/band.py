@@ -122,6 +122,34 @@ def band(
     return RodSpec(name=name, nodes=nodes, closed=True, **fields)
 
 
+def _axis(origin, direction) -> tuple[np.ndarray, np.ndarray]:
+    """``(point, unit direction)`` of an axis. ``(x, y)`` names a vertical line, and only that."""
+    d = np.asarray(direction, dtype=np.float64).reshape(3)
+    d = d / float(np.linalg.norm(d))
+    o = np.asarray(origin, dtype=np.float64).reshape(-1)
+    if o.shape == (2,):
+        if not np.allclose(d[:2], 0.0, atol=1.0e-9):
+            raise ValueError(
+                f"an (x, y) origin names a vertical axis; along {tuple(float(c) for c in d)} it needs (x, y, z), "
+                f"got {origin}"
+            )
+        return np.array([o[0], o[1], 0.0]), d
+    if o.shape != (3,):
+        raise ValueError(f"an axis's origin is (x, y, z), or (x, y) for a vertical one, got {origin}")
+    return o, d
+
+
+def _subtended(points: np.ndarray, o: np.ndarray, d: np.ndarray) -> np.ndarray:
+    """The signed angle [rad] each segment of a closed loop subtends about an axis, the closing segment last."""
+    u = np.cross(d, [1.0, 0.0, 0.0] if abs(d[0]) < 0.9 else [0.0, 1.0, 0.0])
+    u /= float(np.linalg.norm(u))
+    v = np.cross(d, u)
+    rel = points - o
+    angles = np.arctan2(rel @ v, rel @ u)
+    delta = np.diff(np.concatenate([angles, angles[:1]]))
+    return np.arctan2(np.sin(delta), np.cos(delta))
+
+
 def loop_winding(positions: np.ndarray, origin, direction=(0.0, 0.0, 1.0)) -> float:
     """How many times a closed loop goes round an axis: signed, near an integer.
 
@@ -136,24 +164,16 @@ def loop_winding(positions: np.ndarray, origin, direction=(0.0, 0.0, 1.0)) -> fl
     Args:
         positions: ``[n, 3]`` points in loop order. A repeated first point at the
             end (a band's seam particle) is a zero-length segment and changes nothing.
-        origin: A point on the axis [m]; ``(x, y)`` is enough for a vertical one.
+        origin: A point on the axis [m]; ``(x, y)`` is enough for a vertical one,
+            and any other direction refuses it.
         direction: The axis's direction; vertical by default. Only its line
             matters, and its sign only the sign of the answer.
     """
+    o, d = _axis(origin, direction)
     points = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
     if len(points) < 3:
         return 0.0
-    d = np.asarray(direction, dtype=np.float64)
-    d /= float(np.linalg.norm(d))
-    u = np.cross(d, [1.0, 0.0, 0.0] if abs(d[0]) < 0.9 else [0.0, 1.0, 0.0])
-    u /= float(np.linalg.norm(u))
-    v = np.cross(d, u)
-    o = np.zeros(3)
-    o[: len(origin)] = np.asarray(origin, dtype=np.float64)
-    rel = points - o
-    angles = np.arctan2(rel @ v, rel @ u)
-    delta = np.diff(np.concatenate([angles, angles[:1]]))
-    return float(np.arctan2(np.sin(delta), np.cos(delta)).sum() / (2.0 * math.pi))
+    return float(_subtended(points, o, d).sum() / (2.0 * math.pi))
 
 
 def encircles(positions: np.ndarray, origin, direction, length: float | None = None, *, reach: float = 0.02) -> bool:

@@ -126,6 +126,24 @@ class TestTheLoopMeasures(unittest.TestCase):
         self.assertTrue(encircles(hung, *peg), "with no length, the line is enough")
         self.assertFalse(encircles(hung + np.array([0.0, 0.2, 0.0]), *peg, 0.08), "beside the peg")
 
+    def test_an_x_y_origin_names_a_vertical_line_and_no_other(self) -> None:
+        """Along any other direction a 2-D origin is refused, the same way by both measures and the axis feature."""
+        from robosimstudio_materials.rod.band import _encircles_axis, encircles, loop_winding
+
+        standing = _circle(32, 0.03)[:, [2, 0, 1]] + np.array([0.0, 0.0, 0.2])  # round the x axis at 200 mm
+        self.assertAlmostEqual(1.0, abs(loop_winding(standing, (0.0, 0.0, 0.2), (1.0, 0.0, 0.0))), places=9)
+        self.assertAlmostEqual(1.0, abs(loop_winding(_circle(32), (0.0, 0.0), (0.0, 0.0, -1.0))), places=9)
+        for direction in ((1.0, 0.0, 0.0), (0.0, 0.6, 0.8)):
+            with self.subTest(direction=direction):
+                with self.assertRaisesRegex(ValueError, "vertical"):
+                    loop_winding(standing, (0.0, 0.0), direction)
+                with self.assertRaisesRegex(ValueError, "vertical"):
+                    encircles(standing, (0.0, 0.0), direction)
+                with self.assertRaisesRegex(ValueError, "vertical"):
+                    _encircles_axis(standing, {"origin": (0.0, 0.0), "direction": direction})
+        with self.assertRaisesRegex(ValueError, "origin"):
+            loop_winding(standing, (0.0,))
+
     def test_x_y_names_a_vertical_line_but_a_peg_with_a_length_needs_its_root_height(self) -> None:
         """Round the peg or beside it, a 2-D origin with a length is refused the same way, the axis feature too."""
         from robosimstudio_materials.rod.band import _encircles_axis, encircles
