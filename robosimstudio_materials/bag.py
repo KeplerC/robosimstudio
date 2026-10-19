@@ -574,9 +574,9 @@ register_actor_builder(
     "superdex",
     "bag",
     build_bag_actor,
-    # What the shell builder reads, off its own declaration: a key ``build_shell`` learns is the bag's too. Not
-    # ``_OLD_NAMES``: the entity states the shell's, and only a replayed record, which is not composed, the old.
-    consumes=actor_consumes("superdex", "shell"),
+    # What the shell builder reads, off its own declaration: a key ``build_shell`` learns is the bag's too. And
+    # ``_OLD_NAMES``, which ``build_bag_actor`` reads as the shell's: a record stating them is not told they are unread.
+    consumes=(*actor_consumes("superdex", "shell"), *_OLD_NAMES),
     summary="SuperDex builds a bag as a self-colliding shell in its own frame.",
 )
 

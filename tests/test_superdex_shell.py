@@ -306,13 +306,16 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertLessEqual(set(actor.params), set(actor_consumes("superdex", "shell")))
 
     def test_the_bag_reads_what_the_shell_builder_reads(self) -> None:
-        """Its modulus too: it states ``young``/``poisson`` as a sheet does, with no names of its own."""
+        """Its modulus too: it states ``young``/``poisson`` as a sheet does, and reads the two names a record stated
+        it under before (``shell_young``/``shell_poisson``), which its builder declares beside the shell's."""
         from robosimstudio.engines.geometry import actor_consumes
         from robosimstudio.specs.physics import get_backend
         from robosimstudio_materials.bag import EntityBagSuperdex, bag
 
         get_backend("superdex")
-        self.assertEqual(set(actor_consumes("superdex", "shell")), set(actor_consumes("superdex", "bag")))
+        shell = set(actor_consumes("superdex", "shell"))
+        self.assertEqual(shell | {"shell_young", "shell_poisson"}, set(actor_consumes("superdex", "bag")))
+        self.assertEqual(len(shell) + 2, len(actor_consumes("superdex", "bag")), "each name once")
         params = EntityBagSuperdex(bag(name="bag")).host_actor().params
         self.assertEqual((1.0e6, 0.3), (params["young"], params["poisson"]), "the canvas, under the shell's names")
 
