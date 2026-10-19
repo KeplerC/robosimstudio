@@ -143,7 +143,8 @@ class TestAPresetIsOneTheSheetCanWear(unittest.TestCase):
         gui.find("Cloth").fire("towel")
         panel.drain()
         self.assertIn("terry_towelling", preset.options)
-        self.assertIn("paper_label", preset.options, "a label's material is a cloth's too")
+        for other in ("paper_label", "paper", "cardboard"):
+            self.assertNotIn(other, preset.options, "a towel shows a cloth's fields, not a label's or paper's")
         for other in ("rice", "soft_foam", "nylon_bristle"):
             self.assertNotIn(other, preset.options, "no sheet is made of that")
         self.assertEqual("(as built)", preset.value)

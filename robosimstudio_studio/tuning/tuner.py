@@ -116,14 +116,15 @@ class MaterialTuner:
         return tier
 
     def presets(self) -> tuple[str, ...]:
-        """The named presets the selected cloth can wear: those of its built material's class.
+        """The named presets the selected cloth can wear: those of exactly its built material's class.
 
         A tape's spec refuses a material with no adhesive and a paper's one with no plastic trio, so a
         towel preset adopted onto a label moved its sliders and then failed the rebuild; and no sheet
-        can be made of rice.
+        can be made of rice. Exactly, not a subclass: a towel offered a label's material would wear
+        fields its folder does not show, which a rebuild then puts onto a cloth.
         """
         kind = type(self.built[self.selected])
-        return tuple(name for name in list_materials() if isinstance(get_material(name).spec, kind))
+        return tuple(name for name in list_materials() if type(get_material(name).spec) is kind)
 
     def adopt(self, preset: str) -> None:
         """Load a named preset onto the selected cloth.
