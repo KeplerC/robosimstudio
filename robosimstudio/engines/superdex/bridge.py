@@ -1429,9 +1429,8 @@ class SuperdexBridge:
         the same reason ``restore_rest`` marks them.
 
         A rod is refused by name, as a body on a rigid core is: the engine takes
-        node positions on a soft body or a shell only, and a rod's nodes are its
-        displacements, moved only as it is built
-        (``robosimstudio_materials.rod.actor.teleport_rod``).
+        node positions on a soft body or a shell only, and a rod's builder moves
+        its nodes once, as it is built, by holding them.
         """
         rows = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
         touched: list[dict] = []
