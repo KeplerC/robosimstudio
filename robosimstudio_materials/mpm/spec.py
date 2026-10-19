@@ -78,7 +78,8 @@ class ParticleMaterialSpec:
     mass at build and cannot move afterwards.
 
     Attributes:
-        density: Bulk density [kg/m^3]. Particle mass is ``spacing^3 * density``.
+        density: Bulk density [kg/m^3]. A particle's mass is its lattice cell's
+            volume times this (:attr:`ParticleBodySpec.particle_volume`).
         young_modulus: Elastic modulus [Pa]. 1e15 is Newton's "rigid grains":
             a granular's stiffness is the grid's, not the grains'. 5e6 reads as
             a soft solid that can be pressed (dough, clay).
@@ -234,10 +235,10 @@ class ParticleBodySpec:
             run's own is the right choice here: the MPM steps once per control
             step either way, and a finer settle only runs the arm's solver at
             a coarser rate than it was tuned for.
-        render: ``"points"`` draws each particle as a sphere of half the
-            spacing; ``"surface"`` also offers a reconstructed surface mesh to
-            a renderer that can take one per frame (the path tracer), through
-            ``DeformableHandle.surface``.
+        render: ``"points"`` draws each particle as a sphere of its radius,
+            half its lattice cell's cube root; ``"surface"`` also offers a
+            reconstructed surface mesh to a renderer that can take one per
+            frame (the path tracer), through ``DeformableHandle.surface``.
         surface_voxel: Voxel of the surface reconstruction [m], or ``None``
             for 0.45 of the solver's.
         containers: Names of rigid or static entities this body is poured
@@ -318,8 +319,15 @@ class ParticleBodySpec:
             raise ValueError(f"{where}: container_margin must be > 0 m, got {self.container_margin}")
 
     @property
-    def particle_count(self) -> int:
-        """How many particles a box or cylinder allocates; a mesh is counted when it is filled."""
+    def particle_count(self) -> int | None:
+        """How many particles a box or cylinder allocates, or ``None`` for a mesh.
+
+        A mesh keeps the lattice points ``trimesh.contains`` puts inside it,
+        which only the fill knows: the built entity's ``len(particles)``.
+        :attr:`size` is ignored for a mesh, so a count off it would be a guess.
+        """
+        if self.shape == "mesh":
+            return None
         h = float(self.particle_spacing)
         nx, ny, nz = (max(1, int(round(float(s) / h))) for s in self.size)
         if self.shape == "cylinder":
@@ -328,6 +336,30 @@ class ParticleBodySpec:
         return nx * ny * nz
 
     @property
-    def mass(self) -> float:
-        """Total mass [kg]: the particle count times the particle mass."""
-        return float(self.particle_count) * float(self.particle_spacing) ** 3 * float(self.material.density)
+    def particle_volume(self) -> float:
+        """The volume one particle of a box or cylinder stands for [m^3]: its lattice cell's.
+
+        The lattice puts one sample per cell of ``size / round(size / spacing)``
+        so that it ends on the faces, and a cell is a spacing cubed only where
+        the spacing divides the size: a 6 mm puddle at 2.5 mm is two layers of
+        3 mm. A particle's mass is this volume times the density, and its
+        radius is half its cube root, which is what Newton's implicit MPM
+        reads back as the particle's volume (``8 r^3``), so the body weighs
+        what its material does over the region it fills. A mesh's cell is its
+        bound's, known once it is filled; this is the spacing cubed for one.
+        """
+        h = float(self.particle_spacing)
+        if self.shape == "mesh":
+            return h**3
+        volume = 1.0
+        for extent in self.size:
+            volume *= float(extent) / max(1, int(round(float(extent) / h)))
+        return volume
+
+    @property
+    def mass(self) -> float | None:
+        """Total mass [kg]: the particle count times the particle mass, or ``None`` for a mesh, as its count is."""
+        count = self.particle_count
+        if count is None:
+            return None
+        return float(count) * self.particle_volume * float(self.material.density)

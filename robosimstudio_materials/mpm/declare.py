@@ -83,9 +83,12 @@ class ParticleBody:
                 f"{cls.__name__}.from_spec: {spec.name!r} is built by {spec.entity!r}, a {domain} body, "
                 f"not a {cls.DOMAIN} one"
             )
+        # A mesh is counted by its fill, at build, so its summary states no count.
+        count = spec.particle_count
+        body = f"a {domain} body of {spec.shape} shape" + ("" if count is None else f", {count} particles")
         return AssetRecord(
             name=name,
-            summary=summary or f"a {domain} body of {spec.shape} shape, {spec.particle_count} particles",
+            summary=summary or body,
             tags=tuple(tags) or (domain,),
             states=tuple(states),
             sim=SimRequirements(domain=domain, contacts=contacts_with(*touches), notes=notes),

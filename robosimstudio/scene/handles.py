@@ -261,7 +261,7 @@ class DeformableHandle:
     point_radius: float = 0.0
     """For a particle body -- a heap of rice, a pool, a lump of dough: particles
     with no triangle and no order -- the radius a renderer draws each particle
-    at, half the particle spacing as built. 0 for anything drawn from its
+    at, the particles' radius as built. 0 for anything drawn from its
     triangles or swept as a tube; a renderer that meets a handle with no
     triangles, no tube and a positive ``point_radius`` draws points."""
     surface: Any = None

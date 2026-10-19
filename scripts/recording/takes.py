@@ -176,11 +176,11 @@ def _kept_bend(film) -> tuple[bool, str]:
     """The cable with plastic memory is still bent after the hand let go: straightness under 0.9."""
     import numpy as np
 
+    from robosimstudio_materials.rod.measures import straightness
+
     ref = film.sim["cable"]
-    points = np.asarray(film.sim.pipeline.state_0.body_q.numpy())[ref.bodies, :3]
-    path = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
-    straightness = float(np.linalg.norm(points[-1] - points[0]) / path) if path > 0 else 1.0
-    return straightness < 0.9, f"straightness {straightness:.3f} after release (need under 0.9)"
+    measured = straightness(np.asarray(film.sim.pipeline.state_0.body_q.numpy())[ref.bodies, :3])
+    return measured < 0.9, f"straightness {measured:.3f} after release (need under 0.9)"
 
 
 def _succeeded(film) -> tuple[bool, str]:

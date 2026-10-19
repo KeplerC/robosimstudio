@@ -65,7 +65,7 @@ from .request import SceneRequest
 Composer = Callable[..., PhysicsProgram]
 """Builds the physics for a finalized model. See :func:`compile_scene`."""
 
-__all__ = ["CannotReplicate", "CompiledScene", "compile_scene", "resolve_regions"]
+__all__ = ["CannotReplicate", "CompiledScene", "compile_scene", "declared_domains", "resolve_regions"]
 
 
 class CannotReplicate(NotImplementedError):
@@ -226,7 +226,7 @@ def _make_entity(spec, arrangement=None, *, gripper_span: float = 0.08) -> Entit
     return cls(spec, **({"gripper_span": gripper_span} if takes_span else {}))
 
 
-def _declared_domains(request: SceneRequest) -> set[str]:
+def declared_domains(request: SceneRequest) -> set[str]:
     """The domains the request's specs declare, by the rule ``resolve_entity_class`` reads them.
 
     The spec's ``sim.domain`` when it carries one, else the registered entity
@@ -519,7 +519,7 @@ def _build_base(
     # before any entity builds -- MuJoCo's gravcomp, VBD's per-joint flags. Done
     # here, from the arrangement, so no entity has to import a solver to know
     # which attributes its builder calls will be allowed to keep.
-    register_custom_attributes(builder, arrangement, domains=_declared_domains(request))
+    register_custom_attributes(builder, arrangement, domains=declared_domains(request))
 
     entities: list[Entity] = []
     embodiment: Entity | None = None

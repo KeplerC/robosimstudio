@@ -1340,7 +1340,7 @@ class EntityRod(Centerline, Entity):
             inv_mass[body], inv_inertia[body] = pin["inv_mass"], pin["inv_inertia"]
             model.body_inv_mass.assign(inv_mass)
             model.body_inv_inertia.assign(inv_inertia)
-            set_kinematic(pipeline, [body], False)
+            set_kinematic(pipeline, [body], False, restore=pin["flags"])
             notify(pipeline, int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES))
             del self._pins[body]
             return body
@@ -1356,7 +1356,7 @@ class EntityRod(Centerline, Entity):
             inv_mass[body], inv_inertia[body] = 0.0, 0.0
             model.body_inv_mass.assign(inv_mass)
             model.body_inv_inertia.assign(inv_inertia)
-            set_kinematic(pipeline, [body], True)
+            pin["flags"] = set_kinematic(pipeline, [body], True)
             notify(pipeline, int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES))
             self._pins[body] = pin
         pin["pose"], pin["angle"] = pose, 0.0

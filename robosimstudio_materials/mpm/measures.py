@@ -159,8 +159,8 @@ register_atom(
         cost="cheap",
         reads_scene=True,
         provenance=(
-            "fill_fraction times the body's mass: every particle of one body weighs spacing^3 times "
-            "the material's density, so the count is the mass."
+            "fill_fraction times the body's mass: every particle of one body weighs its lattice cell's "
+            "volume times the material's density, so the count is the mass."
         ),
     )
 )
