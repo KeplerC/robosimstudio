@@ -595,12 +595,18 @@ def _build_base(
             # the arm's mount with its name: it says where *that* hand bolts on
             # and wins over a hand's own, so left behind it would bolt the new
             # hand where the old one sat (a cup 105 mm out on the YAM's wrist).
+            # An arm that already carries the named hand keeps its entry, mount
+            # and all: that mount is where this very hand bolts on.
             from dataclasses import replace as _replace
 
+            own = embodiment_spec.gripper
             embodiment_spec = _replace(
                 embodiment_spec,
                 gripper=binding.gripper,
-                arms=tuple(_replace(a, gripper="", gripper_mount=None) for a in embodiment_spec.arms),
+                arms=tuple(
+                    a if (a.gripper or own) == binding.gripper else _replace(a, gripper="", gripper_mount=None)
+                    for a in embodiment_spec.arms
+                ),
             )
         arm_gains = binding.arm_actuation or request.arm_actuation
         gripper_gains = binding.gripper_actuation or request.gripper_actuation

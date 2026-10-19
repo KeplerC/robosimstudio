@@ -89,10 +89,21 @@ class TestThePairing(unittest.TestCase):
         self.assertIn("ArmSpec.gripper", why)
         self.assertEqual((True, ""), _admits_gripper(get_embodiment("panda"), "suction"))
 
-    def test_a_hand_the_binding_names_does_not_inherit_the_cups_mount(self) -> None:
-        """A binding's hand replaces every arm's, and the mount the right arm states for its cup goes with it.
+    def test_a_hand_only_some_arms_carry_is_refused_for_the_whole_robot(self) -> None:
+        """The binding puts its hand on every arm, so one of the robot's own is admitted only if every arm has it."""
+        from robosimstudio.robots.registry import _admits_gripper, get_embodiment
 
-        The compiler is stopped where it builds the robot, with the spec it would build from.
+        for gripper in ("suction", "yam_linear_arena"):
+            with self.subTest(gripper):
+                ok, why = _admits_gripper(get_embodiment("yam_bimanual_suction"), gripper)
+                self.assertFalse(ok)
+                self.assertIn("ArmSpec.gripper", why)
+        self.assertEqual((True, ""), _admits_gripper(get_embodiment("yam_bimanual"), "yam_linear_arena"))
+
+    def _built_spec(self, gripper: str):
+        """The robot spec the compiler would build ``yam_bimanual_suction`` from under a binding naming ``gripper``.
+
+        The compiler is stopped where it builds the robot.
         """
         from unittest import mock
 
@@ -112,7 +123,7 @@ class TestThePairing(unittest.TestCase):
         real = compiler._resolve_entity
         request = BuildRequest(
             embodiment="yam_bimanual_suction",
-            binding=Binding(embodiment="yam_bimanual_suction", gripper="yam_linear_arena"),
+            binding=Binding(embodiment="yam_bimanual_suction", gripper=gripper),
         )
         with mock.patch.object(
             compiler, "_resolve_entity", lambda path: robot if path == compiler._EMBODIMENT_ENTITY else real(path)
@@ -120,8 +131,29 @@ class TestThePairing(unittest.TestCase):
             with self.assertRaises(_Stop):
                 compiler._build_base(request, None)
         (spec,) = specs
+        return spec
+
+    def test_a_hand_the_binding_names_does_not_inherit_the_cups_mount(self) -> None:
+        """A binding's hand replaces the cup, and the mount the right arm states for the cup goes with it.
+
+        The left arm already carries the named hand and is left exactly as it is.
+        """
+        from robosimstudio.robots.registry import get_embodiment
+
+        spec = self._built_spec("yam_linear_arena")
         self.assertEqual("yam_linear_arena", spec.gripper)
-        self.assertEqual([("", None), ("", None)], [(arm.gripper, arm.gripper_mount) for arm in spec.arms])
+        self.assertEqual(get_embodiment("yam_bimanual_suction").arms[0], spec.arms[0])
+        self.assertEqual(("", None), (spec.arms[1].gripper, spec.arms[1].gripper_mount))
+
+    def test_an_arm_that_already_carries_the_named_hand_keeps_its_mount(self) -> None:
+        """Naming the cup the right arm carries leaves that arm as it is, so the cup is not bolted at the flange."""
+        from robosimstudio.robots.embodiments.yam_bimanual_suction import SUCTION_MOUNT
+
+        spec = self._built_spec("suction")
+        self.assertEqual("suction", spec.gripper)
+        self.assertEqual(
+            [("", None), ("suction", SUCTION_MOUNT)], [(arm.gripper, arm.gripper_mount) for arm in spec.arms]
+        )
 
 
 TWIN_ARMS = """<mujoco model="twin_arms">
