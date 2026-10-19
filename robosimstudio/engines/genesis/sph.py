@@ -163,10 +163,11 @@ def longest_substep(params: dict) -> tuple[float, str]:
       at 40 (``p1_rest.py``), where this asks 45.
     * ``"surface_tension"``: Genesis's cohesion pulls each neighbour by ``gamma`` over
       its kernel's volume, a spring, so the substep goes as ``sqrt(spacing**3 /
-      gamma)``, scaled from water's 0.01. At rest in the pour example's cup at 4 mm
-      (``oil_rest.py``): 0.03 kept none of 1,728 particles at 20 substeps, lost 353 at
-      27 and held them all at 35, where this asks 35; 0.02 lost 1,499 at 20 and held
-      at 27, where it asks 29; 0.015 lost 1,311 at 20 and held at 25, where it asks 25.
+      gamma)``, scaled from water's 0.01. At rest in the pour example's cup at 4 mm,
+      on liquids of 900 to 1000 kg/m^3 and ``mu`` 5e-4 to 1e-3 (``oil_rest.py``): 0.03
+      kept none of 1,728 particles at 20 substeps, lost 353 at 27 and held them all at
+      35, where this asks 35; 0.02 lost 1,499 at 20 and held at 27, where it asks 29;
+      0.015 lost 1,311 at 20 and held at 25, where it asks 25.
 
     The two Genesis does not state are never longer than :data:`LONGEST_SUBSTEP`:
     softer or less cohesive water was not measured holding longer substeps (5e3 Pa
