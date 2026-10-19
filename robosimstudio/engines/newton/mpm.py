@@ -197,13 +197,22 @@ class SolverMPM(SolverImplicitMPM):
             self.project_outside(state_out, state_out, step_dt, gap=self.project_gap)
 
     def reset(self, state: newton.State, world_mask=None, flags=None) -> None:
-        """Newton's reset, and the cadence starts again from phase zero.
+        """Newton's reset, and the cadence starts again from phase zero with no wrench held.
 
         A reset happens between control steps, where the phase is already zero
         when the rate fits (which the composer checked); stating it keeps a
-        reset taken mid-settle from carrying a partial step into the run.
+        reset taken mid-settle from carrying a partial step into the run. The
+        held wrenches are zeroed and count as harvested, so the coupled steps
+        before the first MPM step of the new episode -- fifteen of every
+        sixteen calls at the registered stride -- read no load rather than the
+        last contact of the episode before. Zeroing is a device memset, so it
+        stays capturable; a ``world_mask`` reset zeroes every world's, which
+        the next MPM step, at most one stride later, harvests again.
         """
         self._calls = 0
+        for ptr, held in self._held_wrenches.items():
+            held.zero_()
+            self._harvested_at[ptr] = self._steps
         super().reset(state, world_mask=world_mask, flags=flags)
 
     # ------------------------------------------------------------- coupling

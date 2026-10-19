@@ -189,7 +189,9 @@ class TestTheHarvestCoversTheStepTaken(unittest.TestCase):
     the step that made the impulse.
     """
 
-    def _wrenches(self, *, substeps: int, step_hz: float, coupled_steps: int) -> list[float]:
+    def _wrenches(
+        self, *, substeps: int, step_hz: float, coupled_steps: int, reset_after: int | None = None
+    ) -> list[float]:
         from types import SimpleNamespace
         from unittest import mock
 
@@ -210,17 +212,23 @@ class TestTheHarvestCoversTheStepTaken(unittest.TestCase):
         def harvest(self, body_local_to_proxy_global, out_body_f, *, dt, **kwargs) -> None:
             out_body_f.assign(np.full((1, 6), impulse["n_s"] / dt, dtype=np.float32))
 
+        def reset(self, state, world_mask=None, flags=None) -> None:
+            impulse["n_s"] = 0.0
+
         dt = 1.0 / 960.0  # GENERIC's substep: sixteen at 60 Hz
         with (
             mock.patch.object(SolverImplicitMPM, "__init__", init),
             mock.patch.object(SolverImplicitMPM, "step", step),
             mock.patch.object(SolverImplicitMPM, "coupling_harvest_proxy_wrenches", harvest),
+            mock.patch.object(SolverImplicitMPM, "reset", reset),
         ):
             solver = SolverMPM(SimpleNamespace(device=SimpleNamespace(is_capturing=False)), step_hz=step_hz)
             state = SimpleNamespace()
             out = wp.zeros(1, dtype=wp.spatial_vector, device="cpu")
             read = []
-            for _ in range(coupled_steps):
+            for i in range(coupled_steps):
+                if i == reset_after:
+                    solver.reset(state)
                 for _ in range(substeps):
                     solver.step(state, state, None, None, dt / substeps)
                 solver.coupling_harvest_proxy_wrenches(None, out, dt=dt, state=state, contacts=None)
@@ -240,6 +248,11 @@ class TestTheHarvestCoversTheStepTaken(unittest.TestCase):
         """Three substeps and a stride of two: the first coupled step's MPM step falls on its second call."""
         read = self._wrenches(substeps=3, step_hz=1440.0, coupled_steps=4)
         self.assertEqual([1.0] * 4, [round(v, 6) for v in read])
+
+    def test_a_reset_holds_nothing_of_the_episode_before(self) -> None:
+        """After a reset the calls before the first MPM step read zero, not the last episode's last contact."""
+        read = self._wrenches(substeps=1, step_hz=60.0, coupled_steps=48, reset_after=32)
+        self.assertEqual([0.0] * 15 + [1.0] * 17 + [0.0] * 15 + [1.0], [round(v, 6) for v in read])
 
 
 if __name__ == "__main__":
