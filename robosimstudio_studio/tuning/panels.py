@@ -70,7 +70,14 @@ class PanelTune(Panel):
         # ``None`` when nothing in the scene has a fabric material -- a SuperDex
         # sponge is bulk matter, and the tuner drops it rather than mapping
         # Young's modulus onto ``tri_materials``.
-        self.binder = SpecBinder(self.tuner.material) if self.tuner else None
+        # One binder per material class the sheets were built with, and ``binder`` is the selected
+        # sheet's: one set built from the first sheet's class and pointed at the next left a label's
+        # ``tack`` on a towel, where moving it raised in ``replace``, and gave a label after a towel none.
+        self.binders: dict[type, SpecBinder] = {}
+        for name in self.tuner.names:
+            self.binders.setdefault(type(self.tuner.built[name]), SpecBinder(self.tuner.built[name]))
+        self.binder = self.binders[type(self.tuner.built[self.tuner.selected])] if self.tuner else None
+        self._groups: dict[type, Any] = {}
         # Off the request rather than off a task, for the reason
         # :class:`~robosimstudio_studio.panels.PanelArm` reads its control rate
         # the same way: an arrangement is a fact about how the scene is stepped,
@@ -128,7 +135,11 @@ class PanelTune(Panel):
                 f"`{TIER_MARK['recapture'].strip()}` recapture &nbsp; "
                 f"`{TIER_MARK['rebuild'].strip()}` needs rebuild &nbsp; rest lands next substep."
             )
-            self.binder.build(gui)
+            for kind, binder in self.binders.items():
+                # Unlabelled, so no heading: a group shown while a sheet of its class is selected.
+                with gui.add_folder(None, visible=binder is self.binder) as group:
+                    binder.build(gui)
+                self._groups[kind] = group
             self.binder.set_disabled(self.tuner.inert.get(self.tuner.selected, ()))
             self._save_name = gui.add_text("Name", initial_value=f"{self.tuner.selected or 'cloth'}_tuned")
             save = gui.add_button("Save as preset file")
@@ -152,6 +163,7 @@ class PanelTune(Panel):
             if self.cloth_requested:
                 name, self.cloth_requested = self.cloth_requested, ""
                 self.tuner.select(name)
+                self._show_selected()
                 self.binder.set_spec(self.tuner.material)
                 self.binder.set_disabled(self.tuner.inert.get(self.tuner.selected, ()))
                 # Its own class's presets: a label's are not a towel's.
@@ -196,6 +208,13 @@ class PanelTune(Panel):
             self.tuner.set_field(field, value)
         if changed or self.physics.drain():
             self.refresh()
+
+    def _show_selected(self) -> None:
+        """Make the selected sheet's class's binder the one drained, and show only its group."""
+        kind = type(self.tuner.built[self.tuner.selected])
+        self.binder = self.binders[kind]
+        for other, group in self._groups.items():
+            group.visible = other is kind
 
     def _sync_preset(self) -> None:
         """Show the selected cloth's preset in the dropdown.
