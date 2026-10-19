@@ -300,7 +300,7 @@ class SphBridge:
             from .bridge import write_obj
 
             morph = gs.morphs.Mesh(
-                file=write_obj(self.recipe, geom, mesh),
+                file=write_obj(self, geom, mesh),
                 align=False,
                 convexify=False,
                 decimate=False,

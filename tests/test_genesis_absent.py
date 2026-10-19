@@ -15,7 +15,9 @@ convention, and which mirrors may carry a reaction at all.
 
 from __future__ import annotations
 
+import gc
 import importlib.util
+import os
 import subprocess
 import sys
 import unittest
@@ -145,6 +147,47 @@ class TestTheCouplingArithmetic(unittest.TestCase):
         self.assertEqual(len(_surface_of(one)), 4, "a single tet is all boundary")
         two = np.array([[0, 1, 2, 3], [1, 2, 3, 4]])
         self.assertEqual(len(_surface_of(two)), 6, "two tets share one face, so 8 - 2")
+
+
+class _Bridge:
+    """What :func:`write_obj` reads off a bridge: its recipe, and a lifetime to hang the files on."""
+
+    def __init__(self) -> None:
+        self.recipe = {"island": "genesis"}
+
+
+def _mesh(n: int):
+    return np.full((n, 3), float(n)), np.zeros((n, 3), dtype=int)
+
+
+def _vertices_in(path: str) -> int:
+    with open(path) as handle:
+        return sum(line.startswith("v ") for line in handle)
+
+
+class TestTheMirrorFilesAreTheBridgesOwn(unittest.TestCase):
+    def test_two_bridges_of_one_island_write_apart(self):
+        """Two bridges of one island name -- two shards, two live pages -- each read back their own mesh."""
+        from robosimstudio.engines.genesis.bridge import write_obj
+
+        geom = _geom(kind="mesh", shape=3)
+        one, two = _Bridge(), _Bridge()
+        path_one, path_two = write_obj(one, geom, _mesh(4)), write_obj(two, geom, _mesh(5))
+        self.assertNotEqual(path_one, path_two)
+        self.assertEqual((_vertices_in(path_one), _vertices_in(path_two)), (4, 5))
+        self.assertEqual(os.path.basename(path_one), "mirror-3.obj", "Genesis names the link after the file")
+
+    def test_a_bridges_mirrors_go_with_it(self):
+        from robosimstudio.engines.genesis.bridge import write_obj
+
+        bridge = _Bridge()
+        first = write_obj(bridge, _geom(kind="mesh", shape=3), _mesh(4))
+        second = write_obj(bridge, _geom(kind="mesh", shape=4), _mesh(4))
+        root = os.path.dirname(first)
+        self.assertEqual(os.path.dirname(second), root, "one directory per bridge, not per mirror")
+        del bridge
+        gc.collect()
+        self.assertFalse(os.path.exists(root))
 
 
 class TestTheLiquidCouplerArithmetic(unittest.TestCase):

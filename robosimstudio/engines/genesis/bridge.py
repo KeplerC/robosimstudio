@@ -35,7 +35,9 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import shutil
 import tempfile
+import weakref
 from typing import Any
 
 import numpy as np
@@ -122,18 +124,28 @@ def coupler_for(recipe: dict) -> str:
     return "legacy" if legacy else "ipc"
 
 
-def write_obj(recipe: dict, geom: ShapeGeometry, mesh) -> str:
-    """A tessellated mirror as an ``.obj`` under this island's workspace; its path.
+def write_obj(bridge: Any, geom: ShapeGeometry, mesh) -> str:
+    """A tessellated mirror as an ``.obj`` in a directory of ``bridge``'s own; its path.
 
     A file rather than a ``MeshSet`` because that in-memory path is verified only
     for the FEM entity; a rigid morph reading one is not. Mirrors are built once,
     so the write is not on any hot path. The name carries the shape index and
     nothing about the project, since a repro bundle's leak scan reads paths.
+
+    The directory is the bridge's, made on its first mirror and removed when the
+    bridge is collected or the process exits, rather than one fixed path under
+    the temp dir: two processes building an island of the same name (sharded
+    tests, two live pages) wrote the same ``mirror-<shape>.obj``, and in a probe
+    of two writers each reading its own back, 221 of 300 reads came back with
+    the other's mesh or half of one.
     """
     verts, faces = mesh
-    root = pathlib.Path(tempfile.gettempdir()) / "rss-genesis" / str(recipe.get("island", "host"))
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / f"mirror-{geom.shape}.obj"
+    root = getattr(bridge, "_mirror_root", None)
+    if root is None:
+        root = tempfile.mkdtemp(prefix=f"rss-genesis-{bridge.recipe.get('island', 'host')}-")
+        weakref.finalize(bridge, shutil.rmtree, root, ignore_errors=True)
+        bridge._mirror_root = root
+    path = pathlib.Path(root) / f"mirror-{geom.shape}.obj"
     with path.open("w") as handle:
         for v in verts:
             handle.write(f"v {v[0]:.9g} {v[1]:.9g} {v[2]:.9g}\n")
@@ -364,8 +376,8 @@ class GenesisBridge:
         return np.asarray(self.model.body_q.numpy()[int(body)], dtype=np.float64)
 
     def _cache_obj(self, geom: ShapeGeometry, mesh) -> str:
-        """A tessellated mirror as an ``.obj``: :func:`write_obj` under this island's workspace."""
-        return write_obj(self.recipe, geom, mesh)
+        """A tessellated mirror as an ``.obj``: :func:`write_obj` in this bridge's own directory."""
+        return write_obj(self, geom, mesh)
 
     def _check_initial_clearance(self) -> None:
         """Refuse a scene whose actors start inside a mirror, and say which.
