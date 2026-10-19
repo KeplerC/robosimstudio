@@ -553,6 +553,19 @@ def _free_coord(builder: newton.ModelBuilder, body: int) -> int:
     return -1
 
 
+def _z_axes(quats) -> np.ndarray:
+    """``(N, 3)`` local +z axes in world of ``(N, 4)`` xyzw quaternions, normalising as ``quat_to_mat`` does.
+
+    The third column of :func:`~robosimstudio.core.math.quat_to_mat` over the
+    whole array at once, with its identity for a quaternion of zero length.
+    """
+    q = np.asarray(quats, dtype=np.float64).reshape(-1, 4)
+    x, y, z, w = q.T
+    n = np.einsum("ij,ij->i", q, q)
+    s = np.divide(2.0, n, out=np.zeros_like(n), where=n >= 1.0e-12)
+    return np.stack([s * (x * z + y * w), s * (y * z - x * w), 1.0 - s * (x * x + y * y)], axis=1)
+
+
 def _carried(poses: np.ndarray, start: np.ndarray, end: np.ndarray) -> np.ndarray:
     """``(N, 7)`` poses moved rigidly with a body that went from pose ``start`` to pose ``end``."""
     from robosimstudio.core.math import mat_to_quat, quat_to_mat
@@ -996,11 +1009,8 @@ class EntityBrush(Entity):
 
     def tip_positions(self, body_q, *, world: int = 0) -> np.ndarray:
         """``(count, 3)`` tip points in world [m], from a read-back ``body_q`` (whole or one world's)."""
-        from robosimstudio.core.math import quat_to_mat
-
         poses = self._template_body_q(body_q, world)[self.tips]
-        axes = np.stack([quat_to_mat(q[3:7])[:, 2] for q in poses]) if len(poses) else np.zeros((0, 3))
-        return poses[:, :3] + axes * float(self.half_height)
+        return poses[:, :3] + _z_axes(poses[:, 3:7]) * float(self.half_height)
 
     def read(self, form: str, snapshot):
         """The tips as this brush's ``points``: where it touches the world."""

@@ -282,6 +282,33 @@ class TestOneWorldsLattice(unittest.TestCase):
         np.testing.assert_array_equal([1] * 6 + [0] * 6 + [3] * 6, brush._grid_device.array.numpy())
 
 
+class TestTheTipsAreRead(unittest.TestCase):
+    """The tips' axes over the whole ``(N, 4)`` array agree with ``quat_to_mat`` taken one tip at a time."""
+
+    def test_the_axes_match_one_quaternion_at_a_time(self) -> None:
+        from robosimstudio.core.math import quat_to_mat
+        from robosimstudio_materials.brush import _z_axes
+
+        quats = np.random.default_rng(7).normal(size=(64, 4))
+        quats[1] = 0.0  # no length: quat_to_mat's identity
+        quats[2] *= 1.0e-3  # far off the unit sphere
+        expected = np.stack([quat_to_mat(q)[:, 2] for q in quats])
+        np.testing.assert_allclose(_z_axes(quats), expected, atol=1e-12)
+        self.assertEqual((0, 3), _z_axes(np.zeros((0, 4))).shape)
+
+    def test_a_tip_is_half_a_capsule_along_its_axis(self) -> None:
+        from robosimstudio.core.math import quat_to_mat
+        from robosimstudio_materials.brush import EntityBrush
+
+        rng = np.random.default_rng(3)
+        body_q = np.concatenate([rng.normal(size=(10, 3)), rng.normal(size=(10, 4))], axis=1).astype(np.float32)
+        brush = EntityBrush.__new__(EntityBrush)
+        brush.worlds, brush.half_height = None, 0.0025
+        brush.bristle_bodies = np.array([[0, 2], [5, 7]], dtype=np.int32)
+        expected = [body_q[b, :3] + quat_to_mat(body_q[b, 3:7])[:, 2] * 0.0025 for b in (2, 7)]
+        np.testing.assert_allclose(brush.tip_positions(body_q), expected, atol=1e-6)
+
+
 class TestTheCatalogue(unittest.TestCase):
     def test_the_atom_and_its_handler(self) -> None:
         from robosimstudio.assetlib.semantics.atoms import get_atom
