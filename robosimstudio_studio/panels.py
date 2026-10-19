@@ -914,18 +914,19 @@ class PanelCloth(Panel):
     def grab_set(self, set_name: str) -> int:
         """Take hold of one declared set. Main thread. Returns particles held.
 
-        Aimed at the set's own centroid (or at the hand its slot is pinned to)
-        and restricted to its own indices, with
+        Aimed at the set's own centroid and restricted to its own indices, with
         the seize radius widened to reach the furthest of them -- so what is held
         is the strip the garment declares, not whatever happened to be within
         3 cm of a cursor. The dragger's ``max_particles`` still caps it, keeping
         the ones nearest the centroid, which is why the readout says how many:
         the shirt's ``far_side`` is three thousand particles and a handle holding
-        sixty of them should not look like a handle holding all of it.
+        sixty of them should not look like a handle holding all of it. On a slot
+        pinned to a hand it is aimed at the hand instead (:meth:`_hand_frame`),
+        and the cap keeps the ones nearest the hand.
 
-        Restores the click radius afterwards, because that number is the aim
-        tolerance for the *other* way of grabbing and a set grab has no business
-        changing what counts as a miss.
+        Restores the click radius afterwards (:meth:`_grab_all`), because that
+        number is the aim tolerance for the *other* way of grabbing and a set
+        grab has no business changing what counts as a miss.
         """
         handle = self.env.handles.deformables.get(self.selected)
         cloth = self.env.scene.by_name.get(self.selected)
@@ -936,22 +937,10 @@ class PanelCloth(Panel):
             return 0
         points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
         slot = self._acquire()
-        # A slot pinned to a hand takes the set in that hand's frame, so the strip keeps the place it
-        # has relative to the fingers. Taken in the identity frame at its centroid, the first step that
-        # follows the hand would turn every offset by the hand's orientation: a YAM pointing down holds
-        # its strip mirrored end for end.
         arm = self.follow_arm[slot.index]
-        centre, quat = self.env.arm(arm).ee_pose(self.env.state) if arm else (points.mean(axis=0), IDENTITY_QUAT)
-        centre, quat = np.asarray(centre, dtype=np.float64), np.asarray(quat, dtype=np.float64)
-        reach = float(np.linalg.norm(points - centre, axis=1).max())
-
+        centre, quat = self._hand_frame(arm) if arm else (points.mean(axis=0), IDENTITY_QUAT)
         dragger = self.draggers[slot.index]
-        was = dragger.radius
-        dragger.radius = reach + 1e-6
-        try:
-            taken = dragger.grab(self.env.state, centre, quat, candidates=indices, fallback_nearest=False)
-        finally:
-            dragger.radius = was
+        taken = self._grab_all(dragger, indices, centre, quat)
         if not taken:
             self._release(slot)
             return 0
@@ -1112,6 +1101,12 @@ class PanelCloth(Panel):
             self.miss = dragger.last_distance
             return False
         self.miss = 0.0
+        arm = self.follow_arm[slot.index]
+        if arm:
+            # Found where the click aimed, held where the hand is: the same patch, seized again in the
+            # frame grab_set takes a set in on a pinned slot.
+            position, quat = self._hand_frame(arm)
+            self._grab_all(dragger, dragger.grabbed_indices.copy(), position, quat)
         self._hand_over(slot, name, dragger, position, quat)
         slot.place(position, quat, key=("cloth", name), label=f"{name} ({taken})")
         # A task with a rigid pull-tab must let go of it once something else
@@ -1119,6 +1114,35 @@ class PanelCloth(Panel):
         if hasattr(cloth, "release_handle"):
             cloth.release_handle()
         return True
+
+    def _hand_frame(self, arm: str) -> tuple[np.ndarray, np.ndarray]:
+        """The frame a grip on a slot pinned to ``arm`` keeps its offsets in: the hand's pose, now.
+
+        :meth:`drain` aims a pinned slot at the hand's pose every step, so a grip
+        taken in any other frame -- the identity at a click, or at a set's
+        centroid -- is moved onto the hand on the next step and turned by its
+        orientation: a YAM pointing down holds its strip mirrored end for end.
+        Taken in the hand's frame, the patch keeps the place it has relative to
+        the fingers. Both ways of grabbing, a click and a declared set, use it.
+        """
+        position, quat = self.env.arm(arm).ee_pose(self.env.state)
+        return np.asarray(position, dtype=np.float64), np.asarray(quat, dtype=np.float64)
+
+    def _grab_all(self, dragger, indices, position, quat) -> int:
+        """Seize ``indices`` in the frame at ``position``, the radius widened to reach the furthest of them.
+
+        Up to the dragger's ``max_particles``, the nearest kept. Restores the
+        click radius afterwards: it is the aim tolerance of a click, and a grab
+        of particles already chosen has no business changing what counts as a
+        miss.
+        """
+        points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
+        was = dragger.radius
+        dragger.radius = float(np.linalg.norm(points - position, axis=1).max()) + 1e-6
+        try:
+            return dragger.grab(self.env.state, position, quat, candidates=indices, fallback_nearest=False)
+        finally:
+            dragger.radius = was
 
     def _hand_over(self, slot, name: str, dragger, position, quat) -> bool:
         """Give a landed grab to the engine that owns the body. Main thread.

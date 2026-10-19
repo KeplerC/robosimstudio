@@ -397,6 +397,44 @@ class TestLettingGoIsVisible(unittest.TestCase):
             session.teardown()
 
 
+class TestAGripPinnedToAHandIsTakenWhereItIs(unittest.TestCase):
+    """A click on the cloth with its slot pinned to a hand holds the patch where it lies, in the hand's frame.
+
+    The slot is aimed at the hand's pose every step. Seized at the click in the
+    identity frame, the patch was walked onto the hand from the first step (15 mm
+    a step, the pin's rate limit) and turned by the hand's orientation; a declared
+    set taken onto a hand already kept the hand's frame, and a click now takes the
+    same one.
+    """
+
+    def test_the_patch_stays_put_and_rides_the_hand(self) -> None:
+        import numpy as np
+
+        from tests.fixtures.grasp import open_session, tick
+
+        sim = _sim(cloth=True)
+        session = open_session(sim, 8971)
+        try:
+            grips = session.deformables
+            arm = next(iter(session.arms))
+            grips.follow_arm[0] = arm
+            towel = sim["towel"]
+            before = np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)
+            grips.click_at("towel", before[int(towel.particles[0])])
+            tick(session, 10)
+            held = np.asarray(grips.draggers[0].grabbed_indices, dtype=np.int64)
+            self.assertTrue(len(held), "the click missed, so this is untested")
+            after = np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)
+            moved = float(np.linalg.norm(after[held] - before[held], axis=1).max())
+            hand = np.asarray(session.arms[arm].ik.ee_pose(sim.state)[0], dtype=np.float64)
+            self.assertGreater(float(np.linalg.norm(before[held] - hand, axis=1).min()), 0.1, "far from the hand")
+            self.assertLess(
+                moved, 0.005, f"the held patch moved {moved * 1000:.0f} mm toward the hand in 10 steps; 127 before"
+            )
+        finally:
+            session.teardown()
+
+
 class TestTheInspectorWaitsToBeAsked(unittest.TestCase):
     def test_nothing_is_selected_on_a_scene_with_no_goal(self) -> None:
         """A hand-assembled scene has no "first thing the goal is about", and the
