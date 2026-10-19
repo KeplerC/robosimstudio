@@ -203,6 +203,10 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
         "tape and labels (the `tape` kind: a sheet stuck to a body by bonds that let go, with a pull tab)",
         ("TAPE_60HZ", "TapeMaterialSpec", "TapeSpec", "tape", "tapes"),
     ),
+    "robosimstudio_materials.cutting": (
+        "cutting (the `cutting` kind: a block a knife parts, on the walk-on-spheres cage cutter)",
+        ("CUTTING_50HZ", "CuttableMaterialSpec", "CuttableSpec", "KnifeSpec", "cuttable", "cuttables", "knife"),
+    ),
     "robosimstudio_materials.water": (
         "water (the `water` kind: a liquid that keeps its volume, on Genesis's SPH)",
         ("WATER_60HZ", "WaterMaterialSpec", "WaterSpec", "water"),

@@ -73,10 +73,12 @@ KINDS = {
     "dough": ("dough", "ParticleBodySpec", "robosimstudio_materials.dough", "dough"),
     "brush": ("brush", "BrushSpec", "robosimstudio_materials.brush", "brush"),
     "tape": ("tape", "TapeSpec", "robosimstudio_materials.tape", "tape"),
+    "cutting": ("cuttable", "CuttableSpec", "robosimstudio_materials.cutting.entity", "cuttable"),
 }
 """Kind -> its constructor, its spec, the module its entity is defined in, and the entity's registered name.
 
-The entity's name is the kind's except for ``granular``, whose entity is a ``heap``."""
+The entity's name is the kind's except for ``granular``, whose entity is a ``heap``, and ``cutting``, whose
+block is a ``cuttable`` (its knife is a ``knife``)."""
 
 FLAT = {
     "sheet": "robosimstudio_materials.cloth",
@@ -98,6 +100,10 @@ FLAT = {
     "BrushSpec": "robosimstudio_materials.brush",
     "tape": "robosimstudio_materials.tape",
     "TapeSpec": "robosimstudio_materials.tape",
+    "cuttable": "robosimstudio_materials.cutting.spec",
+    "CuttableSpec": "robosimstudio_materials.cutting.spec",
+    "knife": "robosimstudio_materials.cutting.spec",
+    "KnifeSpec": "robosimstudio_materials.cutting.spec",
 }
 """Flat name -> the module the thing behind it is defined in: each kind's constructor and spec, and the dough's roller.
 
@@ -109,8 +115,11 @@ LISTED = [
     "bag",
     "bags",
     "brush",
+    "cuttable",
+    "cuttables",
     "dough",
     "heap",
+    "knife",
     "liquid",
     "materials",
     "paper",
@@ -334,7 +343,9 @@ class TestEachKindStandsAlone(unittest.TestCase):
                 )
                 self.assertEqual(spec, got["spec"])
                 self.assertEqual(entity_module, got["entity"])
-                self.assertEqual(f"{kind}.py" if kind != "rod" else "__init__.py", Path(got["file"]).name)
+                self.assertEqual(
+                    f"{kind}.py" if kind not in ("rod", "cutting") else "__init__.py", Path(got["file"]).name
+                )
                 self.assertEqual(
                     [], [m for m in got["loaded"] if m.split(".")[1] in others], "a module of another kind was imported"
                 )
@@ -395,6 +406,7 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
                 "robosimstudio_materials.bag",
                 "robosimstudio_materials.brush",
                 "robosimstudio_materials.cloth",
+                "robosimstudio_materials.cutting",
                 "robosimstudio_materials.dough",
                 "robosimstudio_materials.granular",
                 "robosimstudio_materials.liquid",

@@ -117,9 +117,15 @@
 
 ## [19 Tape](19_tape/README.md)
 
-| [Peel a label](19_tape/00_peel_a_label.py) | [Peel a label, scored](19_tape/01_peel_a_label_scored.py) |
+| [Peel a label](19_tape/00_peel_a_label.py) | [Peel a label, scored](19_tape/01_peel_a_label_scored.py) | [Stick a label](19_tape/02_stick_a_label.py) |
+|---|---|---|
+| <img src="19_tape/media/00_peel_a_label.webp" width="240"> | | <img src="19_tape/media/02_stick_a_label.webp" width="240"> |
+
+## [20 Cutting](20_cutting/README.md)
+
+| [Cut tofu](20_cutting/00_cut_tofu.py) | [Cut tofu, scored](20_cutting/01_cut_tofu_scored.py) |
 |---|---|
-| <img src="19_tape/media/00_peel_a_label.webp" width="240"> | |
+| <img src="20_cutting/media/00_cut_tofu.webp" width="240"> | |
 
 ## [21 Water](21_water/README.md)
 

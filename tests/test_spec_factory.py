@@ -23,16 +23,20 @@ def _declarations(size: float):
     from robosimstudio.domains.rigid import Body
     from robosimstudio_materials.bag import Bag
     from robosimstudio_materials.brush import Brush
+    from robosimstudio_materials.cutting import Cuttable
     from robosimstudio_materials.mpm.declare import Heap
     from robosimstudio_materials.rod import Rod
     from robosimstudio_materials.rod.band import band
 
+    knife = rss.knife(name="knife", blade_length=4 * size)
     return (
         ("rigid", Body.from_spec(rss.box(name="cube", half=(size,) * 3), name="cube")),
         ("granular", Heap.from_spec(rss.heap(name="rice", size=(size, size, size)), name="rice")),
         ("bag", Bag.from_spec(rss.bag(name="bag", size=(8 * size, 8 * size)), name="bag")),
         ("rod", Rod.from_spec(band(name="band", diameter=2 * size), name="band")),
         ("brush", Brush.from_spec(rss.brush(name="brush", sole=(4 * size, 2 * size, 0.008)), name="brush")),
+        ("cuttable", Cuttable.from_spec(rss.cuttable(name="tofu", knife=knife, size=(size,) * 3), name="tofu")),
+        ("knife", Cuttable.knife(knife, name="knife")),
     )
 
 

@@ -282,7 +282,11 @@ class DeformableHandle:
     an offline replay of a recorded ``particle_q`` regrows the same surface;
     :class:`~robosimstudio.core.render.particles.ParticleSurfacer` is one, and the
     particle kinds install one when their spec says ``render="surface"``
-    (``robosimstudio_materials.mpm.EntityParticleBody.surface_mesh``)."""
+    (``robosimstudio_materials.mpm.EntityParticleBody.surface_mesh``). A cut
+    block's corners do not determine its surface, so it answers from the
+    drawings it kept under the corners it wrote and draws nothing at others: a
+    replay in the process that cut it regrows it, one in another process does
+    not (``robosimstudio_materials.cutting.EntityCuttable.surface_mesh``)."""
 
 
 @dataclass

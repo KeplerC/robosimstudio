@@ -42,6 +42,14 @@ assets/embodiments/robotiq_2f85/
 Where each file came from and what was changed is recorded in
 assets/PROVENANCE.md.
 
+robosimstudio_materials/cutting/cagecut/
+    The cagecut package of "Fast Cutting of Cage Based Deformation with Walk
+    on Spheres" (Saeed, Lambiri, Schneider, Nowrouzezahrai and Kry, SIGGRAPH
+    2026), from https://github.com/hoskillua/wos_cutting_siggraph26 at commit
+    74190cf. MIT License (robosimstudio_materials/cutting/cagecut/LICENSE).
+    Copyright (c) 2026 Hossam Mohamed Saeed. What was changed is recorded in
+    that folder's __init__.py.
+
 .github/media/logo.png
     The sponge emoji (U+1F9FD) from Noto Emoji
     (https://github.com/googlefonts/noto-emoji), padded to a square.

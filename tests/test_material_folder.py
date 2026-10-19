@@ -139,7 +139,9 @@ class TestAPresetIsOneTheSheetCanWear(unittest.TestCase):
 
         panel, gui, _ = _page(_sheet("label", PAPER_LABEL), _sheet("towel", ClothMaterialSpec()))
         preset = gui.find("Preset")
-        self.assertEqual(("(as built)", "paper_label"), preset.options)
+        # Every tape preset, the contact adhesion ones too: ``adhesion`` is REBUILD, and a stuck label
+        # rebuilds under either law.
+        self.assertEqual(("(as built)", "duct_tape", "label", "masking_tape", "paper_label"), preset.options)
         gui.find("Cloth").fire("towel")
         panel.drain()
         self.assertIn("terry_towelling", preset.options)
@@ -153,10 +155,181 @@ class TestAPresetIsOneTheSheetCanWear(unittest.TestCase):
         from robosimstudio_materials.tape import PAPER_LABEL
 
         panel, _, _ = _page(_sheet("label", PAPER_LABEL))
-        with self.assertRaisesRegex(ValueError, "TapeMaterialSpec"):
-            panel.tuner.adopt("terry_towelling")
-        panel.tuner.adopt("paper_label")
+        self.assertFalse(panel.tuner.adopt("terry_towelling"))
+        self.assertIn("TapeMaterialSpec", panel.tuner.refused)
+        self.assertIs(PAPER_LABEL, panel.tuner.material, "nothing loaded")
+        self.assertTrue(panel.tuner.adopt("paper_label"))
         self.assertIs(PAPER_LABEL, panel.tuner.material)
+
+    def test_the_presets_are_listed_once(self) -> None:
+        """Not once more a preset: each name comes from the listing, so none is looked up in it again."""
+        from unittest import mock
+
+        from robosimstudio_materials.tape import PAPER_LABEL
+        from robosimstudio_studio.tuning import tuner
+
+        panel, _, _ = _page(_sheet("label", PAPER_LABEL))
+        with mock.patch.object(tuner, "list_materials", wraps=tuner.list_materials) as listed:
+            offered = panel.tuner.presets()
+        self.assertEqual(("duct_tape", "label", "masking_tape", "paper_label"), offered)
+        self.assertEqual(1, listed.call_count)
+
+
+class TestAnEditTheSpecRefusesIsNotTaken(unittest.TestCase):
+    """A tape's reach dragged under its peak_opening: ``replace`` reruns ``TapeMaterialSpec.__post_init__``,
+    which raised out of ``SpecBinder.drain`` and the panel's drain, and ended the page's loop."""
+
+    def test_the_folder_keeps_the_spec_and_says_why(self) -> None:
+        from robosimstudio_materials.tape import LABEL
+
+        panel, gui, _ = _page(_sheet("label", LABEL))
+        _slider(gui, "reach").fire(4.0e-4)
+        panel.drain()
+        self.assertEqual(LABEL.reach, panel.binder.spec.reach)
+        self.assertEqual(LABEL.reach, panel.tuner.material.reach, "nothing reached the working spec")
+        self.assertAlmostEqual(LABEL.reach, _slider(gui, "reach").value, msg="the slider goes back")
+        self.assertIn("reach not changed", panel.session.status)
+        _slider(gui, "reach").fire(2.0e-3)
+        panel.drain()
+        self.assertEqual(2.0e-3, panel.tuner.material.reach, "the next edit the spec takes lands")
+        self.assertEqual("", panel.binder.refused)
+
+    def test_the_inspector_keeps_its_loop_too(self) -> None:
+        from robosimstudio_materials.tape import LABEL
+        from robosimstudio_studio.tuning.binder import SpecBinder
+
+        binder, gui = SpecBinder(LABEL), _StubGui()
+        binder.build(gui)
+        _slider(gui, "peak_opening").fire(2.0e-3)
+        self.assertEqual({}, binder.drain())
+        self.assertIs(LABEL, binder.spec)
+        self.assertIn("peak_opening < reach", binder.refused)
+
+
+def _tape(material=None, **spec):
+    """A real tape whose contact law's parameters sit on the CPU, its cloth fields landing nowhere."""
+    from unittest import mock
+
+    import warp as wp
+
+    from robosimstudio_materials.cloth import EntityCloth
+    from robosimstudio_materials.tape import CONTACT_FIELDS, LABEL, EntityTape, tape
+
+    material = material or LABEL
+    label = EntityTape(tape(name="label", on="box", material=material, **spec))
+    label.contact, label.bonds = material.adhesion == "contact", np.arange(126, dtype=np.int32)
+    label.owned_particles = lambda: np.arange(4)
+    label._contact = {"params": wp.array([getattr(material, f) for f in CONTACT_FIELDS], dtype=float, device="cpu")}
+    cloth = Tunable(name="material", spec=material, write=lambda field, value: True)
+    with mock.patch.object(EntityCloth, "tunables", return_value=(cloth,)):
+        offered = label.tunables()
+    label.tunables = lambda pipeline=None: offered
+    return label
+
+
+def _law(label) -> np.ndarray:
+    """``peak_opening`` and ``reach`` as the kernels hold them [m]."""
+    return label._contact["params"].numpy()[1:3]
+
+
+class TestAWholeLawIsWrittenAsOneSet(unittest.TestCase):
+    """Revert, ``(as built)`` and a preset wrote a tape's law one field at a time, each checked against the
+    rest as the kernels held them: with the peak and the reach dragged to 0.1 and 0.4 mm, Revert wrote
+    LABEL's 0.5 mm peak first, past the 0.4 mm reach, and the ``ValueError`` ended the page's loop."""
+
+    def _dragged(self):
+        label = _tape(stuck=False)
+        panel, gui, _ = _page(label)
+        _slider(gui, "peak_opening").fire(1.0e-4)
+        panel.drain()
+        _slider(gui, "reach").fire(4.0e-4)
+        panel.drain()
+        np.testing.assert_allclose([1.0e-4, 4.0e-4], _law(label), rtol=1e-6)
+        return label, panel, gui
+
+    def test_revert(self) -> None:
+        from robosimstudio_materials.tape import LABEL
+
+        label, panel, _ = self._dragged()
+        panel.revert_requested = True
+        panel.drain()
+        np.testing.assert_allclose([LABEL.peak_opening, LABEL.reach], _law(label), rtol=1e-6)
+        self.assertIs(LABEL, panel.tuner.material)
+
+    def test_a_preset_then_as_built(self) -> None:
+        from robosimstudio_materials.tape import LABEL, MASKING_TAPE
+
+        label, panel, gui = self._dragged()
+        gui.find("Preset").fire("masking_tape")
+        panel.drain()
+        self.assertAlmostEqual(MASKING_TAPE.strength, float(label._contact["params"].numpy()[0]))
+        np.testing.assert_allclose([MASKING_TAPE.peak_opening, MASKING_TAPE.reach], _law(label), rtol=1e-6)
+        _slider(gui, "peak_opening").fire(1.0e-4)
+        panel.drain()
+        _slider(gui, "reach").fire(4.0e-4)
+        panel.drain()
+        gui.find("Preset").fire("(as built)")
+        panel.drain()
+        np.testing.assert_allclose([LABEL.peak_opening, LABEL.reach], _law(label), rtol=1e-6)
+
+    def test_the_inspector_writes_its_edits_as_one_set_and_refuses_one_the_kernels_do(self) -> None:
+        """Its binder holds the law it was opened on, not what the folder wrote since: a peak it takes can be
+        one the kernels refuse, which is refused on the status line, the slider put back."""
+        from robosimstudio_materials.tape import LABEL
+        from robosimstudio_studio.inspector import PanelInspector
+
+        label, panel, _ = self._dragged()
+        session = SimpleNamespace(env=panel.session.env, server=None, selected=None, status="")
+        inspector, gui = PanelInspector(session), _StubGui()
+        inspector._section_parameters(gui, SimpleNamespace(entity=label))
+        (binder, _), peak = inspector._binders[0], _slider(gui, "peak_opening")
+        peak.fire(8.0e-4)  # under LABEL's 1 mm reach, past the kernels' 0.4 mm
+        inspector.drain()
+        np.testing.assert_allclose([1.0e-4, 4.0e-4], _law(label), rtol=1e-6, err_msg="nothing written")
+        self.assertIn("peak_opening not changed", session.status)
+        self.assertIs(LABEL, binder.spec)
+        self.assertAlmostEqual(LABEL.peak_opening, peak.value, msg="the slider goes back")
+        peak.fire(1.5e-3)  # with the reach in the same drain: past the kernels' reach, under the new one
+        _slider(gui, "reach").fire(2.0e-3)
+        inspector.drain()
+        np.testing.assert_allclose([1.5e-3, 2.0e-3], _law(label), rtol=1e-6)
+        self.assertEqual("", binder.refused)
+
+
+class TestALooseTapeIsOfferedOnlyWhatItCanBeBuiltWith(unittest.TestCase):
+    """A loose tape needs contact adhesion, a rule only ``TapeSpec`` holds: the folder offered it
+    ``paper_label``, whose opening adhesion and zero strength let every bond go, and Apply & rebuild then
+    raised out of the drain."""
+
+    def test_its_presets_are_those_its_spec_takes(self) -> None:
+        _, gui, _ = _page(_tape(stuck=False))
+        self.assertEqual(("(as built)", "duct_tape", "label", "masking_tape"), gui.find("Preset").options)
+        _, gui, _ = _page(_tape(stuck=True))
+        self.assertIn("paper_label", gui.find("Preset").options, "a stuck label rebuilds under either law")
+
+    def test_adopting_another_is_refused_on_the_status_line(self) -> None:
+        from robosimstudio_materials.tape import LABEL
+
+        label = _tape(stuck=False)
+        panel, gui, _ = _page(label)
+        panel.session.status = ""
+        gui.find("Preset").fire("paper_label")
+        panel.drain()
+        self.assertIs(LABEL, panel.tuner.material)
+        self.assertAlmostEqual(LABEL.strength, float(label._contact["params"].numpy()[0]), msg="no bond let go")
+        self.assertIn("only contact adhesion", panel.session.status)
+        self.assertEqual("(as built)", gui.find("Preset").value)
+        self.assertEqual("none", gui.find("Pending rebuild").value)
+
+    def test_opening_adhesion_on_its_slider_is_refused_too(self) -> None:
+        label = _tape(stuck=False)
+        panel, gui, _ = _page(label)
+        _slider(gui, "adhesion").fire("opening")
+        panel.drain()
+        self.assertEqual("contact", panel.tuner.material.adhesion)
+        self.assertEqual("contact", _slider(gui, "adhesion").value, "the control goes back")
+        self.assertIn("adhesion not changed", panel.session.status)
+        self.assertEqual("none", gui.find("Pending rebuild").value)
 
 
 class TestWhatCannotMoveIsNotOffered(unittest.TestCase):
