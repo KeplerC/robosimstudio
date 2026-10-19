@@ -188,6 +188,96 @@ class TestAnEditTheSpecRefusesIsNotTaken(unittest.TestCase):
         self.assertIn("peak_opening < reach", binder.refused)
 
 
+def _tape(material=None, **spec):
+    """A real tape whose contact law's parameters sit on the CPU, its cloth fields landing nowhere."""
+    from unittest import mock
+
+    import warp as wp
+
+    from robosimstudio_materials.cloth import EntityCloth
+    from robosimstudio_materials.tape import CONTACT_FIELDS, LABEL, EntityTape, tape
+
+    material = material or LABEL
+    label = EntityTape(tape(name="label", on="box", material=material, **spec))
+    label.contact, label.bonds = material.adhesion == "contact", np.arange(126, dtype=np.int32)
+    label.owned_particles = lambda: np.arange(4)
+    label._contact = {"params": wp.array([getattr(material, f) for f in CONTACT_FIELDS], dtype=float, device="cpu")}
+    cloth = Tunable(name="material", spec=material, write=lambda field, value: True)
+    with mock.patch.object(EntityCloth, "tunables", return_value=(cloth,)):
+        offered = label.tunables()
+    label.tunables = lambda pipeline=None: offered
+    return label
+
+
+def _law(label) -> np.ndarray:
+    """``peak_opening`` and ``reach`` as the kernels hold them [m]."""
+    return label._contact["params"].numpy()[1:3]
+
+
+class TestAWholeLawIsWrittenAsOneSet(unittest.TestCase):
+    """Revert, ``(as built)`` and a preset wrote a tape's law one field at a time, each checked against the
+    rest as the kernels held them: with the peak and the reach dragged to 0.1 and 0.4 mm, Revert wrote
+    LABEL's 0.5 mm peak first, past the 0.4 mm reach, and the ``ValueError`` ended the page's loop."""
+
+    def _dragged(self):
+        label = _tape(stuck=False)
+        panel, gui, _ = _page(label)
+        _slider(gui, "peak_opening").fire(1.0e-4)
+        panel.drain()
+        _slider(gui, "reach").fire(4.0e-4)
+        panel.drain()
+        np.testing.assert_allclose([1.0e-4, 4.0e-4], _law(label), rtol=1e-6)
+        return label, panel, gui
+
+    def test_revert(self) -> None:
+        from robosimstudio_materials.tape import LABEL
+
+        label, panel, _ = self._dragged()
+        panel.revert_requested = True
+        panel.drain()
+        np.testing.assert_allclose([LABEL.peak_opening, LABEL.reach], _law(label), rtol=1e-6)
+        self.assertIs(LABEL, panel.tuner.material)
+
+    def test_a_preset_then_as_built(self) -> None:
+        from robosimstudio_materials.tape import LABEL, MASKING_TAPE
+
+        label, panel, gui = self._dragged()
+        gui.find("Preset").fire("masking_tape")
+        panel.drain()
+        self.assertAlmostEqual(MASKING_TAPE.strength, float(label._contact["params"].numpy()[0]))
+        np.testing.assert_allclose([MASKING_TAPE.peak_opening, MASKING_TAPE.reach], _law(label), rtol=1e-6)
+        _slider(gui, "peak_opening").fire(1.0e-4)
+        panel.drain()
+        _slider(gui, "reach").fire(4.0e-4)
+        panel.drain()
+        gui.find("Preset").fire("(as built)")
+        panel.drain()
+        np.testing.assert_allclose([LABEL.peak_opening, LABEL.reach], _law(label), rtol=1e-6)
+
+    def test_the_inspector_writes_its_edits_as_one_set_and_refuses_one_the_kernels_do(self) -> None:
+        """Its binder holds the law it was opened on, not what the folder wrote since: a peak it takes can be
+        one the kernels refuse, which is refused on the status line, the slider put back."""
+        from robosimstudio_materials.tape import LABEL
+        from robosimstudio_studio.inspector import PanelInspector
+
+        label, panel, _ = self._dragged()
+        session = SimpleNamespace(env=panel.session.env, server=None, selected=None, status="")
+        inspector, gui = PanelInspector(session), _StubGui()
+        inspector._section_parameters(gui, SimpleNamespace(entity=label))
+        (binder, _), peak = inspector._binders[0], _slider(gui, "peak_opening")
+        peak.fire(8.0e-4)  # under LABEL's 1 mm reach, past the kernels' 0.4 mm
+        inspector.drain()
+        np.testing.assert_allclose([1.0e-4, 4.0e-4], _law(label), rtol=1e-6, err_msg="nothing written")
+        self.assertIn("peak_opening not changed", session.status)
+        self.assertIs(LABEL, binder.spec)
+        self.assertAlmostEqual(LABEL.peak_opening, peak.value, msg="the slider goes back")
+        peak.fire(1.5e-3)  # with the reach in the same drain: past the kernels' reach, under the new one
+        _slider(gui, "reach").fire(2.0e-3)
+        inspector.drain()
+        np.testing.assert_allclose([1.5e-3, 2.0e-3], _law(label), rtol=1e-6)
+        self.assertEqual("", binder.refused)
+
+
 class TestWhatCannotMoveIsNotOffered(unittest.TestCase):
     def test_a_kind_whose_engine_copied_its_material_is_not_on_the_folder(self) -> None:
         panel, gui, _ = _page(_sheet("bag", ClothMaterialSpec(), offers=False))

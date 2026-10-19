@@ -197,12 +197,17 @@ class SpecBinder:
         try:
             spec = replace(self.spec, **taken)
         except ValueError as exc:
-            self.refused = f"{', '.join(taken)} not changed: {exc}"
-            self.set_spec(self.spec)
+            self.refuse(self.spec, f"{', '.join(taken)} not changed: {exc}")
             return {}
         self.spec = spec
         self._refresh_readouts(taken)
         return taken
+
+    def refuse(self, spec: Any, reason: str) -> None:
+        """Take back edits refused after :meth:`drain` took them, by what they were written to: the
+        controls go back to ``spec``, what was taken, and :attr:`refused` says why."""
+        self.refused = reason
+        self.set_spec(spec)
 
     def _refresh_readouts(self, changed: dict[str, Any]) -> None:
         for name, value in changed.items():

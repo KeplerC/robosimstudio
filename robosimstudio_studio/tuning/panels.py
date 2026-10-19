@@ -186,10 +186,10 @@ class PanelTune(Panel):
             return
 
         changed = self.binder.drain() if self.binder is not None else {}
+        if changed and not self.tuner.set_fields(changed):
+            self.binder.refuse(self.tuner.material, self.tuner.refused)
         if self.binder is not None and self.binder.refused:
             self.session.status = self.binder.refused
-        for field, value in changed.items():
-            self.tuner.set_field(field, value)
         if changed or self.physics.drain():
             self.refresh()
 

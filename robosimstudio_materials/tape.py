@@ -982,7 +982,8 @@ class EntityTape(EntityCloth):
         nothing; under opening adhesion no contact kernel runs, so :data:`CONTACT_FIELDS` move nothing.
         A strip stuck to nothing has no bonds for any of them to reach, so there every adhesive field
         moves nothing. Those are the tunable's ``inert`` fields, shown read-only, and a write to one
-        does not land.
+        does not land. Its ``write_many``, what a whole material's write takes, writes contact
+        adhesion's fields as one set (:meth:`write_adhesive_all`).
         """
         base = super().tunables(pipeline)
         if not base:
@@ -1006,7 +1007,13 @@ class EntityTape(EntityCloth):
                 return self.write_adhesive(name, float(value))
             return inner(name, value)
 
-        return (replace(material, write=write, inert=(*material.inert, *idle)),)
+        def write_many(values: dict[str, Any]) -> tuple[str, ...]:
+            # Contact adhesion's fields as one set, and first, so a set refused writes nothing.
+            law = {name: float(v) for name, v in values.items() if name in CONTACT_FIELDS and name not in idle}
+            landed = list(law) if law and self.write_adhesive_all(law) else []
+            return (*landed, *(name for name, v in values.items() if name not in law and write(name, v)))
+
+        return (replace(material, write=write, write_many=write_many, inert=(*material.inert, *idle)),)
 
     def write_break_opening(self, opening: float) -> None:
         """Set how far a bond's particle may lift before it lets go [m]; 0 never lets go. LIVE: the kernel
@@ -1029,19 +1036,33 @@ class EntityTape(EntityCloth):
                 every held bond's spring NaN; one past it makes a law that no longer peaks at
                 ``strength``.
         """
-        if name not in CONTACT_FIELDS:
-            raise KeyError(f"{name!r} is not one of contact adhesion's fields {CONTACT_FIELDS}")
+        return self.write_adhesive_all({name: value})
+
+    def write_adhesive_all(self, values: dict[str, float]) -> bool:
+        """Set several of contact adhesion's fields as one set: checked together, then written together.
+
+        What a whole material's write takes, the material tunable's ``write_many``. One field at a time,
+        a law the spec allows can pass through one it refuses on its way to another: from a
+        ``peak_opening`` of 0.1 mm and a ``reach`` of 0.4 mm back to :data:`LABEL`'s 0.5 and 1 mm, the
+        peak lands first, past the old reach. The fields not in ``values`` are as the kernels hold them.
+        Returns and raises as :meth:`write_adhesive` does, for every field in ``values``.
+        """
+        for name in values:
+            if name not in CONTACT_FIELDS:
+                raise KeyError(f"{name!r} is not one of contact adhesion's fields {CONTACT_FIELDS}")
         params = self._contact.get("params")
         if params is None:
             return False
         # A copy: on the CPU ``numpy()`` is the array itself, and a refused value must not land.
-        values = np.array(params.numpy(), copy=True)
-        values[CONTACT_FIELDS.index(name)] = float(value)
+        held = np.array(params.numpy(), copy=True)
+        for name, value in values.items():
+            held[CONTACT_FIELDS.index(name)] = float(value)
         try:
-            replace(self.spec.material, **{f: float(v) for f, v in zip(CONTACT_FIELDS, values, strict=True)})
+            replace(self.spec.material, **{f: float(v) for f, v in zip(CONTACT_FIELDS, held, strict=True)})
         except ValueError as exc:
-            raise ValueError(f"tape {self.spec.name!r}: {name} = {value} not written: {exc}") from None
-        params.assign(values)
+            written = ", ".join(f"{name} = {value}" for name, value in values.items())
+            raise ValueError(f"tape {self.spec.name!r}: {written} not written: {exc}") from None
+        params.assign(held)
         return True
 
     def write_tack(self, tack: float) -> None:

@@ -178,6 +178,17 @@ class TestTheContactLawsLiveWrites(unittest.TestCase):
         self.assertTrue(self.label.write_adhesive("peak_opening", 1.5e-3))
         np.testing.assert_allclose([1.5e-3, 2.0e-3], self.params()[1:3], rtol=1e-6)
 
+    def test_a_set_written_together_moves_the_peak_past_the_reach_the_kernels_held(self) -> None:
+        """What a whole material's write takes: one field at a time, the peak would land past the old reach."""
+        self.assertTrue(self.label.write_adhesive_all({"peak_opening": 1.0e-4, "reach": 4.0e-4}))
+        with self.assertRaisesRegex(ValueError, "peak_opening < reach"):
+            self.label.write_adhesive("peak_opening", 5.0e-4)
+        self.assertTrue(self.label.write_adhesive_all({"strength": 1.0e4, "peak_opening": 5.0e-4, "reach": 1.0e-3}))
+        np.testing.assert_allclose([1.0e4, 5.0e-4, 1.0e-3], self.params()[:3], rtol=1e-6)
+        with self.assertRaisesRegex(ValueError, "peak_opening < reach"):
+            self.label.write_adhesive_all({"strength": 2.0e4, "peak_opening": 2.0e-3})
+        self.assertAlmostEqual(1.0e4, float(self.params()[0]), msg="a set refused writes none of it")
+
     def test_a_write_before_the_kernels_are_bound_says_it_did_not_land(self) -> None:
         """The material tunable passes the write's word on, so a panel does not show a field it never moved."""
         from unittest import mock
