@@ -72,8 +72,9 @@ class PanelInspector(Panel):
         self._folder: Any = None
         self._gui: Any = None
         self._shown: str = ""
-        self._binders: list[tuple[Any, Any]] = []
-        """``(binder, tunable)`` for the current subject, drained each step."""
+        self._binders: list[tuple[Any, Any, str]] = []
+        """``(binder, tunable, sheet)`` for the current subject, drained each step. ``sheet`` is the
+        name the page's ``Material`` folder knows the tunable by, ``""`` where it writes directly."""
         self._live: list[Any] = []
         """Read-only widgets rewritten on refresh."""
 
@@ -252,10 +253,26 @@ class PanelInspector(Panel):
             for tunable in tunables:
                 heading = f"### {tunable.name}"
                 gui.add_markdown(f"{heading}\n\n*{tunable.summary}*" if tunable.summary else heading)
-                binder = SpecBinder(tunable.spec)
+                sheet = self._sheet(subject, tunable)
+                # Opened on what the folder holds, which edits since the build have moved.
+                binder = SpecBinder(self.session.tune.tuner.working[sheet] if sheet else tunable.spec)
                 binder.build(gui)
                 binder.set_disabled(getattr(tunable, "inert", ()))
-                self._binders.append((binder, tunable))
+                self._binders.append((binder, tunable, sheet))
+
+    def _sheet(self, subject, tunable) -> str:
+        """The name the page's ``Material`` folder tunes this tunable under, or ``""`` when it does not.
+
+        Both bind a sheet's ``material`` tunable, and the folder's tuner holds the working spec that
+        ``Apply & rebuild``, Revert, a preset and ``Pending rebuild`` read. An edit here that wrote the
+        tunable directly reached none of them, so where the folder tunes this sheet its edits go
+        through it. A page with no folder (the ``drive`` panels), or a sheet it does not show, writes
+        directly, as before.
+        """
+        tuner = getattr(getattr(self.session, "tune", None), "tuner", None)
+        if tunable.name != "material" or not tuner:
+            return ""
+        return next((name for name, entity in tuner.entities.items() if entity is subject.entity), "")
 
     # ------------------------------------------------------------------- drain
     def drain(self) -> None:
@@ -265,7 +282,10 @@ class PanelInspector(Panel):
         if key != self._shown:
             self._rebuild()
             return
-        for binder, tunable in self._binders:
+        for binder, tunable, sheet in self._binders:
+            if sheet:
+                self._drain_sheet(binder, sheet)
+                continue
             before = binder.spec
             taken = binder.drain()
             try:
@@ -275,11 +295,32 @@ class PanelInspector(Panel):
                 if taken:
                     tunable.write_fields(taken)
             except ValueError as exc:
-                # Refused beside what the entity holds (a tape's reach the Material folder moved under
-                # this peak), which this binder's spec cannot see: refused, not raised out of the loop.
+                # Refused beside what the entity holds (a tape's reach a script wrote under this peak),
+                # which this binder's spec cannot see: refused, not raised out of the loop.
                 binder.refuse(before, f"{', '.join(taken)} not changed: {exc}")
             if binder.refused:
                 self.session.status = binder.refused
+
+    def _drain_sheet(self, binder, sheet: str) -> None:
+        """Hand a sheet's material edits to the ``Material`` folder, after following what it changed.
+
+        Following first is what keeps the two one: a slider, a preset or Revert on the folder moved
+        the working spec under this binder, which showed the old number and checked an edit against
+        it. An edit still pending here keeps its control and lands on the folder's spec.
+        """
+        tune = self.session.tune
+        working = tune.tuner.working[sheet]
+        if binder.spec is not working:
+            binder.follow(working)
+        taken = binder.drain()
+        if taken and not tune.write(sheet, taken):
+            binder.refuse(working, tune.tuner.refused)
+        elif taken:
+            # The same material by value; held by identity, so the next drain does not take it for a
+            # change made on the folder.
+            binder.spec = tune.tuner.working[sheet]
+        if binder.refused:
+            self.session.status = binder.refused
 
     def refresh(self) -> None:
         for widget, source in self._live:

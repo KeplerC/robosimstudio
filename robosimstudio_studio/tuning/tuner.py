@@ -107,8 +107,8 @@ class MaterialTuner:
             return ""
         return _tier(self.material, field)
 
-    def set_fields(self, changes: dict[str, Any]) -> bool:
-        """Change fields of the selected material together. Whether they were taken.
+    def set_fields(self, changes: dict[str, Any], *, sheet: str = "") -> bool:
+        """Change fields of the selected material, or of ``sheet``'s, together. Whether they were taken.
 
         Live fields land in the model's arrays before this returns, as one set where the material's
         tunable writes one, so a tape's ``peak_opening`` and ``reach`` moved together are not written
@@ -118,9 +118,12 @@ class MaterialTuner:
 
         Refused, nothing moves and :attr:`refused` says why: a material the sheet's own spec refuses,
         whose rebuild would raise (opening adhesion on a loose tape), or a set the entity refuses
-        beside what it holds (a tape's ``peak_opening`` past a ``reach`` the inspector moved).
+        beside what it holds (a tape's ``peak_opening`` past a ``reach`` written outside this tuner).
+
+        ``sheet`` is for the inspector, whose subject need not be the sheet this folder has selected:
+        its material edits come here, so the working spec, :meth:`pending` and the live write stay one.
         """
-        name = self.selected
+        name = sheet or self.selected
         try:
             spec = replace(self.working[name], **changes)
             refused = self._sheet_refuses(name, spec)
@@ -134,7 +137,7 @@ class MaterialTuner:
             return False
         self.working[name] = spec
         if any(_tier(spec, field) == RECAPTURE for field in changes):
-            self.apply_contact()
+            self.apply_contact(name)
         return True
 
     def presets(self) -> tuple[str, ...]:
@@ -199,18 +202,18 @@ class MaterialTuner:
         self.live[name].write(self.working[name])
         self.apply_contact()
 
-    def apply_contact(self) -> bool:
-        """Push the soft-contact scalars, dropping a captured graph if needed.
+    def apply_contact(self, sheet: str = "") -> bool:
+        """Push the selected cloth's soft-contact scalars, or ``sheet``'s, dropping a captured graph if needed.
 
         Model-wide rather than per cloth: ``soft_contact_ke`` and friends are
         single scalars with no per-cloth dimension to select on. With more than
         one deformable in the scene they are the one thing the sheets cannot
         disagree about, and the last write wins.
         """
-        env = self.env
-        if not contact_differs(env.model, self.material):
+        env, material = self.env, self.working[sheet or self.selected]
+        if not contact_differs(env.model, material):
             return False
-        apply_contact(env.model, self.material)
+        apply_contact(env.model, material)
         if env.pipeline.captured:
             env.pipeline.invalidate_graph()
         return True

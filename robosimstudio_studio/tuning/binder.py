@@ -231,10 +231,24 @@ class SpecBinder:
         finally:
             self._syncing = False
 
-    def _sync_widgets(self, spec: Any) -> None:
+    def follow(self, spec: Any) -> None:
+        """Point every control at ``spec``, a change made on another panel, keeping the edits still pending.
+
+        Where :meth:`set_spec` drops them, which is right for a preset that replaces what they
+        described. One panel's edit to the same sheet as another's is not that: a control moved here
+        since the last :meth:`drain` keeps its value and its edit, which lands on ``spec``.
+        """
+        self.spec = spec
+        self._syncing = True
+        try:
+            self._sync_widgets(spec, skip=self.pending)
+        finally:
+            self._syncing = False
+
+    def _sync_widgets(self, spec: Any, skip: Iterable[str] = ()) -> None:
         for name, widget in self._widgets.items():
             value = getattr(spec, name, None)
-            if value is None:
+            if value is None or name in skip:
                 continue
             ui = self._ui[name]
             if ui.log and ui.range is not None and value > 0:
