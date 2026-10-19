@@ -176,6 +176,21 @@ class EntityRoller(EntityRigid):
     spec: RollerSpec
     axle_coord: int = -1
     """The axle's ``joint_q`` index once built; -1 for a welded roller."""
+    handle_body: int = -1
+    """The handle's body once built; the roller's own for a welded one."""
+
+    def collect_shapes(self, builder) -> None:
+        """The drum's shapes and the handle's: the handle's boxes are what the jaws touch.
+
+        :meth:`EntityRigid.collect_shapes` takes the shapes on :attr:`body`, the
+        drum, and a spinning handle is a body of its own -- so a contact measure
+        between the hand and the roller, and the **contact** tunable, would have
+        missed every box the fingers close on.
+        """
+        bodies = {self.body, self.handle_body}
+        self.shapes = np.asarray(
+            [s for s in range(builder.shape_count) if builder.shape_body[s] in bodies], dtype=np.int32
+        )
 
     def _add_primitive(self, builder, pose) -> None:
         import warp as wp
@@ -194,6 +209,7 @@ class EntityRoller(EntityRigid):
         spec.shape.add_to(builder, body=roller, xform=along_y, label=spec.name, cfg=cfg)
         joints = [free]
         handle = builder.add_link(xform=xform, label=f"{spec.name}_handle") if spec.spins else roller
+        self.handle_body = handle
         for k, (centre, half) in enumerate(handle_boxes(float(spec.grip))):
             builder.add_shape_box(
                 handle,
