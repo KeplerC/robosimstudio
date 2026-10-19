@@ -60,6 +60,8 @@ class TestARopeOnSuperdexSaysWhatItDrops(unittest.TestCase):
                 self.assertIn(f"'{name}'", message)
         self.assertIn("superdex", message)
         self.assertIn("flexural_stiffness", message, "the message says what the engine is handed instead")
+        self.assertIn("5 stated RodSpec field(s) never reach superdex", message, "the record the fields are on")
+        self.assertNotIn("material", message, "a RodSpec has no material: its matter is its own fields")
 
     def test_a_field_left_at_its_default_is_not_named(self) -> None:
         """``dahl_tau`` is stated by every rope at 0.1 and says nothing until ``dahl_eps_max`` is set."""

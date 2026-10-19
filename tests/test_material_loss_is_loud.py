@@ -83,6 +83,7 @@ class TestALostMaterialFieldIsLoud(unittest.TestCase):
         entity_side = [m for m in messages if "edge_ke" in m and "tri_ke" in m]
         self.assertTrue(entity_side, f"no entity-side warning named the stated fields; got {messages}")
         self.assertIn("shell_young", entity_side[0], "the message should say which knob does reach the engine")
+        self.assertIn("stated material field(s)", entity_side[0], "the message names the record the fields are on")
 
     def test_a_field_left_at_its_default_is_not_nagged_about(self) -> None:
         """Only what was *stated* is lost; defaults were never a decision."""

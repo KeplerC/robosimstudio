@@ -515,6 +515,8 @@ def _warn_lost_material(node: Any, declared: HostActor, island: Any) -> None:
             )
     spec = getattr(node.entity, "spec", None)
     material = getattr(spec, "material", None)
+    # Each record named for itself, so the reader is sent to the one holding the field:
+    # a rope's lost fields are its RodSpec's, and a cloth's are its material's.
     lost: list[str] = []
     hint = ""
     if material is not None and dataclasses.is_dataclass(material):
@@ -523,17 +525,20 @@ def _warn_lost_material(node: Any, declared: HostActor, island: Any) -> None:
         # them back out -- are not lost, and saying so sends a reader hunting for a
         # bug in a modulus that is in fact applied.
         carried = set(getattr(type(material), "via_model", ()))
-        lost = [name for name in _stated(material) if name not in declared.params and name not in carried]
+        names = [name for name in _stated(material) if name not in declared.params and name not in carried]
+        if names:
+            lost.append(f"{len(names)} stated material field(s) never reach {engine}: {names}")
         unset = [f.name for f in dataclasses.fields(material) if getattr(material, f.name) is None]
         hint = f" Knobs this material offers and leaves unset: {unset}." if unset else ""
     unread = tuple(getattr(type(node.entity), "unread_fields", ()))
     if unread and dataclasses.is_dataclass(spec):
-        lost += _stated(spec, unread)
+        names = _stated(spec, unread)
+        if names:
+            lost.append(f"{len(names)} stated {type(spec).__name__} field(s) never reach {engine}: {names}")
     if not lost:
         return
     warnings.warn(
-        f"{node.name!r}: {len(lost)} stated material field(s) never reach {engine}: {lost}. "
-        f"What the engine is handed: {sorted(declared.params)}.{hint}",
+        f"{node.name!r}: {'; '.join(lost)}. What the engine is handed: {sorted(declared.params)}.{hint}",
         MaterialLossWarning,
         stacklevel=3,
     )
