@@ -659,7 +659,9 @@ def _stick_kernel(
     particle_q: wp.array(dtype=wp.vec3),
     body_q: wp.array(dtype=wp.transform),
     enabled: wp.array(dtype=wp.bool),
+    enabled_model: wp.array(dtype=wp.bool),
     body_point: wp.array(dtype=wp.vec3),
+    body_point_model: wp.array(dtype=wp.vec3),
     normal: wp.array(dtype=wp.vec3),
     dmin: wp.array(dtype=float),
     broken: wp.array(dtype=wp.int32),
@@ -668,7 +670,9 @@ def _stick_kernel(
 
     The press is what VBD's penalty pushes back with: ``contact_ke`` times the depth inside the contact
     thickness, the particle's radius plus the shape's margin, against the nearest of the body's boxes.
-    The anchor goes where the particle would rest on that face, under it.
+    The anchor goes where the particle would rest on that face, under it. ``enabled`` and ``body_point``
+    are the solver's copies and the ``_model`` ones the model's, written alike as :func:`_break_kernel`
+    writes them: a ``CONSTRAINT_PROPERTIES`` notify copies the model's over the solver's.
     """
     k = wp.tid()
     row = rows[k]
@@ -698,10 +702,13 @@ def _stick_kernel(
     depth = particle_radius[p] - best
     if contact_ke * depth < params[5] * area[k]:
         return
-    body_point[row] = surface + face * thick
+    anchor = surface + face * thick
+    body_point[row] = anchor
+    body_point_model[row] = anchor
     normal[k] = face
     dmin[k] = thick
     enabled[row] = True
+    enabled_model[row] = True
     broken[k] = 0
 
 
@@ -721,8 +728,11 @@ def _bond_kernel(
     body_qd: wp.array(dtype=wp.spatial_vector),
     body_com: wp.array(dtype=wp.vec3),
     enabled: wp.array(dtype=wp.bool),
+    enabled_model: wp.array(dtype=wp.bool),
     body_point: wp.array(dtype=wp.vec3),
+    body_point_model: wp.array(dtype=wp.vec3),
     stiffness: wp.array(dtype=float),
+    stiffness_model: wp.array(dtype=float),
     broken: wp.array(dtype=wp.int32),
 ):
     """Each held bond's spring set to ipc-toolkit's law at its lift, and let go past ``reach``. One thread per bond.
@@ -730,7 +740,7 @@ def _bond_kernel(
     The spring is the secant of the pull at the lift the step starts at, so VBD carries the law
     implicitly. Along the face the anchor slides once the spring pulls harder than ``stiction`` times
     the strength, which fades as ipc-toolkit's tangential mollifier does once the slide passes
-    ``stiction_speed``.
+    ``stiction_speed``. Every write goes into the solver's copy and the model's (:func:`_stick_kernel`).
     """
     k = wp.tid()
     row = rows[k]
@@ -739,6 +749,7 @@ def _bond_kernel(
     strength = params[0]
     if strength <= 0.0:
         enabled[row] = False
+        enabled_model[row] = False
         broken[k] = 1
         return
     peak = params[1]
@@ -751,6 +762,7 @@ def _bond_kernel(
     lift = wp.dot(off, n)
     if lift >= reach:
         enabled[row] = False
+        enabled_model[row] = False
         broken[k] = 1
         return
     w = area[k]
@@ -760,6 +772,7 @@ def _bond_kernel(
     if lift > 1.0e-7:
         spring = w * adhesion_pull(d0 + lift, d0, peak, reach, strength) / lift
     stiffness[row] = spring
+    stiffness_model[row] = spring
     side = off - lift * n
     pulled = spring * wp.length(side)
     if pulled <= 0.0:
@@ -775,8 +788,9 @@ def _bond_kernel(
     if y > eps:
         hold = hold * stiction_mollifier(y, eps)
     if pulled > hold:
-        moved = anchor + side * (1.0 - hold / pulled)
-        body_point[row] = wp.transform_point(wp.transform_inverse(pose), moved)
+        moved = wp.transform_point(wp.transform_inverse(pose), anchor + side * (1.0 - hold / pulled))
+        body_point[row] = moved
+        body_point_model[row] = moved
 
 
 # =============================================================================
@@ -1040,7 +1054,9 @@ class EntityTape(EntityCloth):
             return
         model = c["model"]
         device = state.particle_q.device
-        enabled, body_point, stiffness = (self._arrays[key][0] for key in ("enabled", "body_point", "stiffness"))
+        # The solver's copy and the model's, the same array when the solver reads the model's.
+        keys = ("enabled", "body_point", "stiffness")
+        enabled, body_point, stiffness = ((self._arrays[key][0], self._arrays[key][-1]) for key in keys)
         wp.launch(
             _stick_kernel,
             dim=len(self.bonds),
@@ -1059,7 +1075,7 @@ class EntityTape(EntityCloth):
                 state.particle_q,
                 state.body_q,
             ],
-            outputs=[enabled, body_point, c["normal"], c["dmin"], self.broken],
+            outputs=[*enabled, *body_point, c["normal"], c["dmin"], self.broken],
             device=device,
         )
         wp.launch(
@@ -1080,7 +1096,7 @@ class EntityTape(EntityCloth):
                 state.body_qd,
                 model.body_com,
             ],
-            outputs=[enabled, body_point, stiffness, self.broken],
+            outputs=[*enabled, *body_point, *stiffness, self.broken],
             device=device,
         )
 
