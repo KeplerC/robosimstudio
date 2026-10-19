@@ -16,12 +16,13 @@ import newton
 import numpy as np
 import warp as wp
 
+import robosimstudio.engines.superdex  # noqa: F401 -- registers the shell builder's keys (section 7), not the wheel
 from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
 from robosimstudio.assetlib.sim import contacts_with
 from robosimstudio.domains.capabilities import host_bridge
-from robosimstudio.engines.geometry import actor_geometry, register_actor_builder, register_actor_kind
+from robosimstudio.engines.geometry import actor_consumes, actor_geometry, register_actor_builder, register_actor_kind
 from robosimstudio.scene.registry import register_entity
 from robosimstudio.specs.arrangement import GENERIC, backend
 from robosimstudio.specs.base import Vec3
@@ -561,23 +562,8 @@ register_actor_builder(
     "superdex",
     "bag",
     build_bag_actor,
-    # The shell builder's keys.
-    consumes=(
-        "areal_density",
-        "contact_padding",
-        "contact_penalty",
-        "contact_smoothing",
-        "contact_threshold",
-        "friction",
-        "friction_falloff",
-        "mass_damping",
-        "particle_radius",
-        "poisson",
-        "self_contact",
-        "stiffness_damping",
-        "thickness",
-        "young",
-    ),
+    # What the shell builder reads, off its own declaration: a key ``build_shell`` learns is the bag's too.
+    consumes=actor_consumes("superdex", "shell"),
     summary="SuperDex builds a bag as a self-colliding shell in its own frame.",
 )
 

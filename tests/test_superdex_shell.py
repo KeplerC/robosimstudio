@@ -299,6 +299,41 @@ class TestTheDeclarations(unittest.TestCase):
         params = EntityBagSuperdex(bag(name="bag")).host_actor().params
         self.assertEqual((1.0e6, 0.3), (params["young"], params["poisson"]), "the canvas, under the shell's names")
 
+    def test_a_key_the_shell_builder_learns_is_the_bags_too(self) -> None:
+        """The bag's declaration is read off the shell builder's, not copied from it key by key.
+
+        A fresh process, since the bag registers when it is first imported: the shell builder
+        learns a key first, and the bag that imports after it reads it. The superdex wheel stays
+        out: the bag reaches the bundle's declaration, not the engine.
+        """
+        import json
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        script = (
+            "import json, sys\n"
+            "import robosimstudio.engines.superdex\n"
+            "from robosimstudio.specs.physics import actor_consumes, declare_consumes\n"
+            "declare_consumes('superdex', 'shell', (*actor_consumes('superdex', 'shell'), 'learned'))\n"
+            "import robosimstudio_materials.bag\n"
+            "print(json.dumps({'bag': actor_consumes('superdex', 'bag'), 'wheel': 'superdex' in sys.modules}))\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+            env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
+        got = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertIn("learned", got["bag"])
+        self.assertFalse(got["wheel"], "importing the bag loaded the superdex wheel")
+
     def test_a_fabrics_modulus_is_not_called_lost_where_it_crosses_as_young(self) -> None:
         """The composer's entity-side check looks a field up by the name it crosses under.
 
