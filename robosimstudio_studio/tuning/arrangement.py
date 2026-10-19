@@ -14,16 +14,26 @@ described parameter, and on drain applies the recapture-tier ones through
 A backend with no schema -- a dotted path nobody described -- still shows: its
 parameters render as plain rebuild-tier inputs, which is the extensibility
 contract's promise that an undescribed solver is usable, just less informed.
+
+A backend shows once, under every domain the scene declares that it serves.
+:data:`~robosimstudio.specs.GENERIC` names an ``mpm`` backend for three
+particle domains and a ``superdex`` one for ``soft``, and a towel on a bench
+has none of them: listing them gave every such page three identical ``mpm``
+sections. Domains whose backends are equal are one island by the composer's
+equality rule, so they are one section, and an edit lands on all of them --
+folded into one domain alone it split the backend, and a heap and a pool built
+from the edited spec landed on two islands.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Collection
 from dataclasses import fields
 from typing import Any
 
 from robosimstudio.specs.params import REBUILD, RECAPTURE, ParamUI, iter_params
-from robosimstudio.specs.physics import ArrangementSpec, ParamRule, get_backend, get_coupler
+from robosimstudio.specs.physics import ArrangementSpec, BackendSpec, ParamRule, get_backend, get_coupler
 
 from .binder import _LOG_STEP, _fmt, add_param_widget
 
@@ -65,12 +75,16 @@ class ArrangementBinder:
         spec: The arrangement the scene was compiled with.
         program: The running :class:`~robosimstudio.scene.physics.PhysicsProgram`,
             for applying recapture-tier edits live. ``None`` accumulates only.
+        domains: The domains the scene declares
+            (:func:`~robosimstudio.scene.compiler.declared_domains`), whose
+            backends are shown; ``None`` shows every backend.
     """
 
-    def __init__(self, spec: ArrangementSpec, program: Any = None) -> None:
+    def __init__(self, spec: ArrangementSpec, program: Any = None, *, domains: Collection[str] | None = None) -> None:
         self.built = spec
         self.spec = spec
         self.program = program
+        self.domains = None if domains is None else frozenset(domains)
         self.pending: dict[str, Any] = {}
         """Edits since the last drain: ``path -> value`` with paths
         ``rates:<field>``, ``collision:<field>``, ``backend:<domain>:<param>``,
@@ -90,16 +104,16 @@ class ArrangementBinder:
             if ui.tier != REBUILD or f.name == "use_cuda_graph":
                 continue
             self._add(gui, f"rates:{f.name}", f.name, getattr(self.spec, f.name), ui)
-        for domain, backend in self.spec.backends:
+        for domains, backend in self.sections():
             info = get_backend(backend.solver)
-            gui.add_markdown(f"**{domain}: {backend.solver}**")
+            gui.add_markdown(f"**{', '.join(domains)}: {backend.solver}**")
             effective = info.effective(backend, has_particles=True)
             schema = dict(info.schema or {})
             for name, value in effective.params:
                 rule = schema.get(name, ParamRule(ui=ParamUI(tier=REBUILD)))
                 if isinstance(value, (tuple, list, dict)) or value is None:
                     continue
-                self._add(gui, f"backend:{domain}:{name}", name, value, rule.ui)
+                self._add(gui, f"backend:{domains[0]}:{name}", name, value, rule.ui)
         try:
             coupler_info = get_coupler(self.spec.coupling.method)
             schema = dict(coupler_info.schema or {})
@@ -119,6 +133,14 @@ class ArrangementBinder:
                 gui.add_text(f.name, initial_value="unset (solver default)", disabled=True)
                 continue
             self._add(gui, f"collision:{f.name}", f.name, value, ui)
+
+    def sections(self) -> list[tuple[tuple[str, ...], BackendSpec]]:
+        """``(domains, backend)`` per backend shown: each once, under the declared domains it serves."""
+        out: dict[BackendSpec, list[str]] = {}
+        for domain, backend in self.spec.backends:
+            if self.domains is None or domain in self.domains:
+                out.setdefault(backend, []).append(domain)
+        return [(tuple(domains), backend) for backend, domains in out.items()]
 
     def _add(self, gui: Any, path: str, name: str, value: Any, ui: ParamUI) -> None:
         self._built_values[path] = value
@@ -178,7 +200,11 @@ class ArrangementBinder:
             domain, _, param = rest.partition(":")
             current = self.spec.backend_for(domain)
             if current is not None:
-                self.spec = self.spec.with_backend(domain, current.with_(**{param: value}))
+                # Onto every domain that shares it: one island, which stays one.
+                edited = current.with_(**{param: value})
+                for other, backend in self.spec.backends:
+                    if backend == current:
+                        self.spec = self.spec.with_backend(other, edited)
 
     # ---------------------------------------------------------------- status
     def pending_rebuild(self) -> tuple[str, ...]:

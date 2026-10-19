@@ -62,6 +62,8 @@ class PanelTune(Panel):
     """
 
     def __init__(self, session: Any, *, material_dir: str = "assets/materials") -> None:
+        from robosimstudio.scene.compiler import declared_domains
+
         self.session = session
         self.tuner = MaterialTuner(session.env)
         self.material_dir = material_dir
@@ -73,7 +75,11 @@ class PanelTune(Panel):
         # :class:`~robosimstudio_studio.panels.PanelArm` reads its control rate
         # the same way: an arrangement is a fact about how the scene is stepped,
         # and a page over a scene nobody wrote a document for has one.
-        self.physics = ArrangementBinder(session.env.request.physics, getattr(session.env.scene, "program", None))
+        # Only the backends of the domains the scene declares, by the rule the
+        # compiler registers attributes by; a request that cannot say shows all.
+        request = session.env.request
+        domains = declared_domains(request) if callable(getattr(request, "build_order", None)) else None
+        self.physics = ArrangementBinder(request.physics, getattr(session.env.scene, "program", None), domains=domains)
         self.cloth_requested = ""
         self.preset_requested = ""
         self.revert_requested = False

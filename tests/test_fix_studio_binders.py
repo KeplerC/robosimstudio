@@ -128,5 +128,60 @@ class PendingRebuildForgetsWhatWasSetBack(unittest.TestCase):
         self.assertEqual(binder.pending_rebuild(), ("rates:edge_ke",))
 
 
+class _HeadedGui(_Gui):
+    """The fake gui, also keeping the section headers it was handed."""
+
+    def __init__(self):
+        super().__init__()
+        self.headers = []
+
+    def add_markdown(self, text="", *_a, **_k):
+        self.headers.append(text)
+        return _Widget()
+
+
+class OneSectionPerBackendTheSceneUses(unittest.TestCase):
+    """GENERIC names an mpm backend for three particle domains and a superdex one for soft."""
+
+    def _sections(self, domains):
+        from robosimstudio.specs import GENERIC
+
+        gui = _HeadedGui()
+        binder = ArrangementBinder(GENERIC, domains=domains)
+        binder.build(gui)
+        backends = [
+            h for h in gui.headers if h.startswith("**") and h.endswith(("mujoco**", "vbd**", "mpm**", "superdex**"))
+        ]
+        return binder, backends
+
+    def test_a_scene_with_no_particles_lists_no_mpm(self):
+        _, backends = self._sections({"*", "articulated", "rigid"})
+        self.assertEqual(["**articulated: mujoco**", "***: vbd**"], backends)
+
+    def test_the_particle_domains_it_declares_share_one_section(self):
+        _, backends = self._sections({"*", "articulated", "granular", "liquid"})
+        self.assertEqual(["**articulated: mujoco**", "**granular, liquid: mpm**", "***: vbd**"], backends)
+
+    def test_no_domains_given_lists_every_backend(self):
+        binder, _ = self._sections(None)
+        self.assertEqual(
+            [("articulated",), ("soft",), ("granular", "liquid", "dough"), ("*",)], [d for d, _ in binder.sections()]
+        )
+
+    def test_an_edit_to_a_shared_backend_keeps_it_one_island(self):
+        """Folded into ``granular`` alone it split the spec, and a heap and a pool would build two mpm islands."""
+        from robosimstudio.specs import GENERIC
+
+        binder, _ = self._sections({"*", "articulated", "granular", "liquid"})
+        binder.pending["backend:granular:voxel_size"] = 0.005
+        binder.drain()
+        spec = binder.spec
+        shared = {spec.backend_for(d) for d in ("granular", "liquid", "dough")}
+        self.assertEqual(1, len(shared), "the particle domains no longer share one backend")
+        self.assertEqual(0.005, spec.backend_for("liquid").get("voxel_size"))
+        self.assertEqual(GENERIC.backend_for("*"), spec.backend_for("*"))
+        self.assertEqual(GENERIC.backend_for("soft"), spec.backend_for("soft"))
+
+
 if __name__ == "__main__":
     unittest.main()
