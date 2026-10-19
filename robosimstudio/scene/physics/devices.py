@@ -231,8 +231,13 @@ def unserved(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) 
     A kind is unserved when :data:`CPU` has nothing for it (:func:`needs_a_gpu`)
     and the backend ``arrangement`` gives it has no CPU path either -- so
     :func:`arrangement_for` could only hand it ``CPU``'s ``"*"``, MuJoCo, and it
-    would fail inside the composer or MuJoCo's importer. A kind whose backend
-    runs on a CPU is served, a dotted path among them, which states no devices.
+    would fail inside the composer or MuJoCo's importer -- or *is* that MuJoCo
+    already: ``rss.CPU`` staged by hand, or an arrangement built on
+    ``MUJOCO_500HZ``, whose ``"*"`` takes the kind. A brush on that MuJoCo
+    failed with a ``KeyError`` inside Newton's MuJoCo converter, paper and the
+    particle materials in the composer, and water asking for Genesis. A kind
+    whose backend is another that runs on a CPU is served, a dotted path among
+    them, which states no devices.
 
     Args:
         arrangement: The arrangement as staged, before :func:`arrangement_for`.
@@ -240,24 +245,36 @@ def unserved(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) 
             names no backend (one that does is :func:`on_device`'s to refuse).
 
     Returns:
-        A sentence per unserved kind, naming its entities, the backend, the
-        devices it runs on and its ``cpu_note``; empty when a CPU serves them all.
+        A sentence per unserved kind, naming its entities, the backend, why
+        that backend does not step it there; empty when a CPU serves them all.
     """
+    tail = (
+        "-- rss.CPU puts cloth, bags, rope and soft bodies on SuperDex and the arm and rigid bodies on MuJoCo's C "
+        "library."
+    )
+    rigid = CPU.backend_for("*").solver
     out: list[str] = []
     for domain, names in owners.items():
         if not needs_a_gpu(domain):
             continue
         spec = arrangement.backend_for(domain)
-        if spec is None or runs_on_cpu(spec):
+        if spec is None:
+            continue
+        who = ", ".join(repr(name) for name in names) or f"a {domain}"
+        if spec.solver == rigid:
+            out.append(
+                f"{who} ({domain}) needs a GPU: {domain} is on {spec.solver!r}, which carries the arm and rigid "
+                f"bodies and no {domain}, and nothing a CPU runs steps {domain} {tail}"
+            )
+            continue
+        if runs_on_cpu(spec):
             continue
         info = device_facts(spec)
         devices = " and ".join(info.devices) if info is not None else "a GPU"
         why = f" ({info.cpu_note})" if info is not None and info.cpu_note else ""
-        who = ", ".join(repr(name) for name in names) or f"a {domain}"
         out.append(
             f"{who} ({domain}) needs a GPU: {domain} is on {spec.solver!r}, which runs on {devices} only{why}, and "
-            f"nothing a CPU runs steps {domain} -- rss.CPU puts cloth, bags, rope and soft bodies on SuperDex and "
-            "the arm and rigid bodies on MuJoCo's C library."
+            f"nothing a CPU runs steps {domain} {tail}"
         )
     return tuple(out)
 

@@ -131,6 +131,16 @@ class TestTheKindsACpuRefuses(unittest.TestCase):
                     # Nothing was built: the refusal is the compiler's, before the arrangement is adapted.
                     self.assertEqual(frames[-1].name, "_for_platform", [f.name for f in frames])
 
+    def test_under_rss_cpu_staged_by_hand_each_is_refused_not_handed_to_mujoco(self) -> None:
+        """What the refusals say to stage: ``rss.CPU``'s ``"*"`` is MuJoCo, which once failed inside the brush's import."""
+        import robosimstudio as rss
+
+        things = [thing for _, _, _, make, _ in REFUSED for thing in make(rss)]
+        message, frames = self.refusal(rss.CPU, things)
+        for kind, name, *_ in REFUSED:
+            self.assertIn(f"'{name}' ({kind}) needs a GPU: {kind} is on 'mujoco', which carries the arm", message)
+        self.assertEqual(frames[-1].name, "_for_platform", [f.name for f in frames])
+
     def test_beside_a_kind_a_cpu_steps_only_the_one_it_cannot_is_named(self) -> None:
         import robosimstudio as rss
 
@@ -156,6 +166,16 @@ class TestWhatACpuServes(unittest.TestCase):
         owners.update({kind: [name] for kind, name, *_ in REFUSED})
         refused = unserved(GENERIC, owners)
         self.assertEqual([sentence.split(" (")[1].split(")")[0] for sentence in refused], [k for k, *_ in REFUSED])
+
+    def test_every_gpu_kind_on_an_arrangement_whose_star_is_mujoco(self) -> None:
+        from robosimstudio.scene.physics.devices import unserved
+        from robosimstudio.specs.physics import CPU, MUJOCO_500HZ
+
+        owners = {kind: [name] for kind, name, *_ in REFUSED}
+        owners.update({kind: [kind] for kind in ("cloth", "soft", "rod", "bag", "rigid", "cutting")})
+        for arrangement in (CPU, MUJOCO_500HZ):
+            refused = unserved(arrangement, owners)
+            self.assertEqual([sentence.split(" (")[1].split(")")[0] for sentence in refused], [k for k, *_ in REFUSED])
 
     def test_a_dotted_path_states_no_devices_and_is_served(self) -> None:
         """``newton.solvers.SolverVBD`` by path is the way to run paper on a CPU anyway, slowly."""
