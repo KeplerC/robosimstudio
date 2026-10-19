@@ -29,6 +29,7 @@ BACKEND = register_backend(
     # water by name (robosimstudio.scene.physics.devices.unserved).
     devices=("cuda",),
     cpu_note="Genesis is initialised on its GPU backend here, and IPC's libuipc builds a CUDA engine",
+    extra="genesis",
     # What each builder reads is declared beside it, per kind, in ``bridge.py``.
 )
 

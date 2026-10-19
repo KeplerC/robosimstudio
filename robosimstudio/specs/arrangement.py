@@ -466,10 +466,12 @@ soft body refuses to build, naming it.
 tape's bonds and a brush's bristles are VBD's; a heap, a liquid and a dough are
 Newton's implicit MPM, captured into a CUDA graph; water is Genesis's SPH. None
 has an entry here, and a scene holding one is refused before anything is built,
-naming each and why (:func:`robosimstudio.scene.physics.devices.unserved`),
-rather than falling to the ``"*"`` MuJoCo island and failing inside it. The
-cutting kind's cage steps on Warp's CPU device beside the knife's MuJoCo body,
-so a cut runs here, at 1 to 2 s a control step while the edge advances.
+naming each and why -- and, for one its arrangement left on a backend that
+steps it on no device, the arrangement that does
+(:func:`robosimstudio.scene.physics.devices.unserved`) -- rather than falling
+to the ``"*"`` MuJoCo island and failing inside it. The cutting kind's cage
+steps on Warp's CPU device beside the knife's MuJoCo body, so a cut runs here,
+at 1 to 2 s a control step while the edge advances.
 
 **A rope is one-way: it does not push back on what touches it.** The rod's
 SuperDex island harvests no contact wrench (``feedback="off"``), so the pads,

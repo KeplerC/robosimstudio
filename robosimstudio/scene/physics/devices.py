@@ -23,7 +23,10 @@ deformable whose backend has no CPU path and for which ``CPU`` names no backend
 of its own -- paper, tape and the brush on VBD, the particle materials on the
 implicit MPM, water on Genesis -- would otherwise fall to ``CPU``'s ``"*"``,
 MuJoCo, and fail inside the composer or MuJoCo's importer. The compiler refuses
-the scene with those sentences before anything is built.
+the scene with those sentences before anything is built. A kind its arrangement
+puts on a backend that steps it on no device (:func:`misrouted`: water on
+GENERIC's VBD) is told the route that works, which is what a GPU build of the
+same scene is refused with too, rather than to build on a GPU.
 
 Every change is returned as a sentence, and the build prints them on its
 platform line: the physics a scene runs is never different from what was
@@ -51,7 +54,7 @@ from robosimstudio.specs.physics import (
 
 from .errors import CompositionError
 
-__all__ = ["arrangement_for", "device_facts", "needs_a_gpu", "on_device", "runs_on_cpu", "unserved"]
+__all__ = ["arrangement_for", "device_facts", "misrouted", "needs_a_gpu", "on_device", "runs_on_cpu", "unserved"]
 
 
 def _is_cpu(device: Any) -> bool:
@@ -225,8 +228,71 @@ def needs_a_gpu(domain: str) -> bool:
     return kind.role == "deformables" and not kind.world_fixed and bool(kind.state)
 
 
+def _route(domain: str, spec: BackendSpec) -> str:
+    """The route ``domain`` needs when ``spec`` is not the engine it registered, as a clause; empty when it is.
+
+    Empty for a kind that registered no engine (several step a cloth), and for a
+    dotted path, an explicit choice whose constructor can say. Compared by class,
+    not by spelling: an alias registered for the engine's own class is the engine.
+    The clause says what the route needs that the scene may not have -- a GPU, the
+    engine's extra -- so it is the one thing that works on either device.
+    """
+    try:
+        kind = get_domain(domain)
+    except KeyError:
+        return ""  # an unknown kind fails in the composer, by name
+    if not kind.engine or "." in spec.solver:
+        return ""
+    try:
+        wanted, given = get_backend(kind.engine), get_backend(spec.solver)
+    except KeyError:
+        return ""  # an unknown alias fails in the composer, by name
+    if given.cls == wanted.cls:
+        return ""
+    needs = ["a GPU"] if wanted.devices and "cpu" not in wanted.devices else []
+    if wanted.extra:
+        needs.append(f"the [{wanted.extra}] extra")
+    staged = f", as rss.{kind.staged_by} does" if kind.staged_by else ""
+    return f"route the {domain!r} kind to backend({kind.engine!r}){staged}" + (
+        f" (it needs {' and '.join(needs)})" if needs else ""
+    )
+
+
+def _who(names: Sequence[str], domain: str) -> str:
+    return ", ".join(repr(name) for name in names) or f"a {domain}"
+
+
+def _misrouted(domain: str, names: Sequence[str], spec: BackendSpec | None) -> str:
+    route = _route(domain, spec) if spec is not None else ""
+    if not route:
+        return ""
+    return f"{_who(names, domain)} ({domain}) is on {spec.solver!r}, which steps no {domain} on any device: {route}."
+
+
+def misrouted(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
+    """On either device: one sentence per kind in ``owners`` that ``arrangement`` puts on a backend that does not step it.
+
+    A kind that registered the one engine that steps it
+    (:attr:`~robosimstudio.specs.physics.DomainInfo.engine`) and is on another
+    registered backend: water on GENERIC's VBD, a heap on WATER_60HZ's VBD,
+    paper on ``rss.CPU``'s MuJoCo. Each fails on a GPU as well -- on a GPU a heap
+    on WATER_60HZ's VBD died in a Warp copy error and paper on MuJoCo was refused
+    by the composer for its particles -- so the sentence names the route that
+    works, the arrangement that stages it and what that needs, and the compiler
+    refuses the scene with it before anything is built, on a GPU as on a CPU
+    (:func:`unserved`).
+
+    Args:
+        arrangement: The arrangement as staged.
+        owners: Kind -> the names of the entities of that kind whose own spec
+            names no backend.
+    """
+    out = (_misrouted(domain, names, arrangement.backend_for(domain)) for domain, names in owners.items())
+    return tuple(sentence for sentence in out if sentence)
+
+
 def unserved(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
-    """On a CPU: one sentence per kind in ``owners`` that nothing a CPU runs can step, saying why.
+    """On a CPU: one sentence per kind in ``owners`` that nothing a CPU runs can step, saying why and what works.
 
     A kind is unserved when :data:`CPU` has nothing for it (:func:`needs_a_gpu`)
     and the backend ``arrangement`` gives it has no CPU path either -- so
@@ -239,6 +305,11 @@ def unserved(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) 
     whose backend is another that runs on a CPU is served, a dotted path among
     them, which states no devices.
 
+    A kind on its own engine is told to build on a GPU. One on a backend that
+    steps it on no device -- water on GENERIC's VBD, anything on that MuJoCo --
+    is told the route instead (:func:`misrouted`), since a GPU build of the
+    same arrangement fails as well.
+
     Args:
         arrangement: The arrangement as staged, before :func:`arrangement_for`.
         owners: Kind -> the names of the entities of that kind whose own spec
@@ -246,7 +317,8 @@ def unserved(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) 
 
     Returns:
         A sentence per unserved kind, naming its entities, the backend, why
-        that backend does not step it there; empty when a CPU serves them all.
+        that backend does not step it there and what does; empty when a CPU
+        serves them all.
     """
     tail = (
         "-- rss.CPU puts cloth, bags, rope and soft bodies on SuperDex and the arm and rigid bodies on MuJoCo's C "
@@ -260,11 +332,16 @@ def unserved(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) 
         spec = arrangement.backend_for(domain)
         if spec is None:
             continue
-        who = ", ".join(repr(name) for name in names) or f"a {domain}"
+        sentence = _misrouted(domain, names, spec)
+        if sentence:
+            out.append(sentence)
+            continue
+        who = _who(names, domain)
         if spec.solver == rigid:
             out.append(
                 f"{who} ({domain}) needs a GPU: {domain} is on {spec.solver!r}, which carries the arm and rigid "
-                f"bodies and no {domain}, and nothing a CPU runs steps {domain} {tail}"
+                f"bodies and no {domain}, and nothing a CPU runs steps {domain} {tail} Build it on a GPU, on the "
+                f"backend that steps {domain}."
             )
             continue
         if runs_on_cpu(spec):
@@ -272,9 +349,10 @@ def unserved(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) 
         info = device_facts(spec)
         devices = " and ".join(info.devices) if info is not None else "a GPU"
         why = f" ({info.cpu_note})" if info is not None and info.cpu_note else ""
+        extra = f" with the [{info.extra}] extra" if info is not None and info.extra else ""
         out.append(
             f"{who} ({domain}) needs a GPU: {domain} is on {spec.solver!r}, which runs on {devices} only{why}, and "
-            f"nothing a CPU runs steps {domain} {tail}"
+            f"nothing a CPU runs steps {domain} {tail} Build it on a GPU{extra}."
         )
     return tuple(out)
 

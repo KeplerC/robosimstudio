@@ -472,6 +472,113 @@ class TestTheCompilerRefusesWhatACpuCannotDo(unittest.TestCase):
         self.assertIn("robosimstudio[cpu]", notes[-1])
 
 
+_OFF_ITS_ENGINE = (
+    # kind, one of it, an arrangement that puts it on a backend that steps it on no device
+    ("water", lambda rss: rss.water(name="it"), "GENERIC"),
+    ("water", lambda rss: rss.water(name="it"), "CPU"),
+    ("granular", lambda rss: rss.heap(name="it", size=(0.04, 0.04, 0.02)), "WATER_60HZ"),
+    ("liquid", lambda rss: rss.liquid(name="it", size=(0.03, 0.03, 0.03)), "MUJOCO_500HZ"),
+    ("dough", lambda rss: rss.dough(name="it", size=(0.04, 0.04, 0.02)), "WATER_60HZ"),
+    ("paper", lambda rss: rss.paper(name="it", size=(0.1, 0.1), cells=(5, 5)), "MUJOCO_500HZ"),
+    ("tape", lambda rss: rss.tape(name="it", on="box"), "CPU"),
+    ("brush", lambda rss: rss.brush(name="it", rows=4, columns=4), "MUJOCO_500HZ"),
+)
+"""Each GPU-only kind once, on an arrangement without its engine: water on GENERIC's VBD falls there too."""
+
+
+class TestAKindOffItsEngineIsToldItsRoute(unittest.TestCase):
+    """Refused with the arrangement that steps it and what that needs, in one sentence on either device.
+
+    Water under GENERIC falls to its ``"*"``, VBD, and a GPU refuses that too
+    (the water's own build names Genesis), so a CPU's refusal that said to build
+    on a GPU sent the reader to a second refusal. A heap or a liquid on
+    WATER_60HZ's VBD died in a Warp copy error on a GPU, and a brush on
+    MUJOCO_500HZ with a ``KeyError`` inside MuJoCo's converter.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class _Request:
+        physics: Any
+        specs: tuple = ()
+
+        def build_order(self) -> tuple:
+            return self.specs
+
+    def refusal(self, arrangement, thing, device: str) -> str:
+        from robosimstudio.machine import Platform
+        from robosimstudio.scene.compiler import _for_platform
+        from robosimstudio.scene.physics import CompositionError
+
+        plat = Platform(device=device, device_why="test", renderer="tiled", renderer_why="test")
+        with self.assertRaises(CompositionError) as caught:
+            _for_platform(self._Request(arrangement, (thing,)), plat, 1)
+        return str(caught.exception)
+
+    def test_the_same_route_on_a_cpu_and_on_a_gpu(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio.specs.physics import get_domain
+
+        for kind, make, off in _OFF_ITS_ENGINE:
+            with self.subTest(kind=kind, arrangement=off):
+                info, arrangement = get_domain(kind), getattr(rss, off)
+                gpu = self.refusal(arrangement, make(rss), "cuda:0")
+                on = arrangement.backend_for(kind).solver
+                self.assertTrue(
+                    gpu.startswith(
+                        f"'it' ({kind}) is on {on!r}, which steps no {kind} on any device: route the {kind!r} kind "
+                        f"to backend({info.engine!r}), as rss.{info.staged_by} does (it needs a GPU"
+                    ),
+                    gpu,
+                )
+                self.assertEqual(self.refusal(arrangement, make(rss), "cpu"), f"this scene is on a CPU. {gpu}")
+
+    def test_water_names_the_extra_as_its_own_build_does(self) -> None:
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio.scene.registry import resolve_entity_class
+
+        route = self.refusal(rss.GENERIC, rss.water(name="it"), "cuda:0").split(": ", 1)[1].removesuffix(".")
+        self.assertEqual(
+            route,
+            "route the 'water' kind to backend('genesis'), as rss.WATER_60HZ does (it needs a GPU and the "
+            "[genesis] extra)",
+        )
+        spec = rss.water(name="it")
+        with self.assertRaises(NotImplementedError) as caught:
+            resolve_entity_class(spec, rss.GENERIC)(spec).build(newton.ModelBuilder(), None)
+        self.assertIn(route, str(caught.exception), "the entity's build refusal says what the compiler's does")
+
+    def test_on_its_engine_a_gpu_builds_it_and_a_cpu_is_told_to_build_on_one(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio.machine import Platform
+        from robosimstudio.scene.compiler import _for_platform
+        from robosimstudio.specs.physics import get_domain
+
+        gpu = Platform(device="cuda:0", device_why="test", renderer="tiled", renderer_why="test")
+        for kind, make, _ in _OFF_ITS_ENGINE:
+            with self.subTest(kind=kind):
+                info = get_domain(kind)
+                staged = getattr(rss, info.staged_by)
+                self.assertEqual(staged.backend_for(kind).solver, info.engine, "the route it names steps it")
+                request = self._Request(staged, (make(rss),))
+                self.assertEqual(_for_platform(request, gpu, 1), (request, ()))
+                extra = " with the [genesis] extra" if kind == "water" else ""
+                self.assertTrue(
+                    self.refusal(staged, make(rss), "cpu").endswith(f"Build it on a GPU{extra}."), (kind, extra)
+                )
+
+    def test_a_dotted_path_an_alias_of_the_engine_and_a_kind_with_no_engine_pass(self) -> None:
+        """Left to the solver and the composer: an explicit class, the engine by another name, a cloth on MuJoCo."""
+        from robosimstudio.scene.physics.devices import misrouted
+        from robosimstudio.specs.physics import MUJOCO_500HZ, backend, register_backend
+
+        register_backend("test_platform_vbd_alias", cls="newton.solvers.SolverVBD", devices=("cuda",))
+        for spec in (backend("newton.solvers.SolverXPBD"), backend("test_platform_vbd_alias")):
+            self.assertEqual(misrouted(MUJOCO_500HZ.with_backend("paper", spec), {"paper": ["p"]}), (), spec)
+        self.assertEqual(misrouted(MUJOCO_500HZ, {"cloth": ["towel"]}), ())
+
+
 class TestTheRegisteredFacts(unittest.TestCase):
     """What each backend says about devices is data, compared like the rest of its registration."""
 

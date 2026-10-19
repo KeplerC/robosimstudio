@@ -732,6 +732,8 @@ DOMAIN = register_domain(
     role="deformables",
     contacts=("surface", "fixtures", "objects", "hands", "deformables"),
     summary="A membrane of particles whose bending hinges yield: paper and card.",
+    engine="vbd",
+    staged_by="GENERIC",
 )
 
 register_entity("paper")(EntityPaper)

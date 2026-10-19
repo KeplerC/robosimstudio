@@ -17,7 +17,10 @@ through the examples a reader runs; this module holds the rest:
   and under each kind's own arrangement, the build raises before an entity is
   made, naming the entity, its kind, the backend, why that backend is not run
   on a CPU, and that the scene needs a GPU; a scene holding one of them beside
-  a kind a CPU does step names only the one it cannot.
+  a kind a CPU does step names only the one it cannot. Water under ``GENERIC``,
+  which leaves it on VBD, and every one of them under ``rss.CPU``, which leaves
+  it on MuJoCo, is told the arrangement that steps it instead, since a GPU
+  refuses those arrangements too.
 * **What a served kind cannot bring along, refused by name.** A cloth's contact
   forces are VBD's, so reading them on a CPU, where the cloth is on SuperDex,
   says it needs a GPU rather than falling through to MuJoCo's solver. The two
@@ -123,23 +126,33 @@ class TestTheKindsACpuRefuses(unittest.TestCase):
             for label, physics in (("GENERIC", None), ("its own", own(rss))):
                 with self.subTest(kind=kind, arrangement=label):
                     message, frames = self.refusal(physics, make(rss))
-                    # Under GENERIC water falls to its "*", VBD; its own arrangement puts it on Genesis.
-                    on = "vbd" if (kind, label) == ("water", "GENERIC") else solver
-                    self.assertIn(f"'{name}' ({kind}) needs a GPU: {kind} is on {on!r}", message)
-                    self.assertIn("which runs on cuda only (", message, "the backend's reason is given")
-                    self.assertIn("rss.CPU puts cloth, bags, rope and soft bodies on SuperDex", message)
-                    self.assertTrue(message.endswith("Build it on a GPU."), message)
+                    if (kind, label) == ("water", "GENERIC"):
+                        # GENERIC's "*", VBD, steps no water on a GPU either: the route is what works.
+                        self.assertIn("'water' (water) is on 'vbd', which steps no water on any device", message)
+                        route = "as rss.WATER_60HZ does (it needs a GPU and the [genesis] extra)."
+                        self.assertTrue(message.endswith(route), message)
+                    else:
+                        self.assertIn(f"'{name}' ({kind}) needs a GPU: {kind} is on {solver!r}", message)
+                        self.assertIn("which runs on cuda only (", message, "the backend's reason is given")
+                        self.assertIn("rss.CPU puts cloth, bags, rope and soft bodies on SuperDex", message)
+                        extra = " with the [genesis] extra" if kind == "water" else ""
+                        self.assertTrue(message.endswith(f"Build it on a GPU{extra}."), message)
                     # Nothing was built: the refusal is the compiler's, before the arrangement is adapted.
                     self.assertEqual(frames[-1].name, "_for_platform", [f.name for f in frames])
 
     def test_under_rss_cpu_staged_by_hand_each_is_refused_not_handed_to_mujoco(self) -> None:
-        """What the refusals say to stage: ``rss.CPU``'s ``"*"`` is MuJoCo, which once failed inside the brush's import."""
+        """``rss.CPU``'s ``"*"`` is MuJoCo, which steps none of them on either device: each is told its route, not a GPU."""
         import robosimstudio as rss
 
         things = [thing for _, _, _, make, _ in REFUSED for thing in make(rss)]
         message, frames = self.refusal(rss.CPU, things)
-        for kind, name, *_ in REFUSED:
-            self.assertIn(f"'{name}' ({kind}) needs a GPU: {kind} is on 'mujoco', which carries the arm", message)
+        for kind, name, solver, *_ in REFUSED:
+            self.assertIn(
+                f"'{name}' ({kind}) is on 'mujoco', which steps no {kind} on any device: route the {kind!r} kind to "
+                f"backend({solver!r})",
+                message,
+            )
+        self.assertNotIn("Build it on a GPU", message)
         self.assertEqual(frames[-1].name, "_for_platform", [f.name for f in frames])
 
     def test_beside_a_kind_a_cpu_steps_only_the_one_it_cannot_is_named(self) -> None:

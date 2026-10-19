@@ -1237,6 +1237,8 @@ DOMAIN = register_domain(
     role="deformables",
     contacts=("surface", "fixtures", "objects", "hands", "deformables"),
     summary="A brush: sole strips and a field of short capsule-chain bristles on VBD, under a grip.",
+    engine="vbd",
+    staged_by="BRUSH_60HZ",
 )
 
 register_entity("brush")(EntityBrush)

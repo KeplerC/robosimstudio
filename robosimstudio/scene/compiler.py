@@ -398,7 +398,10 @@ def _on_the_host(program: PhysicsProgram | None, plat: Platform) -> tuple[str, .
 def _for_platform(request: SceneRequest, plat: Platform, num_worlds: int) -> tuple[SceneRequest, tuple[str, ...]]:
     """The request as it builds on ``plat``, and what changed -- or a refusal naming what cannot.
 
-    The identity on a GPU. On a CPU: the arrangement is adapted by
+    On a GPU, the identity, or a refusal naming each kind the arrangement puts
+    on a backend that steps it on no device, with the route that does
+    (:func:`~robosimstudio.scene.physics.devices.misrouted`). On a CPU: the
+    arrangement is adapted by
     :func:`~robosimstudio.scene.physics.devices.arrangement_for` *before* any
     entity is built, because the arrangement picks entity classes as well as
     solvers; a scene asking for what a CPU cannot do -- a kind nothing on a CPU
@@ -406,18 +409,21 @@ def _for_platform(request: SceneRequest, plat: Platform, num_worlds: int) -> tup
     worlds of a one-world solver, signed-distance fields -- is refused here, by
     name, rather than inside the composer or the solver's importer.
     """
+    from .physics import CompositionError
+    from .physics.devices import device_facts, misrouted, unserved
+
+    physics = request.physics
     if not plat.is_cpu:
+        refused = misrouted(physics, _owners(request))
+        if refused:
+            raise CompositionError(" ".join(refused))
         return request, ()
     import dataclasses
     import importlib.util
 
-    from .physics import CompositionError
-    from .physics.devices import device_facts, unserved
-
-    physics = request.physics
     refused = unserved(physics, _owners(request))
     if refused:
-        raise CompositionError(f"this scene is on a CPU. {' '.join(refused)} Build it on a GPU.")
+        raise CompositionError(f"this scene is on a CPU. {' '.join(refused)}")
     adapted, notes = arrangement_for(physics, is_cpu=True)
     if num_worlds > 1:
         for _, spec in adapted.backends:
