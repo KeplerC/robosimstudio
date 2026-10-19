@@ -38,7 +38,7 @@ folder's README). The jaws close on the cup's 66 mm walls, and the water's react
 carried still, it reads 1.09 N where the water weighs 1.085 N. The wrist stops at 115 degrees: in three drives
 99.2 to 99.9% of the 1,728 particles ended in the glass, standing 29.4 to 29.7 mm where their count fills 30.5 to
 30.7 mm, 0.1 to 0.8% on the bench (`tests/test_pour_water`'s gesture, GPU 1, RTX PRO 6000). Turned 60 degrees
-it pours nothing; carried 100 mm beside the glass, 99.2% lands on the bench. 24 ms per control step.
+it keeps the water (at most 0.1% in the glass); carried 100 mm aside, 99.2% lands on the bench. 24 ms per step.
 
 ```bash
 uv run examples/21_water/00_pour_water.py
