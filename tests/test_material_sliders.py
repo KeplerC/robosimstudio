@@ -24,7 +24,7 @@ from tests.fixtures.examples import _run
 from tests.fixtures.grasp import tick
 
 TIER = "medium"
-"""One GPU: four examples built through their pages, about 90 s."""
+"""One GPU: five examples built through their pages."""
 
 PORT = 9801
 
@@ -181,6 +181,16 @@ class TestTheTapeOnAnIslandWithItsOwnCopy(unittest.TestCase):
         _slide(self.session, "break_opening", 0.002)
         self.assertAlmostEqual(0.002, float(self.label._limit.numpy()[0]), places=6)
 
+    def test_the_contact_laws_fields_are_read_only(self) -> None:
+        """Opening adhesion runs no contact kernel, so nothing reads strength, reach and the rest."""
+        from robosimstudio_materials.tape import CONTACT_FIELDS
+
+        widgets = _tune(self.session).binder._widgets
+        for name in CONTACT_FIELDS:
+            with self.subTest(name):
+                self.assertTrue(widgets[name].disabled, f"{name} is a slider on a label no contact kernel reads")
+        self.assertFalse(widgets["tack"].disabled)
+
     def test_a_contact_thickness_reaches_the_margin_the_box_collides_with(self) -> None:
         box = self.sim["box"].entity
         contact = next(t for t in box.tunables(self.sim.pipeline) if t.name == "contact")
@@ -188,6 +198,38 @@ class TestTheTapeOnAnIslandWithItsOwnCopy(unittest.TestCase):
         shapes = np.asarray(list(contact.write.shapes), dtype=np.int64)
         view = self.sim.scene.program.view_for("box")
         np.testing.assert_allclose(view.shape_margin.numpy()[shapes], 0.003, rtol=1e-6)
+
+
+class TestTheStuckLabelsContactAdhesive(unittest.TestCase):
+    """``examples/19_tape/02_stick_a_label``: the contact law's fields reach the array its kernels read."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.sim, cls.session = _open("19_tape/02_stick_a_label.py", PORT + 4, ("inspector", "cloth", "tune"))
+        cls.label = cls.sim["label"].entity
+        cls.binder = _tune(cls.session).binder
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.session.teardown()
+
+    def test_every_contact_field_lands_in_the_kernels_parameters(self) -> None:
+        from robosimstudio_materials.tape import CONTACT_FIELDS
+
+        for k, name in enumerate(CONTACT_FIELDS):
+            with self.subTest(name):
+                self.assertFalse(self.binder._widgets[name].disabled, name)
+                value = _new_value(self.binder.spec, name)
+                _slide(self.session, name, value)
+                np.testing.assert_allclose(self.label._contact["params"].numpy()[k], value, rtol=2e-3, err_msg=name)
+
+    def test_the_opening_laws_fields_are_read_only(self) -> None:
+        """Contact adhesion sets each bond's spring itself and runs no break kernel."""
+        for name in ("tack", "break_opening"):
+            with self.subTest(name):
+                self.assertTrue(self.binder._widgets[name].disabled, f"{name} is a slider nothing here reads")
+        (material,) = self.label.tunables(self.sim.pipeline)
+        self.assertFalse(material.write("tack", 2.0e6))
 
 
 class TestTheRodsDahlPair(unittest.TestCase):

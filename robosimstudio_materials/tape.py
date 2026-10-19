@@ -934,14 +934,23 @@ class EntityTape(EntityCloth):
 
     # -------------------------------------------------------------- phase 2
     def tunables(self, pipeline=None):
-        """Cloth's material tunable, with the adhesive's two fields routed to the bonds."""
+        """Cloth's material tunable, with the adhesive's fields routed to the bonds.
+
+        Only the law the tape was built with reads its fields. Under contact adhesion the law sets each
+        bond's spring every substep and no break kernel runs, so ``tack`` and ``break_opening`` move
+        nothing; under opening adhesion no contact kernel runs, so :data:`CONTACT_FIELDS` move nothing.
+        Those are the tunable's ``inert`` fields, shown read-only, and a write to one does not land.
+        """
         base = super().tunables(pipeline)
         if not base:
             return base
         (material,) = base
         inner = material.write
+        idle = ("tack", "break_opening") if self.contact else CONTACT_FIELDS
 
         def write(name: str, value: Any) -> bool:
+            if name in idle:
+                return False
             if name == "tack":
                 self.write_tack(float(value))
                 return True
@@ -953,7 +962,7 @@ class EntityTape(EntityCloth):
                 return True
             return inner(name, value)
 
-        return (replace(material, write=write),)
+        return (replace(material, write=write, inert=(*material.inert, *idle)),)
 
     def write_break_opening(self, opening: float) -> None:
         """Set how far a bond's particle may lift before it lets go [m]; 0 never lets go. LIVE: the kernel
