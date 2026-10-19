@@ -197,6 +197,71 @@ class TestTheContactLawsLiveWrites(unittest.TestCase):
         self.assertFalse(material.write("strength", 2.0e3))
 
 
+class TestThePressThatMakesABond(unittest.TestCase):
+    """The stick kernel reads a press as VBD's penalty for the pair: the mean of the sheet's and the box's ke."""
+
+    def _bonds(self, depth: float, box_ke: float) -> bool:
+        """One loose bond over a 100 x 120 x 50 mm box, its particle ``depth`` into the contact, on the CPU."""
+        from types import SimpleNamespace
+
+        import warp as wp
+
+        from robosimstudio_materials.tape import CONTACT_FIELDS, LABEL, EntityTape, tape
+
+        label = EntityTape(tape(name="label", on="box", material=LABEL, stuck=False))
+        label.body, label.contact = 0, True
+        label.bonds, label.bond_particles = np.zeros(1, dtype=np.int32), np.zeros(1, dtype=np.int32)
+        one = lambda value, dtype: wp.array([value], dtype=dtype, device="cpu")  # noqa: E731
+        identity = wp.transform_identity()
+        model = SimpleNamespace(
+            shape_transform=one(identity, wp.transform),
+            shape_scale=one(wp.vec3(0.05, 0.06, 0.025), wp.vec3),
+            shape_margin=one(0.0, float),
+            particle_radius=one(5.0e-4, float),
+            soft_contact_ke=1.0e4,
+            shape_material_ke=one(box_ke, float),
+            body_com=one(wp.vec3(0.0), wp.vec3),
+        )
+        label._arrays = {
+            "enabled": [one(False, wp.bool)],
+            "body_point": [one(wp.vec3(0.0), wp.vec3)],
+            "stiffness": [one(0.0, float)],
+        }
+        label._rows, label._particle, label.broken = one(0, wp.int32), one(0, wp.int32), one(0, wp.int32)
+        params = [8.0e3 if f == "press" else float(getattr(LABEL, f)) for f in CONTACT_FIELDS]
+        label._contact = {
+            "model": model,
+            "boxes": one(0, wp.int32),
+            "area": one(2.5e-5, float),
+            "normal": one(wp.vec3(0.0, 0.0, 1.0), wp.vec3),
+            "dmin": one(5.0e-4, float),
+            "params": wp.array(params, dtype=float, device="cpu"),
+        }
+        state = SimpleNamespace(
+            particle_q=one(wp.vec3(0.0, 0.0, 0.025 + 5.0e-4 - depth), wp.vec3),
+            particle_qd=one(wp.vec3(0.0), wp.vec3),
+            body_q=one(identity, wp.transform),
+            body_qd=one(wp.spatial_vector(), wp.spatial_vector),
+        )
+        label._stick(state, 1.0 / 960.0)
+        return bool(label._arrays["enabled"][0].numpy()[0])
+
+    def test_a_soft_box_takes_a_deeper_press(self) -> None:
+        # 8 kPa on a 5 mm cell is 0.2 N; the pair's 6.25 kN/m reaches it at 32 um, the sheet's 10 kN/m at 20.
+        self.assertFalse(self._bonds(0.9 * 0.2 / 6250.0, 2.5e3), "0.18 N as VBD pushes back: no bond")
+        self.assertTrue(self._bonds(1.1 * 0.2 / 6250.0, 2.5e3))
+
+    def test_a_stiff_box_takes_a_shallower_one(self) -> None:
+        self.assertTrue(self._bonds(1.1 * 0.2 / 55.0e3, 1.0e5), "0.22 N as VBD pushes back against a 100 kN/m box")
+        self.assertFalse(self._bonds(0.9 * 0.2 / 55.0e3, 1.0e5))
+
+    def test_the_label_presses_as_deep_as_it_was_measured(self) -> None:
+        """LABEL's press was set on the example's 2.5 kN/m box: the same 20 um the sheet's ke alone gave 8 kPa."""
+        from robosimstudio_materials.tape import LABEL
+
+        self.assertAlmostEqual(8.0e3 / 1.0e4, LABEL.press / (0.5 * (1.0e4 + 2.5e3)))
+
+
 class TestThePresets(unittest.TestCase):
     def test_each_preset_is_soft_enough_for_its_tab_to_pull_it(self) -> None:
         # Paper's edge_ke 30 and tri_ke 1e4 held the tab still under the hand's pull (the module's section 1).

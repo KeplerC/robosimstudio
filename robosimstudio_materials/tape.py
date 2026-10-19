@@ -90,9 +90,9 @@ __all__ = [
 # (``p2_pull.py``, GPU 6). So the law rides on the attachments, which VBD solves implicitly. Every
 # bondable particle is given an attachment to the body at the build, disabled unless the sheet is
 # built stuck. After every substep one kernel makes a bond where its particle presses into the body
-# harder than :attr:`~TapeMaterialSpec.press` (VBD's own penalty, ``contact_ke`` times the depth inside
-# the contact thickness, over the particle's share of the sheet), anchored where the particle would
-# rest on that face. A second sets every held bond's spring to the secant of the pull at the lift the
+# harder than :attr:`~TapeMaterialSpec.press` (VBD's own penalty for the pair, the mean of the sheet's
+# ``contact_ke`` and the box's ``ke``, times the depth inside the contact thickness, over the particle's
+# share of the sheet), anchored where the particle would rest on that face. A second sets every held bond's spring to the secant of the pull at the lift the
 # substep starts at, so the spring pulls with ipc-toolkit's force there, and lets the bond go past
 # :attr:`~TapeMaterialSpec.reach`. Along the face the anchor slides once the spring pulls harder than
 # ``stiction`` times the bond's strength, a hold that fades as ipc-toolkit's tangential mollifier
@@ -174,7 +174,8 @@ class TapeMaterialSpec(ClothMaterialSpec):
         stiction_speed: Contact adhesion: sliding along the face faster than this [m/s], a bond's hold
             fades, gone at twice it (ipc-toolkit's ``eps_a``, as a speed).
         press: Contact adhesion: the contact pressure that makes a bond [Pa], VBD's penalty over the
-            particle's share of the sheet.
+            particle's share of the sheet: the depth times ``(contact_ke + ke) / 2``, the sheet's
+            soft-contact stiffness and the box shape's, the stiffness ``SolverVBD`` gives the pair.
     """
 
     tack: float = field(
@@ -249,7 +250,7 @@ class TapeMaterialSpec(ClothMaterialSpec):
         ),
     )
     press: float = field(
-        default=8.0e3,
+        default=5.0e3,
         metadata=ui(
             tier=LIVE,
             unit="Pa",
@@ -339,9 +340,11 @@ LABEL = replace(
     # one drive); at these two, four strokes 3 mm under it made 88-92% of the bonds in five.
     stiction=4.0,
     stiction_speed=0.1,
-    # 0.2 N on a 5 mm cell: a label laid by the hand makes 1-6 of 126 bonds, the shut fingertips
-    # rubbing it 88-92% in four strokes (``m1_screen.py``, five drives).
-    press=8.0e3,
+    # 0.125 N on a 5 mm cell: a label laid by the hand makes 1-6 of 126 bonds, the shut fingertips
+    # rubbing it 88-92% in four strokes (``m1_screen.py``, five drives). Measured as 8 kPa when the press
+    # was read off the sheet's 10 kN/m alone; the pair's mean with the box's 2.5 kN/m is 6.25 kN/m, so
+    # 5 kPa is the same depth, 20 um on a 5 mm cell.
+    press=5.0e3,
 )
 """A paper label that sticks where it is pressed: it peeled whole at 2.9 N drawn up on the rig, and drawn
 up by the YAM's pads at 2.2-2.4 N, all but 1-2 of its 126 bonds (``m1_screen.py``, five drives)."""
@@ -655,7 +658,8 @@ def _stick_kernel(
     particle_radius: wp.array(dtype=float),
     area: wp.array(dtype=float),
     params: wp.array(dtype=float),
-    contact_ke: float,
+    soft_ke: float,
+    shape_ke: wp.array(dtype=float),
     particle_q: wp.array(dtype=wp.vec3),
     body_q: wp.array(dtype=wp.transform),
     enabled: wp.array(dtype=wp.bool),
@@ -668,11 +672,18 @@ def _stick_kernel(
 ):
     """Make each bond whose particle is pressed onto the body harder than ``press``. One thread per bond.
 
-    The press is what VBD's penalty pushes back with: ``contact_ke`` times the depth inside the contact
-    thickness, the particle's radius plus the shape's margin, against the nearest of the body's boxes.
-    The anchor goes where the particle would rest on that face, under it. ``enabled`` and ``body_point``
-    are the solver's copies and the ``_model`` ones the model's, written alike as :func:`_break_kernel`
-    writes them: a ``CONSTRAINT_PROPERTIES`` notify copies the model's over the solver's.
+    The press is what VBD's penalty pushes back with: the depth inside the contact thickness, the
+    particle's radius plus the shape's margin, against the nearest of the body's boxes, times the pair's
+    stiffness, the mean of the particles' ``soft_ke`` and that shape's ``shape_ke``, as
+    ``init_body_particle_contacts`` mixes them. ``SolverVBD`` holds the pair's penalty at that mean when
+    its linear beta is 0, :data:`TAPE_60HZ`'s; a ramped penalty starts lower, and this reads its
+    ceiling. ``soft_ke`` is a float frozen into a captured graph, as VBD's own launches take it, and
+    cloth's ``contact_ke`` is RECAPTURE; ``shape_ke`` is the model's array, read live.
+
+    The anchor goes where the particle would rest on that face, under it. ``enabled`` and
+    ``body_point`` are the solver's copies and the ``_model`` ones the model's, written alike as
+    :func:`_break_kernel` writes them: a ``CONSTRAINT_PROPERTIES`` notify copies the model's over the
+    solver's.
     """
     k = wp.tid()
     row = rows[k]
@@ -685,6 +696,7 @@ def _stick_kernel(
     face = wp.vec3(0.0, 0.0, 1.0)
     surface = wp.vec3(0.0)
     thick = particle_radius[p]
+    pair = soft_ke
     for j in range(boxes.shape[0]):
         s = boxes[j]
         frame = shape_transform[s]
@@ -699,8 +711,9 @@ def _stick_kernel(
             face = wp.transform_vector(frame, n_shape)
             surface = wp.transform_point(frame, inside - n_shape * g[3])
             thick = particle_radius[p] + margin
+            pair = 0.5 * (soft_ke + shape_ke[s])
     depth = particle_radius[p] - best
-    if contact_ke * depth < params[5] * area[k]:
+    if pair * depth < params[5] * area[k]:
         return
     anchor = surface + face * thick
     body_point[row] = anchor
@@ -1072,6 +1085,7 @@ class EntityTape(EntityCloth):
                 c["area"],
                 c["params"],
                 float(model.soft_contact_ke),
+                model.shape_material_ke,
                 state.particle_q,
                 state.body_q,
             ],
