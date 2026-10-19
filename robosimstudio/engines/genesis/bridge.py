@@ -456,6 +456,15 @@ class GenesisBridge:
         see, Genesis changing the factor, the weighing in ``tests/test_genesis.py``
         does.
 
+        Only the particles Newton gives mass are weighed, on both sides. A held
+        cloth's held particles and a pinned paper's pinned ones are massless on
+        Newton, its kinematic particle (``EntityHeldCloth`` and ``EntityPaper``'s
+        ``apply_model_materials``), and Genesis is handed the whole sheet: weighed
+        whole against Newton's sum, a 200 mm towel held by one edge row of its 121
+        particles read 1.100 and a 120 x 130 mm board pinned by two of its 14 rows
+        1.167, both refused with a correct record (``r1_probe.py``). The area those
+        particles hold is apportioned as Newton masses them (:func:`_weighed_share`).
+
         A volume is not compared. ``FEM.Elastic`` masses it at ``rho * volume``
         of the lattice it is handed: a 100 x 70 x 35 mm sponge at 110 kg/m^3
         pressed 0.26438 N on a plate, its ``rho * V * g`` to five figures
@@ -468,17 +477,24 @@ class GenesisBridge:
         for geom in geoms:
             if geom.kind != "shell":
                 continue
-            want = float(newton_mass[geom.start : geom.start + geom.count].sum())
+            masses = np.asarray(newton_mass[geom.start : geom.start + geom.count], dtype=np.float64)
+            weighed = masses > 0.0
+            want = float(masses[weighed].sum())
             if want <= 0.0:
                 continue
             cloth = _cloth_args(self.recipe, geom.params)
             a, b, c = (geom.rest[geom.tris[:, i]] for i in range(3))
-            area = 0.5 * float(np.linalg.norm(np.cross(b - a, c - a), axis=1).sum())
+            areas = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+            # The area the particles Newton weighs hold, so both sides are the same particles.
+            area = float(areas.sum()) * _weighed_share(masses, geom.tris, areas)
             got = CLOTH_MASS_FACTOR * cloth["rho"] * cloth["thickness"] * area
             if abs(got - want) > 0.1 * want:
+                over = (
+                    "" if weighed.all() else f" over the {int(weighed.sum())} of its {len(masses)} particles it weighs"
+                )
                 raise ValueError(
                     f"genesis actor {geom.name!r} would weigh {got * 1e3:.1f} g on Genesis where the Newton model "
-                    f"says {want * 1e3:.1f} g (ratio {got / want:.3f}): its record's areal density, "
+                    f"says {want * 1e3:.1f} g{over} (ratio {got / want:.3f}): its record's areal density, "
                     f"{got / area:.4g} kg/m^2 over its {area:.4g} m^2, is not the {want / area:.4g} Newton built "
                     "it at. State the areal_density and thickness the sheet was built with in its actor params."
                 )
@@ -584,6 +600,24 @@ def _surface_of(tets: np.ndarray) -> np.ndarray:
     keyed = np.sort(faces, axis=1)
     _, index, counts = np.unique(keyed, axis=0, return_index=True, return_counts=True)
     return faces[index[counts == 1]]
+
+
+def _weighed_share(masses: np.ndarray, tris: np.ndarray, areas: np.ndarray) -> float:
+    """The share of a sheet's area its particles with mass hold, apportioned as Newton's builder masses them.
+
+    1 when every particle has mass. ``add_cloth_grid`` gives every particle of a sheet one mass, so each
+    holds an equal share, and a sheet whose weighed particles weigh alike is read that way;
+    ``add_cloth_mesh`` gives each a third of its triangles' mass, so each holds a third of their area.
+    ``tris`` index the sheet's own particles and ``areas`` are theirs [m^2].
+    """
+    weighed = masses > 0.0
+    if weighed.all():
+        return 1.0
+    held = masses[weighed]
+    if np.allclose(held, held[0], rtol=1.0e-5, atol=0.0):
+        return float(weighed.mean())
+    lumped = np.bincount(np.asarray(tris).ravel(), weights=np.repeat(areas / 3.0, 3), minlength=len(masses))
+    return float(lumped[weighed].sum() / lumped.sum())
 
 
 def _cloth_args(recipe: dict, params: dict) -> dict[str, float]:

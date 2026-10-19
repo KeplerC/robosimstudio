@@ -339,6 +339,97 @@ class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
                 self._open(weighs=weighs)
 
 
+class TestOnlyTheParticlesNewtonWeighsAreWeighed(unittest.TestCase):
+    """A held cloth's held particles and a pinned paper's pinned ones are massless on Newton, its kinematic particle,
+    and Genesis is handed the whole sheet. Weighed whole against Newton's sum, a 200 mm towel held by one edge row of
+    its 121 particles read 1.100 and a 120 x 130 mm board pinned by two of its 14 rows 1.167, and both were refused
+    blaming a correct record (``r1_probe.py``). Built here by their own entities on a CPU model, no scene."""
+
+    def _open(self, model, record: dict) -> None:
+        from unittest import mock
+
+        from robosimstudio.engines.genesis import bridge
+        from robosimstudio.engines.genesis.solver import SolverGenesis
+
+        recipe = {"island": "cloth", "actors": [record], "mirrors": []}
+        with mock.patch.object(bridge, "ensure_initialized", side_effect=LookupError("asked for the engine")):
+            SolverGenesis(model, recipe=recipe, substeps=2)
+
+    def _built(self, spec, *, holder: bool = False):
+        """``spec`` built by its entity, bound and its materials applied as a compile applies them, and its record."""
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio.scene.registry import resolve_entity_class
+
+        entity = resolve_entity_class(spec, rss.GENERIC)(spec)
+        builder = newton.ModelBuilder()
+        if holder:
+            builder.add_body(label="holder")
+        entity.build_into(builder, None)
+        model = builder.finalize(device="cpu")
+        entity.bind(model)
+        entity.apply_model_materials(model)
+        particles = entity.owned_particles()
+        record = entity.host_actor().record(
+            name=spec.name, particle_start=int(min(particles)), particle_count=len(particles)
+        )
+        return model, record
+
+    def test_a_held_cloth_and_a_pinned_paper_reach_the_engine(self):
+        """Their records state what Newton built them at; a record stating twice or half is still refused."""
+        import robosimstudio as rss
+
+        held = rss.sheet(
+            name="towel",
+            size=(0.2, 0.2),
+            cells=(10, 10),
+            held_by="holder",
+            particle_sets=(("held", lambda rest: rest[:, 1] > rest[:, 1].max() - 0.012),),
+        )
+        paper = rss.paper(name="flap", size=(0.12, 0.13), cells=(12, 13), material=rss.papers.CARDBOARD)
+        pinned = rss.replace(
+            paper, particle_sets=(("bound", lambda rest: rest[:, 1] <= rest[:, 1].min() + 0.018),), pinned="bound"
+        )
+        for spec, holder, massless, factor in ((held, True, 11, 2.0), (pinned, False, 26, 0.5)):
+            with self.subTest(spec.name):
+                model, record = self._built(spec, holder=holder)
+                count = record["particle_count"]
+                self.assertEqual(massless, int((model.particle_mass.numpy() == 0.0).sum()), "massless, as built")
+                with self.assertRaisesRegex(LookupError, "asked for the engine"):
+                    self._open(model, record)
+                params = {**record["params"], "areal_density": factor * record["params"]["areal_density"]}
+                with self.assertRaises(ValueError) as caught:
+                    self._open(model, {**record, "params": params})
+                for word in (f"ratio {factor:.3f}", f"over the {count - massless} of its {count} particles"):
+                    self.assertIn(word, str(caught.exception))
+
+    def test_a_mesh_sheets_massless_corner_is_weighed_by_the_area_newton_gives_it(self):
+        """``add_cloth_mesh`` masses a particle by a third of its triangles' area, ``add_cloth_grid`` every one alike.
+        A strip whose last cell is 17 times the others', its far edge massless: 8 of its 10 particles, and 57.5 % of
+        its area by Newton's lumping. Counted alike, Genesis's share read 1.391 of Newton's mass, refused."""
+        import newton
+        import warp as wp
+
+        xs, ys = (0.0, 0.01, 0.02, 0.03, 0.2), (0.0, 0.1)
+        vertices = [wp.vec3(x, y, 0.0) for y in ys for x in xs]
+        quads = [(i, i + 1, i + 6, i + 5) for i in range(4)]
+        faces = [v for a, b, c, d in quads for v in (a, b, c, a, c, d)]
+        builder = newton.ModelBuilder()
+        builder.add_cloth_mesh(
+            pos=wp.vec3(0.0), rot=wp.quat_identity(), scale=1.0, vel=wp.vec3(0.0), vertices=vertices, indices=faces,
+            density=0.3,
+        )  # fmt: skip
+        model = builder.finalize(device="cpu")
+        mass = model.particle_mass.numpy()
+        mass[[4, 9]] = 0.0  # the far edge, as a held or pinned set is left
+        model.particle_mass.assign(mass)
+        record = {"kind": "shell", "name": "strip", "particle_start": 0, "particle_count": 10}
+        for areal, raises in ((0.3, LookupError), (0.6, ValueError)):
+            with self.subTest(areal_density=areal), self.assertRaises(raises):
+                self._open(model, {**record, "params": {"areal_density": areal}})
+
+
 class TestTheLongestSubstepIsTheMaterials(unittest.TestCase):
     """Genesis's viscosity limit, and the pressure wave's and the cohesion's, scaled from the water the probes held."""
 
