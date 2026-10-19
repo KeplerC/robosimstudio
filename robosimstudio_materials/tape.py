@@ -384,7 +384,7 @@ class TapeSpec(ClothSpec):
             the clamp, sets how it answers the pads (section 1's "Why the sheet is soft").
         tab_color: Display RGB of the tab.
         dry: How far past the fold the sheet carries no adhesive [m], like a label's lift tab. ``0``
-            bonds every row on the face but the fold's.
+            bonds every row on the face but the fold's. Without a tab it runs from the sheet's end.
         stuck: Built stuck to ``on``: every bond made at the build and again at every reset. ``False``
             builds the sheet loose, its bonds made only where it is pressed onto ``on``, which needs
             contact adhesion (:attr:`TapeMaterialSpec.adhesion`).
@@ -430,7 +430,7 @@ class TapeSpec(ClothSpec):
             raise ValueError(
                 f"tape {self.name!r}: the tab ({self.tab_size[2]} m tall) must hold the {self.tab} m turned up"
             )
-        if self.dry < 0.0 or (self.tab > 0.0 and self.tab + self.dry >= length):
+        if self.dry < 0.0 or self.tab + self.dry >= length:
             raise ValueError(f"tape {self.name!r}: dry {self.dry} m leaves nothing to stick past the {self.tab} m tab")
         if not self.stuck and self.material.adhesion != "contact":
             raise ValueError(
@@ -467,11 +467,11 @@ def tape_surface(
 def bonded_rows(vertices: np.ndarray, tab: float, cell_along: float, dry: float = 0.0) -> np.ndarray:
     """The vertices stuck to the body: on the face, past the fold row and past ``dry`` metres beyond it.
 
-    All of them without a tab.
+    Without a tab there is no fold: all of them past ``dry`` metres from the sheet's end at ``y = 0``.
     """
     on_face = vertices[:, 2] <= 1.0e-9
     if tab <= 0.0:
-        return np.flatnonzero(on_face)
+        return np.flatnonzero(on_face & (vertices[:, 1] >= float(dry) - 1.0e-9))
     past = float(tab) + max(0.5 * float(cell_along), float(dry) - 1.0e-9)
     return np.flatnonzero(on_face & (vertices[:, 1] >= past))
 

@@ -79,6 +79,16 @@ class TestTheSurface(unittest.TestCase):
         self.assertEqual(len(vertices), len(bonded_rows(vertices, 0.0, 0.005)))
         self.assertEqual(0, len(clamped_rows(vertices, 0.0)))
 
+    def test_without_a_tab_a_dry_margin_runs_from_the_sheets_end(self) -> None:
+        from robosimstudio_materials.tape import bonded_rows, tape, tape_surface
+
+        vertices, _, _ = tape_surface((0.02, 0.05), (4, 10), 0.0)
+        dry = bonded_rows(vertices, 0.0, 0.005, 0.012)
+        self.assertEqual(8 * 5, len(dry), "the rows 0, 5 and 10 mm from the end carry no adhesive")
+        self.assertGreaterEqual(float(vertices[dry, 1].min()), 0.012)
+        with self.assertRaisesRegex(ValueError, "leaves nothing to stick"):
+            tape(name="t", on="box", size=(0.02, 0.05), cells=(4, 10), tab=0.0, dry=0.05)
+
 
 class TestTheBreakLaw(unittest.TestCase):
     """A bond opens along the face's normal only."""
