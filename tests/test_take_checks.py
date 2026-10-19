@@ -60,6 +60,41 @@ class TestTheTwistTakeReadsTheMiddleThird(unittest.TestCase):
         self.assertIn(f"let go soft {0.8 / (2 * np.pi):.3f}", said)
 
 
+class TestTheTopOfABoxIsItsTop(unittest.TestCase):
+    """``Top`` on an ``rss.box`` reads the box's size off ``spec.shape``: a plate's top, not its middle.
+
+    A box's spec carries its halves only in ``shape.half_extents``, so the film once took its top
+    for its origin, and the suction take's ``Top("plate", dz=-0.003)`` aimed 6 mm under the top.
+    """
+
+    @staticmethod
+    def _film(quat) -> object:
+        from recording.lockstep import Film
+
+        plate = SimpleNamespace(
+            spec=_box((0.0, -0.25, 0.003), (0.075, 0.075, 0.003)),  # 04_extending/02_suction's plate
+            particles=np.zeros(0, dtype=np.int64),
+            bodies=np.array([4]),
+            position=np.array([0.6, -0.25, 0.753]),
+            pose=np.array([0.6, -0.25, 0.753, *quat]),
+        )
+        film = Film(None, port=0, scratch=None, software=False, probe=False, log=print)
+        film.sim = _Sim(refs={"plate": plate})
+        return film
+
+    def test_a_flat_plate_s_top_is_3_mm_over_its_middle(self) -> None:
+        from recording.beats import Top
+
+        film = self._film((0.0, 0.0, 0.0, 1.0))
+        self.assertAlmostEqual(0.756, film.top("plate"), 12)
+        self.assertAlmostEqual(0.006, film.height("plate"), 12)
+        self.assertAlmostEqual(0.753, Top("plate", dz=-0.003).resolve(film)[2], 12)
+
+    def test_a_plate_stood_on_its_edge_tops_out_at_its_half_width(self) -> None:
+        film = self._film((np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)))  # turned 90 degrees about x
+        self.assertAlmostEqual(0.753 + 0.075, film.top("plate"), 12)
+
+
 # =============================================================================
 # The layout a take aims at is the one its example builds
 # =============================================================================

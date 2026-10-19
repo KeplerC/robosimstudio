@@ -1312,13 +1312,14 @@ ROBOT_BRUSH = (
 
 # The suction hand: down onto the plate, the right arm's Vacuum box ticked, lift, carry, down, unticked.
 # The gestures are tests/test_suction_pick's, through the same arm panel, with the gizmo put 3 mm into the
-# plate rather than 4 and a lowering aimed to stop the held plate 2 mm over the bench (it stops 2.8 mm
+# plate rather than 4 and a lowering aimed to stop the held plate 2 mm over the bench (it stops 2.3 mm
 # over and drops that far when the box is unticked). What holds the plate is the vacuum: the Seal readout
 # on the panel says sealed and the mass it holds.
 INTO_PLATE = 0.003
-"""How far under the plate's top the gizmo is put [m]. The cup stops on the plate with its face 0.1 to 0.2 mm
-over it (the Seal readout's gap once ticked, inside the seal's 2 mm), and the panel reads the hand 6 mm behind
-the gizmo: too far to put the gizmo back on the hand, so the arm keeps the face down on the plate."""
+"""How far under the plate's top the gizmo is put [m]. The cup stops on the plate 3 mm short of the gizmo,
+inside the panel's 4 mm tolerance, so the panel puts the gizmo back on the hand (its EE readout says on
+target) and the face rests on the plate: the Seal readout's gap is 0.0 mm before the box is ticked and once
+it seals, inside the seal's 2 mm."""
 
 
 def _plate_half(film) -> float:

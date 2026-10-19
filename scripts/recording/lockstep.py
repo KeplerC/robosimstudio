@@ -378,10 +378,21 @@ class Film:
         return tuple(float(v) for v in self._points(name).mean(axis=0))
 
     def _half_height(self, name: str) -> float:
-        spec = self.sim[name].spec
+        """How far one body's top stands over its origin [m].
+
+        A box (``rss.box``) carries its size only in ``spec.shape.half_extents``: its half-height is
+        those halves seen along world z as the body is turned now, 3 mm for a 6 mm plate lying flat.
+        """
+        ref = self.sim[name]
+        spec = ref.spec
         half = getattr(spec, "half", None)
         if half is not None:
             return float(half[2])
+        shape = getattr(spec, "shape", None)
+        if getattr(shape, "kind", "") == "box":
+            qx, qy, qz, qw = (float(v) for v in ref.pose[3:7])
+            up = (2.0 * (qx * qz - qw * qy), 2.0 * (qy * qz + qw * qx), 1.0 - 2.0 * (qx * qx + qy * qy))
+            return sum(abs(u) * float(h) for u, h in zip(up, shape.half_extents, strict=True))
         return float(getattr(spec, "radius", 0.0) or 0.0) + float(getattr(spec, "half_height", 0.0) or 0.0)
 
     def top(self, name: str) -> float:
