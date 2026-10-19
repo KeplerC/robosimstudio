@@ -509,11 +509,18 @@ class GenesisBridge:
                 over = (
                     "" if weighed.all() else f" over the {int(weighed.sum())} of its {len(masses)} particles it weighs"
                 )
+                if area > 0.0:
+                    density = (
+                        f"its record's areal density, {got / area:.4g} kg/m^2 over its {area:.4g} m^2, is not the "
+                        f"{want / area:.4g} Newton built it at"
+                    )
+                else:
+                    # A ratio would divide by zero: no triangle's area is lumped onto a weighed particle.
+                    density = "the particles Newton weighs hold none of its triangles' area, so no record weighs them"
                 raise ValueError(
                     f"genesis actor {geom.name!r} would weigh {got * 1e3:.1f} g on Genesis where the Newton model "
-                    f"says {want * 1e3:.1f} g{over} (ratio {got / want:.3f}): its record's areal density, "
-                    f"{got / area:.4g} kg/m^2 over its {area:.4g} m^2, is not the {want / area:.4g} Newton built "
-                    "it at. State the areal_density and thickness the sheet was built with in its actor params."
+                    f"says {want * 1e3:.1f} g{over} (ratio {got / want:.3f}): {density}. State the areal_density "
+                    "and thickness the sheet was built with in its actor params."
                 )
 
     # ------------------------------------------------------------------ tick
@@ -637,7 +644,8 @@ def _weighed_share(masses: np.ndarray, tris: np.ndarray, areas: np.ndarray, lump
     if lumping != "mesh":
         return None
     lumped = np.bincount(np.asarray(tris).ravel(), weights=np.repeat(areas / 3.0, 3), minlength=len(masses))
-    return float(lumped[weighed].sum() / lumped.sum())
+    total = float(lumped.sum())
+    return float(lumped[weighed].sum() / total) if total > 0.0 else 0.0
 
 
 def _cloth_args(recipe: dict, params: dict) -> dict[str, float]:

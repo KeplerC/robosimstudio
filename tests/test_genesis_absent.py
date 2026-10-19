@@ -512,6 +512,18 @@ class TestOnlyTheParticlesNewtonWeighsAreWeighed(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ratio 2.000"):
             self._open(model, {**record, "params": params})
 
+    def test_weighed_particles_holding_no_area_are_refused_by_name(self):
+        """Newton weighs only two particles of the range, on no triangle of it, at two masses: the area they hold is
+        0, and the refusal divided by it, a ZeroDivisionError for the ValueError meant."""
+        corners = [[0.0, 0, 0.1], [0.1, 0, 0.1], [0.0, 0.1, 0.1], [0.1, 0.1, 0.1]]
+        model = _model([*corners, [0.3, 0, 0.1], [0.4, 0, 0.1]], tris=[[0, 1, 2], [1, 3, 2]])
+        model.particle_mass = _Arr(np.array([0.0, 0.0, 0.0, 0.0, 1.0e-3, 2.0e-3], dtype=np.float32))
+        record = {"kind": "shell", "name": "strip", "particle_start": 0, "particle_count": 6, "lumping": "mesh"}
+        with self.assertRaises(ValueError) as caught:
+            self._open(model, {**record, "params": {"areal_density": 0.3}})
+        for word in ("'strip'", "over the 2 of its 6 particles", "hold none of its triangles' area"):
+            self.assertIn(word, str(caught.exception))
+
 
 class TestTheLongestSubstepIsTheMaterials(unittest.TestCase):
     """Genesis's viscosity limit, and the pressure wave's and the cohesion's, scaled from the water the probes held."""
