@@ -181,7 +181,9 @@ class PanelTune(Panel):
                 if preset == "(as built)":
                     self.revert_requested = True
                 else:
-                    self.tuner.adopt(preset)
+                    if not self.tuner.adopt(preset):
+                        self.session.status = self.tuner.refused
+                        self._sync_preset()
                     self.binder.set_spec(self.tuner.material)
                     self.refresh()
                     return
@@ -206,8 +208,10 @@ class PanelTune(Panel):
             return
 
         changed = self.binder.drain() if self.binder is not None else {}
-        for field, value in changed.items():
-            self.tuner.set_field(field, value)
+        if changed and not self.tuner.set_fields(changed):
+            self.binder.refuse(self.tuner.material, self.tuner.refused)
+        if self.binder is not None and self.binder.refused:
+            self.session.status = self.binder.refused
         if changed or self.physics.drain():
             self.refresh()
 

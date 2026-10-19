@@ -229,19 +229,25 @@ class LiveMaterial:
         return write_live(spec, self.write_field, only=only)
 
 
-def write_live(spec: Any, write_field: Any, *, only: str = "") -> tuple[str, ...]:
+def write_live(
+    spec: Any, write_field: Any, *, only: str | tuple[str, ...] = "", write_many: Any = None
+) -> tuple[str, ...]:
     """Write every live field of ``spec`` through ``write_field``, or just ``only``. Returns what landed.
 
     ``write_field`` is ``(field, value) -> bool``: :meth:`LiveMaterial.write_field`, or an entity's
     material :class:`~robosimstudio.core.tuning.Tunable`, which routes the fields its kind adds.
+    ``only`` is one field's name or several. ``write_many``, a tunable's
+    :attr:`~robosimstudio.core.tuning.Tunable.write_many`, takes them all in one call instead.
     """
-    written: list[str] = []
+    wanted = (only,) if isinstance(only, str) and only else tuple(only)
+    values: dict[str, Any] = {}
     for f in fields(spec):
-        if only and f.name != only:
+        if wanted and f.name not in wanted:
             continue
         described = param_ui(spec, f.name)
         if described is None or described.tier != LIVE:
             continue
-        if write_field(f.name, getattr(spec, f.name)):
-            written.append(f.name)
-    return tuple(written)
+        values[f.name] = getattr(spec, f.name)
+    if write_many is not None:
+        return tuple(write_many(values)) if values else ()
+    return tuple(name for name, value in values.items() if write_field(name, value))

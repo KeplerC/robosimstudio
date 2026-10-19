@@ -7,11 +7,17 @@ name = "robosimstudio"
 dynamic = ["version"]
 description = "An open interactive toolkit that accelerates human and agentic physics-based Real2Sim of Robot Manipulation Tasks"
 readme = "README.md"
-# The project is Apache-2.0; the robot models under assets/ keep their own
-# licences (MIT, BSD-2-Clause, BSD-3-Clause), each in a LICENSE beside its files
-# and listed in NOTICE.
+# The project is Apache-2.0; the robot models under assets/ and the vendored cage
+# cutter keep their own licences (MIT, BSD-2-Clause, BSD-3-Clause), each in a
+# LICENSE beside its files and listed in NOTICE.
 license = "Apache-2.0 AND MIT AND BSD-2-Clause AND BSD-3-Clause"
-license-files = ["LICENSE", "NOTICE", "assets/embodiments/*/LICENSE*", "assets/embodiments/*/*/LICENSE*"]
+license-files = [
+    "LICENSE",
+    "NOTICE",
+    "assets/embodiments/*/LICENSE*",
+    "assets/embodiments/*/*/LICENSE*",
+    "robosimstudio_materials/cutting/cagecut/LICENSE",
+]
 requires-python = ">=3.12"
 authors = [{ name = "Kaiyuan Chen" }]
 keywords = ["robotics", "simulation", "manipulation", "deformable", "newton", "real-to-sim"]
@@ -209,6 +215,8 @@ registries = ["../open-robot-skills"]
 cache-dir = ".cache/ruff"
 line-length = 120
 indent-width = 4
+# Vendored as it was released (MIT, tabs and all): the walk-on-spheres cage cutter the cutting kind drives.
+extend-exclude = ["robosimstudio_materials/cutting/cagecut"]
 
 [tool.ruff.lint]
 select = [

@@ -43,7 +43,9 @@ recording's ``shape_color_live_index`` anchor to say which rows those are.
 A particle body's surface is not a channel: its handle's ``surface`` is a
 function of the particle positions alone, so a replay that writes
 ``particle_q`` regrows the surface the recording showed, frame by frame, with
-nothing recorded but the particles.
+nothing recorded but the particles. A cut block's is regrown only in the
+process that cut it, which kept each step's drawing under the corners it wrote
+(``robosimstudio_materials.cutting.EntityCuttable.surface_mesh``).
 
 Named rather than left implicit because it is what a reader has to select *on*
 before slicing. A recording that stores an episode's constants beside its

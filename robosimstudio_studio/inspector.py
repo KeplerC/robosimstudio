@@ -266,10 +266,20 @@ class PanelInspector(Panel):
             self._rebuild()
             return
         for binder, tunable in self._binders:
-            for field, value in binder.drain().items():
-                # `False` means the field has nothing in this entity to write to.
-                # Shown rather than raised: it is information about the entity.
-                tunable.write(field, value)
+            before = binder.spec
+            taken = binder.drain()
+            try:
+                # As one set: a tape's peak_opening and reach moved together must not pass through a law
+                # it refuses. A field that does not land has nothing in this entity to write to, which
+                # is information about the entity rather than an error.
+                if taken:
+                    tunable.write_fields(taken)
+            except ValueError as exc:
+                # Refused beside what the entity holds (a tape's reach the Material folder moved under
+                # this peak), which this binder's spec cannot see: refused, not raised out of the loop.
+                binder.refuse(before, f"{', '.join(taken)} not changed: {exc}")
+            if binder.refused:
+                self.session.status = binder.refused
 
     def refresh(self) -> None:
         for widget, source in self._live:

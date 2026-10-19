@@ -3,8 +3,11 @@
 
 This file is what ``rss.tape`` builds, imported as ``robosimstudio_materials.tape``. It is cloth
 (``cloth.py``) plus three things: Newton's particle-body attachments, which stick the sheet to a
-body named in the scene; a kernel that breaks a bond once the sheet lifts off it; and a rigid pull
-tab clamped on one end, which a hand closes on. Run ``examples/19_tape/00_peel_a_label.py`` first.
+body named in the scene; kernels that make and break those bonds, by one of two laws; and a rigid
+pull tab clamped on one end, which a hand closes on. Under opening adhesion the sheet is built stuck
+and a bond lets go once the sheet lifts off it; under contact adhesion, ipc-toolkit's adhesion law,
+a bond forms where the sheet is pressed onto the body and holds up to a strength. Run
+``examples/19_tape/00_peel_a_label.py`` and ``02_stick_a_label.py`` first.
 """
 
 from __future__ import annotations
@@ -33,12 +36,17 @@ from robosimstudio.specs.physics import register_domain
 from robosimstudio_materials.cloth import ClothMaterialSpec, ClothSpec, EntityCloth
 
 __all__ = [
+    "CONTACT_FIELDS",
+    "DUCT_TAPE",
+    "LABEL",
+    "MASKING_TAPE",
     "PAPER_LABEL",
     "TAPE_60HZ",
     "EntityTape",
     "Tape",
     "TapeMaterialSpec",
     "TapeSpec",
+    "adhesion_curve",
     "bonded_rows",
     "clamped_rows",
     "opening",
@@ -54,11 +62,12 @@ __all__ = [
 # Importing this file registers the tape. The library finds it by scanning ``robosimstudio_materials``,
 # like cloth; like paper and the bag, it extends ``cloth.py``.
 #
-# The bonds. Newton 1.7's ``ModelBuilder.add_attachment_particle_body`` ties one particle to a point
-# fixed in a body by a spring (stiffness [N/m], no force cap, no break), which ``SolverVBD`` applies
-# to both ends. Every particle of the flat part gets one, to the body ``on`` names, at the point it
-# was built over. Newton has no strength: a bond holds at any load. Strength is the model stated here,
-# the cohesive zone of the peel literature in its simplest form: a bond breaks once the sheet has lifted
+# Opening adhesion, the bonds :data:`PAPER_LABEL` is built with. Newton 1.7's
+# ``ModelBuilder.add_attachment_particle_body`` ties one particle to a point fixed in a body by a
+# spring (stiffness [N/m], no force cap, no break), which ``SolverVBD`` applies to both ends. Every
+# particle of the flat part gets one, to the body ``on`` names, at the point it was built over.
+# Newton has no strength: a bond holds at any load. Strength is the model stated here, the cohesive
+# zone of the peel literature in its simplest form: a bond breaks once the sheet has lifted
 # off the body by more than :attr:`TapeMaterialSpec.break_opening` along the face's normal, and a
 # broken bond stays broken. Shear does not break a bond: tape pushed along a face does not come
 # unstuck, and only being pulled off it peels. The kernel (section 4) runs after every substep inside
@@ -67,6 +76,35 @@ __all__ = [
 # attachment arrays) and into the model's, which Newton copies over the solver's again whenever it is
 # told the constraints changed. A bond's force at its break is ``tack x cell area x break_opening``:
 # 0.1 N on a 5 mm cell of :data:`PAPER_LABEL`, 0.9 N across a 40 mm label's row.
+#
+# Contact adhesion (:attr:`TapeMaterialSpec.adhesion` ``"contact"``, :data:`LABEL` and the presets after
+# it). A bond forms where the sheet is pressed onto the body and holds by ipc-toolkit's adhesion law
+# (Fang, Li et al., TVCG 2023; section 4), so a loose label sticks only where a hand presses it.
+# ipc-toolkit adds its potentials to an implicit solve. Added instead as forces on ``particle_f``
+# before the solve, the ``pre_solve`` phase of ``core/schedule.py``, with the reaction on the body's
+# ``body_f``, they cannot work here: SolverVBD folds ``particle_f`` into the step's predicted velocity,
+# so a force f moves a 2 mg particle's starting iterate by dt^2 f/m, 0.54 mm a millinewton at 1/960 s,
+# and the body-particle contact turns that depth into its penalty on the body. A constant 1 mN pushed
+# down on each of a label's 153 particles shoved the 0.5 kg box 49 mm, and the ipc pull
+# at 4 kPa held a tab pulled up and back at 21 N without a row lifting, dragging the box 12 mm
+# (``p2_pull.py``, GPU 6). So the law rides on the attachments, which VBD solves implicitly. Every
+# bondable particle is given an attachment to the body at the build, disabled unless the sheet is
+# built stuck. After every substep one kernel makes a bond where its particle presses into the body
+# harder than :attr:`~TapeMaterialSpec.press` (VBD's own penalty for the pair, the mean of the sheet's
+# ``contact_ke`` and the box's ``ke``, times the depth inside the contact thickness, over the particle's
+# share of the sheet), anchored where the particle would rest on that face. A second sets every held bond's spring to the secant of the pull at the lift the
+# substep starts at, so the spring pulls with ipc-toolkit's force there, and lets the bond go past
+# :attr:`~TapeMaterialSpec.reach`. Along the face the anchor slides once the spring pulls harder than
+# ``stiction`` times the bond's strength, a hold that fades as ipc-toolkit's tangential mollifier
+# does once the slide passes ``stiction_speed``. A bond let go is made again where the sheet is
+# pressed back. The two warp functions match ipctk 1.6.0 to float32 (``tests/test_tape_adhesion_law.py``).
+#
+# Both ways, within the tape's island. VBD applies an attachment to both its ends, so the box carries
+# what the label carries: drawn up by its tab, :data:`DUCT_TAPE` lifted and dragged the 0.5 kg box 80 mm
+# (``p4_law.py``), and the hand feels the tab through the proxy coupler. A body on another solver cannot
+# be stuck to (Newton drops the attachment; section 5 raises), so contact adhesion does not reach a
+# body MuJoCo owns: that would need the reaction carried through ``body_f``, the route the explicit
+# forces above took. The press is measured against the body's boxes, so ``on`` must be an ``rss.box``.
 #
 # The pull tab, and why it is rigid. Peeling needs the hand to hold the sheet's end, and every way of
 # holding it by contact was measured. The attachments need VBD to integrate the body too, so they
@@ -100,6 +138,9 @@ __all__ = [
 # count, so bonds cost launches rather than arithmetic: a 216-particle label with 180 bonds on a box
 # beside the YAM steps in 38.7 ms a control step and the same label with none in 28.9 ms, graph-captured
 # at ``GENERIC``'s 16 substeps; the break kernel is one launch a substep (``p11_cost.py``, GPU 1).
+# Contact adhesion is two launches a substep, one thread a bond: ``02_stick_a_label``'s 126 bonds beside
+# the YAM step in 35.1-35.5 ms a control step through the page, carried, laid and rubbed
+# (``m1_screen.py``, five drives, GPU 6).
 
 
 # =============================================================================
@@ -112,15 +153,29 @@ __all__ = [
 class TapeMaterialSpec(ClothMaterialSpec):
     """Cloth constitutive parameters plus an adhesive.
 
-    Every :class:`~robosimstudio_materials.cloth.ClothMaterialSpec` field applies. The two below are
-    the adhesive, and both are LIVE: the stiffness is written into the attachment arrays VBD reads on
-    every launch, and the opening lives in an array the break kernel reads.
+    Every :class:`~robosimstudio_materials.cloth.ClothMaterialSpec` field applies. The ones below are
+    the adhesive. ``adhesion`` picks the law at the build; the rest are LIVE, written into the
+    attachment arrays VBD reads on every launch or into arrays the bond kernels read.
 
     Attributes:
-        tack: The bonds' stiffness per unit area of sheet [N/m per m^2]. Each bonded particle gets
-            ``tack`` times its cell's area: 100 N/m on a 5 mm cell at 4e6.
-        break_opening: How far the sheet lifts off the face under a bond before the bond lets go [m].
-            ``0`` never lets go: the sheet stays stuck whatever pulls on it.
+        tack: Opening adhesion: the bonds' stiffness per unit area of sheet [N/m per m^2]. Each bonded
+            particle gets ``tack`` times its cell's area: 100 N/m on a 5 mm cell at 4e6.
+        break_opening: Opening adhesion: how far the sheet lifts off the face under a bond before the
+            bond lets go [m]. ``0`` never lets go: the sheet stays stuck whatever pulls on it.
+        adhesion: ``"opening"``, bonds made at the build that let go past ``break_opening``; or
+            ``"contact"``, bonds made where the sheet is pressed, held by ipc-toolkit's law (section 1).
+        strength: Contact adhesion: the largest pull a bond makes per unit area [Pa], ipc-toolkit's
+            ``Y * eps_c``, reached at a lift of ``peak_opening``. ``0`` is adhesion off: no bond forms
+            and every bond lets go.
+        peak_opening: Contact adhesion: the lift past contact at which a bond pulls hardest [m],
+            ipc-toolkit's ``dhat_p``.
+        reach: Contact adhesion: the lift past contact at which a bond lets go [m], ``dhat_a``.
+        stiction: Contact adhesion: a bond's hold along the face, as a multiple of its strength.
+        stiction_speed: Contact adhesion: sliding along the face faster than this [m/s], a bond's hold
+            fades, gone at twice it (ipc-toolkit's ``eps_a``, as a speed).
+        press: Contact adhesion: the contact pressure that makes a bond [Pa], VBD's penalty over the
+            particle's share of the sheet: the depth times ``(contact_ke + ke) / 2``, the sheet's
+            soft-contact stiffness and the box shape's, the stiffness ``SolverVBD`` gives the pair.
     """
 
     tack: float = field(
@@ -145,20 +200,101 @@ class TapeMaterialSpec(ClothMaterialSpec):
         ),
     )
 
+    adhesion: str = field(
+        default="opening",
+        metadata=ui(
+            tier=REBUILD,
+            choices=("opening", "contact"),
+            group="adhesive",
+            doc="opening: bonds made at build, let go past break_opening. contact: bonds form where pressed.",
+        ),
+    )
+    strength: float = field(
+        default=0.0,
+        metadata=ui(
+            tier=LIVE,
+            unit="Pa",
+            range=(0.0, 1.0e5),
+            group="adhesive",
+            doc="Contact adhesion's largest pull per square metre of sheet. 0 is adhesion off: nothing sticks.",
+        ),
+    )
+    peak_opening: float = field(
+        default=5.0e-4,
+        metadata=ui(
+            tier=LIVE, unit="m", range=(1.0e-5, 5.0e-3), group="adhesive", doc="Lift at which a bond pulls hardest."
+        ),
+    )
+    reach: float = field(
+        default=1.0e-3,
+        metadata=ui(tier=LIVE, unit="m", range=(2.0e-5, 1.0e-2), group="adhesive", doc="Lift at which a bond lets go."),
+    )
+    stiction: float = field(
+        default=1.0,
+        metadata=ui(
+            tier=LIVE,
+            range=(0.0, 4.0),
+            group="adhesive",
+            doc="A bond's hold along the face, as a share of its strength.",
+        ),
+    )
+    stiction_speed: float = field(
+        default=0.01,
+        metadata=ui(
+            tier=LIVE,
+            unit="m/s",
+            log=True,
+            range=(1.0e-4, 1.0),
+            group="adhesive",
+            doc="Sliding faster than this, a bond's hold along the face fades; at twice it, it is gone.",
+        ),
+    )
+    press: float = field(
+        default=5.0e3,
+        metadata=ui(
+            tier=LIVE,
+            unit="Pa",
+            log=True,
+            range=(1.0e2, 1.0e6),
+            group="adhesive",
+            doc="Contact pressure that makes a bond, under contact adhesion.",
+        ),
+    )
+
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.tack < 0.0:
             raise ValueError(f"tape tack cannot be negative, got {self.tack}")
         if self.break_opening < 0.0:
             raise ValueError(f"tape break_opening cannot be negative, got {self.break_opening}")
+        if self.adhesion not in ("opening", "contact"):
+            raise ValueError(f"tape adhesion must be 'opening' or 'contact', got {self.adhesion!r}")
+        if min(self.strength, self.stiction, self.press) < 0.0:
+            raise ValueError("tape strength, stiction and press cannot be negative")
+        if not 0.0 < self.peak_opening < self.reach:
+            raise ValueError(f"tape needs 0 < peak_opening < reach, got {self.peak_opening} and {self.reach}")
+        if self.stiction_speed <= 0.0:
+            raise ValueError(f"tape stiction_speed must be positive, got {self.stiction_speed}")
 
 
-ADHESIVE_FIELDS: tuple[str, ...] = ("tack", "break_opening")
-"""The two adhesive fields, which the entity writes itself rather than into the cloth's material arrays."""
+ADHESIVE_FIELDS: tuple[str, ...] = (
+    "tack",
+    "break_opening",
+    "strength",
+    "peak_opening",
+    "reach",
+    "stiction",
+    "stiction_speed",
+    "press",
+)
+"""The adhesive fields, which the entity writes itself rather than into the cloth's material arrays."""
+
+CONTACT_FIELDS: tuple[str, ...] = ("strength", "peak_opening", "reach", "stiction", "stiction_speed", "press")
+"""Contact adhesion's fields, in the order its parameter array holds them."""
 
 
 # =============================================================================
-# 3. Materials: a paper label
+# 3. Materials: a paper label, and three that stick where pressed
 # =============================================================================
 # Section 8 registers it with what it was measured on.
 
@@ -188,8 +324,41 @@ PAPER_LABEL = TapeMaterialSpec(
 )
 """A paper label: soft enough for its tab to peel it, 0.9 N across a 40 mm row at the break."""
 
-tapes = SimpleNamespace(PAPER_LABEL=PAPER_LABEL)
-"""The material above under one name, which is what ``rss.tapes`` resolves to."""
+# Contact adhesion's presets: PAPER_LABEL's sheet, soft for section 1's reason, with three adhesives.
+# Each was pressed onto the example's 0.5 kg box with 5 N over the whole label, then its tab drawn
+# straight up at 30 mm/s by a 300 N/m spring (``p4_law.py``, GPU 6, the 126 bonds of a 12 mm dry
+# margin); the pull is the tab's clamps' summed force, and a label stuck by nothing reads 1.07 N on the
+# same rig, the drag of VBD's slow answer through the cloth.
+LABEL = replace(
+    PAPER_LABEL,
+    adhesion="contact",
+    strength=4.0e3,
+    peak_opening=5.0e-4,
+    reach=1.0e-3,
+    # A bond's hold along the face, 0.4 N on a 5 mm cell. At 1, with stiction_speed 0.01 m/s, the shut
+    # fingertips rubbing at 30 mm/s, 5 mm under the label, dragged it along with them (``p18_film.py``,
+    # one drive); at these two, four strokes 3 mm under it made 88-92% of the bonds in five.
+    stiction=4.0,
+    stiction_speed=0.1,
+    # 0.125 N on a 5 mm cell: a label laid by the hand makes 1-6 of 126 bonds, the shut fingertips
+    # rubbing it 88-92% in four strokes (``m1_screen.py``, five drives). Measured as 8 kPa when the press
+    # was read off the sheet's 10 kN/m alone; the pair's mean with the box's 2.5 kN/m is 6.25 kN/m, so
+    # 5 kPa is the same depth, 20 um on a 5 mm cell.
+    press=5.0e3,
+)
+"""A paper label that sticks where it is pressed: it peeled whole at 2.9 N drawn up on the rig, and drawn
+up by the YAM's pads at 2.2-2.4 N, all but 1-2 of its 126 bonds (``m1_screen.py``, five drives)."""
+
+MASKING_TAPE = replace(LABEL, strength=1.0e4)
+""":data:`LABEL`'s sheet with 2.5 times the strength: it peeled whole at 4.2 N on the rig. Not driven by
+the YAM, whose pads let a tab slide out at 2-3.5 N pulled along them (``p8_peel.py``)."""
+
+DUCT_TAPE = replace(LABEL, strength=4.0e4)
+""":data:`LABEL`'s sheet with 10 times the strength: drawn up on the rig it did not peel, and lifted and
+dragged the 0.5 kg box 80 mm at 4.6-7.8 N."""
+
+tapes = SimpleNamespace(PAPER_LABEL=PAPER_LABEL, LABEL=LABEL, MASKING_TAPE=MASKING_TAPE, DUCT_TAPE=DUCT_TAPE)
+"""The materials above under one name, which is what ``rss.tapes`` resolves to."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -217,6 +386,11 @@ class TapeSpec(ClothSpec):
             These never break. Softer than the 10 kN/m Newton defaults to, so the tab's own inertia, not
             the clamp, sets how it answers the pads (section 1's "Why the sheet is soft").
         tab_color: Display RGB of the tab.
+        dry: How far past the fold the sheet carries no adhesive [m], like a label's lift tab. ``0``
+            bonds every row on the face but the fold's. Without a tab it runs from the sheet's end.
+        stuck: Built stuck to ``on``: every bond made at the build and again at every reset. ``False``
+            builds the sheet loose, its bonds made only where it is pressed onto ``on``, which needs
+            contact adhesion (:attr:`TapeMaterialSpec.adhesion`).
         settle_frames: ``0``, unlike cloth's 60: a reset puts the body back at its spawn pose and the
             tab where it was built, so the sheet goes back where it was built too, on that pose.
             Settled for 30 frames first, the box came back to its spawn pose with the settled label
@@ -241,6 +415,8 @@ class TapeSpec(ClothSpec):
     tab_hold: float = 3.0e3
     tab_color: Vec3 = (0.16, 0.36, 0.78)
     settle_frames: int = 0
+    stuck: bool = True
+    dry: float = field(default=0.0, metadata=ui(tier=REBUILD, unit="m", range=(0.0, 0.05), group="tab"))
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -256,6 +432,13 @@ class TapeSpec(ClothSpec):
         if self.tab > 0.0 and self.tab_size[2] < self.tab:
             raise ValueError(
                 f"tape {self.name!r}: the tab ({self.tab_size[2]} m tall) must hold the {self.tab} m turned up"
+            )
+        if self.dry < 0.0 or self.tab + self.dry >= length:
+            raise ValueError(f"tape {self.name!r}: dry {self.dry} m leaves nothing to stick past the {self.tab} m tab")
+        if not self.stuck and self.material.adhesion != "contact":
+            raise ValueError(
+                f"tape {self.name!r}: only contact adhesion makes bonds after the build, so a loose "
+                f"(stuck=False) tape needs a material with adhesion='contact', not {self.material.adhesion!r}"
             )
 
     @property
@@ -284,12 +467,16 @@ def tape_surface(
     return vertices, faces, up
 
 
-def bonded_rows(vertices: np.ndarray, tab: float, cell_along: float) -> np.ndarray:
-    """The vertices stuck to the body: on the face, past the fold row. All of them without a tab."""
+def bonded_rows(vertices: np.ndarray, tab: float, cell_along: float, dry: float = 0.0) -> np.ndarray:
+    """The vertices stuck to the body: on the face, past the fold row and past ``dry`` metres beyond it.
+
+    Without a tab there is no fold: all of them past ``dry`` metres from the sheet's end at ``y = 0``.
+    """
     on_face = vertices[:, 2] <= 1.0e-9
     if tab <= 0.0:
-        return np.flatnonzero(on_face)
-    return np.flatnonzero(on_face & (vertices[:, 1] >= float(tab) + 0.5 * float(cell_along)))
+        return np.flatnonzero(on_face & (vertices[:, 1] >= float(dry) - 1.0e-9))
+    past = float(tab) + max(0.5 * float(cell_along), float(dry) - 1.0e-9)
+    return np.flatnonzero(on_face & (vertices[:, 1] >= past))
 
 
 def clamped_rows(vertices: np.ndarray, tab: float) -> np.ndarray:
@@ -297,6 +484,29 @@ def clamped_rows(vertices: np.ndarray, tab: float) -> np.ndarray:
     if tab <= 0.0:
         return np.zeros(0, dtype=np.int64)
     return np.flatnonzero(vertices[:, 2] >= 0.5 * float(tab) - 1.0e-9)
+
+
+def sheet_areas(size: tuple[float, float], cells: tuple[int, int]) -> np.ndarray:
+    """Each vertex's share of the flat sheet's area [m^2]: a third of every triangle it is a corner of."""
+    vertices, faces = grid_surface(size, cells)
+    corners = vertices[faces]
+    tri = 0.5 * np.linalg.norm(np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]), axis=1)
+    out = np.zeros(len(vertices))
+    for k in range(3):
+        np.add.at(out, faces[:, k], tri / 3.0)
+    return out
+
+
+def contact_stiffness(material: TapeMaterialSpec, dmin: float) -> float:
+    """Contact adhesion's spring at contact, per square metre of sheet [N/m per m^2]: the slope of the pull.
+
+    The same number :func:`adhesion_stiffness` gives on the device, for a contact thickness ``dmin``.
+    """
+    peak, reach, strength = float(material.peak_opening), float(material.reach), float(material.strength)
+    big_p = 2.0 * dmin * peak + peak * peak
+    big_a = 2.0 * dmin * reach + reach * reach
+    a2 = strength / (4.0 * (peak + dmin) * (big_p - big_a))
+    return 8.0 * a2 * (1.0 - big_a / big_p) * dmin * dmin
 
 
 def opening(points: np.ndarray, anchors: np.ndarray, normals: np.ndarray) -> np.ndarray:
@@ -340,6 +550,325 @@ def _break_kernel(
         enabled_model[rows[i]] = False
 
 
+# Contact adhesion. The force law is ipc-toolkit's (v1.6.0, MIT, Copyright (c) 2020-2025 Zachary
+# Ferguson; Fang, Li et al., "Augmented Incremental Potential Contact for Sticky Interactions", TVCG
+# 2023): ``src/ipc/adhesion/adhesion.cpp`` and the argument shift in
+# ``src/ipc/potentials/normal_adhesion_potential.cpp``, written below as warp functions. ipc-toolkit
+# evaluates its potential on the squared distance less ``dmin^2``; the pull here is that potential's
+# derivative along the distance itself, so it peaks at ``strength`` (``Y * eps_c``) per unit area when
+# the gap reaches ``peak``, and is zero at contact and past ``reach``. Section 1 says how it is applied.
+
+
+@wp.func
+def adhesion_pull(dist: float, dmin: float, peak: float, reach: float, strength: float) -> float:
+    """ipc-toolkit's normal adhesion force per unit area at centre-to-surface distance ``dist`` [Pa].
+
+    ``dmin`` is the contact thickness, ``peak`` and ``reach`` the gaps past it where the pull is largest
+    and where it ends (``dhat_p`` and ``dhat_a``). Positive pulls the point onto the surface.
+    """
+    big_d = dist * dist - dmin * dmin
+    big_p = 2.0 * dmin * peak + peak * peak
+    big_a = 2.0 * dmin * reach + reach * reach
+    if big_d <= 0.0 or big_d >= big_a:
+        return 0.0
+    a2 = strength / (4.0 * (peak + dmin) * (big_p - big_a))
+    slope = float(0.0)
+    if big_d < big_p:
+        slope = 2.0 * a2 * (1.0 - big_a / big_p) * big_d
+    else:
+        slope = 2.0 * a2 * (big_d - big_a)
+    return 2.0 * dist * slope
+
+
+@wp.func
+def adhesion_stiffness(dmin: float, peak: float, reach: float, strength: float) -> float:
+    """The pull's slope at contact, per unit area [Pa/m]: what a bond starts as, and holds at below contact."""
+    big_p = 2.0 * dmin * peak + peak * peak
+    big_a = 2.0 * dmin * reach + reach * reach
+    a2 = strength / (4.0 * (peak + dmin) * (big_p - big_a))
+    return 8.0 * a2 * (1.0 - big_a / big_p) * dmin * dmin
+
+
+@wp.func
+def stiction_mollifier(y: float, eps: float) -> float:
+    """ipc-toolkit's ``tangential_adhesion_f1``: 1 at a slide of ``eps`` a step, 0 at none and past ``2 eps``."""
+    if y <= 0.0 or y >= 2.0 * eps:
+        return 0.0
+    z = y / eps
+    return z * (2.0 - z)
+
+
+@wp.kernel
+def _curve_kernel(
+    dist: wp.array(dtype=float),
+    params: wp.array(dtype=float),
+    pull: wp.array(dtype=float),
+    mollified: wp.array(dtype=float),
+):
+    i = wp.tid()
+    pull[i] = adhesion_pull(dist[i], params[0], params[1], params[2], params[3])
+    mollified[i] = stiction_mollifier(dist[i], params[4])
+
+
+def adhesion_curve(
+    dist: np.ndarray, *, dmin: float, peak: float, reach: float, strength: float, eps: float = 1.0e-3
+) -> tuple[np.ndarray, np.ndarray]:
+    """The two warp functions above evaluated on the CPU: ``(pull [Pa], stiction_mollifier)`` at each ``dist``.
+
+    For checking the port against ipc-toolkit itself (``tests/test_tape_adhesion_law.py``); the
+    mollifier takes ``dist`` as the slide ``y``.
+    """
+    d = wp.array(np.asarray(dist, dtype=np.float32), dtype=float, device="cpu")
+    params = wp.array(np.array([dmin, peak, reach, strength, eps], dtype=np.float32), dtype=float, device="cpu")
+    pull = wp.zeros(len(d), dtype=float, device="cpu")
+    mollified = wp.zeros(len(d), dtype=float, device="cpu")
+    wp.launch(_curve_kernel, dim=len(d), inputs=[d, params], outputs=[pull, mollified], device="cpu")
+    return pull.numpy().astype(np.float64), mollified.numpy().astype(np.float64)
+
+
+@wp.func
+def _box_gap(point: wp.vec3, half: wp.vec3) -> wp.vec4:
+    """Signed distance from a box centred at the origin, and the outward normal there: ``(nx, ny, nz, d)``."""
+    q = wp.vec3(wp.abs(point[0]) - half[0], wp.abs(point[1]) - half[1], wp.abs(point[2]) - half[2])
+    if q[0] > 0.0 or q[1] > 0.0 or q[2] > 0.0:
+        outside = wp.vec3(wp.max(q[0], 0.0), wp.max(q[1], 0.0), wp.max(q[2], 0.0))
+        clamped = wp.vec3(
+            wp.clamp(point[0], -half[0], half[0]),
+            wp.clamp(point[1], -half[1], half[1]),
+            wp.clamp(point[2], -half[2], half[2]),
+        )
+        n = wp.normalize(point - clamped)
+        return wp.vec4(n[0], n[1], n[2], wp.length(outside))
+    if q[0] >= q[1] and q[0] >= q[2]:
+        return wp.vec4(wp.sign(point[0]), 0.0, 0.0, q[0])
+    if q[1] >= q[2]:
+        return wp.vec4(0.0, wp.sign(point[1]), 0.0, q[1])
+    return wp.vec4(0.0, 0.0, wp.sign(point[2]), q[2])
+
+
+@wp.func
+def _margin_of(shape_margin: wp.array(dtype=float), s: int) -> float:
+    """A shape's contact margin [m], 0 for none or with no margins on the model."""
+    if s < 0 or shape_margin.shape[0] == 0:
+        return 0.0
+    return shape_margin[s]
+
+
+@wp.func
+def _nearest_box(
+    local: wp.vec3,
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+) -> int:
+    """The body's box nearest a point in the body's frame, its margin counted; -1 with no boxes."""
+    best = float(1.0e9)
+    hit = int(-1)
+    for j in range(boxes.shape[0]):
+        s = boxes[j]
+        g = _box_gap(wp.transform_point(wp.transform_inverse(shape_transform[s]), local), shape_scale[s])
+        if g[3] - _margin_of(shape_margin, s) < best:
+            best = g[3] - _margin_of(shape_margin, s)
+            hit = s
+    return hit
+
+
+@wp.kernel
+def _stick_kernel(
+    rows: wp.array(dtype=wp.int32),
+    particle: wp.array(dtype=wp.int32),
+    target: int,
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+    particle_radius: wp.array(dtype=float),
+    area: wp.array(dtype=float),
+    params: wp.array(dtype=float),
+    soft_ke: float,
+    shape_ke: wp.array(dtype=float),
+    particle_q: wp.array(dtype=wp.vec3),
+    body_q: wp.array(dtype=wp.transform),
+    enabled: wp.array(dtype=wp.bool),
+    enabled_model: wp.array(dtype=wp.bool),
+    body_point: wp.array(dtype=wp.vec3),
+    body_point_model: wp.array(dtype=wp.vec3),
+    normal: wp.array(dtype=wp.vec3),
+    dmin: wp.array(dtype=float),
+    broken: wp.array(dtype=wp.int32),
+):
+    """Make each bond whose particle is pressed onto the body harder than ``press``. One thread per bond.
+
+    The press is what VBD's penalty pushes back with: the depth inside the contact thickness, the
+    particle's radius plus the shape's margin, against the nearest of the body's boxes, times the pair's
+    stiffness, the mean of the particles' ``soft_ke`` and that shape's ``shape_ke``, as
+    ``init_body_particle_contacts`` mixes them. ``SolverVBD`` holds the pair's penalty at that mean when
+    its linear beta is 0, :data:`TAPE_60HZ`'s; a ramped penalty starts lower, and this reads its
+    ceiling. ``soft_ke`` is a float frozen into a captured graph, as VBD's own launches take it, and
+    cloth's ``contact_ke`` is RECAPTURE; ``shape_ke`` is the model's array, read live.
+
+    The anchor goes where the particle would rest on that face, under it. ``enabled`` and
+    ``body_point`` are the solver's copies and the ``_model`` ones the model's, written alike as
+    :func:`_break_kernel` writes them: a ``CONSTRAINT_PROPERTIES`` notify copies the model's over the
+    solver's.
+    """
+    k = wp.tid()
+    row = rows[k]
+    if enabled[row] or params[0] <= 0.0:
+        return
+    p = particle[k]
+    pose = body_q[target]
+    local = wp.transform_point(wp.transform_inverse(pose), particle_q[p])
+    s = _nearest_box(local, boxes, shape_transform, shape_scale, shape_margin)
+    if s < 0:
+        return
+    frame = shape_transform[s]
+    inside = wp.transform_point(wp.transform_inverse(frame), local)
+    g = _box_gap(inside, shape_scale[s])
+    margin = _margin_of(shape_margin, s)
+    n_shape = wp.vec3(g[0], g[1], g[2])
+    face = wp.transform_vector(frame, n_shape)
+    surface = wp.transform_point(frame, inside - n_shape * g[3])
+    thick = particle_radius[p] + margin
+    pair = 0.5 * (soft_ke + shape_ke[s])
+    depth = particle_radius[p] - (g[3] - margin)
+    if pair * depth < params[5] * area[k]:
+        return
+    anchor = surface + face * thick
+    body_point[row] = anchor
+    body_point_model[row] = anchor
+    normal[k] = face
+    dmin[k] = thick
+    enabled[row] = True
+    enabled_model[row] = True
+    broken[k] = 0
+
+
+@wp.kernel
+def _bond_kernel(
+    rows: wp.array(dtype=wp.int32),
+    particle: wp.array(dtype=wp.int32),
+    target: int,
+    area: wp.array(dtype=float),
+    normal: wp.array(dtype=wp.vec3),
+    dmin: wp.array(dtype=float),
+    params: wp.array(dtype=float),
+    dt: float,
+    particle_q: wp.array(dtype=wp.vec3),
+    particle_qd: wp.array(dtype=wp.vec3),
+    body_q: wp.array(dtype=wp.transform),
+    body_qd: wp.array(dtype=wp.spatial_vector),
+    body_com: wp.array(dtype=wp.vec3),
+    enabled: wp.array(dtype=wp.bool),
+    enabled_model: wp.array(dtype=wp.bool),
+    body_point: wp.array(dtype=wp.vec3),
+    body_point_model: wp.array(dtype=wp.vec3),
+    stiffness: wp.array(dtype=float),
+    stiffness_model: wp.array(dtype=float),
+    broken: wp.array(dtype=wp.int32),
+):
+    """Each held bond's spring set to ipc-toolkit's law at its lift, and let go past ``reach``. One thread per bond.
+
+    The spring is the secant of the pull at the lift the step starts at, so VBD carries the law
+    implicitly. Along the face the anchor slides once the spring pulls harder than ``stiction`` times
+    the strength, which fades as ipc-toolkit's tangential mollifier does once the slide passes
+    ``stiction_speed``. Every write goes into the solver's copy and the model's (:func:`_stick_kernel`).
+    """
+    k = wp.tid()
+    row = rows[k]
+    if not enabled[row]:
+        return
+    strength = params[0]
+    if strength <= 0.0:
+        enabled[row] = False
+        enabled_model[row] = False
+        broken[k] = 1
+        return
+    peak = params[1]
+    reach = params[2]
+    pose = body_q[target]
+    anchor = wp.transform_point(pose, body_point[row])
+    n = wp.transform_vector(pose, normal[k])
+    x = particle_q[particle[k]]
+    off = x - anchor
+    lift = wp.dot(off, n)
+    if lift >= reach:
+        enabled[row] = False
+        enabled_model[row] = False
+        broken[k] = 1
+        return
+    w = area[k]
+    d0 = dmin[k]
+    k0 = w * adhesion_stiffness(d0, peak, reach, strength)
+    spring = k0
+    if lift > 1.0e-7:
+        spring = w * adhesion_pull(d0 + lift, d0, peak, reach, strength) / lift
+    stiffness[row] = spring
+    stiffness_model[row] = spring
+    side = off - lift * n
+    pulled = spring * wp.length(side)
+    if pulled <= 0.0:
+        return
+    com = wp.transform_point(pose, body_com[target])
+    twist = body_qd[target]
+    v_face = wp.spatial_top(twist) + wp.cross(wp.spatial_bottom(twist), anchor - com)
+    slide = particle_qd[particle[k]] - v_face
+    slide = slide - wp.dot(slide, n) * n
+    y = wp.length(slide) * dt
+    eps = params[4] * dt
+    hold = params[3] * w * strength
+    if y > eps:
+        hold = hold * stiction_mollifier(y, eps)
+    if pulled > hold:
+        moved = wp.transform_point(wp.transform_inverse(pose), anchor + side * (1.0 - hold / pulled))
+        body_point[row] = moved
+        body_point_model[row] = moved
+
+
+@wp.kernel
+def _seat_kernel(
+    rows: wp.array(dtype=wp.int32),
+    particle: wp.array(dtype=wp.int32),
+    anchor: wp.array(dtype=wp.vec3),
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+    particle_radius: wp.array(dtype=float),
+    area: wp.array(dtype=float),
+    params: wp.array(dtype=float),
+    dmin: wp.array(dtype=float),
+    normal: wp.array(dtype=wp.vec3),
+    stiffness: wp.array(dtype=float),
+    stiffness_model: wp.array(dtype=float),
+    body_point: wp.array(dtype=wp.vec3),
+    body_point_model: wp.array(dtype=wp.vec3),
+):
+    """Each bond's contact thickness, its spring at contact and its anchor, as :func:`_stick_kernel` would
+    make the bond over its built anchor: the radius and the margin of the box nearest it, as the model
+    holds them now, and the anchor that far off the face, where VBD's contact rests the particle. One
+    thread per bond; the spring and the anchor go into the solver's copy and the model's."""
+    k = wp.tid()
+    s = _nearest_box(anchor[k], boxes, shape_transform, shape_scale, shape_margin)
+    thick = particle_radius[particle[k]] + _margin_of(shape_margin, s)
+    dmin[k] = thick
+    spring = area[k] * adhesion_stiffness(thick, params[1], params[2], params[0])
+    stiffness[rows[k]] = spring
+    stiffness_model[rows[k]] = spring
+    if s < 0:
+        return
+    frame = shape_transform[s]
+    inside = wp.transform_point(wp.transform_inverse(frame), anchor[k])
+    g = _box_gap(inside, shape_scale[s])
+    n_shape = wp.vec3(g[0], g[1], g[2])
+    face = wp.transform_vector(frame, n_shape)
+    seated = wp.transform_point(frame, inside - n_shape * g[3]) + face * thick
+    normal[k] = face
+    body_point[rows[k]] = seated
+    body_point_model[rows[k]] = seated
+
+
 # =============================================================================
 # 5. The entity: cloth, plus the bonds, the tab and the break kernel
 # =============================================================================
@@ -354,8 +883,8 @@ class EntityTape(EntityCloth):
     """One strip of tape or label: a cloth bonded to a body, its end in a rigid tab.
 
     Building, settling and reading the sheet are :class:`EntityCloth`'s. This adds the attachments
-    (section 1) and the tab at build, the break kernel after every substep, and the bonds' and the
-    tab's place in a reset: every bond is stuck again and the tab goes back where it was built.
+    (section 1) and the tab at build, the bond kernels after every substep, and the bonds' and the
+    tab's place in a reset: every bond back as built, stuck or loose, and the tab where it was built.
     """
 
     spec: TapeSpec
@@ -392,6 +921,14 @@ class EntityTape(EntityCloth):
         self._limit: Any = None
         self.broken: Any = None
         """Per bond, 1 once it has let go, on the device."""
+        self.contact: bool = False
+        """Contact adhesion: bonds made where the sheet is pressed, held by ipc-toolkit's law (section 1)."""
+        self.bond_area: np.ndarray = np.zeros(0)
+        """Each bond's share of the sheet's area [m^2]."""
+        self.clamp_particles: np.ndarray = np.zeros(0, dtype=np.int32)
+        self.clamp_points: np.ndarray = np.zeros((0, 3))
+        """Where the tab holds each clamped particle, in the tab's frame [m]."""
+        self._contact: dict[str, Any] = {}
 
     # -------------------------------------------------------------- phase 1
     def _named_body(self, builder: newton.ModelBuilder, name: str) -> int:
@@ -436,14 +973,22 @@ class EntityTape(EntityCloth):
         to_body = wp.transform_inverse(_transform(builder.body_q[self.body]))
         self.normal = np.array(wp.transform_vector(to_body, wp.transform_vector(sheet, wp.vec3(0.0, 0.0, 1.0))))
         across, along = spec.cell
-        stiffness = float(material.tack) * across * along
-        rows = bonded_rows(vertices, spec.tab, along)
+        rows = bonded_rows(vertices, spec.tab, along, spec.dry)
+        self.contact = material.adhesion == "contact"
+        self.bond_area = sheet_areas(spec.size, spec.cells)[rows]
+        stiffness = np.full(len(rows), float(material.tack) * across * along)
+        if self.contact:
+            # At the radius alone: the bind seats each at the box's margin too, spring and anchor, as the
+            # kernels read it.
+            stiffness = self.bond_area * contact_stiffness(material, float(material.particle_radius))
         bonds, anchors = [], []
-        for i in rows:
+        for i, k in zip(rows, stiffness, strict=True):
             p = start + int(i)
             local = np.array(wp.transform_point(to_body, wp.vec3(*builder.particle_q[p])))
             bonds.append(
-                builder.add_attachment_particle_body(p, self.body, body_point=wp.vec3(*local), stiffness=stiffness)
+                builder.add_attachment_particle_body(
+                    p, self.body, body_point=wp.vec3(*local), stiffness=float(k), enabled=bool(spec.stuck)
+                )
             )
             anchors.append(local)
         self.bonds = np.asarray(bonds, dtype=np.int32)
@@ -467,14 +1012,18 @@ class EntityTape(EntityCloth):
         cfg.has_particle_collision = False
         self.tab_shapes = [int(builder.add_shape_box(self.tab_body, hx=half[0], hy=half[1], hz=half[2], cfg=cfg))]
         to_tab = wp.transform_inverse(pose)
-        clamps = []
+        clamps, held, points = [], [], []
         for i in clamped_rows(vertices, spec.tab):
             p = start + int(i)
             local = wp.transform_point(to_tab, wp.vec3(*builder.particle_q[p]))
             clamps.append(
                 builder.add_attachment_particle_body(p, self.tab_body, body_point=local, stiffness=spec.tab_hold)
             )
+            held.append(p)
+            points.append(np.array(local, dtype=np.float64))
         self.clamps = np.asarray(clamps, dtype=np.int32)
+        self.clamp_particles = np.asarray(held, dtype=np.int32)
+        self.clamp_points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
 
     def apply_display(self, builder: newton.ModelBuilder) -> None:
         """The sheet's colour everywhere but the tab, which keeps its own."""
@@ -488,20 +1037,27 @@ class EntityTape(EntityCloth):
 
     # -------------------------------------------------------------- phase 2
     def tunables(self, pipeline=None):
-        """Cloth's material tunable, with the adhesive's two fields routed to the bonds.
+        """Cloth's material tunable, with the adhesive's fields routed to the bonds.
 
-        A strip stuck to nothing has no bonds for either to reach, so there both are inert and a write
-        lands nothing.
+        Only the law the tape was built with reads its fields. Under contact adhesion the law sets each
+        bond's spring every substep and no break kernel runs, so ``tack`` and ``break_opening`` move
+        nothing; under opening adhesion no contact kernel runs, so :data:`CONTACT_FIELDS` move nothing.
+        A strip stuck to nothing has no bonds for any of them to reach, so there every adhesive field
+        moves nothing. Those are the tunable's ``inert`` fields, shown read-only, and a write to one
+        does not land. Its ``write_many``, what a whole material's write takes, writes contact
+        adhesion's fields as one set (:meth:`write_adhesive_all`).
         """
         base = super().tunables(pipeline)
         if not base:
             return base
         (material,) = base
         inner = material.write
-        loose = not len(self.bonds)
+        idle = ("tack", "break_opening") if self.contact else CONTACT_FIELDS
+        if not len(self.bonds):
+            idle = ADHESIVE_FIELDS
 
         def write(name: str, value: Any) -> bool:
-            if name in ADHESIVE_FIELDS and loose:
+            if name in idle:
                 return False
             if name == "tack":
                 self.write_tack(float(value))
@@ -509,10 +1065,17 @@ class EntityTape(EntityCloth):
             if name == "break_opening":
                 self.write_break_opening(float(value))
                 return True
+            if name in CONTACT_FIELDS:
+                return self.write_adhesive(name, float(value))
             return inner(name, value)
 
-        inert = (*material.inert, *ADHESIVE_FIELDS) if loose else material.inert
-        return (replace(material, write=write, inert=inert),)
+        def write_many(values: dict[str, Any]) -> tuple[str, ...]:
+            # Contact adhesion's fields as one set, and first, so a set refused writes nothing.
+            law = {name: float(v) for name, v in values.items() if name in CONTACT_FIELDS and name not in idle}
+            landed = list(law) if law and self.write_adhesive_all(law) else []
+            return (*landed, *(name for name, v in values.items() if name not in law and write(name, v)))
+
+        return (replace(material, write=write, write_many=write_many, inert=(*material.inert, *idle)),)
 
     def write_break_opening(self, opening: float) -> None:
         """Set how far a bond's particle may lift before it lets go [m]; 0 never lets go. LIVE: the kernel
@@ -520,8 +1083,56 @@ class EntityTape(EntityCloth):
         if self._limit is not None:
             self._limit.assign(np.array([float(opening)], dtype=np.float32))
 
+    def write_adhesive(self, name: str, value: float) -> bool:
+        """Set one of contact adhesion's fields (:data:`CONTACT_FIELDS`). LIVE: the kernels read them every
+        substep. ``strength`` 0 lets every bond go and makes none.
+
+        Returns:
+            Whether it landed: ``False`` before the kernels' parameters are bound, which a tape with no
+            bonds never has, and nothing is written.
+
+        Raises:
+            KeyError: For a name that is not one of :data:`CONTACT_FIELDS`.
+            ValueError: For a value :class:`TapeMaterialSpec` refuses beside the other fields as the
+                kernels hold them, and nothing is written. A ``peak_opening`` at the ``reach`` makes
+                every held bond's spring NaN; one past it makes a law that no longer peaks at
+                ``strength``.
+        """
+        return self.write_adhesive_all({name: value})
+
+    def write_adhesive_all(self, values: dict[str, float]) -> bool:
+        """Set several of contact adhesion's fields as one set: checked together, then written together.
+
+        What a whole material's write takes, the material tunable's ``write_many``. One field at a time,
+        a law the spec allows can pass through one it refuses on its way to another: from a
+        ``peak_opening`` of 0.1 mm and a ``reach`` of 0.4 mm back to :data:`LABEL`'s 0.5 and 1 mm, the
+        peak lands first, past the old reach. The fields not in ``values`` are as the kernels hold them.
+        Returns and raises as :meth:`write_adhesive` does, for every field in ``values``.
+        """
+        for name in values:
+            if name not in CONTACT_FIELDS:
+                raise KeyError(f"{name!r} is not one of contact adhesion's fields {CONTACT_FIELDS}")
+        params = self._contact.get("params")
+        if params is None:
+            return False
+        # A copy: on the CPU ``numpy()`` is the array itself, and a refused value must not land.
+        held = np.array(params.numpy(), copy=True)
+        for name, value in values.items():
+            held[CONTACT_FIELDS.index(name)] = float(value)
+        try:
+            replace(self.spec.material, **{f: float(v) for f, v in zip(CONTACT_FIELDS, held, strict=True)})
+        except ValueError as exc:
+            written = ", ".join(f"{name} = {value}" for name, value in values.items())
+            raise ValueError(f"tape {self.spec.name!r}: {written} not written: {exc}") from None
+        params.assign(held)
+        return True
+
     def write_tack(self, tack: float) -> None:
-        """Set every bond's stiffness from a tack [N/m per m^2], in every array a solver reads. LIVE."""
+        """Set every bond's stiffness from a tack [N/m per m^2], in every array a solver reads. LIVE.
+
+        Opening adhesion only: under contact adhesion the law sets each bond's spring every substep."""
+        if self.contact:
+            return
         across, along = self.spec.cell
         for array in self._arrays.get("stiffness", ()):
             values = array.numpy()
@@ -530,8 +1141,64 @@ class EntityTape(EntityCloth):
 
     # -------------------------------------------------------------- phase 3
     def contribute_hooks(self, hooks) -> None:
-        if len(self.bonds):
+        if len(self.bonds) and self.contact:
+            hooks.add("post_solve", self._stick, name=f"stick:{self.spec.name}")
+        elif len(self.bonds):
             hooks.add("post_solve", self._break, name=f"bonds:{self.spec.name}")
+
+    def _stick(self, state: newton.State, dt: float) -> None:
+        """Contact adhesion's substep: make bonds where pressed, then hold or release each by the law."""
+        c = self._contact
+        if not c:
+            return
+        model = c["model"]
+        device = state.particle_q.device
+        # The solver's copy and the model's, the same array when the solver reads the model's.
+        keys = ("enabled", "body_point", "stiffness")
+        enabled, body_point, stiffness = ((self._arrays[key][0], self._arrays[key][-1]) for key in keys)
+        wp.launch(
+            _stick_kernel,
+            dim=len(self.bonds),
+            inputs=[
+                self._rows,
+                self._particle,
+                self.body,
+                c["boxes"],
+                model.shape_transform,
+                model.shape_scale,
+                model.shape_margin,
+                model.particle_radius,
+                c["area"],
+                c["params"],
+                float(model.soft_contact_ke),
+                model.shape_material_ke,
+                state.particle_q,
+                state.body_q,
+            ],
+            outputs=[*enabled, *body_point, c["normal"], c["dmin"], self.broken],
+            device=device,
+        )
+        wp.launch(
+            _bond_kernel,
+            dim=len(self.bonds),
+            inputs=[
+                self._rows,
+                self._particle,
+                self.body,
+                c["area"],
+                c["normal"],
+                c["dmin"],
+                c["params"],
+                float(dt),
+                state.particle_q,
+                state.particle_qd,
+                state.body_q,
+                state.body_qd,
+                model.body_com,
+            ],
+            outputs=[*enabled, *body_point, *stiffness, self.broken],
+            device=device,
+        )
 
     def _break(self, state: newton.State, dt: float) -> None:
         del dt
@@ -588,7 +1255,7 @@ class EntityTape(EntityCloth):
         self._arrays = {
             key: [getattr(view, f"attachment_particle_body_{key}")]
             + ([getattr(model, f"attachment_particle_body_{key}")] if view is not model else [])
-            for key in ("enabled", "stiffness")
+            for key in ("enabled", "stiffness", "body_point")
         }
         device = model.device
         self._rows = wp.array(self.bonds, dtype=wp.int32, device=device)
@@ -597,6 +1264,74 @@ class EntityTape(EntityCloth):
         self._anchor = wp.array(self.anchors.astype(np.float32), dtype=wp.vec3, device=device)
         self._limit = wp.array([float(self.spec.material.break_opening)], dtype=wp.float32, device=device)
         self.broken = wp.zeros(len(self.bonds), dtype=wp.int32, device=device)
+        if self.contact and len(self.bonds):
+            self._bind_contact(pipeline)
+
+    def _bind_contact(self, pipeline: ScenePipeline) -> None:
+        """Contact adhesion's device arrays, and the body's boxes it measures presses against.
+
+        Raises:
+            ValueError: When the body has a collision shape that is not a box: the press is measured
+                against boxes only.
+        """
+        model = pipeline.model
+        device = model.device
+        material = self.spec.material
+        bodies = model.shape_body.numpy()
+        types = model.shape_type.numpy()
+        mine = np.flatnonzero(bodies == self.body)
+        boxes = mine[types[mine] == int(newton.GeoType.BOX)]
+        if len(boxes) != len(mine) or not len(boxes):
+            raise ValueError(
+                f"tape {self.spec.name!r}: contact adhesion measures a press against boxes, and {self.spec.on!r} "
+                f"has shapes of types {sorted(set(types[mine].tolist()))}; stick it to an rss.box"
+            )
+        self._contact = {
+            "model": model,
+            "boxes": wp.array(boxes.astype(np.int32), dtype=wp.int32, device=device),
+            "area": wp.array(self.bond_area.astype(np.float32), dtype=float, device=device),
+            "normal": wp.array(
+                np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32), dtype=wp.vec3, device=device
+            ),
+            "dmin": wp.zeros(len(self.bonds), dtype=float, device=device),
+            "params": wp.array(
+                np.array([float(getattr(material, f)) for f in CONTACT_FIELDS], dtype=np.float32),
+                dtype=float,
+                device=device,
+            ),
+        }
+        self._seat_bonds()
+
+    def _seat_bonds(self) -> None:
+        """Every contact bond's contact thickness, its spring at contact and its anchor, in every array a
+        solver reads.
+
+        From the particle's radius and the margin of the box nearest the bond's built anchor, as the model
+        holds them now: a margin moved live since the build is the one the stick kernel makes a bond with.
+        The anchor goes that far off the face, as the stick kernel puts it: a stuck sheet is built a radius
+        off the face, VBD's contact rests it a margin further out, and a bond anchored where it was built
+        would start that margin into its lift, past ``reach`` at a margin of 1 mm.
+        """
+        c = self._contact
+        model, stiffness, body_point = c["model"], self._arrays["stiffness"], self._arrays["body_point"]
+        wp.launch(
+            _seat_kernel,
+            dim=len(self.bonds),
+            inputs=[
+                self._rows,
+                self._particle,
+                self._anchor,
+                c["boxes"],
+                model.shape_transform,
+                model.shape_scale,
+                model.shape_margin,
+                model.particle_radius,
+                c["area"],
+                c["params"],
+            ],
+            outputs=[c["dmin"], c["normal"], stiffness[0], stiffness[-1], body_point[0], body_point[-1]],
+            device=c["params"].device,
+        )
 
     # -------------------------------------------------------------- phase 5
     def reset(self, pipeline: ScenePipeline, episode, *, world: int = 0) -> None:
@@ -613,15 +1348,25 @@ class EntityTape(EntityCloth):
                 rest["particle_qd"][self.particles] = 0.0
         super().reset(pipeline, episode, world=world)
         if self.broken is not None:
-            self.broken.zero_()
-            for array in self._arrays.get("enabled", ()):
-                values = array.numpy()
-                values[self.bonds] = True
-                array.assign(values)
+            self._reset_bonds()
         if self.coord_start >= 0:
             c = self.coord_start
             for state in (pipeline.state_0, pipeline.state_1):
                 state.joint_q[c : c + 7].assign(self.tab_q0.astype(np.float32))
+
+    def _reset_bonds(self) -> None:
+        """Every bond as built, in every array a solver reads: stuck or loose, at its anchor, and under
+        contact adhesion seated as a bond starts (:meth:`_seat_bonds`), not with the secant, the anchor and
+        the face the last episode left."""
+        self.broken.zero_()
+        rows = {"enabled": bool(self.spec.stuck), "body_point": self.anchors.astype(np.float32)}
+        for key, value in rows.items():
+            for array in self._arrays.get(key, ()):
+                values = array.numpy()
+                values[self.bonds] = value
+                array.assign(values)
+        if self._contact:
+            self._seat_bonds()
 
     # ---------------------------------------------------------------- runtime
     def peeled(self) -> float:
@@ -631,10 +1376,26 @@ class EntityTape(EntityCloth):
         return float(self.broken.numpy().mean())
 
     def held(self) -> int:
-        """How many bonds still hold."""
-        if self.broken is None:
-            return len(self.bonds)
-        return int(len(self.bonds) - self.broken.numpy().sum())
+        """How many bonds hold now: under contact adhesion, the ones made and not yet let go."""
+        enabled = self._arrays.get("enabled")
+        if not enabled or not len(self.bonds):
+            return len(self.bonds) if self.spec.stuck else 0
+        return int(enabled[0].numpy()[self.bonds].sum())
+
+    def bonded(self) -> float:
+        """The share of the bonds holding now, in ``[0, 1]``."""
+        return self.held() / len(self.bonds) if len(self.bonds) else 0.0
+
+    def pull(self, state: newton.State) -> float:
+        """How hard the sheet pulls on its tab [N]: the tab's clamps' springs, summed as vectors."""
+        if self.tab_body < 0 or not len(self.clamp_particles):
+            return 0.0
+        pose = state.body_q.numpy()[self.tab_body].astype(np.float64)
+        from robosimstudio.core.math import quat_to_mat
+
+        held = self.clamp_points @ quat_to_mat(pose[3:7]).T + pose[:3]
+        points = state.particle_q.numpy()[self.clamp_particles].astype(np.float64)
+        return float(np.linalg.norm(float(self.spec.tab_hold) * (points - held).sum(axis=0)))
 
     def peel_front(self) -> float:
         """How far from the fold the furthest broken bond lay [m]; 0 before any lets go."""
@@ -729,7 +1490,7 @@ class Tape:
 
 
 # =============================================================================
-# 7. The measure: how much has peeled
+# 7. The measures: how much has peeled, and how much holds
 # =============================================================================
 
 
@@ -777,6 +1538,49 @@ def _peeled_fraction(snapshot, tape: str) -> dict[str, float]:
     return {"fraction": fraction, "front": entity.peel_front(), f"{tape}/peeled_fraction": fraction}
 
 
+register_atom(
+    AtomSpec(
+        name="bonded_fraction",
+        summary="What share of a tape's bonds hold now: under contact adhesion, the ones made where it was pressed.",
+        args=(ArgSpec(name="tape", substrates=("tape",), reads="handle"),),
+        directions=("check", "observe"),
+        returns=("fraction", "held"),
+        cost="cheap",
+        reads_scene=True,
+        provenance=(
+            "Designed here, on the tape's own bonds: the share whose attachment is enabled in the solver's "
+            "copy, read this step. Under contact adhesion a bond is made where the sheet is pressed onto its "
+            "body and let go past its reach, so the share rises as a hand rubs the sheet down and falls as it "
+            "peels; under opening adhesion it is one less peeled_fraction."
+        ),
+        calibration=AtomCalibration(
+            positives=(
+                "examples/19_tape/02_stick_a_label, the loose label carried by its tab, laid on the box and "
+                "rubbed by the right hand's shut fingertips in four strokes 10 mm apart, reads 0.88-0.92 in five "
+                "drives, 0.25-0.29 after the first stroke (m1_screen.py, GPU 6; tests/test_stick_a_label).",
+            ),
+            negatives=(
+                "The same label laid and not rubbed reads 0.008-0.048, 1-6 of its 126 bonds; rubbed with the "
+                "page's Adhesive off, 0 in two drives; drawn up by its tab after the rub, 0.008-0.016 (the same).",
+            ),
+            gate=None,
+            bench="examples/19_tape/02_stick_a_label driven through its right arm panel, tests/test_stick_a_label.py",
+            notes="No gate: a task states its own share. held is a count of bonds.",
+        ),
+    )
+)
+
+
+@handler("bonded_fraction", substrates=("tape",), summary="The share of the bonds holding now, and how many.")
+def _bonded_fraction(snapshot, tape: str) -> dict[str, float]:
+    entities = getattr(snapshot, "entities", None) or {}
+    entity = entities.get(tape) if hasattr(entities, "get") else None
+    if entity is None or not hasattr(entity, "bonded"):
+        raise KeyError(f"{tape!r} is not a tape the scene carries an entity for")
+    fraction = entity.bonded()
+    return {"fraction": fraction, "held": float(entity.held()), f"{tape}/bonded_fraction": fraction}
+
+
 # =============================================================================
 # 8. Registration
 # =============================================================================
@@ -818,13 +1622,47 @@ register_material(
     )
 )
 
+_STICK = (
+    "examples/19_tape/02_stick_a_label: the right hand carries the label by its tab, lays it on the box, rubs it "
+    "down and draws the tab straight up"
+)
+
+for _name, _spec, _notes in (
+    (
+        "label",
+        LABEL,
+        "Rubbed down by the YAM's shut fingertips, 88-92% of the bonds held, and drawn up by its tab all but 1-2 "
+        "of 126 let go at 2.2-2.4 N (m1_screen.py, five drives); on the pull rig it peeled whole at 2.9 N (p4_law.py).",
+    ),
+    ("masking_tape", MASKING_TAPE, "On the pull rig it peeled whole at 4.2 N (p4_law.py). Not driven by the YAM."),
+    (
+        "duct_tape",
+        DUCT_TAPE,
+        "On the pull rig it did not peel; the tab lifted and dragged the 0.5 kg box 80 mm at 4.6-7.8 N (p4_law.py).",
+    ),
+):
+    register_material(
+        MaterialRecord(
+            name=_name,
+            spec=_spec,
+            notes="A 40 x 95 mm sheet that sticks to a box where it is pressed, its end in a pull tab.",
+            calibration=CalibrationSpec(
+                fabric="paper label stock (80 gsm) with a pressure-sensitive adhesive",
+                bench=_STICK,
+                knob="strength",
+                cell=0.005,
+                notes=_notes + " Newton 1.7, GPU 6.",
+            ),
+        )
+    )
+
 DOMAIN = register_domain(
     "tape",
     state=("particles", "bodies", "joints", "shapes"),
     reads=("tape", "cloth"),
     role="deformables",
     contacts=TOUCHES,
-    summary="A sheet stuck to a body by bonds that let go past an opening, its end in a rigid pull tab.",
+    summary="A sheet stuck to a body by bonds made at the build or where it is pressed, its end in a rigid pull tab.",
 )
 
 register_entity("tape")(EntityTape)

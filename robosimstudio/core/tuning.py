@@ -89,6 +89,11 @@ class Tunable:
         summary: One line, for the section.
         inert: Fields of ``spec`` with nothing in this entity to write to, which a panel shows
             read-only rather than as a slider that moves nothing.
+        write_many: ``({field: value}) -> the fields that landed``, several written as one set, or
+            ``None`` to write them one at a time through ``write``. For a group whose fields are
+            checked against each other: a tape's contact law refuses a ``peak_opening`` at or past
+            its ``reach``, so a whole material written field by field from one law the spec allows
+            to another can pass through one it refuses. It raises ``ValueError`` on a set it refuses.
     """
 
     name: str
@@ -96,6 +101,13 @@ class Tunable:
     write: Any
     summary: str = ""
     inert: tuple[str, ...] = ()
+    write_many: Any = None
+
+    def write_fields(self, values: dict[str, Any]) -> tuple[str, ...]:
+        """Write several fields: as one set through :attr:`write_many`, else one at a time. Returns what landed."""
+        if self.write_many is not None:
+            return tuple(self.write_many(dict(values)))
+        return tuple(name for name, value in values.items() if self.write(name, value))
 
 
 def notify(pipeline: Any, flags: int) -> None:

@@ -78,6 +78,7 @@ class _Tuner:
 
     def adopt(self, preset):
         self.origin = preset
+        return True
 
     def revert(self):
         self.origin = ""
