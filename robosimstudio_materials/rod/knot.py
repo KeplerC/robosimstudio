@@ -109,17 +109,22 @@ def overhand(
     return np.stack([np.interp(s_new, arc, path[:, k]) for k in range(3)], axis=1)
 
 
-def _segment_distances(points: np.ndarray, skip: int) -> np.ndarray:
+def _segment_distances(points: np.ndarray, skip: int, *, closed: bool = False) -> np.ndarray:
     """Axis-to-axis distance between every pair of segments at least ``skip`` apart along the rod, ``[pairs]``.
 
     The clearance probe's closest points of two segments, a zero-length leg measured as the point it is.
+    ``closed``: ``points`` go once round a loop, its closing segment last, and two segments are as
+    far apart as the shorter way round.
     """
     a0, a1 = points[:-1], points[1:]
     i, j = np.triu_indices(len(a0), k=max(1, int(skip)))
+    if closed:
+        keep = len(a0) - (j - i) >= int(skip)
+        i, j = i[keep], j[keep]
     return segment_segment(a0, a1, a0, a1)[i, j]
 
 
-def self_clearance(positions: np.ndarray, radius: float, *, skip: int | None = None) -> float:
+def self_clearance(positions: np.ndarray, radius: float, *, skip: int | None = None, closed: bool = False) -> float:
     """The closest two non-neighbouring segments come, axis to axis, less the rod's diameter [m].
 
     Positive is a gap between the two surfaces; zero is touching; negative is one
@@ -131,16 +136,24 @@ def self_clearance(positions: np.ndarray, radius: float, *, skip: int | None = N
         positions: ``[n, 3]`` nodes in order [m].
         radius: The rod's radius [m].
         skip: Segments this many apart or more are compared; ``None`` derives it.
+        closed: A loop (``RodSpec.closed``, a band): its closing segment is measured too, and
+            neighbours are counted the shorter way round, across the seam. A repeated first node
+            at the end (a band's seam particle) is the same loop.
     """
     points = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    if closed:
+        if len(points) > 1 and np.array_equal(points[0], points[-1]):
+            points = points[:-1]
+        points = np.vstack([points, points[:1]])  # the closing segment last
     if len(points) < 4:
         return math.inf
     if skip is None:
         spacing = float(np.median(np.linalg.norm(np.diff(points, axis=0), axis=1)))
         skip = max(2, int(math.ceil(3.0 * radius / max(spacing, 1e-9))) + 1)
-    if len(points) - 1 <= skip:
+    pairs = _segment_distances(points, skip, closed=closed)
+    if not len(pairs):
         return math.inf
-    return float(_segment_distances(points, skip).min() - 2.0 * radius)
+    return float(pairs.min() - 2.0 * radius)
 
 
 def _crossing_pairs(points: np.ndarray) -> list[tuple[int, int]]:
