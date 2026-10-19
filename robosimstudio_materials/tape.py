@@ -1715,9 +1715,11 @@ class EntityTape(EntityCloth):
             self._seat_bonds()
 
     # ---------------------------------------------------------------- runtime
-    def _counted(self, holding: np.ndarray, broken: np.ndarray) -> np.ndarray:
+    def _counted(self, holding: np.ndarray | None = None, broken: np.ndarray | None = None) -> np.ndarray:
         """Per bond, whether :meth:`peeled` and :meth:`bonded` count it: on a stuck sheet the bonds made at the
-        build (:attr:`made`) and any made since, holding now or let go since; on a loose one every bond.
+        build (:attr:`made`) and any made since, holding now or let go since; on a loose one every bond. A
+        stuck sheet's count reads both flags, each copied off the device here only when not passed in; a loose
+        one's reads neither.
 
         Opening adhesion gives a stuck sheet no bond past the box's edge, and contact adhesion one left
         unmade there until it is pressed onto a face. Counted over every bond, an untouched stuck
@@ -1727,6 +1729,8 @@ class EntityTape(EntityCloth):
         peeled whole first, it read 0.0 bonded with all 80 holding."""
         if not self.made.any():
             return np.ones(len(self.bonds), dtype=bool)
+        holding = self._holding() if holding is None else holding
+        broken = self._let_go() if broken is None else broken
         return self.made | holding | broken
 
     def _holding(self) -> np.ndarray:
@@ -1742,25 +1746,28 @@ class EntityTape(EntityCloth):
 
     def peeled(self) -> float:
         """The share of the bonds counted (:meth:`_counted`) that have let go, in ``[0, 1]``."""
-        if self.broken is None or not len(self.bonds):
+        return self._peeled_of(self._let_go())
+
+    def _peeled_of(self, gone: np.ndarray) -> float:
+        """:meth:`peeled` off the let-go flags already copied (:meth:`_let_go`)."""
+        if self.broken is None or not len(gone):
             return 0.0
-        holding, gone = self._holding(), self._let_go()
-        return float(gone[self._counted(holding, gone)].mean())
+        return float(gone[self._counted(broken=gone)].mean())
 
     def held(self) -> int:
         """How many bonds hold now: under contact adhesion, the ones made and not yet let go."""
-        enabled = self._arrays.get("enabled")
-        if not enabled or not len(self.bonds):
-            return int(self.made.sum())
-        return int(enabled[0].numpy()[self.bonds].sum())
+        return int(self._holding().sum())
 
     def bonded(self) -> float:
         """The share of the bonds counted (:meth:`_counted`) holding now, in ``[0, 1]``: on a stuck sheet, under
         either law, one less :meth:`peeled`."""
-        if not len(self.bonds):
+        return self._bonded_of(self._holding())
+
+    def _bonded_of(self, holding: np.ndarray) -> float:
+        """:meth:`bonded` off the holding flags already copied (:meth:`_holding`)."""
+        if not len(holding):
             return 0.0
-        holding, gone = self._holding(), self._let_go()
-        return float(holding[self._counted(holding, gone)].mean())
+        return float(holding[self._counted(holding=holding)].mean())
 
     def pull(self, state: newton.State) -> float:
         """How hard the sheet pulls on its tab [N]: the tab's clamps' springs, summed as vectors."""
@@ -1775,9 +1782,10 @@ class EntityTape(EntityCloth):
 
     def peel_front(self) -> float:
         """How far from the fold the furthest broken bond lay [m]; 0 before any lets go."""
-        if self.broken is None or not len(self.bonds):
-            return 0.0
-        gone = self.broken.numpy().astype(bool)
+        return self._front_of(self._let_go())
+
+    def _front_of(self, gone: np.ndarray) -> float:
+        """:meth:`peel_front` off the let-go flags already copied (:meth:`_let_go`)."""
         return float(self.along[gone].max()) if gone.any() else 0.0
 
     def tab_pose(self, state: newton.State) -> np.ndarray:
@@ -1902,8 +1910,9 @@ def _peeled_fraction(snapshot, tape: str) -> dict[str, float]:
     entity = entities.get(tape) if hasattr(entities, "get") else None
     if entity is None or not hasattr(entity, "peeled"):
         raise KeyError(f"{tape!r} is not a tape the scene carries an entity for")
-    fraction = entity.peeled()
-    return {"fraction": fraction, "front": entity.peel_front(), f"{tape}/peeled_fraction": fraction}
+    gone = entity._let_go()  # once, for the share and the front both
+    fraction = entity._peeled_of(gone)
+    return {"fraction": fraction, "front": entity._front_of(gone), f"{tape}/peeled_fraction": fraction}
 
 
 register_atom(
@@ -1948,8 +1957,9 @@ def _bonded_fraction(snapshot, tape: str) -> dict[str, float]:
     entity = entities.get(tape) if hasattr(entities, "get") else None
     if entity is None or not hasattr(entity, "bonded"):
         raise KeyError(f"{tape!r} is not a tape the scene carries an entity for")
-    fraction = entity.bonded()
-    return {"fraction": fraction, "held": float(entity.held()), f"{tape}/bonded_fraction": fraction}
+    holding = entity._holding()  # once, for the share and the count both
+    fraction = entity._bonded_of(holding)
+    return {"fraction": fraction, "held": float(holding.sum()), f"{tape}/bonded_fraction": fraction}
 
 
 # =============================================================================

@@ -1013,14 +1013,41 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual([], spec.problems())
         self.assertEqual("bonded_fraction", dispatch("bonded_fraction", ("",), ("tape",)).atom)
 
+    @staticmethod
+    def _flagged(holding, gone, along=(0.0, 0.0, 0.0, 0.0)):
+        """A label stuck by four bonds, all made at the build, its solver's flags ``holding`` and ``gone``: device
+        arrays whose copies to the host are counted, ``copies["holding"]`` and ``copies["gone"]``."""
+        import warp as wp
+
+        from robosimstudio_materials.tape import EntityTape, tape
+
+        copies = {"holding": 0, "gone": 0}
+
+        class Counted:
+            def __init__(self, name, values, dtype) -> None:
+                self.name, self.array = name, wp.array(values, dtype=dtype, device="cpu")
+
+            def numpy(self):
+                copies[self.name] += 1
+                return self.array.numpy()
+
+        entity = EntityTape(tape(name="label", on="box"))
+        entity.bonds, entity.made, entity.along = np.arange(4, dtype=np.int32), np.ones(4, dtype=bool), np.array(along)
+        entity._arrays = {"enabled": [Counted("holding", holding, wp.bool)]}
+        entity.broken = Counted("gone", gone, wp.int32)
+        return entity, copies
+
     def test_the_bonded_handler_reads_the_bonds_holding(self) -> None:
+        """Its share and its count off one copy of each flag, the share as :meth:`bonded` reads it."""
         from types import SimpleNamespace
 
         from robosimstudio_materials.tape import _bonded_fraction
 
-        entity = SimpleNamespace(bonded=lambda: 0.75, held=lambda: 3)
+        entity, copies = self._flagged([True, True, True, False], [0, 0, 0, 1])
         got = _bonded_fraction(SimpleNamespace(entities={"label": entity}), "label")
         self.assertEqual({"fraction": 0.75, "held": 3.0, "label/bonded_fraction": 0.75}, got)
+        self.assertEqual({"holding": 1, "gone": 1}, copies, "each flag copied once")
+        self.assertEqual((0.75, 3), (entity.bonded(), entity.held()))
         with self.assertRaises(KeyError):
             _bonded_fraction(SimpleNamespace(entities={}), "label")
 
@@ -1057,15 +1084,28 @@ class TestTheDeclarations(unittest.TestCase):
                 self.assertTrue(material.write("tri_ke", 500.0), "the cloth's own fields still land")
 
     def test_the_handler_reads_the_entitys_bonds(self) -> None:
+        """Its share and its front off one copy of each flag, as :meth:`peeled` and :meth:`peel_front` read them."""
         from types import SimpleNamespace
 
         from robosimstudio_materials.tape import _peeled_fraction
 
-        entity = SimpleNamespace(peeled=lambda: 0.25, peel_front=lambda: 0.02)
+        entity, copies = self._flagged([False, True, True, True], [1, 0, 0, 0], along=(0.02, 0.01, 0.0, 0.03))
         got = _peeled_fraction(SimpleNamespace(entities={"label": entity}), "label")
         self.assertEqual({"fraction": 0.25, "front": 0.02, "label/peeled_fraction": 0.25}, got)
+        self.assertEqual({"holding": 1, "gone": 1}, copies, "each flag copied once")
+        self.assertEqual((0.25, 0.02), (entity.peeled(), entity.peel_front()))
         with self.assertRaises(KeyError):
             _peeled_fraction(SimpleNamespace(entities={}), "label")
+
+    def test_a_loose_strips_shares_copy_one_flag_each(self) -> None:
+        """Counting every bond, a loose strip's :meth:`peeled` copies only the let-go flags off the device, and its
+        :meth:`bonded` and :meth:`held` only the holding ones."""
+        for call, want, copied in (("peeled", 0.25, (0, 1)), ("bonded", 0.75, (1, 0)), ("held", 3, (1, 0))):
+            with self.subTest(call):
+                entity, copies = self._flagged([False, True, True, True], [1, 0, 0, 0])
+                entity.made = np.zeros(4, dtype=bool)
+                self.assertEqual(want, getattr(entity, call)())
+                self.assertEqual(copied, (copies["holding"], copies["gone"]))
 
 
 if __name__ == "__main__":
