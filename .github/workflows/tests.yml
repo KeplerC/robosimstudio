@@ -50,8 +50,9 @@ jobs:
         with:
           enable-cache: true
           cache-suffix: cpu-3.12
-      # Warp compiles every kernel for the CPU on first use: the tier took 48 s
-      # cold and 23 s warm when measured. The key moves with the locked versions.
+      # Warp compiles every kernel for the CPU on first use: the tier took 104 s
+      # cold and 85 s warm when measured, the materials included. The key moves
+      # with the locked versions.
       - name: Warp kernel cache
         uses: actions/cache@v4
         with:
