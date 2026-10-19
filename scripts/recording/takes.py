@@ -645,13 +645,22 @@ def handle(example: str, thing: str, at: Any, *, camera: Any, lift: float = 0.10
     )
 
 
-def routine(example: str, *, speed: float, success: str, done: Any = None, budget: int = 1_500_000) -> Take:
+def routine(
+    example: str,
+    *,
+    speed: float,
+    success: str,
+    done: Any = None,
+    budget: int = 1_500_000,
+    needs: tuple[str, ...] = (),
+) -> Take:
     """A demo: the home pose, then its Run button, filmed to the routine's end.
 
     ``done(film)`` is the demo's own success measure; a take without one is still a draft.
     """
     return Take(
         example,
+        needs=needs,
         fps=12,
         speed=speed,
         warmup=0.5,
@@ -761,6 +770,7 @@ DRAFTS = (
     ),
     Take(
         "examples/02_soft/00_sponge.py",
+        needs=("superdex",),
         # The sponge under the Panda's tool-down hand, from the bench's open side.
         camera=Camera(eye=(0.80, -0.50, 1.02), look_at=(0.457, -0.115, 0.80)),
         warmup=1.0,  # the foam settles on the bench before the first frame
@@ -782,6 +792,7 @@ DRAFTS = (
     Take(
         "examples/02_soft/00_sponge.py",
         name="press_sponge",
+        needs=("superdex",),
         camera=Camera(eye=(0.80, -0.50, 1.02), look_at=(0.457, -0.115, 0.80)),
         warmup=1.0,
         beats=(
@@ -1042,6 +1053,7 @@ DRAFTS = (
         success="the bar is wiped:",
         done=_wiped,
         budget=2_000_000,
+        needs=("superdex",),
     ),
     routine(
         "examples/08_demos/route_the_cable/route_the_cable.py", speed=2.0, success="the cable is routed:", done=_routed
@@ -1366,6 +1378,7 @@ ROBOT_BAGS: tuple[Take, ...] = (
     # a little in front, so the opening shows under the hand: the gizmo's arrows and arcs point +x, +y, +z.
     Take(
         "examples/16_bags/00_open_a_bag.py",
+        needs=("superdex",),
         camera=Orbit(Bench(0.0, -0.10, 0.04), distance=0.95, azimuth=-80.0, elevation=25.0, fov=38.0),
         warmup=0.5,
         layout=Layout(collapse=("Simulation", "Arm: left")),
