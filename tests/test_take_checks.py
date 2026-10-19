@@ -72,17 +72,220 @@ class TestTheFlapTakeMeasuresFromItsBench(unittest.TestCase):
             entity=SimpleNamespace(update_probe=lambda *_: None, rest={"particle_q": rest}),
             particles=np.arange(3),
             particle_q=np.concatenate([now[:1], now[1:] - np.array([0.0, 0.0, 0.10])]),
+            spec=SimpleNamespace(pose=(-0.11, 0.045, 0.103), quat=_LEANING, size=(0.12, 0.13), cells=(12, 13)),
         )
-        sim = _Sim(refs={"flap": flap})
+        sim = _Sim(
+            refs={"flap": flap, "wall_far": SimpleNamespace(spec=_slab((-0.05, 0.045, 0.05), (0.065, 0.005, 0.05)))}
+        )
         sim.step_count, sim.make_context = 0, lambda: None
         film = SimpleNamespace(sim=sim, bench=lambda p: (p[0] + 0.6, p[1], p[2] + 0.75))
         with (
             mock.patch("robosimstudio.assetlib.semantics.snapshot.Snapshot"),
-            mock.patch("robosimstudio_materials.paper.crease_angle", return_value={"angle": 2.0}),
+            mock.patch("robosimstudio_materials.paper.crease_angle", return_value={"angle": 2.0}) as crease,
         ):
             ok, said = takes._flap_shut(film)
         self.assertTrue(ok, said)
         self.assertIn("+0 mm off the rim", said)
+        # The hinge the example reads: its third row, ``height + 0.003 + 0.02 cos(15 deg)``.
+        self.assertAlmostEqual(0.103 + 0.02 * np.cos(np.radians(15.0)), crease.call_args[0][2]["crease"]["at"], 12)
+
+
+# =============================================================================
+# The layout a take aims at is the one its example builds
+# =============================================================================
+
+ORIGIN = (0.6, 0.0, 0.75)
+"""Where the stand-in bench's frame is in the world [m]: ``bench_075``'s."""
+_LEANING = (np.sin(np.radians(37.5)), 0.0, 0.0, np.cos(np.radians(37.5)))
+"""``01_box_flap``'s turn: the sheet's +y leaning 15 degrees out past upright."""
+
+
+def _box(at, half) -> SimpleNamespace:
+    """An unturned body's spec, as ``rss.box`` gives it."""
+    return SimpleNamespace(pose=at, quat=(0.0, 0.0, 0.0, 1.0), shape=SimpleNamespace(kind="box", half_extents=half))
+
+
+def _slab(at, half) -> SimpleNamespace:
+    """An unturned static's spec, as ``rss.slab`` gives it."""
+    return SimpleNamespace(xform=(*at, 0.0, 0.0, 0.0, 1.0), shape=SimpleNamespace(kind="box", half_extents=half))
+
+
+def _laid_film(things: dict, regions: dict | None = None) -> SimpleNamespace:
+    """A stand-in film holding only the specs a take's layout reads, its bench at :data:`ORIGIN`."""
+    sim = _Sim(
+        refs={name: thing if hasattr(thing, "spec") else SimpleNamespace(spec=thing) for name, thing in things.items()}
+    )
+    sim.handles = SimpleNamespace(regions={k: SimpleNamespace(xy_ranges=v) for k, v in (regions or {}).items()})
+    return SimpleNamespace(sim=sim, bench=lambda p: tuple(float(a) + b for a, b in zip(p, ORIGIN, strict=True)))
+
+
+def _drags(key: str, film) -> list[tuple[str, float]]:
+    """Each drag of a take to a point of its layout: its axis, and the bench-frame coordinate it drags to along it.
+
+    A drag to where a thing is now (:class:`~recording.beats.At`, :class:`~recording.beats.Top`) reads
+    the state, not the layout, and is left out.
+    """
+    from recording.beats import At, Drag, DragTo, Top, resolve
+
+    out = []
+    for beat in takes.find(key).beats:
+        if isinstance(beat, Drag) and beat.to is not None and not isinstance(beat.to, At | Top):
+            i = "xyz".index(beat.axis)
+            out.append((beat.axis, round(resolve(beat.to, film)[i] - ORIGIN[i], 9)))
+        elif isinstance(beat, DragTo):
+            out += [(a, round(v - o, 9)) for a, v, o in zip("xyz", resolve(beat.to, film), ORIGIN, strict=True)]
+    return out
+
+
+class TestTheTakesAimWhereTheirExampleLaysThings(unittest.TestCase):
+    """Each layout is moved off the example's own (to numbers no example uses) and the take moves with it.
+
+    Before, a take restated its example's box top, tab, knife, board, square, bowl and sheet as
+    constants, and an example that moved one moved the take off it without a word. The equality
+    with each example's own numbers, on the built scene, is ``tests/test_take_layout``.
+    """
+
+    def test_the_peel_closes_over_the_tab_and_climbs_from_the_box_top(self) -> None:
+        tab = np.array([*(np.array([0.03, -0.06, 0.0825]) + ORIGIN), 0.0, 0.0, 1.0, 0.0])
+        film = _laid_film(
+            {
+                "box": _box((0.03, -0.10, 0.035), (0.05, 0.06, 0.035)),  # its top 70 mm up
+                "label": SimpleNamespace(spec=None, entity=SimpleNamespace(tab_q0=tab)),
+            }
+        )
+        stairs = [leg for k in range(1, 8) for leg in (("y", -0.06 - 0.02 * k), ("z", 0.10 + 0.01 * k))]
+        expected = [("z", 0.0865), ("z", 0.10), *stairs]
+        self.assertEqual([(a, round(v, 9)) for a, v in expected], _drags("19_tape/00_peel_a_label", film))
+
+    def test_the_cut_takes_the_knife_where_it_stands_and_cuts_on_the_board(self) -> None:
+        edge = ((0.045, 0.0, -0.045), (1.0, 0.0, 0.0), 0.12)  # a 55 mm blade's edge, 45 mm under the handle
+        knife = SimpleNamespace(**vars(_box((-0.01, -0.25, 0.05), (0.045, 0.01, 0.01))), edge=edge)
+        film = _laid_film(
+            {
+                "knife": knife,
+                "board": _slab((0.06, -0.12, 0.008), (0.07, 0.08, 0.008)),
+                "tofu": SimpleNamespace(at=(0.06, -0.12, 0.016)),
+            }
+        )
+        expected = [("z", 0.05), ("z", 0.12), ("y", -0.12), ("z", 0.056)]
+        self.assertEqual([(a, round(v, 9)) for a, v in expected], _drags("20_cutting/00_cut_tofu", film))
+
+    def test_the_rice_sweep_goes_over_the_pusher_and_into_the_tray(self) -> None:
+        film = _laid_film(
+            {
+                "pusher": _box((0.02, -0.40, 0.02), (0.08, 0.01, 0.02)),
+                "wall_back": _slab((0.02, 0.03, 0.02), (0.16, 0.01, 0.02)),
+            }
+        )
+        drags = _drags("10_granular/00_sweep_rice", film)
+        self.assertEqual([("x", 0.02), ("y", -0.40), ("z", 0.12)], drags[:3])  # over the pusher, 100 mm up
+        self.assertIn(("y", round(0.02 - 0.14, 9)), drags)  # 140 mm short of the back wall's face
+
+    def test_the_roll_takes_the_handle_over_the_axle_and_rolls_across_the_block(self) -> None:
+        roller = SimpleNamespace(pose=(-0.10, -0.25, 0.025), quat=(0.0, 0.0, 0.0, 1.0), grip=0.06)
+        film = _laid_film({"roller": roller, "dough": SimpleNamespace(at=(0.05, -0.25, 0.0))})
+        drags = _drags("12_dough/00_roll_dough", film)
+        self.assertEqual([("z", 0.085), ("z", 0.115), ("x", -0.035)], drags[:3])
+        self.assertEqual([("x", 0.125), ("x", -0.035), ("x", 0.125)], [d for d in drags if d[0] == "x"][1:])
+
+    def test_the_pours_count_what_is_inside_the_bowl_and_the_glass_where_they_stand(self) -> None:
+        walls = {}
+        for prefix, (x, y), side, thick, tall in (
+            ("bowl", (0.20, -0.05), 0.14, 0.004, 0.02),
+            ("glass", (0.20, -0.05), 0.06, 0.003, 0.0275),
+        ):
+            h = side / 2 + thick
+            for name, (dx, dy, hx, hy) in {
+                "near": (-h, 0.0, thick, h),
+                "far": (h, 0.0, thick, h),
+                "right": (0.0, -h, h, thick),
+                "left": (0.0, h, h, thick),
+            }.items():
+                walls[f"{prefix}_{name}"] = _slab((x + dx, y + dy, tall), (hx, hy, tall))
+        inside = np.array([[0.20, -0.05, 0.005], [0.21, -0.04, 0.01]]) + ORIGIN
+        liquid = SimpleNamespace(spec=None, particle_q=inside)
+        honey = _laid_film({**walls, "honey": liquid})
+        ok, said = takes._poured(honey)
+        self.assertTrue(ok, said)
+        water = _laid_film({**walls, "water": liquid})
+        with self.subTest("glass"):
+            from unittest import mock
+
+            with mock.patch(
+                "robosimstudio_materials.water.fill_level", return_value={"fraction": 1.0, "height": 0.03}
+            ) as level:
+                takes._water_in_glass(water)
+            lo, hi = level.call_args[0][1:3]
+            np.testing.assert_allclose(lo, np.array([0.17, -0.08, 0.0]) + ORIGIN, atol=1e-12)
+            np.testing.assert_allclose(hi, np.array([0.23, -0.02, 0.055]) + ORIGIN, atol=1e-12)
+
+    def test_the_tray_and_the_drawn_squares_are_the_scene_s(self) -> None:
+        film = _laid_film(
+            {
+                "wall_left": _slab((-0.12, -0.05, 0.02), (0.01, 0.11, 0.02)),
+                "wall_right": _slab((0.18, -0.05, 0.02), (0.01, 0.11, 0.02)),
+                "wall_back": _slab((0.03, 0.05, 0.02), (0.16, 0.01, 0.02)),
+                "plate": _box((0.0, -0.25, 0.004), (0.075, 0.075, 0.004)),
+            },
+            regions={"square": (-0.05, -0.15, 0.15, 0.05)},
+        )
+        np.testing.assert_allclose(takes._tray(film), ((-0.11, -0.16, -0.005), (0.17, 0.04, 0.04)), atol=1e-12)
+        self.assertEqual((-0.05, -0.15, 0.15, 0.05), takes._square(film))
+        self.assertEqual(0.004, takes._plate_half(film))
+
+    def test_the_stick_and_the_fold_work_on_the_box_and_the_sheet_as_laid(self) -> None:
+        film = _laid_film(
+            {
+                "box": _box((0.02, -0.10, 0.03), (0.05, 0.06, 0.03)),
+                "paper": SimpleNamespace(pose=(-0.05, -0.43, 0.005), size=(0.20, 0.30)),
+            }
+        )
+        np.testing.assert_allclose(takes._stick_far(film), np.array([0.02, -0.145, 0.156]) + ORIGIN, atol=1e-12)
+        np.testing.assert_allclose(takes._stick_near(film), np.array([0.02, -0.06, 0.079]) + ORIGIN, atol=1e-12)
+        sheet = takes._sheet(film)
+        self.assertAlmostEqual(-0.33, sheet["crease"], 12)
+        np.testing.assert_allclose(sheet["pinch"], (-0.015, -0.4165), atol=1e-12)
+        np.testing.assert_allclose(sheet["hold"], (0.05, -0.165), atol=1e-12)
+        np.testing.assert_allclose(sheet["stamps"], (0.005, 0.06, 0.115), atol=1e-12)
+
+    def test_the_pegs_and_the_post_are_where_the_example_stands_them(self) -> None:
+        along_x = (0.0, np.sqrt(0.5), 0.0, np.sqrt(0.5))
+        post = SimpleNamespace(
+            xform=(0.02, -0.15, 0.20, *along_x), shape=SimpleNamespace(radius=0.006, half_height=0.03)
+        )
+        cable_post = SimpleNamespace(xform=(0.05, -0.10, 0.05, 0.0, 0.0, 0.0, 1.0), shape=SimpleNamespace(radius=0.025))
+        film = _laid_film({"upper": post, "post": cable_post, "cable": SimpleNamespace(radius=0.01)})
+        root, out, length = takes._peg(film, "upper")
+        np.testing.assert_allclose(root, np.array([0.05, -0.15, 0.20]) + ORIGIN, atol=1e-12)
+        np.testing.assert_allclose(out, (-1.0, 0.0, 0.0), atol=1e-12)
+        self.assertAlmostEqual(0.06, length, 12)
+        at, lays = takes._wrap_post(film)
+        np.testing.assert_allclose(at, np.array([0.05, -0.10, 0.0]) + ORIGIN, atol=1e-12)
+        self.assertAlmostEqual(0.035, lays, 12)
+
+    def test_the_flap_push_and_the_band_path_follow_their_box_and_pegs(self) -> None:
+        box = _laid_film(
+            {
+                "wall_far": _slab((-0.05, 0.065, 0.06), (0.065, 0.005, 0.06)),  # a box 120 mm tall
+                "wall_left": _slab((-0.115, 0.0, 0.06), (0.005, 0.065, 0.06)),  # its middle at y 0
+            }
+        )
+        self.assertEqual([("z", 0.182), ("y", 0.01), ("z", 0.082), ("z", 0.182)], _drags("13_paper/01_box_flap", box))
+        along_x = (0.0, np.sqrt(0.5), 0.0, np.sqrt(0.5))
+        pegs = _laid_film(
+            {
+                "band": SimpleNamespace(nodes=((0.05, -0.24, 0.20), (0.05, -0.16, 0.20))),
+                "lower": SimpleNamespace(xform=(0.09, -0.2, 0.15, *along_x)),
+                "board": _slab((0.12, -0.2, 0.15), (0.005, 0.012, 0.15)),
+            }
+        )
+        path = [("x", 0.045), ("z", 0.12), ("x", 0.097), ("z", 0.135), ("x", -0.01), ("x", -0.13)]
+        self.assertEqual(path, _drags("18_bands/00_band_on_pegs", pegs))
+
+    def test_the_flap_s_hinge_rides_with_a_taller_box(self) -> None:
+        flap = SimpleNamespace(pose=(-0.11, 0.045, 0.123), quat=_LEANING, size=(0.12, 0.13), cells=(12, 13))
+        hinge = takes._flap_hinge(_laid_film({"flap": flap}))
+        self.assertAlmostEqual(0.123 + 0.02 * np.cos(np.radians(15.0)), hinge, 12)
 
 
 if __name__ == "__main__":
