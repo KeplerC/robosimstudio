@@ -6,6 +6,42 @@ its task: the hand takes hold, works the material, and the page reads how far it
 got. Cloth and the sponge are introduced in [`01_cloth`](../01_cloth/README.md)
 and [`02_soft`](../02_soft/README.md).
 
+- **Rope**, `00` to `02`: [`rod/`](../../robosimstudio_materials/rod/) is `rss.rod`, a
+  capsule chain on Newton, or a Cosserat rod when SuperDex steps the `rod` kind.
+- **Knot**, `03`: [`rod/knot.py`](../../robosimstudio_materials/rod/knot.py) lays an
+  overhand knot (`overhand`) and reads `crossings`, `knot_length` and
+  `self_clearance`; `RodSpec.self_contact` is what keeps it a knot.
+- **Band**, `04`: [`rod/band.py`](../../robosimstudio_materials/rod/band.py) closes a
+  rod into a loop on SuperDex. `RUBBER` and `O_RING` ship.
+- **Paper**, `05`: [`paper.py`](../../robosimstudio_materials/paper.py) is `rss.paper`,
+  cloth whose folds stay. `rss.papers.PAPER` and `rss.papers.CARDBOARD` ship.
+- **Bag**, `06`: [`bag.py`](../../robosimstudio_materials/bag.py) is `rss.bag`, two
+  layers of cloth sewn into a pocket that SuperDex keeps apart. `rss.bags.CANVAS`
+  ships.
+- **Brush**, `07`: [`brush.py`](../../robosimstudio_materials/brush.py) is `rss.brush`,
+  bristles of capsule chains under a sole; `nylon` and `soft` ship. The hand holds a
+  named handle on the arm's own solver (`rss.brush(handle=...)` under
+  `rss.BRUSH_60HZ`), and the module's docstring says why and what that costs.
+- **Tape**, `08` and `09`: [`tape.py`](../../robosimstudio_materials/tape.py) is
+  `rss.tape`, a sheet stuck to a free body on the tape's solver (`rss.TAPE_60HZ`) by
+  bonds that let go. `rss.tapes.PAPER_LABEL`, `LABEL`, `MASKING_TAPE` and
+  `DUCT_TAPE` ship.
+- **Cutting**, `10`: [`cutting/`](../../robosimstudio_materials/cutting/__init__.py) is
+  `rss.cuttable` and `rss.knife`, on a vendored walk-on-spheres cage cutter.
+  `rss.cuttables.TOFU`, `CAKE` and `FOAM` ship.
+- **Granular, liquid and dough**, `11` to `13`:
+  [`granular.py`](../../robosimstudio_materials/granular.py),
+  [`liquid.py`](../../robosimstudio_materials/liquid.py) and
+  [`dough.py`](../../robosimstudio_materials/dough.py) are `rss.heap`, `rss.liquid`
+  and `rss.dough`, on Newton's implicit MPM in
+  [`mpm/`](../../robosimstudio_materials/mpm/). The presets are `rice`, `sand`,
+  `beans`, `flour`; `water`, `honey`, `ketchup`; and `dough`, `plasticine`, `clay`,
+  `butter`. Two caveats for a liquid: the `water` preset loses volume, so it is
+  read by counts, not heights; and a wall thinner than two voxels leaks unless its
+  body is in the liquid's `containers`.
+- **Water**, `14`: [`water.py`](../../robosimstudio_materials/water.py) is `rss.water`,
+  SPH on Genesis that keeps its volume. `water` and `oil` ship.
+
 <!-- examples:start: written by scripts/example_readmes.py from each script's docstring -->
 
 ## Rope: drag a cable

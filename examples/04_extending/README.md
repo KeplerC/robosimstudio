@@ -4,7 +4,10 @@ Adding a robot, or a new kind of simulated thing, without editing the library.
 `02_suction.py` is a hand of another sort: a vacuum cup,
 [`robosimstudio/robots/grippers/suction.py`](../../robosimstudio/robots/grippers/suction.py),
 that bolts to any imported wrist and seals and holds by
-[`robosimstudio/core/suction.py`](../../robosimstudio/core/suction.py).
+[`robosimstudio/core/suction.py`](../../robosimstudio/core/suction.py). The cup
+seals when its face is within 2 mm of a flat face of the part and square to it
+within 15 degrees. It holds by a MuJoCo weld when the part shares the arm's
+solver, and otherwise by a spring that lets go past the vacuum's pull.
 
 <!-- examples:start: written by scripts/example_readmes.py from each script's docstring -->
 
