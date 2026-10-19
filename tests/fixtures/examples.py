@@ -19,7 +19,8 @@ every other material's; :data:`ROPE` is the four older flat scripts under
 ``examples/scenes/``, in a tree that has them, and is empty in a tree that does
 not. A scene a test drives that is not an example, one whose material already has
 its script in ``03_materials``, is under ``tests/scenes/``, named from the
-repository root (``tests/scenes/01_between_posts.py``) and loaded the same way.
+repository root (``tests/scenes/01_between_posts.py``) and loaded the same way;
+:data:`SCENES` lists them.
 
 Importing this module imports nothing of the library, so reading its tables
 needs no GPU; the library is loaded with the first example a test asks for.
@@ -43,8 +44,10 @@ __all__ = [
     "NUMBERED",
     "ROOT",
     "ROPE",
+    "SCENES",
     "SCRIPTS",
     "_load",
+    "_path",
     "_run",
     "_stub_studio",
 ]
@@ -120,8 +123,22 @@ DEMO_ENGINES = {
     "06_tasks/06_bag_scored.py": "superdex",
     "06_tasks/07_band_scored.py": "superdex",
     "06_tasks/10_water_scored.py": "genesis",
+    "tests/scenes/02_superdex.py": "superdex",
 }
-"""The foreign engine each demo is about, by its path: stated, not read off the file's name."""
+"""The foreign engine each demo is about, by its path: stated, not read off the file's name.
+``tests/scenes/02_superdex`` is no demo, but it is the rope's scene on SuperDex and held to that engine too."""
+
+SCENES = (
+    "tests/scenes/00_roll_dough.py",
+    "tests/scenes/01_between_posts.py",
+    "tests/scenes/01_box_flap.py",
+    "tests/scenes/01_wipe_spill.py",
+    "tests/scenes/02_superdex.py",
+)
+"""The scenes the tests drive that are not examples, named from the repository root.
+Not shipped, and still held to the scene scripts' shape: two arms, a handle on the
+robot, no command line, ``main()`` ending in ``rss.view``. ``02_superdex`` needs the
+``[superdex]`` extra to build, and :data:`DEMO_ENGINES` holds it to that engine."""
 
 HAS_ROPE = bool(ROPE)
 NO_ROPE = "the older rope scripts (examples/scenes/) are not in this tree"

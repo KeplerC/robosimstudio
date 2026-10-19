@@ -28,7 +28,8 @@ in ``examples/03_materials/`` among them. Four older flat rope scripts remain un
 script's -- it runs, it ships two arms, the page can take hold of it, it parses
 no command line -- they are held to it by the same loop, and the loop covers the
 numbered scripts alone in a tree that does not have them. What only those older
-scripts claim is tested beside them, in a tree that has them.
+scripts claim is tested beside them, in a tree that has them. The scenes under
+``tests/scenes/`` are held to the shape rules too, though no reader runs them.
 
 ``scripts/studio.py`` -- the studio's launcher, in a tree that has it -- is not
 checked here: it takes a registered task id and about fifty flags, which makes
@@ -38,6 +39,7 @@ it a tool rather than an example.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import subprocess
@@ -46,11 +48,29 @@ import unittest
 from pathlib import Path
 from textwrap import dedent
 
-from tests.fixtures.examples import DEMO_ENGINES, DEMOS, EXAMPLES, HAS_ROPE, NUMBERED, ROOT, SCRIPTS, _load, _run
+from tests.fixtures.examples import (
+    DEMO_ENGINES,
+    DEMOS,
+    EXAMPLES,
+    HAS_ROPE,
+    NUMBERED,
+    ROOT,
+    SCENES,
+    SCRIPTS,
+    _load,
+    _path,
+    _run,
+)
 from tests.fixtures.packs import PYTHON_FLAGS, env_without
 
 TIER = "medium"
 """Builds and steps real scenes on a GPU."""
+
+
+def _absent(name: str) -> str:
+    """The engine a scene is built on that this checkout lacks, or ``""``: ``02_superdex`` without ``[superdex]``."""
+    engine = DEMO_ENGINES.get(name, "")
+    return engine if engine and importlib.util.find_spec(engine) is None else ""
 
 
 class TestTheExamplesRun(unittest.TestCase):
@@ -69,8 +89,10 @@ class TestTheExamplesRun(unittest.TestCase):
         can be dragged but not *driven*, and the difference is the whole second
         half of the interaction.
         """
-        for name in SCRIPTS:
+        for name in (*SCRIPTS, *SCENES):
             with self.subTest(example=name):
+                if _absent(name):
+                    self.skipTest(f"[{_absent(name)}] is not installed; {name} cannot be built")
                 sim, _ = _run(name)
                 self.assertEqual(["left", "right"], sorted(sim.handles.arms))
 
@@ -244,7 +266,7 @@ class TestTheMultiEngineDemos(unittest.TestCase):
         self.assertLessEqual(set(DEMOS), set(DEMO_ENGINES), "every demo states the engine it is about")
         for name, engine in DEMO_ENGINES.items():
             with self.subTest(demo=name):
-                text = (EXAMPLES / name).read_text()
+                text = _path(name).read_text()
                 ast.parse(text)
                 self.assertIn(engine, text, "the demo must name the engine it demonstrates")
 
@@ -291,8 +313,10 @@ class TestThePageCanTakeHoldOfIt(unittest.TestCase):
                     session.teardown()
 
     def test_every_example_offers_a_handle_on_the_robot(self) -> None:
-        for name in SCRIPTS:
+        for name in (*SCRIPTS, *SCENES):
             with self.subTest(example=name):
+                if _absent(name):
+                    self.skipTest(f"[{_absent(name)}] is not installed; {name} cannot be built")
                 _, session = self._page(name)
                 try:
                     session.tick()
@@ -342,9 +366,9 @@ class TestTheShape(unittest.TestCase):
         ``studio`` is deliberately not in this list. It is the launcher -- it
         takes a registered task id -- and a command line is what makes it one.
         """
-        for name in (*SCRIPTS, *DEMOS):
+        for name in (*SCRIPTS, *DEMOS, *SCENES):
             with self.subTest(example=name):
-                source = (EXAMPLES / name).read_text()
+                source = _path(name).read_text()
                 self.assertNotIn("argparse", source)
                 tree = ast.parse(source)
                 mains = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]
@@ -364,9 +388,9 @@ class TestTheShape(unittest.TestCase):
     def test_each_numbered_script_ends_by_opening_the_studio(self) -> None:
         """``import robosimstudio as rss`` at the top, ``rss.view(...)`` as the last
         thing ``main()`` does, and ``main()`` called only when the file is run."""
-        for name in (*NUMBERED, *DEMOS):
+        for name in (*NUMBERED, *DEMOS, *SCENES):
             with self.subTest(example=name):
-                tree = ast.parse((EXAMPLES / name).read_text())
+                tree = ast.parse(_path(name).read_text())
                 imports = [a for n in tree.body if isinstance(n, ast.Import) for a in n.names]
                 self.assertIn(("robosimstudio", "rss"), [(a.name, a.asname) for a in imports])
                 main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -423,6 +447,11 @@ class TestTheShape(unittest.TestCase):
                 )
                 self.assertFalse(lines[0].rstrip().endswith("."), "a title takes no full stop")
                 self.assertTrue(len(lines) == 1 or not lines[1].strip(), "line 2 is blank")
+
+    def test_every_test_scene_is_in_the_table(self) -> None:
+        """A scene put under ``tests/scenes/`` is held to the rules above once :data:`SCENES` names it."""
+        found = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "tests" / "scenes").glob("[0-9]*_*.py"))
+        self.assertEqual(found, sorted(SCENES))
 
     def test_no_numbered_script_is_a_pack(self) -> None:
         """An example folder may be put on ``robosimstudio.domains``'s path as a
