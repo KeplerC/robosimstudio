@@ -151,9 +151,10 @@ class TestAPresetIsOneTheSheetCanWear(unittest.TestCase):
         from robosimstudio_materials.tape import PAPER_LABEL
 
         panel, _, _ = _page(_sheet("label", PAPER_LABEL))
-        with self.assertRaisesRegex(ValueError, "TapeMaterialSpec"):
-            panel.tuner.adopt("terry_towelling")
-        panel.tuner.adopt("paper_label")
+        self.assertFalse(panel.tuner.adopt("terry_towelling"))
+        self.assertIn("TapeMaterialSpec", panel.tuner.refused)
+        self.assertIs(PAPER_LABEL, panel.tuner.material, "nothing loaded")
+        self.assertTrue(panel.tuner.adopt("paper_label"))
         self.assertIs(PAPER_LABEL, panel.tuner.material)
 
 
@@ -276,6 +277,42 @@ class TestAWholeLawIsWrittenAsOneSet(unittest.TestCase):
         inspector.drain()
         np.testing.assert_allclose([1.5e-3, 2.0e-3], _law(label), rtol=1e-6)
         self.assertEqual("", binder.refused)
+
+
+class TestALooseTapeIsOfferedOnlyWhatItCanBeBuiltWith(unittest.TestCase):
+    """A loose tape needs contact adhesion, a rule only ``TapeSpec`` holds: the folder offered it
+    ``paper_label``, whose opening adhesion and zero strength let every bond go, and Apply & rebuild then
+    raised out of the drain."""
+
+    def test_its_presets_are_those_its_spec_takes(self) -> None:
+        _, gui, _ = _page(_tape(stuck=False))
+        self.assertEqual(("(as built)", "duct_tape", "label", "masking_tape"), gui.find("Preset").options)
+        _, gui, _ = _page(_tape(stuck=True))
+        self.assertIn("paper_label", gui.find("Preset").options, "a stuck label rebuilds under either law")
+
+    def test_adopting_another_is_refused_on_the_status_line(self) -> None:
+        from robosimstudio_materials.tape import LABEL
+
+        label = _tape(stuck=False)
+        panel, gui, _ = _page(label)
+        panel.session.status = ""
+        gui.find("Preset").fire("paper_label")
+        panel.drain()
+        self.assertIs(LABEL, panel.tuner.material)
+        self.assertAlmostEqual(LABEL.strength, float(label._contact["params"].numpy()[0]), msg="no bond let go")
+        self.assertIn("only contact adhesion", panel.session.status)
+        self.assertEqual("(as built)", gui.find("Preset").value)
+        self.assertEqual("none", gui.find("Pending rebuild").value)
+
+    def test_opening_adhesion_on_its_slider_is_refused_too(self) -> None:
+        label = _tape(stuck=False)
+        panel, gui, _ = _page(label)
+        _slider(gui, "adhesion").fire("opening")
+        panel.drain()
+        self.assertEqual("contact", panel.tuner.material.adhesion)
+        self.assertEqual("contact", _slider(gui, "adhesion").value, "the control goes back")
+        self.assertIn("adhesion not changed", panel.session.status)
+        self.assertEqual("none", gui.find("Pending rebuild").value)
 
 
 class TestWhatCannotMoveIsNotOffered(unittest.TestCase):

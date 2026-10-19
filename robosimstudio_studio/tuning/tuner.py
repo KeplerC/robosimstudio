@@ -14,7 +14,7 @@ answer.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import is_dataclass, replace
 from typing import Any
 
 from robosimstudio.assetlib.materials import get_material, list_materials
@@ -78,7 +78,7 @@ class MaterialTuner:
         """Which named preset each cloth was last loaded from, if any."""
         self.selected: str = self.names[0] if self.names else ""
         self.refused = ""
-        """Why the last :meth:`set_fields` took nothing, for the status line; empty otherwise."""
+        """Why the last :meth:`set_fields` or :meth:`adopt` took nothing, for the status line; empty otherwise."""
 
     def __bool__(self) -> bool:
         return bool(self.names)
@@ -116,15 +116,16 @@ class MaterialTuner:
         only move the working spec -- the sheet on screen was built with the old value and no
         assignment can change that.
 
-        Refused, nothing moves and :attr:`refused` says why: a set the entity refuses beside what it
-        holds (a tape's ``peak_opening`` past a ``reach`` the inspector moved).
+        Refused, nothing moves and :attr:`refused` says why: a material the sheet's own spec refuses,
+        whose rebuild would raise (opening adhesion on a loose tape), or a set the entity refuses
+        beside what it holds (a tape's ``peak_opening`` past a ``reach`` the inspector moved).
         """
         name = self.selected
-        refused = ""
         try:
             spec = replace(self.working[name], **changes)
+            refused = self._sheet_refuses(name, spec)
             live = tuple(field for field in changes if _tier(spec, field) == LIVE)
-            if live:
+            if live and not refused:
                 self.live[name].write(spec, only=live)
         except ValueError as exc:
             refused = str(exc)
@@ -137,28 +138,52 @@ class MaterialTuner:
         return True
 
     def presets(self) -> tuple[str, ...]:
-        """The named presets the selected cloth can wear: those of its built material's class.
+        """The named presets the selected cloth can wear: those of its built material's class that the
+        sheet's own spec takes, as its rebuild will check.
 
         A tape's spec refuses a material with no adhesive and a paper's one with no plastic trio, so a
         towel preset adopted onto a label moved its sliders and then failed the rebuild; and no sheet
-        can be made of rice.
+        can be made of rice. A loose tape's spec refuses opening adhesion: ``paper_label`` adopted onto
+        one zeroed its strength, so every bond let go, and the rebuild raised.
         """
-        kind = type(self.built[self.selected])
-        return tuple(name for name in list_materials() if isinstance(get_material(name).spec, kind))
+        return tuple(preset for preset in list_materials() if not self._cannot_wear(self.selected, preset))
 
-    def adopt(self, preset: str) -> None:
-        """Load a named preset onto the selected cloth.
+    def adopt(self, preset: str) -> bool:
+        """Load a named preset onto the selected cloth. Whether it was taken.
 
-        Raises:
-            ValueError: For a preset that is not one of :meth:`presets`.
+        A preset that is not one of :meth:`presets` is refused, and :attr:`refused` says why.
         """
         name = self.selected
-        if preset not in self.presets():
-            raise ValueError(f"{name!r} is a {type(self.built[name]).__name__}; {preset!r} is not one")
+        refused = self._cannot_wear(name, preset)
+        self.refused = f"{preset!r} not loaded: {refused}" if refused else ""
+        if refused:
+            return False
         self.working[name] = get_material(preset).spec
         self.origin[name] = preset
         self.live[name].write(self.working[name])
         self.apply_contact()
+        return True
+
+    def _cannot_wear(self, name: str, preset: str) -> str:
+        """Why the cloth ``name`` cannot wear the preset ``preset``; empty when it can."""
+        if preset not in list_materials():
+            return "no preset of that name"
+        material = get_material(preset).spec
+        kind = type(self.built[name])
+        if not isinstance(material, kind):
+            return f"{name!r} is a {kind.__name__}; {preset!r} is not one"
+        return self._sheet_refuses(name, material)
+
+    def _sheet_refuses(self, name: str, material: Any) -> str:
+        """Why the sheet ``name``'s own spec refuses ``material``, as its rebuild would; empty when it takes it."""
+        sheet = getattr(self.entities[name], "spec", None)
+        if not is_dataclass(sheet):
+            return ""
+        try:
+            replace(sheet, material=material)
+        except ValueError as exc:
+            return str(exc)
+        return ""
 
     def revert(self) -> None:
         """Back to what this cloth was actually built with."""

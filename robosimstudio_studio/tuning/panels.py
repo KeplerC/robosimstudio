@@ -161,7 +161,9 @@ class PanelTune(Panel):
                 if preset == "(as built)":
                     self.revert_requested = True
                 else:
-                    self.tuner.adopt(preset)
+                    if not self.tuner.adopt(preset):
+                        self.session.status = self.tuner.refused
+                        self._sync_preset()
                     self.binder.set_spec(self.tuner.material)
                     self.refresh()
                     return
