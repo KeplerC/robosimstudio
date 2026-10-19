@@ -217,8 +217,8 @@ class CuttableSpec:
         knife: The knife that cuts it, the same spec added to the scene before the block.
         material: One of :data:`cuttables` or a :class:`CuttableMaterialSpec`.
         walks: Walk-on-spheres walks per point, the cutter's Monte Carlo budget: 1,024, the paper's.
-        quad_points: Interior quadrature points the elastic solve integrates over: 800 asked, 792
-            sampled in a 100 x 60 x 40 mm block.
+        quad_points: Interior quadrature points the elastic solve integrates over: 800 asked, 785
+            sampled (seeded, so every build) in ``00_cut_tofu``'s 60 x 100 x 40 mm block.
         mesh_cell: The drawn skin's triangle size [m]: 994 skin points at 5 mm on that block.
         push: The edge law's stiffness as a multiple of ``E`` per metre of edge in the block (see
             ``law.py``).

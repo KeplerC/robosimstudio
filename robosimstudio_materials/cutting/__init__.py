@@ -11,7 +11,7 @@ freedom are the corners of a cage, its interior and its drawn skin carried by ha
 that walks on spheres estimate on the GPU, and a blade sweeping a plane splits the cage and updates
 only the walks the new cut surface touches. Its own demo, the starfish, steps in 3.3 ms and cuts in 8
 to 26 ms a step over 8,158 skin points (``demo_star.py``, GPU 5). Here a block starts as an
-eight-corner box cage with 1,024 walks over 792 interior points and a 994-point skin: building it
+eight-corner box cage with 1,024 walks over 785 interior points and a 994-point skin: building it
 solves the walks in 0.6 s (1.2 to 1.7 s the first time in a process), the cage steps in 3.2 ms, and a cut step costs 7.6 ms (median of 51
 in each of three drives, 15 ms at most warm; ``measure.py``, GPU 5).
 
