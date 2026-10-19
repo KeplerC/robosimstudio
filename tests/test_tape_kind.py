@@ -262,6 +262,60 @@ class TestThePressThatMakesABond(unittest.TestCase):
         self.assertAlmostEqual(8.0e3 / 1.0e4, LABEL.press / (0.5 * (1.0e4 + 2.5e3)))
 
 
+class TestAContactBondsSpring(unittest.TestCase):
+    """A contact bond starts at the law's slope at the contact thickness the kernels use, radius plus margin."""
+
+    def test_the_build_counts_the_boxs_margin(self) -> None:
+        import newton
+        import warp as wp
+
+        from robosimstudio_materials.tape import LABEL, EntityTape, contact_stiffness, tape
+
+        builder = newton.ModelBuilder()
+        box = builder.add_body(xform=wp.transform((0.0, 0.0, 0.025), wp.quat_identity()), label="box")
+        cfg = builder.default_shape_cfg.copy()
+        cfg.margin = 0.002
+        builder.add_shape_box(box, hx=0.05, hy=0.06, hz=0.025, cfg=cfg)
+        label = EntityTape(tape(name="label", on="box", at=(-0.02, -0.05, 0.0505), material=LABEL, stuck=False))
+        label.build(builder, None)
+        built = np.asarray(builder.attachment_particle_body_stiffness)[label.bonds]
+        want = label.bond_area * contact_stiffness(LABEL, LABEL.particle_radius + 0.002)
+        np.testing.assert_allclose(built, want, rtol=1e-6)
+
+    def test_a_reset_puts_back_the_spring_a_bond_starts_at(self) -> None:
+        """Not the secant the last episode's lift left, in the island's copy and the model's alike."""
+        import warp as wp
+
+        from robosimstudio_materials.tape import CONTACT_FIELDS, LABEL, EntityTape, contact_stiffness, tape
+
+        label = EntityTape(tape(name="label", on="box", material=LABEL))
+        n = 4
+        label.contact, label.bonds = True, np.arange(n, dtype=np.int32)
+        label.bond_area, label.anchors = np.full(n, 2.5e-5), np.zeros((n, 3))
+        label.broken = wp.ones(n, dtype=wp.int32, device="cpu")
+        stale = lambda: wp.array(np.full(n, 7.0, dtype=np.float32), dtype=float, device="cpu")  # noqa: E731
+        label._arrays = {
+            "enabled": [wp.zeros(n, dtype=wp.bool, device="cpu") for _ in range(2)],
+            "body_point": [wp.zeros(n, dtype=wp.vec3, device="cpu") for _ in range(2)],
+            "stiffness": [stale(), stale()],
+        }
+        live = dataclasses.replace(LABEL, strength=1.0e4)
+        label._contact = {
+            "params": wp.array([getattr(live, f) for f in CONTACT_FIELDS], dtype=float, device="cpu"),
+            "normal": wp.zeros(n, dtype=wp.vec3, device="cpu"),
+            "dmin": wp.zeros(n, dtype=float, device="cpu"),
+            "thick": 6.0e-4,
+        }
+        label._reset_bonds()
+        want = 2.5e-5 * contact_stiffness(live, 6.0e-4)
+        for array in label._arrays["stiffness"]:
+            np.testing.assert_allclose(array.numpy(), want, rtol=1e-6, err_msg="the law as the kernels hold it now")
+        for array in label._arrays["enabled"]:
+            self.assertTrue(array.numpy().all(), "a stuck label is stuck again")
+        np.testing.assert_allclose(label._contact["dmin"].numpy(), 6.0e-4)
+        self.assertFalse(label.broken.numpy().any())
+
+
 class TestThePresets(unittest.TestCase):
     def test_each_preset_is_soft_enough_for_its_tab_to_pull_it(self) -> None:
         # Paper's edge_ke 30 and tri_ke 1e4 held the tab still under the hand's pull (the module's section 1).

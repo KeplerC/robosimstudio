@@ -915,7 +915,10 @@ class EntityTape(EntityCloth):
         self.bond_area = sheet_areas(spec.size, spec.cells)[rows]
         stiffness = np.full(len(rows), float(material.tack) * across * along)
         if self.contact:
-            stiffness = self.bond_area * contact_stiffness(material, float(material.particle_radius))
+            # The contact thickness the kernels measure from: the radius plus the body's shape margin.
+            margins = [float(builder.shape_margin[s]) for s in range(builder.shape_count)]
+            margin = next((m for s, m in enumerate(margins) if int(builder.shape_body[s]) == self.body), 0.0)
+            stiffness = self.bond_area * contact_stiffness(material, float(material.particle_radius) + margin)
         bonds, anchors = [], []
         for i, k in zip(rows, stiffness, strict=True):
             p = start + int(i)
@@ -1239,22 +1242,28 @@ class EntityTape(EntityCloth):
                 rest["particle_qd"][self.particles] = 0.0
         super().reset(pipeline, episode, world=world)
         if self.broken is not None:
-            self.broken.zero_()
-            for array in self._arrays.get("enabled", ()):
-                values = array.numpy()
-                values[self.bonds] = bool(self.spec.stuck)
-                array.assign(values)
-            for array in self._arrays.get("body_point", ()):
-                values = array.numpy()
-                values[self.bonds] = self.anchors.astype(np.float32)
-                array.assign(values)
-            if self._contact:
-                self._contact["normal"].assign(np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32))
-                self._contact["dmin"].fill_(self._contact["thick"])
+            self._reset_bonds()
         if self.coord_start >= 0:
             c = self.coord_start
             for state in (pipeline.state_0, pipeline.state_1):
                 state.joint_q[c : c + 7].assign(self.tab_q0.astype(np.float32))
+
+    def _reset_bonds(self) -> None:
+        """Every bond as built, in every array a solver reads: stuck or loose, at its anchor, and under
+        contact adhesion with the spring a bond starts at, not the secant the last episode left."""
+        self.broken.zero_()
+        rows = {"enabled": bool(self.spec.stuck), "body_point": self.anchors.astype(np.float32)}
+        if self._contact:
+            values = self._contact["params"].numpy()
+            law = replace(self.spec.material, **{f: float(v) for f, v in zip(CONTACT_FIELDS, values, strict=True)})
+            rows["stiffness"] = (self.bond_area * contact_stiffness(law, self._contact["thick"])).astype(np.float32)
+            self._contact["normal"].assign(np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32))
+            self._contact["dmin"].fill_(self._contact["thick"])
+        for key, value in rows.items():
+            for array in self._arrays.get(key, ()):
+                values = array.numpy()
+                values[self.bonds] = value
+                array.assign(values)
 
     # ---------------------------------------------------------------- runtime
     def peeled(self) -> float:
