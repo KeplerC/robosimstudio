@@ -402,6 +402,7 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
                 "robosimstudio_materials.rod",
                 "robosimstudio_materials.soft",
                 "robosimstudio_materials.tape",
+                "robosimstudio_materials.water",
             ],
             sorted(rss._PACKS),
         )
