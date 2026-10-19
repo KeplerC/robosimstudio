@@ -972,13 +972,26 @@ class EntityTape(EntityCloth):
 
     def write_adhesive(self, name: str, value: float) -> None:
         """Set one of contact adhesion's fields (:data:`CONTACT_FIELDS`). LIVE: the kernels read them every
-        substep. ``strength`` 0 lets every bond go and makes none."""
+        substep. ``strength`` 0 lets every bond go and makes none.
+
+        Raises:
+            KeyError: For a name that is not one of :data:`CONTACT_FIELDS`.
+            ValueError: For a value :class:`TapeMaterialSpec` refuses beside the other fields as the
+                kernels hold them, and nothing is written. A ``peak_opening`` at the ``reach`` makes
+                every held bond's spring NaN; one past it makes a law that no longer peaks at
+                ``strength``.
+        """
         if name not in CONTACT_FIELDS:
             raise KeyError(f"{name!r} is not one of contact adhesion's fields {CONTACT_FIELDS}")
         params = self._contact.get("params")
         if params is not None:
-            values = params.numpy()
+            # A copy: on the CPU ``numpy()`` is the array itself, and a refused value must not land.
+            values = np.array(params.numpy(), copy=True)
             values[CONTACT_FIELDS.index(name)] = float(value)
+            try:
+                replace(self.spec.material, **{f: float(v) for f, v in zip(CONTACT_FIELDS, values, strict=True)})
+            except ValueError as exc:
+                raise ValueError(f"tape {self.spec.name!r}: {name} = {value} not written: {exc}") from None
             params.assign(values)
 
     def write_tack(self, tack: float) -> None:

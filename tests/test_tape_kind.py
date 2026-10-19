@@ -136,6 +136,39 @@ class TestTheSpec(unittest.TestCase):
                 self.assertEqual(LIVE, fields[name].metadata["ui"].tier)
 
 
+class TestTheContactLawsLiveWrites(unittest.TestCase):
+    """A live write keeps the law the spec allows: a peak at or past the reach is refused, unwritten."""
+
+    def setUp(self) -> None:
+        import warp as wp
+
+        from robosimstudio_materials.tape import CONTACT_FIELDS, LABEL, EntityTape, tape
+
+        self.label = EntityTape(tape(name="label", on="box", material=LABEL))
+        built = np.array([getattr(LABEL, f) for f in CONTACT_FIELDS], dtype=np.float32)
+        self.label._contact = {"params": wp.array(built, dtype=float, device="cpu")}
+        self.built = built.copy()
+
+    def params(self) -> np.ndarray:
+        return self.label._contact["params"].numpy()
+
+    def test_a_peak_at_or_past_the_reach_is_refused_and_not_written(self) -> None:
+        # At peak == reach the law's spring is strength / 0 times 0, NaN in every held bond.
+        for name, value in (("reach", 5.0e-4), ("peak_opening", 1.0e-3), ("peak_opening", 2.0e-3), ("reach", 1.0e-4)):
+            with self.subTest(name=name, value=value):
+                with self.assertRaisesRegex(ValueError, "peak_opening < reach"):
+                    self.label.write_adhesive(name, value)
+                np.testing.assert_array_equal(self.built, self.params())
+        with self.assertRaisesRegex(ValueError, "stiction_speed"):
+            self.label.write_adhesive("stiction_speed", 0.0)
+        np.testing.assert_array_equal(self.built, self.params())
+
+    def test_the_reach_then_the_peak_moves_both_past_where_they_were(self) -> None:
+        self.label.write_adhesive("reach", 2.0e-3)
+        self.label.write_adhesive("peak_opening", 1.5e-3)
+        np.testing.assert_allclose([1.5e-3, 2.0e-3], self.params()[1:3], rtol=1e-6)
+
+
 class TestThePresets(unittest.TestCase):
     def test_each_preset_is_soft_enough_for_its_tab_to_pull_it(self) -> None:
         # Paper's edge_ke 30 and tri_ke 1e4 held the tab still under the hand's pull (the module's section 1).
