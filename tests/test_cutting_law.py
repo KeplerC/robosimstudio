@@ -19,7 +19,7 @@ import numpy as np
 from tests.fixtures.packs import has_pack
 
 TIER = "fast"
-"""No GPU: numpy only."""
+"""No GPU: numpy, and a builder on the CPU that is never finalized."""
 
 
 @unittest.skipUnless(has_pack("cutting"), "the cutting kind is not installed")
@@ -97,6 +97,37 @@ class TestTheLaw(unittest.TestCase):
         dull = push(depth=0.012, gap=0.02, **{**common, "threshold": 3000.0})
         self.assertEqual(0.012, dull[1], "a blade 1000 times duller cuts nothing at 12 mm")
         self.assertAlmostEqual(23.5e3 * 0.06 * 0.012 * 0.032 / 0.02, dull[0])
+
+
+@unittest.skipUnless(has_pack("cutting"), "the cutting kind is not installed")
+class TestTheKnifeAndTheBlockAsBuilt(unittest.TestCase):
+    """What the two entities take from their specs, on a CPU builder that is never finalized."""
+
+    def _knife(self, **kwargs):
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.cutting.entity import EntityKnife
+
+        builder = newton.ModelBuilder()
+        knife = EntityKnife(rss.knife(name="knife", **kwargs))
+        knife._add_primitive(builder, (0.0, 0.0, 0.04, 0.0, 0.0, 0.0, 1.0))
+        return builder, knife
+
+    def test_the_knife_weighs_its_densities_unless_it_states_a_mass(self) -> None:
+        builder, knife = self._knife()
+        self.assertAlmostEqual(0.096, float(builder.body_mass[knife.body]), places=3, msg="25 g handle, 71 g blade")
+        self.assertGreaterEqual(knife.coord_start, 0, "a free body")
+        builder, knife = self._knife(mass=0.2)
+        self.assertAlmostEqual(0.2, float(builder.body_mass[knife.body]), places=6)
+
+    def test_a_static_knife_is_welded_where_it_stands(self) -> None:
+        import newton
+
+        builder, knife = self._knife(static=True)
+        self.assertEqual(-1, knife.coord_start, "no free joint's coordinates to reset")
+        self.assertNotIn(int(newton.JointType.FREE), [int(t) for t in builder.joint_type])
+        self.assertEqual(2, sum(int(b) == knife.body for b in builder.shape_body), "the handle and the blade")
 
 
 if __name__ == "__main__":

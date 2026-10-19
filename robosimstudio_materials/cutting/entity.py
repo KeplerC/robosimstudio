@@ -24,6 +24,7 @@ import warp as wp
 
 from robosimstudio.core.schedule import Stage
 from robosimstudio.domains.rigid.entity import EntityRigid
+from robosimstudio.scene.build.bodies import set_body_mass
 from robosimstudio.scene.entity import Entity
 
 from .law import BlockFrame, blade_normal, box_cage, cut_line, edge_contact, edge_push, quat_to_matrix
@@ -43,12 +44,16 @@ class EntityKnife(EntityRigid):
         self.blade_shape: int = -1
 
     def _add_primitive(self, builder: newton.ModelBuilder, pose) -> None:
+        """The handle and the blade on one body; ``static`` and ``mass`` as :class:`EntityRigid` takes them."""
         spec = self.spec
         xform = wp.transform(tuple(float(v) for v in pose[:3]), wp.quat(*[float(v) for v in pose[3:7]]))
-        self.body = builder.add_body(xform=xform, label=spec.name)
-        joint = builder.joint_count - 1
-        self.coord_start = int(builder.joint_q_start[joint])
-        self.dof_start = int(builder.joint_qd_start[joint])
+        if spec.static:
+            self.body = builder.add_link(xform=xform, label=spec.name)
+        else:
+            self.body = builder.add_body(xform=xform, label=spec.name)
+            joint = builder.joint_count - 1
+            self.coord_start = int(builder.joint_q_start[joint])
+            self.dof_start = int(builder.joint_qd_start[joint])
         handle = self._contact_cfg(builder)
         handle.density = float(spec.handle_density)
         hx, hy, hz = (0.5 * float(v) for v in spec.handle_size)
@@ -78,6 +83,9 @@ class EntityKnife(EntityRigid):
                 label=f"{spec.name}/blade",
             )
         )
+        if spec.mass is not None:
+            # The densities' 96 g rescaled, the balance over the blade kept.
+            set_body_mass(builder, self.body, float(spec.mass))
 
     def apply_display(self, builder: newton.ModelBuilder) -> None:
         """The blade in the spec's colour, the handle in its own."""
