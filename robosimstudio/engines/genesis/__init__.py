@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``genesis`` backend: Genesis's IPC coupler, co-simulated beside Newton.
+"""The ``genesis`` backend: Genesis's IPC coupler, or its SPH liquid, co-simulated beside Newton.
 
 Importing this registers the alias and nothing else --- the engine itself loads
 the first time a scene actually builds a Genesis island, so a checkout without
@@ -20,10 +20,11 @@ BACKEND = register_backend(
     "genesis",
     cls="robosimstudio.engines.genesis.solver.SolverGenesis",
     supports=("particles",),
-    summary="Genesis's IPC coupler (libuipc): cloth and FEM bodies, co-simulated on the host; "
-    "Newton islands lead, constraint reactions feed back.",
+    summary="Genesis, co-simulated on the host: cloth and FEM bodies on its IPC coupler (libuipc), "
+    "liquids on SPH under its legacy coupler; Newton islands lead, reactions feed back.",
     host_engine=True,
     # What each builder reads is declared beside it, per kind, in ``bridge.py``.
 )
 
 from . import bridge as _bridge  # noqa: E402, F401 -- registers the shell and tet builders
+from . import sph as _sph  # noqa: E402, F401 -- registers the sph kind and its builder

@@ -147,6 +147,49 @@ class TestTheCouplingArithmetic(unittest.TestCase):
         self.assertEqual(len(_surface_of(two)), 6, "two tets share one face, so 8 - 2")
 
 
+class TestTheLiquidCouplerArithmetic(unittest.TestCase):
+    """The legacy coupler's island: which coupler an island gets, and the numbers its liquid and mirrors are given."""
+
+    def test_an_island_picks_its_coupler_from_its_actors(self):
+        from robosimstudio.engines.genesis.bridge import coupler_for
+
+        self.assertEqual("legacy", coupler_for({"actors": [{"kind": "sph", "name": "water"}]}))
+        self.assertEqual("ipc", coupler_for({"actors": [{"kind": "shell", "name": "towel"}]}))
+        self.assertEqual("ipc", coupler_for({"actors": []}))
+
+    def test_a_liquid_beside_a_cloth_is_refused_by_name(self):
+        """A Genesis scene holds one coupler, and an SPH body under the IPC coupler does not compile."""
+        from robosimstudio.engines.genesis.bridge import coupler_for
+
+        recipe = {"island": "host", "actors": [{"kind": "sph", "name": "water"}, {"kind": "tet", "name": "sponge"}]}
+        with self.assertRaises(ValueError) as caught:
+            coupler_for(recipe)
+        for word in ("'sph'", "'tet'", "one coupler", "backend('genesis'"):
+            self.assertIn(word, str(caught.exception))
+
+    def test_the_liquid_weighs_the_volume_it_fills(self):
+        """Genesis masses a particle at 0.8 of ``size**3 * rho``; density and stiffness are divided by it together,
+        so the pressure's acceleration (stiffness over rest density) is the material's own."""
+        from robosimstudio.engines.genesis.sph import GENESIS_MASS_VOLUME, liquid_args
+
+        args = liquid_args({"density": 1000.0, "stiffness": 1.0e4, "viscosity": 5.0e-4, "surface_tension": 0.01})
+        self.assertAlmostEqual(1000.0, args["rho"] * GENESIS_MASS_VOLUME)
+        self.assertAlmostEqual(1.0e4, args["stiffness"] * GENESIS_MASS_VOLUME)
+        self.assertAlmostEqual(args["stiffness"] / args["rho"], 10.0)
+        self.assertEqual((5.0e-4, 0.01), (args["mu"], args["gamma"]))
+
+    def test_a_mirror_turns_at_a_rate_in_its_own_frame(self):
+        """Genesis integrates a free joint's angular dofs in the body's frame. A body yawed 90 degrees about z and
+        turned about world x has its rate on its own -y axis."""
+        from robosimstudio.core.math import quat_from_axis_angle, quat_multiply
+        from robosimstudio.engines.genesis.sph import _angular_velocity
+
+        start = quat_from_axis_angle((0.0, 0.0, 1.0), np.pi / 2)
+        end = quat_multiply(quat_from_axis_angle((1.0, 0.0, 0.0), 0.02), start)
+        np.testing.assert_allclose(_angular_velocity(start, end, 0.01), [0.0, -2.0, 0.0], atol=1e-9)
+        np.testing.assert_allclose(_angular_velocity(start, start, 0.01), np.zeros(3))
+
+
 class TestTheSolverIsAHostSolver(unittest.TestCase):
     def test_it_inherits_the_shared_contract(self):
         from robosimstudio.engines.genesis.solver import SolverGenesis

@@ -1,5 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The ``genesis`` backend class. One method, because the contract is shared."""
+"""The ``genesis`` backend class. One method, because the contract is shared.
+
+The one method picks the bridge: an island of cloth and soft bodies runs Genesis's
+IPC coupler (:class:`~robosimstudio.engines.genesis.bridge.GenesisBridge`), an island
+of liquids its legacy coupler (:class:`~robosimstudio.engines.genesis.sph.SphBridge`),
+and a Genesis scene holds one coupler, so an island holding both is refused
+(:func:`~robosimstudio.engines.genesis.bridge.coupler_for`).
+"""
 
 from __future__ import annotations
 
@@ -23,8 +30,10 @@ class SolverGenesis(SolverHost):
         recipe: The manifest's host-island record.
         substeps: Genesis steps per control step.
         precision: ``"64"``, and changing it is a correctness decision rather
-            than a performance one --- see
-            :mod:`robosimstudio.engines.genesis.runtime`.
+            than a performance one for the IPC coupler --- see
+            :mod:`robosimstudio.engines.genesis.runtime`. A liquid island reads
+            its reaction as a momentum change and states ``"32"``, which is 8x
+            cheaper there (:mod:`robosimstudio.engines.genesis.sph`).
         feedback: ``"auto"`` or ``"off"`` --- the IPC constraint-reaction harvest
             for two-way mirrors.
         feedback_alpha: EMA coefficient for a *rising* harvested force; 1.0
@@ -46,6 +55,18 @@ class SolverGenesis(SolverHost):
             encodes the force, which is harmless at float64 and destroys the
             measurement at float32.
         constraint_strength_rotation: The rotational twin.
+        pressure_solver: A liquid island's SPH pressure solve, ``"WCSPH"``. Genesis's
+            ``"DFSPH"`` is accepted and is not what the liquid kinds measured: it
+            held a resting cup's water at 1.96 times its weight with 2 ms substeps
+            and 1.97 with 0.4 ms ones, which cost 171 ms a control step
+            (``p1_rest.py``).
+        sph_reach: How far [m] the SPH solver's box reaches past the liquids' rest
+            bounds, sideways and up.
+        sph_reach_down: And down: where water that falls off the bench comes to rest.
+        wall_friction: Genesis's ``coup_friction`` for every mirror a liquid touches
+            (its own default). A Newton shape's friction is a rigid-rigid
+            coefficient, and a cup gripped through rubber pads is not a wall the
+            water clings to.
     """
 
     def open(
@@ -65,6 +86,10 @@ class SolverGenesis(SolverHost):
         contact_d_hat: float = 1.0e-3,
         constraint_strength_translation: float = 100.0,
         constraint_strength_rotation: float = 100.0,
+        pressure_solver: str = "WCSPH",
+        sph_reach: float = 0.5,
+        sph_reach_down: float = 0.25,
+        wall_friction: float = 0.1,
     ) -> Any:
         """The Genesis bridge, with the island-wide scalars folded into the recipe.
 
@@ -72,8 +97,27 @@ class SolverGenesis(SolverHost):
         do: the manifest records the recipe, so a twin rebuilds the same scene
         from it and the model alone.
         """
-        from .bridge import GenesisBridge
+        from .bridge import GenesisBridge, coupler_for
 
+        if coupler_for(recipe) == "legacy":
+            from .sph import SphBridge
+
+            return SphBridge(
+                model,
+                {
+                    **recipe,
+                    "feedback_alpha": float(feedback_alpha),
+                    "feedback_dv_max": float(feedback_dv_max),
+                    "pressure_solver": str(pressure_solver),
+                    "sph_reach": float(sph_reach),
+                    "sph_reach_down": float(sph_reach_down),
+                    "wall_friction": float(wall_friction),
+                },
+                substeps=int(substeps),
+                precision=str(precision),
+                feedback=str(feedback),
+                pose_source=str(pose_source),
+            )
         return GenesisBridge(
             model,
             {

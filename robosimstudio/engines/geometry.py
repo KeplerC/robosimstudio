@@ -387,8 +387,16 @@ def _read_tet(model: Any, base: ActorGeometry) -> ActorGeometry:
     return replace(base, tets=tets, young=young, poisson=poisson)
 
 
+def _read_sph(model: Any, base: ActorGeometry) -> ActorGeometry:
+    """A liquid: its particles alone, with no triangle and no tetrahedron to read."""
+    del model
+    return base
+
+
 register_actor_kind("shell", _read_shell, summary="A membrane: triangles with thickness-integrated stiffness.")
 register_actor_kind("tet", _read_tet, summary="A volume: tetrahedra, with the model's own Lame pair.")
+# Read here, beside the other two, so the set of kinds does not depend on whether an engine was imported.
+register_actor_kind("sph", _read_sph, summary="A liquid: particles with no connectivity, for an SPH solver.")
 
 
 def actor_geometry(model: Any, record: dict) -> ActorGeometry:

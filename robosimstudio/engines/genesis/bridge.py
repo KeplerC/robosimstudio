@@ -55,7 +55,16 @@ from robosimstudio.engines.pose import compose, quat_rotate
 
 from .runtime import ensure_initialized
 
-__all__ = ["CLOTH_MASS_FACTOR", "GenesisBridge", "cloth_density", "mirror_role", "wxyz"]
+__all__ = [
+    "CLOTH_MASS_FACTOR",
+    "LEGACY_KINDS",
+    "GenesisBridge",
+    "cloth_density",
+    "coupler_for",
+    "mirror_role",
+    "write_obj",
+    "wxyz",
+]
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +89,57 @@ dynamics are not the scene's. The division is checked at build --- see
 :meth:`GenesisBridge._verify_mass` --- because a factor that changes upstream
 would otherwise read as "the cloth feels heavy" for a week.
 """
+
+
+LEGACY_KINDS = frozenset({"sph"})
+"""Actor kinds only Genesis's legacy coupler steps; every other kind here is the IPC coupler's.
+
+A Genesis scene holds one coupler, so an island is one or the other: see
+:func:`coupler_for` and :mod:`robosimstudio.engines.genesis.sph`."""
+
+
+def coupler_for(recipe: dict) -> str:
+    """``"legacy"`` or ``"ipc"``: the coupler an island's actors need, or a refusal naming the mix.
+
+    Raises:
+        ValueError: when the island holds a legacy kind (a liquid) beside an IPC
+            one (a cloth or a soft body). Genesis builds one coupler per scene, and
+            an SPH body under the IPC coupler does not compile
+            (:mod:`robosimstudio.engines.genesis.sph`); route one of them to
+            another backend, or to a second ``genesis`` backend with other
+            parameters, which is a second island.
+    """
+    kinds = {str(a.get("kind", "tet")): str(a.get("name", "")) for a in recipe.get("actors", ())}
+    legacy = sorted(k for k in kinds if k in LEGACY_KINDS)
+    ipc = sorted(k for k in kinds if k not in LEGACY_KINDS)
+    if legacy and ipc:
+        raise ValueError(
+            f"genesis island {recipe.get('island')!r} holds {legacy} actors, which only Genesis's legacy coupler "
+            f"steps, beside {ipc} actors, which only its IPC coupler does, and a Genesis scene has one coupler. "
+            "Route the liquid and the cloth or soft body to different backends: a second "
+            "backend('genesis', ...) with other parameters is a second island."
+        )
+    return "legacy" if legacy else "ipc"
+
+
+def write_obj(recipe: dict, geom: ShapeGeometry, mesh) -> str:
+    """A tessellated mirror as an ``.obj`` under this island's workspace; its path.
+
+    A file rather than a ``MeshSet`` because that in-memory path is verified only
+    for the FEM entity; a rigid morph reading one is not. Mirrors are built once,
+    so the write is not on any hot path. The name carries the shape index and
+    nothing about the project, since a repro bundle's leak scan reads paths.
+    """
+    verts, faces = mesh
+    root = pathlib.Path(tempfile.gettempdir()) / "rss-genesis" / str(recipe.get("island", "host"))
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"mirror-{geom.shape}.obj"
+    with path.open("w") as handle:
+        for v in verts:
+            handle.write(f"v {v[0]:.9g} {v[1]:.9g} {v[2]:.9g}\n")
+        for f in faces:
+            handle.write(f"f {f[0] + 1} {f[1] + 1} {f[2] + 1}\n")
+    return str(path)
 
 
 def wxyz(q_xyzw) -> np.ndarray:
@@ -132,6 +192,11 @@ class GenesisBridge:
         feedback: str = "auto",
         pose_source: str = "fresh",
     ) -> None:
+        if coupler_for(recipe) != "ipc":
+            raise ValueError(
+                f"genesis island {recipe.get('island')!r} holds a liquid, which this IPC bridge does not step; "
+                "robosimstudio.engines.genesis.sph.SphBridge does (SolverGenesis picks it from the actors)"
+            )
         gs = ensure_initialized(precision)
         self.gs = gs
         self.model = model
@@ -299,24 +364,8 @@ class GenesisBridge:
         return np.asarray(self.model.body_q.numpy()[int(body)], dtype=np.float64)
 
     def _cache_obj(self, geom: ShapeGeometry, mesh) -> str:
-        """A tessellated mirror as an ``.obj`` under this island's workspace.
-
-        A file rather than a ``MeshSet`` because that in-memory path is verified
-        only for the FEM entity; a rigid morph reading one is not. Mirrors are
-        built once, so the write is not on any hot path. The name carries the
-        shape index and nothing about the project, since a repro bundle's leak
-        scan reads paths.
-        """
-        verts, faces = mesh
-        root = pathlib.Path(tempfile.gettempdir()) / "rss-genesis" / str(self.recipe.get("island", "host"))
-        root.mkdir(parents=True, exist_ok=True)
-        path = root / f"mirror-{geom.shape}.obj"
-        with path.open("w") as handle:
-            for v in verts:
-                handle.write(f"v {v[0]:.9g} {v[1]:.9g} {v[2]:.9g}\n")
-            for f in faces:
-                handle.write(f"f {f[0] + 1} {f[1] + 1} {f[2] + 1}\n")
-        return str(path)
+        """A tessellated mirror as an ``.obj``: :func:`write_obj` under this island's workspace."""
+        return write_obj(self.recipe, geom, mesh)
 
     def _check_initial_clearance(self) -> None:
         """Refuse a scene whose actors start inside a mirror, and say which.

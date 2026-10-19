@@ -58,7 +58,7 @@ def require_genesis():
     return gs
 
 
-def ensure_initialized(precision: str = "64") -> Any:
+def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
     """Initialise Genesis once per process. Returns the module.
 
     Args:
@@ -66,17 +66,35 @@ def ensure_initialized(precision: str = "64") -> Any:
             a caller can measure the difference, and warned about loudly,
             because a scene that harvests wrenches at 32 reads zero rather than
             reading wrong, which is much harder to notice.
+        coupler: ``"ipc"`` or ``"legacy"``: whose harvest the precision serves. The
+            legacy coupler's reaction is a momentum change, which float32 reads
+            (:mod:`robosimstudio.engines.genesis.sph`), so it asks for 32 without
+            the warning.
     """
     gs = require_genesis()
     if _ENGINE["precision"] is not None:
-        if str(precision) != _ENGINE["precision"]:
+        if str(precision) == "64" and _ENGINE["precision"] == "32":
+            # A liquid island (legacy coupler, float32 by choice) was built first in
+            # this process, and an IPC island now wants 64: its harvest reads zero.
+            log.warning(
+                "genesis was initialised at precision=32 by an earlier island in this process, and this one "
+                "asks for 64: an IPC two-way harvest reads ZERO at float32. Build it in a process of its own."
+            )
+        elif str(precision) == "32" and coupler == "legacy":
+            # An IPC island initialised the process at 64 first: the liquid is right, and slow.
+            log.warning(
+                "genesis was initialised at precision=64 by an earlier island in this process, so this liquid "
+                "island steps its SPH at float64 too: right, and about 8x slower per substep (1.93 ms against "
+                "0.25 ms for 1,728 particles, p2_cost.py). Build it in a process of its own for its own budget."
+            )
+        elif str(precision) != _ENGINE["precision"]:
             log.debug(
                 "genesis already initialised at precision %s; ignoring %s",
                 _ENGINE["precision"],
                 precision,
             )
         return gs
-    if str(precision) != "64":
+    if str(precision) != "64" and coupler == "ipc":
         log.warning(
             "genesis initialised at precision=%s: the two-way wrench harvest is a difference of "
             "two nearly-equal world coordinates and reads ZERO at float32 for a stiff constraint "

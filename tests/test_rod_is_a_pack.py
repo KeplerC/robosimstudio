@@ -317,9 +317,9 @@ class TestWithoutThePack(unittest.TestCase):
         self.assertEqual(got["library_kinds"], got["kinds"], "the feature kinds are exactly the library's own")
         self.assertNotIn("point", got["kinds"])
         self.assertIn("rod", got["kinds"], "the geometric rod FEATURE kind is not the rope and stays")
-        # The library's two, and the bag's, whose pack is not the rope's and stays.
+        # The library's three (the shell, the tet, the sph liquid), and the bag's, whose pack is not the rope's.
         others = ["bag"] if has_pack("bag") else []
-        self.assertEqual(sorted(["shell", "tet", *others]), got["actor_kinds"])
+        self.assertEqual(sorted(["shell", "sph", "tet", *others]), got["actor_kinds"])
         self.assertEqual(sorted(["shell", "tet", *others]), got["superdex_builds"])
         self.assertEqual([], [name for name in got["entities"] if name.startswith("rod")])
         self.assertEqual([], got["capabilities"], "no pack here publishes a capability")
@@ -394,7 +394,9 @@ class TestWithThePack(unittest.TestCase):
         self.assertIs(ACTOR_KINDS.get("rod"), actor.read_rod)
         self.assertIs(actor_builder("superdex", "rod"), actor.build_rod_actor)
         self.assertEqual(tuple(actor.CONSUMES), actor_consumes("superdex", "rod"))
-        self.assertEqual(sorted(["rod", "shell", "tet", *(["bag"] if has_pack("bag") else [])]), ACTOR_KINDS.names())
+        self.assertEqual(
+            sorted(["rod", "shell", "sph", "tet", *(["bag"] if has_pack("bag") else [])]), ACTOR_KINDS.names()
+        )
 
     def test_the_bridge_builds_only_what_its_bundle_ships(self) -> None:
         """The engine bundle's own table is the shell and the tet. The rod's builder
