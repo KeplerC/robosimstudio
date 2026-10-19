@@ -17,6 +17,9 @@ tracer agree about what the handle means:
   isosurface Newton's :class:`~newton.geometry.ParticleSurface` wraps round the
   particles, from the positions it is given and nothing else -- which is what
   lets an offline replay of a recorded ``particle_q`` regrow it.
+* :func:`extract_shifted` is the one extraction both that and a kind's own
+  context go through, because Newton's needs the particles moved into the
+  positive octant first.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["ParticleSurfacer", "draws_points", "surface_mesh"]
+__all__ = ["ParticleSurfacer", "draws_points", "extract_shifted", "surface_mesh"]
 
 EMPTY_VERTICES = np.zeros((0, 3), dtype=np.float32)
 EMPTY_TRIANGLES = np.zeros((0, 3), dtype=np.int32)
@@ -95,6 +98,46 @@ def surface_mesh(
     return vertices, triangles, normals
 
 
+def extract_shifted(surface: Any, positions: np.ndarray, radii: Any, margin: float) -> tuple[Any, Any, Any]:
+    """``surface.extract`` over ``positions`` moved into the positive octant, and the vertices moved back.
+
+    Newton 1.6.0's extraction is wrong wherever a particle's support reaches a
+    negative coordinate (:class:`ParticleSurfacer` has the measurements), so
+    every extraction here goes through this: the particles are shifted by
+    their minimum less ``margin``, which puts the nearest one ``margin`` inside
+    the octant, and the vertices are shifted back. The vertices and normals are
+    exact under it.
+
+    Args:
+        surface: A :class:`~newton.geometry.ParticleSurface`.
+        positions: World coordinates, ``[n, 3]``.
+        radii: One radius per particle, a warp ``float32`` array on the
+            device the mesh is extracted on.
+        margin: How far inside the octant the nearest particle goes [m]: the
+            kernel's reach plus a leaf tile of voxels.
+
+    Returns:
+        ``(vertices, triangles, normals)``: the vertices on the host,
+        ``float32 [m, 3]`` in world coordinates, the triangles and normals as
+        Newton returned them; ``(None, None, None)`` when there is nothing to
+        draw.
+    """
+    import warp as wp
+
+    positions = np.asarray(positions, dtype=np.float32).reshape(-1, 3)
+    if not len(positions):
+        return None, None, None
+    shift = (positions.min(axis=0) - float(margin)).astype(np.float32)
+    points = wp.array(np.ascontiguousarray(positions - shift), dtype=wp.vec3, device=radii.device)
+    vertices, triangles, normals = surface.extract(points, radii, compute_normals=True).to_arrays()
+    if vertices is None:
+        return None, None, None
+    # The vertices come back on the host, shifted home: every renderer reads
+    # them there anyway (:func:`surface_mesh`), so a second device round trip
+    # for the shift would buy nothing.
+    return vertices.numpy() + shift, triangles, normals
+
+
 class ParticleSurfacer:
     """A ``DeformableHandle.surface``: the isosurface Newton wraps round the particles.
 
@@ -116,7 +159,12 @@ class ParticleSurfacer:
     ``-0.5`` m, or astride the origin as every bench scene is, never comes
     back). The shift is by the particles' minimum less the kernel reach and a
     tile of voxels, so the whole support stays positive; the vertices and the
-    normals are exact under it.
+    normals are exact under it. A body astride only a vertical plane does come
+    back, with the wrong mesh: the MPM solver's own context over the dough puck
+    on ``bench_075``, whose particles all sit at negative y, returned 3,480
+    triangles where the same 7,168 particles moved into the positive octant
+    give 9,940, a closed surface (GPU 1, same card and versions). Moved to
+    straddle z = 0 they never came back.
 
     Measured on that GPU over 7,290 particles at 3 mm spacing (a 27 x 27 x 10
     block): 10,802 vertices and 21,600 triangles in 43 ms on the first call
@@ -153,17 +201,8 @@ class ParticleSurfacer:
         positions = np.asarray(positions, dtype=np.float32).reshape(-1, 3)
         if not len(positions):
             return None, None, None
-        shift = (positions.min(axis=0) - self.margin).astype(np.float32)
-        positions = np.ascontiguousarray(positions - shift)
         if self._surface is None:
             self._surface = ParticleSurface(self.radius, device=self.device, **self.options)
         if self._radii is None or len(self._radii) != len(positions):
             self._radii = wp.full(len(positions), self.radius, dtype=wp.float32, device=self.device)
-        points = wp.array(positions, dtype=wp.vec3, device=self.device)
-        vertices, triangles, normals = self._surface.extract(points, self._radii).to_arrays()
-        if vertices is None:
-            return None, None, None
-        # The vertices come back on the host, shifted home: every renderer
-        # reads them there anyway (:func:`surface_mesh`), so a second device
-        # round trip for the shift would buy nothing.
-        return vertices.numpy() + shift, triangles, normals
+        return extract_shifted(self._surface, positions, self._radii, self.margin)
