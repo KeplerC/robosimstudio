@@ -301,6 +301,15 @@ class EntityBag(EntityCloth):
             params["shell_poisson"] = float(material.shell_poisson)
         return HostActor(kind="bag", params=params)
 
+    def apply_model_materials(self, model: newton.Model) -> None:
+        """Nothing: SuperDex reads the bag's contact off :meth:`host_actor`.
+
+        Cloth writes its contact as the model's one ``soft_contact_ke``/``kd``/``mu``, which only a
+        sheet a Newton solver integrates reads. A bag that wrote CANVAS there would hand a VBD towel
+        in the same scene the bag's values whenever it came after the towel.
+        """
+        del model
+
     def tunables(self, pipeline=None):
         """None: the engine copied the material when it built the shell, so nothing here is live."""
         del pipeline

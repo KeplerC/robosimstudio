@@ -177,6 +177,19 @@ class TestTheDeclarations(unittest.TestCase):
                 self.assertIs(on, entity.sim_requirements().self_contact)
                 self.assertIs(on, entity.host_actor().params["self_contact"])
 
+    def test_a_bag_leaves_newtons_soft_contact_to_the_sheet_newton_simulates(self) -> None:
+        """A VBD towel and a bag on SuperDex: the bag, applied after the towel, writes nothing over it."""
+        from types import SimpleNamespace
+
+        from robosimstudio_materials.cloth import TERRY_TOWELLING, ClothSpec, EntityCloth
+
+        model = SimpleNamespace(soft_contact_ke=0.0, soft_contact_kd=0.0, soft_contact_mu=0.0)
+        EntityCloth(ClothSpec(name="towel", material=TERRY_TOWELLING)).apply_model_materials(model)
+        entity, _, _ = _bag()
+        entity.apply_model_materials(model)
+        towel = (TERRY_TOWELLING.contact_ke, TERRY_TOWELLING.contact_kd, TERRY_TOWELLING.friction)
+        self.assertEqual(towel, (model.soft_contact_ke, model.soft_contact_kd, model.soft_contact_mu))
+
     def test_the_arrangement_puts_the_bag_on_superdex_beside_the_soft_kind(self) -> None:
         import robosimstudio as rss
 
