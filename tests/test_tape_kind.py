@@ -558,7 +558,7 @@ class TestAStuckSheetIsLaidWhereTheContactRestsIt(unittest.TestCase):
                 built, tab, now = label.built.copy(), label.tab_q0.copy(), material.particle_radius + 0.001
                 self._radius(label, model, now)
                 label.reset(pipeline, None)
-                self.assertAlmostEqual(0.001, label.radius_moved(), places=7)
+                np.testing.assert_allclose(label.radius_moved(), 0.001, atol=1e-7)
                 clamped = np.isin(label.particles, label.clamp_particles)
                 up = np.where(clamped[:, None], 0.0, np.array([[0.0, 0.0, 0.001]]))
                 for state in (pipeline.state_0, pipeline.state_1):
@@ -599,6 +599,44 @@ class TestAStuckSheetIsLaidWhereTheContactRestsIt(unittest.TestCase):
                         (label._stick if label.contact else label._break)(s1, dt)
                         s0, s1 = s1, s0
                 self.assertEqual(len(label.bonds), label.held(), "every bond holds through the write and the reset")
+                self.assertLess(float(np.abs(self._lift(label, s0)).max()), 5.0e-4)
+
+    def test_every_bond_holds_through_a_radius_written_to_half_the_sheet_and_a_reset(self) -> None:
+        """The radius written to 1.5 mm over the half of the sheet past its middle, the scene reset, then two control
+        steps of VBD on the CPU: each particle laid by its own radius's change, so all 144 of either law's bonds hold.
+        Lifted by the largest change, the half left at 0.5 mm was laid 1 mm over the thickness each bond is seated at."""
+        import newton
+
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                s0, s1 = pipeline.state_0, pipeline.state_1
+                built, along = label.built.copy(), label.built[:, 1]
+                far = along > 0.5 * (along.min() + along.max())
+                radii = model.particle_radius.numpy().copy()
+                radii[label.particles[far]] += 0.001
+                model.particle_radius.assign(radii)
+                label.reset(pipeline, None)
+                clamped = np.isin(label.particles, label.clamp_particles)
+                up = np.where((far & ~clamped)[:, None], np.array([[0.0, 0.0, 0.001]]), 0.0)
+                np.testing.assert_allclose(s0.particle_q.numpy()[label.particles], built + up, atol=1e-6)
+                np.testing.assert_allclose(self._lift(label, s0), 0.0, atol=1e-6)
+                for state in (s0, s1):
+                    newton.eval_fk(model, state.joint_q, state.joint_qd, state)
+                solver = newton.solvers.SolverVBD(model, iterations=10, rigid_compliant_alm=True)
+                collide = newton.CollisionPipeline(model, soft_contact_gap=0.005)
+                contacts, control, dt = collide.contacts(), model.control(), 1.0 / 960.0
+                for _ in range(2):
+                    label._relay(s0, 16 * dt)
+                    for _ in range(16):
+                        collide.collide(s0, contacts)
+                        s0.clear_forces()
+                        solver.step(s0, s1, control, contacts, dt)
+                        (label._stick if label.contact else label._break)(s1, dt)
+                        s0, s1 = s1, s0
+                self.assertEqual(len(label.bonds), label.held(), "every bond holds through the half write and reset")
                 self.assertLess(float(np.abs(self._lift(label, s0)).max()), 5.0e-4)
 
 

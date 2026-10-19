@@ -1081,7 +1081,8 @@ class EntityTape(EntityCloth):
         """The model the bonds are bound on: the margins, radii and shapes every bond kernel reads."""
         self._under: Any = None
         self._radius: np.ndarray = np.zeros(0, dtype=np.float32)
-        """Each bond's particle radius as the bonds were bound [m]: what :meth:`radius_moved` measures from."""
+        """Every particle's radius as the bonds were bound [m], the model's whole array: what each particle's change
+        is measured from, a bond's by :meth:`radius_moved` and every particle's of the sheet by a reset."""
         self._laid: Any = None
         """Opening adhesion: per bond, the contact thickness its particle and anchor are laid at [m], on the device:
         the particle's radius plus the margin the sheet is laid at (:meth:`_relay`). Contact adhesion's is its
@@ -1542,7 +1543,7 @@ class EntityTape(EntityCloth):
         self._limit = wp.array([float(self.spec.material.break_opening)], dtype=wp.float32, device=device)
         self._model = model
         self._under = wp.array(self.lift_shapes.astype(np.int32), dtype=wp.int32, device=device)
-        self._radius = model.particle_radius.numpy()[self.bond_particles].astype(np.float32)
+        self._radius = model.particle_radius.numpy().astype(np.float32)
         self._laid = wp.array(self._laid_at(self.lift), dtype=float, device=device)
         self._normals = wp.array(
             np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32), dtype=wp.vec3, device=device
@@ -1625,12 +1626,14 @@ class EntityTape(EntityCloth):
         a settle steps the label too. So this sheet's rows are put back where it was built in every
         such snapshot, the ones later things restore included (``TapeSpec.settle_frames``). A stuck
         sheet whose box's margin has moved since the build goes back that much further off the face,
-        its tab and its opening bonds' anchors with it (:meth:`margin_moved`), and one whose particle
-        radius has moved that much further again, its anchors with it and the tab and the end it clamps
-        not, as :meth:`_relay` lays it between resets (:meth:`radius_moved`).
+        its tab and its opening bonds' anchors with it (:meth:`margin_moved`), and each particle whose
+        radius has moved goes that much further again, by its own change, a bond's anchor with it and the
+        tab and the end it clamps not, as :meth:`_relay` lays each bond between resets
+        (:meth:`radius_moved`). Lifted by the largest change, a radius written to half the sheet laid the
+        other half that much over the thickness each of its bonds is seated at.
         """
         moved, raised = self.margin_moved(), self.radius_moved()
-        lifts = np.full((len(self.built), 1), moved + raised)
+        lifts = (moved + self._raised(self.particles).astype(np.float64))[:, None]
         lifts[np.isin(self.particles, self.clamp_particles)] = moved
         for thing in getattr(pipeline, "particle_settles", {}).get("things", [self]):
             rest = getattr(thing, "rest", None)
@@ -1659,19 +1662,24 @@ class EntityTape(EntityCloth):
             return 0.0
         return float(self._model.shape_margin.numpy()[self.lift_shapes].max()) - self.lift
 
-    def radius_moved(self) -> float:
-        """How far the particle radius a stuck sheet was laid at has moved since the build [m]: what a reset lays
-        it further off the face by, past :meth:`margin_moved`. The sheet's material ``particle_radius`` writes it
-        live; 0 for a loose sheet.
+    def radius_moved(self) -> np.ndarray:
+        """How far each bond's particle radius has moved since a stuck sheet was laid [m], per bond: what a reset
+        lays that bond's particle and anchor further off the face by, past :meth:`margin_moved`. The sheet's
+        material ``particle_radius`` writes it live; all 0 on a loose sheet.
 
         Reset at the radius it was built at after a live write from 0.5 to 1.5 mm, a contact bond was seated
         at the new thickness over a particle laid at the old, 1 mm inside the contact, and the relay, finding
         the bond already at the new thickness, moved nothing: :data:`LABEL` kept 8 of its 144 bonds one control
         step in. An opening bond was laid at the old thickness and moved by the relay at the next control
         step. Laid here, all 144 of either held (``r2_probe.py``, VBD on the CPU)."""
+        return self._raised(self.bond_particles)
+
+    def _raised(self, particles: np.ndarray) -> np.ndarray:
+        """How far each of ``particles``' radius has moved since the bonds were bound [m], in float32 as
+        :func:`_relay_kernel` sums it; all 0 on a loose sheet, which is laid at no radius."""
         if not len(self.lift_shapes) or self._model is None or not len(self._radius):
-            return 0.0
-        return float((self._radii() - self._radius).max())
+            return np.zeros(len(particles), dtype=np.float32)
+        return self._model.particle_radius.numpy()[particles].astype(np.float32) - self._radius[particles]
 
     def _radii(self) -> np.ndarray:
         """Each bond's particle radius as the model holds it now [m]."""
@@ -1682,18 +1690,19 @@ class EntityTape(EntityCloth):
         :func:`_relay_kernel` sums it."""
         return self._radii() + np.float32(margin)
 
-    def _reset_bonds(self, moved: float | None = None, raised: float | None = None) -> None:
+    def _reset_bonds(self, moved: float | None = None, raised: np.ndarray | None = None) -> None:
         """Every bond as built, in every array a solver reads: made or not (:attr:`made`), at its anchor, and
         under contact adhesion seated as a bond starts (:meth:`_seat_bonds`), not with the secant, the anchor
         and the face the last episode left. The seat writes a contact bond's anchor into every copy itself;
-        an opening bond's goes ``moved`` and ``raised`` further off the face (:meth:`margin_moved` and
-        :meth:`radius_moved`, read when not given)."""
+        an opening bond's goes ``moved`` and its own ``raised`` further off the face (:meth:`margin_moved`
+        and :meth:`radius_moved`, per bond, read when not given)."""
         self.broken.zero_()
         rows = {"enabled": self.made}
         if not self._contact:
             moved = self.margin_moved() if moved is None else moved
             raised = self.radius_moved() if raised is None else raised
-            anchors = (self.anchors + (moved + raised) * self.normal).astype(np.float32)
+            lift = moved + np.asarray(raised, dtype=np.float64)[:, None]
+            anchors = (self.anchors + lift * self.normal).astype(np.float32)
             rows["body_point"] = anchors
             self._anchor.assign(anchors)
             self._laid.assign(self._laid_at(self.lift + moved))
