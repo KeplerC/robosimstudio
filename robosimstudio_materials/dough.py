@@ -268,8 +268,9 @@ class EntityRoller(EntityRigid):
         box stays on the web while the drum rolls under it; ``ObbGrasp.body`` says
         which body places it. The long axis is stated, the web's x across the
         drum: the heuristic's would be its height, a near-vertical axis whose
-        heading turned 90 degrees under a 0.2 degree tilt. The jaws close square
-        to it, across the web's 20 mm along the drum, and that is the width.
+        heading read -90, 90, 0 or 180 degrees under a 0.2 degree tilt. The jaws
+        close square to it, across the web's 20 mm along the drum, and that is
+        the width.
         """
         from robosimstudio.solvers.grasp.obb import _shape_corners_local
 
