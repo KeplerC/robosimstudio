@@ -22,8 +22,9 @@ through the examples a reader runs; this module holds the rest:
   forces are VBD's, so reading them on a CPU, where the cloth is on SuperDex,
   says it needs a GPU rather than falling through to MuJoCo's solver. The two
   rope examples that show the capsule chain's own physics -- its Dahl memory, its
-  twist joint and a pinned capsule -- say so before building, since a CPU's rope
-  is SuperDex's Cosserat rod.
+  twist joint and a pinned capsule -- build with ``device="cuda"``, since a CPU's
+  rope is SuperDex's Cosserat rod, and a machine without one refuses them by the
+  device's name as they build.
 
 Built from the library's constructors rather than the example scripts, so the
 scenes say what they are without depending on where an example lives. Run by
@@ -238,22 +239,23 @@ CAPSULE_CHAIN_EXAMPLES = ("03_rope/03_cable_memory.py", "03_rope/04_twist.py")
 """The rope examples whose physics is the capsule chain's on VBD, under ``examples/``; they move with the examples."""
 
 
+def _cuda_visible() -> bool:
+    import warp as wp
+
+    return bool(wp.is_cuda_available())
+
+
+@unittest.skipIf(_cuda_visible(), "a device named in code wins over ROBOSIMSTUDIO_DEVICE: hide the GPUs to run this")
 class TestTheCapsuleChainExamplesOnACpu(unittest.TestCase):
-    """Refused by the example before anything is built, saying what a CPU's rope does not have."""
+    """Each builds with ``device="cuda"``, so a machine without one refuses it as it builds, naming the device."""
 
-    def test_each_says_it_needs_a_gpu(self) -> None:
-        from unittest import mock
-
-        import robosimstudio as rss
+    def test_each_is_refused_for_want_of_cuda(self) -> None:
         from tests.fixtures.examples import _run
 
         for rel in CAPSULE_CHAIN_EXAMPLES:
-            with self.subTest(example=rel), mock.patch.object(rss.Scene, "build") as build:
-                with self.assertRaises(SystemExit) as caught:
-                    _run(rel)
-                self.assertIn("this example needs a GPU", str(caught.exception.code))
-                self.assertIn("SuperDex's Cosserat rod (rss.CPU)", str(caught.exception.code))
-                build.assert_not_called()
+            with self.subTest(example=rel), self.assertRaises(ValueError) as caught:
+                _run(rel)
+            self.assertIn("device='cuda' (there is no CUDA device here)", str(caught.exception))
 
 
 @unittest.skipUnless(HAS_SUPERDEX, NO_SUPERDEX)

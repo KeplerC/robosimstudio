@@ -20,12 +20,6 @@ from robosimstudio_materials.rod.measures import straightness
 
 
 def main():
-    if rss.platform().is_cpu:  # before anything is built: on a CPU the rope is not the capsule chain
-        raise SystemExit(
-            "this example needs a GPU: the memory it shows is Newton's Dahl bending hysteresis (dahl_eps_max) on "
-            "VBD's capsule chain, and its page reads the capsules; on a CPU every rope is SuperDex's Cosserat rod "
-            "(rss.CPU), which has neither"
-        )
     length, radius, segments = 0.4, 0.011, 18  # [m]; spacing 22.2 mm, above twice the radius
     start = (0.15, -0.05, radius + 0.002)  # the clamped end, in the bench's frame [m]; the cable runs toward the arms
     post = (0.0, -0.086)  # the post it is wrapped round, 5 mm clear of the cable's side [m]
@@ -59,7 +53,7 @@ def main():
             mu_base=0.0,
         )
     )
-    sim = scene.build(control_mode="joint_position")
+    sim = scene.build(control_mode="joint_position", device="cuda")  # VBD: a CPU's rope has no Dahl memory
 
     def page(studio):
         out = studio.gui.add_number("straightness (1 = straight)", 1.0, step=1e-3, disabled=True)
