@@ -482,15 +482,23 @@ class Suction:
             check: Test the seal first and refuse to hold when it fails.
 
         Returns:
-            The seal report; ``sealed`` is whether the part is now held.
+            The seal report; ``sealed`` is whether the part asked for is now
+            held. Asked again for the part it holds, in its tier or ``"auto"``,
+            the hold stands and the report says where that part is now: a wrench
+            hold rides a few millimetres under the face, past
+            :data:`GAP_TOLERANCE`, and a fresh seal test would drop it. A part
+            already held is let go only once another has sealed.
         """
         if self.pipeline is None:
             raise RuntimeError("Suction.hold before the scene is ready")
         if tier not in ("auto", "weld", "wrench"):
             raise ValueError(f"tier must be 'auto', 'weld' or 'wrench', not {tier!r}")
-        if self.holding:
-            self.release()
+        held = self.held
         poses = self._body_q()
+        if held >= 0 and (body is None or int(body) == held) and tier in ("auto", self.tier):
+            found = self._seal(held, poses)
+            self.last = SealReport(True, found.gap_m, found.tilt_rad, held)
+            return self.last
         if body is None:
             report = self.under(poses)
             if not report.sealed:
@@ -507,6 +515,8 @@ class Suction:
                 f"no weld from the cup to body {body}: it needs a row (built for {sorted(self.rows)}) and the part "
                 f"on the arm's MuJoCo solver (it steps {sorted(self.weldable)})"
             )
+        if held >= 0:
+            self.release()
         relpose = _compose(_inverse(poses[self.pad_body]), poses[body]).astype(np.float32)
         if tier == "weld":
             self._weld(body, relpose)

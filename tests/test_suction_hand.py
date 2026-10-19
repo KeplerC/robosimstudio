@@ -8,9 +8,10 @@ with the left arm exactly ``yam_bimanual``'s; the gripper axis refuses the cup
 for the whole two-root robot with the reason. :func:`face_on_box` reads gap,
 tilt and cover off synthetic poses, :meth:`Suction.seal` turns them into the
 sentences the page shows (its **Seal** readout looking without overwriting
-:attr:`Suction.last`), and ``sim.vacuum`` appears only on a robot with a cup,
-is tagged privileged, and maps its arguments onto :meth:`Suction.hold` and
-:meth:`Suction.release`. Only a robot carrying a cup is kept to one world.
+:attr:`Suction.last`), a hold asked for again keeps the part it has, and
+``sim.vacuum`` appears only on a robot with a cup, is tagged privileged, and
+maps its arguments onto :meth:`Suction.hold` and :meth:`Suction.release`. Only
+a robot carrying a cup is kept to one world.
 """
 
 from __future__ import annotations
@@ -260,6 +261,40 @@ class TestTheSealSays(unittest.TestCase):
         self.assertIs(refused, cup.last)
         # A test the cup is asked for still records.
         self.assertIs(cup.seal(self.plate), cup.last)
+
+    def _cup(self, now: list):
+        """A cup over the plate and the block whose pipeline reads ``now[0]``; on a CPU model, the wrench tier."""
+        from robosimstudio.core.suction import Suction
+
+        cup = Suction(self.model, arm="right", pad_body=self.pad, pad_radius=0.015, rows={self.plate: 0, self.block: 1})
+        cup.pipeline = types.SimpleNamespace(
+            state_0=types.SimpleNamespace(body_q=types.SimpleNamespace(numpy=lambda: now[0]))
+        )
+        return cup
+
+    def test_asking_again_for_the_held_part_keeps_it(self) -> None:
+        """A wrench hold rides millimetres under the face, past the seal's gap; asked again, the cup keeps it."""
+        now = [self.poses(_down(z=0.0065))]
+        cup = self._cup(now)
+        self.assertTrue(cup.hold(self.plate).sealed)
+        offset = cup._offset_dev.numpy().copy()
+        # The plate rides 5.5 mm under the face, as a 2 kg plate does on the wrench tier.
+        now[0] = self.poses(_down(z=0.0115))
+        for ask in ({"body": self.plate}, {}, {"body": self.plate, "tier": "wrench"}):
+            again = cup.hold(**ask)
+            self.assertTrue(again.sealed, again.why)
+            self.assertEqual((self.plate, "wrench"), (cup.held, cup.tier))
+            self.assertAlmostEqual(0.0055, again.gap_m, places=6)
+            self.assertIs(again, cup.last)
+        np.testing.assert_array_equal(offset, cup._offset_dev.numpy(), "the hold was re-made where the plate is now")
+
+    def test_a_refused_part_leaves_the_held_one_held(self) -> None:
+        now = [self.poses(_down(z=0.0065))]
+        cup = self._cup(now)
+        self.assertTrue(cup.hold(self.plate).sealed)
+        refused = cup.hold(self.block)
+        self.assertFalse(refused.sealed)
+        self.assertEqual(self.plate, cup.held, "a seal that failed on the block let the plate go")
 
 
 class TestAPartOfSeveralShapes(unittest.TestCase):
