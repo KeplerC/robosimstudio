@@ -463,7 +463,13 @@ class GenesisBridge:
         whole against Newton's sum, a 200 mm towel held by one edge row of its 121
         particles read 1.100 and a 120 x 130 mm board pinned by two of its 14 rows
         1.167, both refused with a correct record (``r1_probe.py``). The area those
-        particles hold is apportioned as Newton masses them (:func:`_weighed_share`).
+        particles hold is apportioned as Newton's builder masses them, which the
+        actor's record states (its ``lumping``, :func:`_weighed_share`): told
+        apart by whether the weighed particles weigh alike, an 11 x 11 mesh sheet
+        massless around its rim was counted 81/121 of its area where it holds
+        81/100, and a record stating its built density read 0.826, refused. A
+        record that does not say how, over a sheet Newton weighs only in part,
+        is not weighed at all, and a debug line says so.
 
         A volume is not compared. ``FEM.Elastic`` masses it at ``rho * volume``
         of the lattice it is handed: a 100 x 70 x 35 mm sponge at 110 kg/m^3
@@ -486,7 +492,18 @@ class GenesisBridge:
             a, b, c = (geom.rest[geom.tris[:, i]] for i in range(3))
             areas = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
             # The area the particles Newton weighs hold, so both sides are the same particles.
-            area = float(areas.sum()) * _weighed_share(masses, geom.tris, areas)
+            share = _weighed_share(masses, geom.tris, areas, geom.lumping)
+            if share is None:
+                log.debug(
+                    "genesis actor %r: not weighed; Newton weighs %d of its %d particles and its record states "
+                    "no lumping (%r), so the area they hold is not known",
+                    geom.name,
+                    int(weighed.sum()),
+                    len(masses),
+                    geom.lumping,
+                )
+                continue
+            area = float(areas.sum()) * share
             got = CLOTH_MASS_FACTOR * cloth["rho"] * cloth["thickness"] * area
             if abs(got - want) > 0.1 * want:
                 over = (
@@ -602,20 +619,23 @@ def _surface_of(tets: np.ndarray) -> np.ndarray:
     return faces[index[counts == 1]]
 
 
-def _weighed_share(masses: np.ndarray, tris: np.ndarray, areas: np.ndarray) -> float:
-    """The share of a sheet's area its particles with mass hold, apportioned as Newton's builder masses them.
+def _weighed_share(masses: np.ndarray, tris: np.ndarray, areas: np.ndarray, lumping: str | None) -> float | None:
+    """The share of a sheet's area its particles with mass hold, apportioned as Newton's builder massed them.
 
-    1 when every particle has mass. ``add_cloth_grid`` gives every particle of a sheet one mass, so each
-    holds an equal share, and a sheet whose weighed particles weigh alike is read that way;
-    ``add_cloth_mesh`` gives each a third of its triangles' mass, so each holds a third of their area.
-    ``tris`` index the sheet's own particles and ``areas`` are theirs [m^2].
+    1 when every particle has mass, whatever the builder. Otherwise by ``lumping``, the record's statement
+    of the builder: ``"grid"``, ``add_cloth_grid``, gives every particle one mass, so each holds an equal
+    share; ``"mesh"``, ``add_cloth_mesh``, gives each a third of its triangles' mass, so each holds a third
+    of their area. ``None``, or a builder not named here, where some particle is massless: the masses
+    cannot tell the two apart, since a regular mesh's weighed particles can weigh alike, so this does not
+    guess. ``tris`` index the sheet's own particles and ``areas`` are theirs [m^2].
     """
     weighed = masses > 0.0
     if weighed.all():
         return 1.0
-    held = masses[weighed]
-    if np.allclose(held, held[0], rtol=1.0e-5, atol=0.0):
+    if lumping == "grid":
         return float(weighed.mean())
+    if lumping != "mesh":
+        return None
     lumped = np.bincount(np.asarray(tris).ravel(), weights=np.repeat(areas / 3.0, 3), minlength=len(masses))
     return float(lumped[weighed].sum() / lumped.sum())
 

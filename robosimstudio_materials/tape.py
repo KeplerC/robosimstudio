@@ -1176,6 +1176,7 @@ class EntityTape(EntityCloth):
         self.up = np.array(wp.transform_vector(sheet, wp.vec3(0.0, 0.0, 1.0)), dtype=np.float64)
         start = int(builder.particle_count)
         self.surface_count = len(vertices)
+        self.lumping = "mesh"
         builder.add_cloth_mesh(
             pos=wp.transform_get_translation(sheet),
             rot=wp.transform_get_rotation(sheet),

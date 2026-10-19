@@ -151,20 +151,34 @@ class HostActor:
             the model belongs in the model: a tet body's elasticity is inverted
             back out of ``tet_materials`` rather than restated here, so there is
             exactly one statement of what the body is made of.
+        lumping: How the Newton builder that made this actor shared its mass
+            out among its particles, which the model's masses alone cannot
+            say: ``"grid"`` for ``add_cloth_grid`` (every particle one mass),
+            ``"mesh"`` for ``add_cloth_mesh`` (each a third of its triangles'
+            mass). ``None`` says nothing. Not an engine parameter, so no
+            ``consumes`` list names it: a bridge reads it to check its reading
+            of the model's masses (the Genesis mass check), and a record that
+            says nothing is not guessed at.
     """
 
     kind: str
     params: dict[str, Any] = field(default_factory=dict)
+    lumping: str | None = None
 
     def record(self, *, name: str, particle_start: int, particle_count: int) -> dict[str, Any]:
-        """This declaration plus the range the composer resolved, as plain JSON."""
-        return {
+        """This declaration plus the range the composer resolved, as plain JSON.
+
+        ``lumping`` is a key only when stated, so a record from an actor that states none is as it was."""
+        out: dict[str, Any] = {
             "name": str(name),
             "kind": str(self.kind),
             "particle_start": int(particle_start),
             "particle_count": int(particle_count),
             "params": dict(self.params),
         }
+        if self.lumping is not None:
+            out["lumping"] = str(self.lumping)
+        return out
 
 
 def sim_to_dict(spec: SimRequirements) -> dict[str, Any]:

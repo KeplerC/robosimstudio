@@ -253,6 +253,9 @@ class ActorGeometry:
             island backend's rather than the model's (a cloth spec speaks its
             solver's stiffnesses, not Young and Poisson).
         params: the entity's :class:`~robosimstudio.specs.physics.HostActor` params, verbatim.
+        lumping: the record's ``lumping``, how Newton's builder shared the
+            actor's mass among its particles (``"grid"`` or ``"mesh"``), or
+            ``None`` where the record does not say.
     """
 
     name: str
@@ -265,6 +268,7 @@ class ActorGeometry:
     young: float | None = None
     poisson: float | None = None
     params: dict = field(default_factory=dict)
+    lumping: str | None = None
 
 
 ActorReader = Callable[[Any, "ActorGeometry"], "ActorGeometry"]
@@ -417,5 +421,14 @@ def actor_geometry(model: Any, record: dict) -> ActorGeometry:
     kind = str(record.get("kind", "tet"))
     name = str(record.get("name", f"{kind}:{start}"))
     rest = np.asarray(model.particle_q.numpy()[start : start + count], dtype=np.float64)
-    base = ActorGeometry(name, kind, start, count, rest, params=dict(record.get("params", {})))
+    lumping = record.get("lumping")
+    base = ActorGeometry(
+        name,
+        kind,
+        start,
+        count,
+        rest,
+        params=dict(record.get("params", {})),
+        lumping=None if lumping is None else str(lumping),
+    )
     return ACTOR_KINDS.get(kind)(model, base)

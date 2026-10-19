@@ -395,6 +395,7 @@ class TestOnlyTheParticlesNewtonWeighsAreWeighed(unittest.TestCase):
             with self.subTest(spec.name):
                 model, record = self._built(spec, holder=holder)
                 count = record["particle_count"]
+                self.assertEqual("grid", record["lumping"], "add_cloth_grid built it, and its record says so")
                 self.assertEqual(massless, int((model.particle_mass.numpy() == 0.0).sum()), "massless, as built")
                 with self.assertRaisesRegex(LookupError, "asked for the engine"):
                     self._open(model, record)
@@ -424,10 +425,92 @@ class TestOnlyTheParticlesNewtonWeighsAreWeighed(unittest.TestCase):
         mass = model.particle_mass.numpy()
         mass[[4, 9]] = 0.0  # the far edge, as a held or pinned set is left
         model.particle_mass.assign(mass)
-        record = {"kind": "shell", "name": "strip", "particle_start": 0, "particle_count": 10}
+        record = {"kind": "shell", "name": "strip", "particle_start": 0, "particle_count": 10, "lumping": "mesh"}
         for areal, raises in ((0.3, LookupError), (0.6, ValueError)):
             with self.subTest(areal_density=areal), self.assertRaises(raises):
                 self._open(model, {**record, "params": {"areal_density": areal}})
+
+    RIM = 40
+    """Of an 11 x 11 sheet's 121 particles, the ones on its edge: what a hand round it or a pin along it leaves massless."""
+
+    @staticmethod
+    def _rim(rest) -> np.ndarray:
+        """The particles on a square sheet's edge."""
+        x, y = rest[:, 0], rest[:, 1]
+        edge = 1.0e-6
+        return (x < x.min() + edge) | (x > x.max() - edge) | (y < y.min() + edge) | (y > y.max() - edge)
+
+    @staticmethod
+    def _regular(n: int = 11, side: float = 0.2) -> tuple[np.ndarray, np.ndarray]:
+        """An ``n`` x ``n`` regular mesh ``side`` [m] square: its vertices, and two triangles to a cell."""
+        ticks = np.linspace(0.0, side, n)
+        vertices = np.array([[x, y, 0.0] for y in ticks for x in ticks])
+        cells = [(a, a + 1, a + n + 1, a + n) for a in (j * n + i for j in range(n - 1) for i in range(n - 1))]
+        return vertices, np.array([t for a, b, c, d in cells for t in ((a, b, c), (a, c, d))], dtype=np.int64)
+
+    def test_a_regular_mesh_held_round_its_rim_is_weighed_by_the_area_newton_gives_it(self):
+        """An 11 x 11 ``add_cloth_mesh`` sheet at 0.3 kg/m^2, its rim massless: its 81 weighed particles weigh alike, as
+        a grid's do, and hold 81 of its 100 cells. Told apart by whether they weigh alike, it was counted as a grid,
+        81/121 of its area, and a record stating 0.3 read 0.826, refused. Its record says how it was massed: read
+        that way it reaches the engine, read as a grid it is refused at the same 0.826, and saying nothing it is not
+        weighed at all."""
+        import newton
+        import warp as wp
+
+        vertices, faces = self._regular()
+        builder = newton.ModelBuilder()
+        builder.add_cloth_mesh(
+            pos=wp.vec3(0.0), rot=wp.quat_identity(), scale=1.0, vel=wp.vec3(0.0),
+            vertices=[wp.vec3(*v) for v in vertices], indices=faces.reshape(-1).tolist(), density=0.3,
+        )  # fmt: skip
+        model = builder.finalize(device="cpu")
+        mass = model.particle_mass.numpy()
+        mass[self._rim(vertices)] = 0.0
+        model.particle_mass.assign(mass)
+        weighed = mass[mass > 0.0]
+        self.assertEqual((121 - self.RIM, True), (len(weighed), bool(np.allclose(weighed, weighed[0]))), "alike")
+        record = {"kind": "shell", "name": "sheet", "particle_start": 0, "particle_count": 121}
+        mesh = {**record, "lumping": "mesh"}
+        with self.assertRaisesRegex(LookupError, "asked for the engine"):
+            self._open(model, {**mesh, "params": {"areal_density": 0.3}})
+        with self.assertRaisesRegex(ValueError, "ratio 2.000"):
+            self._open(model, {**mesh, "params": {"areal_density": 0.6}})
+        with self.assertRaisesRegex(ValueError, "ratio 0.826"):
+            self._open(model, {**record, "lumping": "grid", "params": {"areal_density": 0.3}})
+        with self.assertLogs("robosimstudio.engines.genesis.bridge", "DEBUG") as said:
+            with self.assertRaisesRegex(LookupError, "asked for the engine"):
+                self._open(model, {**record, "params": {"areal_density": 0.6}})
+        self.assertIn("not weighed", "\n".join(said.output))
+
+    def test_a_mesh_sheet_held_round_its_rim_says_how_it_was_massed(self):
+        """``rss.sheet(mesh="mesh")`` over a regular mesh, held round its rim: built by its entity, its record says
+        ``add_cloth_mesh`` massed it, so a record of its built density reaches the engine and one of twice is refused."""
+        import tempfile
+        from pathlib import Path
+
+        import trimesh
+
+        import robosimstudio as rss
+
+        vertices, faces = self._regular()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sheet.obj"
+            trimesh.Trimesh(vertices=vertices, faces=faces, process=False).export(path)
+            spec = rss.sheet(
+                name="towel",
+                mesh="mesh",
+                asset=rss.AssetSpec(path=str(path)),
+                held_by="holder",
+                particle_sets=(("held", self._rim),),
+            )
+            model, record = self._built(spec, holder=True)
+        self.assertEqual("mesh", record["lumping"])
+        self.assertEqual(self.RIM, int((model.particle_mass.numpy() == 0.0).sum()), "massless, as built")
+        with self.assertRaisesRegex(LookupError, "asked for the engine"):
+            self._open(model, record)
+        params = {**record["params"], "areal_density": 2.0 * record["params"]["areal_density"]}
+        with self.assertRaisesRegex(ValueError, "ratio 2.000"):
+            self._open(model, {**record, "params": params})
 
 
 class TestTheLongestSubstepIsTheMaterials(unittest.TestCase):

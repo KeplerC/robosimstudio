@@ -283,6 +283,7 @@ class EntityBag(EntityCloth):
         placed = self.placed((*spec.pose, *spec.quat))
         start = int(builder.particle_count)
         self.surface_count = len(vertices)
+        self.lumping = "mesh"
         builder.add_cloth_mesh(
             pos=wp.vec3(*[float(v) for v in placed[:3]]),
             rot=wp.quat(*[float(v) for v in placed[3:7]]),
@@ -322,7 +323,7 @@ class EntityBag(EntityCloth):
             params["young"] = float(material.shell_young)
         if material.shell_poisson is not None:
             params["poisson"] = float(material.shell_poisson)
-        return HostActor(kind="bag", params=params)
+        return HostActor(kind="bag", params=params, lumping=self.lumping)
 
     def apply_model_materials(self, model: newton.Model) -> None:
         """Nothing: SuperDex reads the bag's contact off :meth:`host_actor`.
