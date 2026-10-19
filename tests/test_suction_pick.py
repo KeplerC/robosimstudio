@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """The suction examples' task, done the way their pages ask: down onto the plate, **Vacuum**, lift, carry, let go.
 
-``examples/15_suction`` promises that a hand dragged down onto a plate lying
-flat, with the right arm's **Vacuum** box ticked, picks the plate up, carries it
-200 mm and sets it down in the square when the box is unticked. This drives the
-arm panel through that gesture with no browser (:mod:`tests.fixtures.grasp`):
-the cursor the gizmo writes, the request the box writes, the session's own
-setpoint law. Nothing is pinned or teleported, so the plate comes up because the
-cup holds it.
+``examples/04_extending/02_suction`` and ``06_tasks/05_suction_scored`` promise
+that a hand dragged down onto a plate lying flat, with the right arm's
+**Vacuum** box ticked, picks the plate up, carries it 200 mm and sets it down in
+the square when the box is unticked. This drives the arm panel through that
+gesture with no browser (:mod:`tests.fixtures.grasp`): the cursor the gizmo
+writes, the request the box writes, the session's own setpoint law. Nothing is
+pinned or teleported, so the plate comes up because the cup holds it.
 
 Three more things the cup has to show, each a claim in
 :mod:`robosimstudio.core.suction`: a cup tilted 20 degrees onto the plate does
@@ -49,7 +49,7 @@ the hand when a drag ends with the hand within ``POS_TOLERANCE`` (4 mm) of it. S
 plate's top leaves the face 3.5 mm over it, too far to seal; put 2 mm in, 1.5 mm over. Put 4 mm in, the face
 comes down onto the plate and stops there, 3.8 to 3.9 mm short of the cursor: inside the tolerance too, so
 the panel puts the cursor back on the hand, and the face rests on the plate with a seal gap under 0.02 mm
-(``press_down.py`` on ``00_pick_a_plate``, GPU 3, two runs each; at 4 mm also after the tilted try)."""
+(``press_down.py`` on ``04_extending/02_suction``, GPU 3, two runs each; at 4 mm also after the tilted try)."""
 
 LIFT, CARRY, SPEED = 0.08, 0.20, 0.10
 """The lift and the carry [m], and the cursor's walk [m/s]."""
@@ -193,9 +193,9 @@ class _Pick:
 
 
 class TestThePageLiftsThePlate(_Pick, unittest.TestCase):
-    """``00_pick_a_plate``: a tilted cup is refused, then the level one seals by weld and carries the plate."""
+    """``04_extending/02_suction``: a tilted cup is refused, then the level one seals by weld and carries the plate."""
 
-    EXAMPLE = "15_suction/00_pick_a_plate.py"
+    EXAMPLE = "04_extending/02_suction.py"
     PORT = 9630
 
     @classmethod
@@ -240,9 +240,9 @@ class TestThePageLiftsThePlate(_Pick, unittest.TestCase):
 
 
 class TestTheTaskGoalTurnsTrue(_Pick, unittest.TestCase):
-    """``01_pick_scored``: the same pick on the task's page, and ``evaluate`` says success."""
+    """``06_tasks/05_suction_scored``: the same pick on the task's page, and ``evaluate`` says success."""
 
-    EXAMPLE = "15_suction/01_pick_scored.py"
+    EXAMPLE = "06_tasks/05_suction_scored.py"
     PORT = 9631
 
     def test_the_goal_is_met(self) -> None:

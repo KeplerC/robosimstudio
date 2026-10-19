@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """The brush examples' headline task, done the way their pages ask: the hand scrubs the marked square.
 
-``examples/14_brush`` promises a gesture -- the hand down onto the brush's
-handle, **Close**, press the bristles to the bench, scrub the square -- and a
-number, the share of the square's 5 mm cells a bristle tip has touched while
-down. This drives the arm panel through that gesture with no browser on it
+``examples/03_materials/07_brush`` and ``06_tasks/04_brush_scored`` promise a
+gesture -- the hand down onto the brush's handle, **Close**, press the
+bristles to the bench, scrub the square -- and a number, the share of the
+square's 5 mm cells a bristle tip has touched while down. This drives the arm
+panel through that gesture with no browser on it
 (:mod:`tests.fixtures.grasp`): the cursor the gizmo writes, the grip the Close
 button writes, the session's own setpoint law. Nothing is pinned: the handle
 stays in the fingers because the pads hold it, and the bristles mark the bench
@@ -165,9 +166,9 @@ class _Scrub:
 
 
 class TestThePageScrubsTheSquare(_Scrub, unittest.TestCase):
-    """``00_scrub_the_bench``: the hand starts over the handle, pointing down; the readout passes half."""
+    """``03_materials/07_brush``: the hand starts over the handle, pointing down; the readout passes half."""
 
-    EXAMPLE = "14_brush/00_scrub_the_bench.py"
+    EXAMPLE = "03_materials/07_brush.py"
     PORT = 9655
 
     def test_the_hand_starts_over_the_handle_pointing_down(self) -> None:
@@ -182,9 +183,9 @@ class TestThePageScrubsTheSquare(_Scrub, unittest.TestCase):
 
 
 class TestTheTaskGoalTurnsTrue(_Scrub, unittest.TestCase):
-    """``01_scrub_scored``: the same scrub on the task's page, from the robot's own home, and the goal holds."""
+    """``06_tasks/04_brush_scored``: the same scrub on the task's page, from the robot's own home, and the goal holds."""
 
-    EXAMPLE = "14_brush/01_scrub_scored.py"
+    EXAMPLE = "06_tasks/04_brush_scored.py"
     PORT = 9656
     TURN = True
 

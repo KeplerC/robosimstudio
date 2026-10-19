@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The scored cutting example: the same cut on the task's page, and the task says the goal is met.
 
-``examples/20_cutting/01_cut_tofu_scored`` is ``00_cut_tofu`` as a task document with a goal,
+``examples/06_tasks/09_cutting_scored`` is ``03_materials/10_cutting`` as a task document with a goal,
 ``(>= (pieces tofu) 2)``. Its embodiment starts the right hand over the knife's handle as ``00`` does,
 so this drives the cut ``tests/test_cut_tofu`` drives: down onto the handle, **Close**, up, across and
 down to the board. ``evaluate`` reads the atom and says success.
@@ -26,7 +26,7 @@ class TestTheTaskGoalTurnsTrue(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.env, kwargs = _run("20_cutting/01_cut_tofu_scored.py")
+        cls.env, kwargs = _run("06_tasks/09_cutting_scored.py")
         sim = getattr(cls.env, "sim", cls.env)
         tofu, knife = sim["tofu"].entity, sim["knife"]
         cls.session = session = open_session(cls.env, PORT, kwargs.get("page"))

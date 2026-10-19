@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The cutting example's headline task, done by the robot's hand the way its page asks.
 
-``examples/20_cutting/00_cut_tofu`` promises a gesture and a number. This drives the example's own
+``examples/03_materials/10_cutting`` promises a gesture and a number. This drives the example's own
 arm panel through :mod:`tests.fixtures.grasp` -- the cursor the gizmo writes, the grip the **Close**
 button writes -- and reads what the page's **Tofu** folder reads. The right hand is put down on the
 knife's handle, closes, lifts the knife 70 mm out of its rest, carries it over the tofu and pushes it
@@ -122,7 +122,7 @@ def replay(sim, tofu, frames: list) -> dict:
 
 def _drive(port: int, *, dull: bool) -> dict:
     """Build the example and drive its page through the cut, holding 15 mm over the board on the way down."""
-    sim, kwargs = _run("20_cutting/00_cut_tofu.py")
+    sim, kwargs = _run("03_materials/10_cutting.py")
     tofu, knife = sim["tofu"].entity, sim["knife"]
     session = open_session(sim, port, kwargs.get("page"))
     frames: list = []

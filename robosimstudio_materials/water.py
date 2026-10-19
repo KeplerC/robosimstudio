@@ -2,7 +2,7 @@
 """The ``water`` kind: water that keeps its volume, on Genesis's SPH, poured by the robot's hand.
 
 This file is what ``rss.water`` builds, imported as ``robosimstudio_materials.water``.
-Run ``examples/21_water/00_pour_water.py`` first. The liquid kind (``liquid.py``)
+Run ``examples/03_materials/14_water.py`` first. The liquid kind (``liquid.py``)
 pours honey on Newton's implicit MPM because that solver's water loses volume at
 tabletop scale (a 57 mm column stands at 24% of its height after 2 s on Newton
 1.7.0); this kind is water on a solver that holds it, Genesis's weakly compressible
@@ -474,7 +474,7 @@ register_atom(
                 "carried 100 mm to the side it reads 0.0006, one particle, with 99.2% on the bench (p12_harvest.py).",
             ),
             gate=None,
-            bench="examples/21_water/00_pour_water driven through its right arm panel, tests/test_pour_water.py",
+            bench="examples/03_materials/14_water driven through its right arm panel, tests/test_pour_water.py",
             notes="No gate: a task states its own line. The height is the measure a fill line reads.",
         ),
     )

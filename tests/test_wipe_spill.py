@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The wipe example's gesture, made the way its page makes it, moves the puddle off its patch.
 
-``examples/11_liquid/01_wipe_spill`` promises that a hand dragged down onto the
+``tests/scenes/01_wipe_spill`` promises that a hand dragged down onto the
 wiper, closed, and dragged toward the middle of the bench pushes the ketchup off
 the patch it settled on. This drives the example's own arm panel through
 :mod:`tests.fixtures.grasp` -- the cursor the gizmo writes, the grip the Close
@@ -35,7 +35,7 @@ class TestTheWipeByHand(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, kwargs = _run("11_liquid/01_wipe_spill.py")
+        cls.sim, kwargs = _run("tests/scenes/01_wipe_spill.py")
         cls.session = open_session(cls.sim, PORT, kwargs.get("page"))
         tick(cls.session, 30)
         cls.sauce, cls.wiper = cls.sim["ketchup"], cls.sim["wiper"]

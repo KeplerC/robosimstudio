@@ -23,7 +23,7 @@ which is also how a reader runs one (``uv run examples/01_cloth/00_towel.py``).
 The tables of scripts and the loader are :mod:`tests.fixtures.examples`.
 
 **This module is the numbered examples**, the ones every tree ships, the rope's
-in ``examples/03_rope/`` among them. Four older flat rope scripts remain under
+in ``examples/03_materials/`` among them. Four older flat rope scripts remain under
 ``examples/scenes/`` in a tree that has them. Where a rule here is every scene
 script's -- it runs, it ships two arms, the page can take hold of it, it parses
 no command line -- they are held to it by the same loop, and the loop covers the
@@ -90,10 +90,10 @@ class TestTheExamplesRun(unittest.TestCase):
         sim, _ = _run("04_extending/01_new_kind.py")
         self.assertGreater(len(sim["chain"].bodies), 12, "the kind this file registered")
 
-        sim, _ = _run("03_rope/00_cable.py")
+        sim, _ = _run("03_materials/00_rope.py")
         self.assertEqual(28, len(sim["cable"].bodies), "a cable is a chain of capsules")
 
-        sim, _ = _run("03_rope/01_between_posts.py")
+        sim, _ = _run("tests/scenes/01_between_posts.py")
         self.assertEqual(24, len(sim["cable"].bodies))
         self.assertLessEqual({"post_start", "post_end"}, set(sim.names()))
 
@@ -102,7 +102,7 @@ class TestTheExamplesRun(unittest.TestCase):
         they were built, just over the posts, and the span between them hangs."""
         import numpy as np
 
-        sim, _ = _run("03_rope/01_between_posts.py")
+        sim, _ = _run("tests/scenes/01_between_posts.py")
         sim.run(120).sync()
         bodies = np.asarray(sim["cable"].bodies).ravel()
         z = np.asarray(sim.pipeline.snapshot.body_q)[bodies, 2]
@@ -171,7 +171,7 @@ WATER = dedent(
 class TestTheMultiEngineDemos(unittest.TestCase):
     """The scripts that are the whole multi-engine claim, and were in no test.
 
-    ``02_soft/00_sponge`` and ``03_rope/02_superdex`` are the smallest thing that
+    ``02_soft/00_sponge`` and ``tests/scenes/02_superdex`` are the smallest thing that
     proves a foreign engine simulates a deformable beside a Newton arm, and until
     then nothing ran them.
     They cannot join :data:`SCRIPTS`: the scene scripts are held to a bimanual
@@ -203,20 +203,20 @@ class TestTheMultiEngineDemos(unittest.TestCase):
 
         if importlib.util.find_spec("superdex") is None:
             self.skipTest("[superdex] is not installed; the engine cannot be reached")
-        sim, _ = _run("03_rope/02_superdex.py")
+        sim, _ = _run("tests/scenes/02_superdex.py")
         cable = sim["cable"]
         self.assertEqual("superdex", sim.request.physics.backend_for("rod").solver)
         self.assertEqual("mujoco", sim.request.physics.backend_for("articulated").solver)
         self.assertEqual(29, len(cable.particles), "28 elements are 29 nodes")
         self.assertEqual(0, len(cable.entity.owned_bodies()), "a centerline owns no capsule")
         sim.run(20).sync()
-        self.assertTrue(sim.state_is_finite(), "examples/03_rope/02_superdex.py diverged in twenty steps")
+        self.assertTrue(sim.state_is_finite(), "tests/scenes/02_superdex.py diverged in twenty steps")
 
     def test_the_water_is_an_sph_liquid_on_genesis(self) -> None:
         """The water's scene: it builds, it steps, the water is Genesis's and the cup the arm's island's.
 
         Skips where Genesis is absent, which is the checkout's own environment: the
-        extra lives in a virtual environment of its own (``examples/21_water``). In a
+        extra lives in a virtual environment of its own (``examples/03_materials/README.md``). In a
         process of its own, because Genesis is initialised once per process: built
         here, the water's float32 would be what ``tests/test_genesis``, after this module
         in a tier run, found, where an IPC island is refused (its harvest asks for float64)."""
@@ -225,7 +225,7 @@ class TestTheMultiEngineDemos(unittest.TestCase):
         if importlib.util.find_spec("genesis") is None:
             self.skipTest("[genesis] is not installed here; it lives in a virtual environment of its own")
         proc = subprocess.run(
-            [sys.executable, "-c", WATER, str(EXAMPLES / "21_water/00_pour_water.py")],
+            [sys.executable, "-c", WATER, str(EXAMPLES / "03_materials/14_water.py")],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -237,7 +237,7 @@ class TestTheMultiEngineDemos(unittest.TestCase):
         self.assertEqual("genesis", got["water"])
         self.assertEqual("mujoco", got["rigid"])
         self.assertEqual(1728, got["particles"])
-        self.assertTrue(got["finite"], "examples/21_water/00_pour_water.py diverged in twenty steps")
+        self.assertTrue(got["finite"], "examples/03_materials/14_water.py diverged in twenty steps")
 
     def test_each_demo_stages_its_engine_for_the_domain_it_is_about(self) -> None:
         """Static, so it holds whichever wheels are present: the arrangement is data."""
@@ -275,8 +275,8 @@ class TestThePageCanTakeHoldOfIt(unittest.TestCase):
         for name, expected in (
             ("00_getting_started/01_core_concepts.py", {"cube", "ball"}),
             ("04_extending/01_new_kind.py", {"chain"}),
-            ("03_rope/00_cable.py", {"cable"}),
-            ("03_rope/01_between_posts.py", {"cable"}),
+            ("03_materials/00_rope.py", {"cable"}),
+            ("tests/scenes/01_between_posts.py", {"cable"}),
             *(rope if HAS_ROPE else ()),
         ):
             with self.subTest(example=name):
@@ -498,7 +498,7 @@ class TestEachKindsFolderStandsAlone(unittest.TestCase):
         self.assertTrue(got["finite"])
 
     def test_a_rope_example_builds_and_steps_with_no_cloth(self) -> None:
-        got = self._alone("03_rope/00_cable.py", "cloth")
+        got = self._alone("03_materials/00_rope.py", "cloth")
         self.assertFalse(got["other_findable"], "the cloth kind was meant to be left out of the package")
         self.assertFalse(got["other_loaded"])
         self.assertEqual(0, got["particles"], "a capsule chain is bodies, not particles")

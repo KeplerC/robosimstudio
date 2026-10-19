@@ -61,7 +61,7 @@ def _arrangement(**superdex):
 
 @unittest.skipUnless(_importable("superdex.physics"), "the [superdex] extra is not installed")
 class TestTheCableRestsOnItsSkin(unittest.TestCase):
-    """The scene ``examples/03_rope/02_superdex.py`` builds, measured where it lands."""
+    """The scene ``tests/scenes/02_superdex.py`` builds, measured where it lands."""
 
     def test_an_11mm_cable_rests_11mm_above_the_bench(self):
         import robosimstudio as rss

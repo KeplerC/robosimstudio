@@ -22,20 +22,33 @@
 |---|---|---|
 | <img src="02_soft/media/00_sponge.webp" width="240"> | <img src="02_soft/media/01_tet_mesh.webp" width="240"> | <img src="02_soft/media/02_your_own_soft.webp" width="240"> |
 
-## [03 Rope Simulation](03_rope/README.md)
+## [03 Materials](03_materials/README.md)
 
-| [Cable](03_rope/00_cable.py) | [Between posts](03_rope/01_between_posts.py) | [SuperDex](03_rope/02_superdex.py) |
+| [Rope: drag a cable](03_materials/00_rope.py) | [Rope memory: wrap a post](03_materials/01_rope_memory.py) | [Twist: turn two cables](03_materials/02_twist.py) |
 |---|---|---|
-| <img src="03_rope/media/00_cable.webp" width="240"> | <img src="03_rope/media/01_between_posts.webp" width="240"> | <img src="03_rope/media/02_superdex.webp" width="240"> |
+| <img src="03_materials/media/00_rope.webp" width="240"> | <img src="03_materials/media/01_rope_memory.webp" width="240"> | <img src="03_materials/media/02_twist.webp" width="240"> |
 
-| [A cable keeps its bend](03_rope/03_cable_memory.py) | [A cable carries a twist](03_rope/04_twist.py) |
-|---|---|
+| [Knot: pull it tight](03_materials/03_knot.py) | [Band: hook it on pegs](03_materials/04_band.py) | [Paper: fold a sheet](03_materials/05_paper.py) |
+|---|---|---|
+| <img src="03_materials/media/03_knot.webp" width="240"> | <img src="03_materials/media/04_band.webp" width="240"> | <img src="03_materials/media/05_paper.webp" width="240"> |
+
+| [Bag: open its mouth](03_materials/06_bag.py) | [Brush: scrub a patch](03_materials/07_brush.py) | [Tape: peel a label](03_materials/08_tape.py) |
+|---|---|---|
+| <img src="03_materials/media/06_bag.webp" width="240"> | <img src="03_materials/media/07_brush.webp" width="240"> | <img src="03_materials/media/08_tape.webp" width="240"> |
+
+| [Adhesion: stick a label](03_materials/09_adhesion.py) | [Cutting: cut the tofu](03_materials/10_cutting.py) | [Granular: sweep rice](03_materials/11_granular.py) |
+|---|---|---|
+| <img src="03_materials/media/09_adhesion.webp" width="240"> | <img src="03_materials/media/10_cutting.webp" width="240"> | <img src="03_materials/media/11_granular.webp" width="240"> |
+
+| [Liquid: pour honey](03_materials/12_liquid.py) | [Dough: press a ball](03_materials/13_dough.py) | [Water: pour into a glass](03_materials/14_water.py) |
+|---|---|---|
+| <img src="03_materials/media/12_liquid.webp" width="240"> | <img src="03_materials/media/13_dough.webp" width="240"> | <img src="03_materials/media/14_water.webp" width="240"> |
 
 ## [04 Robots and Kinds of Your Own](04_extending/README.md)
 
-| [Add a robot](04_extending/00_add_a_robot.py) | [A new kind](04_extending/01_new_kind.py) |
-|---|---|
-| <img src="04_extending/media/00_add_a_robot.webp" width="240"> | <img src="04_extending/media/01_new_kind.webp" width="240"> |
+| [Add a robot](04_extending/00_add_a_robot.py) | [A new kind](04_extending/01_new_kind.py) | [Pick up a plate](04_extending/02_suction.py) |
+|---|---|---|
+| <img src="04_extending/media/00_add_a_robot.webp" width="240"> | <img src="04_extending/media/01_new_kind.webp" width="240"> | <img src="04_extending/media/02_suction.webp" width="240"> |
 
 ## [05 The Browser Studio](05_studio/README.md)
 
@@ -48,6 +61,15 @@
 | [First task](06_tasks/00_your_first_task.py) | [Goals and rewards](06_tasks/01_goals_and_rewards.py) | [Episodes](06_tasks/02_episodes.py) |
 |---|---|---|
 | <img src="06_tasks/media/00_your_first_task.webp" width="240"> | <img src="06_tasks/media/01_goals_and_rewards.webp" width="240"> | <img src="06_tasks/media/02_episodes.webp" width="240"> |
+
+| [Sweep rice, scored](06_tasks/03_granular_scored.py) | [Scrub a patch, scored](06_tasks/04_brush_scored.py) | [Pick up a plate, scored](06_tasks/05_suction_scored.py) |
+|---|---|---|
+
+| [Open a bag, scored](06_tasks/06_bag_scored.py) | [Hook a band, scored](06_tasks/07_band_scored.py) | [Peel a label, scored](06_tasks/08_tape_scored.py) |
+|---|---|---|
+
+| [Cut tofu, scored](06_tasks/09_cutting_scored.py) | [Pour water, scored](06_tasks/10_water_scored.py) |
+|---|---|
 
 ## [07 Policies as Graphs](07_policies/README.md)
 
@@ -66,72 +88,6 @@
 | [Leader arm](09_teleop/00_leader_arm.py) | [Force feedback](09_teleop/01_force_feedback.py) |
 |---|---|
 | <img src="09_teleop/media/00_leader_arm.webp" width="240"> | <img src="09_teleop/media/01_force_feedback.webp" width="240"> |
-
-## [10 Granular](10_granular/README.md)
-
-| [Sweep rice into the tray](10_granular/00_sweep_rice.py) | [Sweep rice, scored](10_granular/01_sweep_rice_scored.py) |
-|---|---|
-
-## [11 Liquid](11_liquid/README.md)
-
-| [Pour honey into a bowl](11_liquid/00_pour_honey.py) | [Wipe a spill](11_liquid/01_wipe_spill.py) |
-|---|---|
-
-## [12 Dough](12_dough/README.md)
-
-| [Roll the dough flat](12_dough/00_roll_dough.py) | [Press a dough ball](12_dough/01_press_dough.py) |
-|---|---|
-
-## [13 Paper](13_paper/README.md)
-
-| [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
-|---|---|
-
-## [14 Brush](14_brush/README.md)
-
-| [Scrub a patch clean](14_brush/00_scrub_the_bench.py) | [Scrub a patch, scored](14_brush/01_scrub_scored.py) |
-|---|---|
-
-## [15 Suction](15_suction/README.md)
-
-| [Pick up a plate](15_suction/00_pick_a_plate.py) | [Pick up a plate, scored](15_suction/01_pick_scored.py) |
-|---|---|
-
-## [16 Bags](16_bags/README.md)
-
-| [Open a bag](16_bags/00_open_a_bag.py) | [Open a bag, scored](16_bags/01_open_a_bag_scored.py) |
-|---|---|
-| <img src="16_bags/media/00_open_a_bag.webp" width="240"> | |
-
-## [17 Knots](17_knots/README.md)
-
-| [Pull a knot tight](17_knots/00_pull_knot_tight.py) |
-|---|
-| <img src="17_knots/media/00_pull_knot_tight.webp" width="240"> |
-
-## [18 Bands](18_bands/README.md)
-
-| [Hook a band on pegs](18_bands/00_band_on_pegs.py) | [Hook a band, scored](18_bands/01_band_on_pegs_scored.py) |
-|---|---|
-| <img src="18_bands/media/00_band_on_pegs.webp" width="240"> | |
-
-## [19 Tape](19_tape/README.md)
-
-| [Peel a label](19_tape/00_peel_a_label.py) | [Peel a label, scored](19_tape/01_peel_a_label_scored.py) | [Stick a label](19_tape/02_stick_a_label.py) |
-|---|---|---|
-| <img src="19_tape/media/00_peel_a_label.webp" width="240"> | | <img src="19_tape/media/02_stick_a_label.webp" width="240"> |
-
-## [20 Cutting](20_cutting/README.md)
-
-| [Cut tofu](20_cutting/00_cut_tofu.py) | [Cut tofu, scored](20_cutting/01_cut_tofu_scored.py) |
-|---|---|
-| <img src="20_cutting/media/00_cut_tofu.webp" width="240"> | |
-
-## [21 Water](21_water/README.md)
-
-| [Pour water into a glass](21_water/00_pour_water.py) | [Pour water, scored](21_water/01_pour_water_scored.py) |
-|---|---|
-| <img src="21_water/media/00_pour_water.webp" width="240"> | |
 
 ## [Live Scene Editing](live/README.md)
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The bag example's headline task, done by the robot's hand the way its page asks.
 
-``examples/16_bags/00_open_a_bag`` promises a gesture and two numbers. This drives the
+``examples/03_materials/06_bag`` promises a gesture and two numbers. This drives the
 example's own arm panel through :mod:`tests.fixtures.grasp` -- the cursor the gizmo
 writes, the grip the **Close** button writes, the session's own setpoint law -- and reads
 the measures the page shows. The right hand is put down until its open jaws straddle the
@@ -47,7 +47,7 @@ def _drive(port: int, *, self_contact: bool) -> dict:
 
     real = rss.bag
     with mock.patch.object(rss, "bag", lambda **kw: real(**{**kw, "self_contact": self_contact})):
-        sim, kwargs = _run("16_bags/00_open_a_bag.py")
+        sim, kwargs = _run("03_materials/06_bag.py")
     bag = sim["bag"]
     points = lambda: np.asarray(bag.particle_q, dtype=np.float64)  # noqa: E731
     out: dict = {"sim": sim, "spec": bag.entity.spec}

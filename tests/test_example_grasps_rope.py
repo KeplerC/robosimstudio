@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The rope example's grasp, made the way its page makes it: down, Close, up, and the cable comes too.
 
-``examples/03_rope/00_cable.py`` says a person can drag the right hand down onto
+``examples/03_materials/00_rope.py`` says a person can drag the right hand down onto
 the cable, press **Close** and lift it. This runs the example's own ``main()``,
 drives its arm panel as the gizmo and the Grip button do
 (:mod:`tests.fixtures.grasp`), and holds the lift to numbers. The cable has no
@@ -34,11 +34,11 @@ axis itself they press into the bench and the hand is shoved 50 mm sideways."""
 
 
 class TestTheRopeExampleLiftsTheCable(unittest.TestCase):
-    """``03_rope/00_cable``: the hand starts over the cable, closes on it and lifts its middle."""
+    """``03_materials/00_rope``: the hand starts over the cable, closes on it and lifts its middle."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, kwargs = _run("03_rope/00_cable.py")
+        cls.sim, kwargs = _run("03_materials/00_rope.py")
         cls.session = open_session(cls.sim, 9400, kwargs.get("page"))
         tick(cls.session, 30)  # the cable lands on the bench
         bodies = np.asarray(cls.sim["cable"].bodies)

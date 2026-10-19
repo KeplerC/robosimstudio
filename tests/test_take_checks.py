@@ -48,7 +48,7 @@ class _Sim:
 
 
 class TestTheTwistTakeReadsTheMiddleThird(unittest.TestCase):
-    """``04_twist`` reads each cable through the middle third of its capsules, and so does its take's check."""
+    """``03_materials/02_twist`` reads each cable through the middle third of its capsules, and so does its take's check."""
 
     def test_the_third_follows_the_cable_s_length(self) -> None:
         # 30 capsules, a tenth of a radian a joint: the middle third is capsules 10 to 20, ten joints, a radian.
@@ -58,31 +58,6 @@ class TestTheTwistTakeReadsTheMiddleThird(unittest.TestCase):
     def test_the_example_s_cable_reads_capsules_8_to_16(self) -> None:
         _, said = takes._twisted(_twisted_cables(24, 0.1))
         self.assertIn(f"let go soft {0.8 / (2 * np.pi):.3f}", said)
-
-
-class TestTheFlapTakeMeasuresFromItsBench(unittest.TestCase):
-    """``01_box_flap``'s check reads the rim off the bench the scene stands on, as the takes' other checks do."""
-
-    def test_an_edge_on_the_rim_reads_zero_on_a_taller_bench(self) -> None:
-        from unittest import mock
-
-        rest = np.array([[0.0, 0.0, 0.10], [0.0, 0.0, 0.20], [0.01, 0.0, 0.20]])
-        now = rest + np.array([0.6, 0.0, 0.75])  # the flap shut, its free edge on the rim, bench_075 under it
-        flap = SimpleNamespace(
-            entity=SimpleNamespace(update_probe=lambda *_: None, rest={"particle_q": rest}),
-            particles=np.arange(3),
-            particle_q=np.concatenate([now[:1], now[1:] - np.array([0.0, 0.0, 0.10])]),
-        )
-        sim = _Sim(refs={"flap": flap})
-        sim.step_count, sim.make_context = 0, lambda: None
-        film = SimpleNamespace(sim=sim, bench=lambda p: (p[0] + 0.6, p[1], p[2] + 0.75))
-        with (
-            mock.patch("robosimstudio.assetlib.semantics.snapshot.Snapshot"),
-            mock.patch("robosimstudio_materials.paper.crease_angle", return_value={"angle": 2.0}),
-        ):
-            ok, said = takes._flap_shut(film)
-        self.assertTrue(ok, said)
-        self.assertIn("+0 mm off the rim", said)
 
 
 if __name__ == "__main__":

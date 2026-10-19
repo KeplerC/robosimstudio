@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The paper fold example's headline task, done by both of the robot's hands the way its page asks.
 
-``examples/13_paper/00_fold_paper`` promises a gesture and a number. This drives
+``examples/03_materials/05_paper`` promises a gesture and a number. This drives
 the example's own arm panels through :mod:`tests.fixtures.grasp` -- the cursor
 the gizmo writes, the grip the **Close** button and the **Grip amount** slider
 write, the session's own setpoint law -- and reads the same ``crease_angle`` the
@@ -123,7 +123,7 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, kwargs = _run("13_paper/00_fold_paper.py")
+        cls.sim, kwargs = _run("03_materials/05_paper.py")
         sim = cls.sim
         sim.pipeline.program.solver.enable_contact_forces()  # before the first step captures the graph
         sim.run(10).sync()

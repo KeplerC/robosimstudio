@@ -61,7 +61,7 @@ between the pads, and it is carried 30 mm up at 50 mm/s.
 - `CollisionSpec(contact_matching="sticky")` and VBD's `rigid_contact_history`:
   each contact keeps its anchor from step to step, which is static friction.
   Without them a pinched capsule crept through the pads at 15 mm/s and fell out
-  of a 0.15 m/s lift (on the 22 mm cable of `examples/03_rope/00_cable.py`).
+  of a 0.15 m/s lift (on the 22 mm cable of `examples/03_materials/00_rope.py`).
   The reference's own arrangement (`cable_coupled_960hz@v1`: proxies at 20x
   mass, 40 VBD iterations) never moved the cable in a pinch and drag here,
   three runs of three, at a quarter of the speed.

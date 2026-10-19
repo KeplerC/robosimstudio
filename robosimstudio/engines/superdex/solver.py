@@ -59,7 +59,7 @@ class SolverSuperdex(SolverHost):
         integration: The engine's time integrator by name (``"backward_euler"``,
             the engine's own, or ``"bdf2"``...), or ``None`` to leave it. An
             unknown name is refused with the names there are. On the knot the
-            two hands pull (``examples/17_knots``), BDF2 drew the knot to 239 mm
+            two hands pull (``examples/03_materials/03_knot.py``), BDF2 drew the knot to 239 mm
             but let a tail slide 88 mm through a hand, so no shipped scene sets it.
     """
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The roll example's gesture, made the way its page makes it, rolls the dough flat.
 
-``examples/12_dough/00_roll_dough`` promises that a hand dragged down onto the
+``tests/scenes/00_roll_dough`` promises that a hand dragged down onto the
 roller's handle, closed, lifted out of the rest and rolled across the block
 three times leaves the dough wider and lower. This drives the example's own arm
 panel through :mod:`tests.fixtures.grasp` -- the cursor the gizmo writes, the
@@ -61,7 +61,7 @@ class TestTheRollByHand(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, kwargs = _run("12_dough/00_roll_dough.py")
+        cls.sim, kwargs = _run("tests/scenes/00_roll_dough.py")
         cls.sim.run(20).sync()
         t = time.perf_counter()
         cls.sim.run(100).sync()

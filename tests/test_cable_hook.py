@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The between-posts example's hook, made by the robot's hand through the arm panel: close, pull, open, it springs back.
 
-``examples/03_rope/01_between_posts`` says the right hand can be driven down
+``tests/scenes/01_between_posts`` says the right hand can be driven down
 onto the span's middle, closed on it, pulled back up and opened, and that the
 cable springs back to where it hung. Its old clip did this with a click handle;
 this drives the arm panel instead (:mod:`tests.fixtures.grasp`): the cursor
@@ -38,7 +38,7 @@ class TestTheHandHooksTheSpan(unittest.TestCase):
     def setUpClass(cls) -> None:
         from robosimstudio.core.math import quat_to_mat
 
-        cls.sim, kwargs = _run("03_rope/01_between_posts.py")
+        cls.sim, kwargs = _run("tests/scenes/01_between_posts.py")
         sim = cls.sim
         cls.session = session = open_session(sim, PORT, kwargs.get("page"))
         cable, arm = sim["cable"], session.arms["right"]

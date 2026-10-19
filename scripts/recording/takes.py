@@ -50,7 +50,6 @@ from .beats import (
     Run,
     Sank,
     Scroll,
-    Segment,
     Select,
     Slider,
     Squashed,
@@ -187,42 +186,6 @@ def _kept_bend(film) -> tuple[bool, str]:
     return measured < 0.9, f"straightness {measured:.3f} after release (need under 0.9)"
 
 
-def _rolled_flat(film) -> tuple[bool, str]:
-    """The roll example's own readouts: the footprint 1.2 times the block's or more, the height 60% of it or less."""
-    import numpy as np
-
-    from robosimstudio_materials.mpm.measures import heap_height, spread
-
-    ref = film.sim["dough"]
-    rest = ref.entity.rest["particle_q"][ref.particles]
-    points = np.asarray(ref.particle_q, dtype=np.float64)
-    floor = float(ref.entity.floor_z)
-    footprint, before, after = spread(points, rest), heap_height(rest, floor), heap_height(points, floor)
-    return footprint >= 1.2 and after <= 0.6 * before, (
-        f"footprint {footprint:.2f} of the block's (need 1.2), height {before * 1000:.1f} -> {after * 1000:.1f} mm "
-        f"(need {0.6 * before * 1000:.1f})"
-    )
-
-
-def _flap_shut(film) -> tuple[bool, str]:
-    """The box flap's hinge kept 1.8 rad once the hand had gone, and its free edge rests no higher than the rim."""
-    import numpy as np
-
-    from robosimstudio.assetlib.semantics.snapshot import Snapshot
-    from robosimstudio_materials.paper import crease_angle
-
-    sim, flap = film.sim, film.sim["flap"]
-    line = {"crease": {"axis": 2, "at": 0.103 + 0.02 * math.cos(math.radians(15.0))}}  # the example's hinge rows
-    flap.entity.update_probe(sim.state, sim.step_count)
-    angle = float(crease_angle(Snapshot(sim.make_context()), "flap", line)["angle"])
-    rest = np.asarray(flap.entity.rest["particle_q"], dtype=np.float64)[flap.particles]
-    edge = np.asarray(flap.particle_q, dtype=np.float64)[rest[:, 2] > rest[:, 2].max() - 0.003].mean(axis=0)
-    above = float(edge[2]) - film.bench((0.0, 0.0, 0.10))[2]  # the box's rim, 100 mm over whatever bench
-    return angle >= 1.8 and above < 0.015, (
-        f"the hinge kept {angle:.2f} rad (need 1.8) and the free edge is {above * 1000:+.0f} mm off the rim (need under 15)"
-    )
-
-
 def _band_on_both(film) -> tuple[bool, str]:
     """The band is round both pegs of the board and stretched there, the hand gone."""
     import numpy as np
@@ -253,13 +216,6 @@ def _knot_tight(film) -> tuple[bool, str]:
         ok,
         f"{cross} crossings, {now * 1e3:.0f} of {built * 1e3:.0f} mm in the knot, tails {held * 1e3:.0f} mm off the hands",
     )
-
-
-def _sprang_back(film) -> tuple[bool, str]:
-    """The span's middle is back where it hung before the hand took it."""
-    key = str(Segment("cable", 0.5))
-    off = abs(film.marks["end"]["things"][key][2] - film.marks["start"]["things"][key][2])
-    return off < 0.002, f"the middle ended {off * 1000:.1f} mm from where it hung (need under 2)"
 
 
 def _round_the_post(film) -> dict:
@@ -525,25 +481,6 @@ FINAL = (
             Wait(seconds=1.8, label="it drapes again"),
         ),
         expect=(Check(_stiffened, needs=("tape",)),),
-    ),
-    Take(
-        "examples/03_rope/01_between_posts.py",
-        camera=Orbit(At("cable", dz=0.08), distance=1.0, azimuth=-30.0, elevation=30.0, fov=50.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        beats=(
-            Wait(seconds=0.5, label="the right hand pointing at the span's middle"),
-            # The hand leans 40 degrees, so its z arrow is the hand's own axis: 80 mm down it is the cable.
-            Drag("right", "z", -0.08, seconds=1.2, label="drag the gizmo down onto the cable"),
-            Press(text="Close", within=RIGHT, label="Close"),
-            Wait(seconds=0.8, mark="closed"),
-            Drag("right", "z", 0.03, seconds=1.0, label="pull it back up"),
-            Wait(seconds=0.8, mark="pulled", label="the span hangs from the hand"),
-            Press(text="Open", within=RIGHT, label="Open"),
-            Drag("right", "z", 0.05, seconds=0.8, label="and away"),
-            Wait(seconds=1.5, label="it springs back between the posts"),
-        ),
-        expect=(Rose(Segment("cable", 0.5), 0.008, at="pulled"), Check(_sprang_back, needs=(Segment("cable", 0.5),))),
     ),
     lift("examples/00_getting_started/00_hello_world.py"),
     lift("examples/00_getting_started/01_core_concepts.py"),
@@ -839,26 +776,6 @@ DRAFTS = (
         lift=0.12,
         radius=0.012,  # the one link the handle took: the links are loose, and the rest stay in the heap
     ),
-    # The hand, closed and pointing down, pushes the standing flap over and presses it into the box;
-    # tests/test_box_flap_robot.py drives the same path through the panel.
-    Take(
-        "examples/13_paper/01_box_flap.py",
-        camera=Orbit(Bench(-0.06, 0.05, 0.12), distance=1.05, azimuth=35.0, elevation=32.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: right")),
-        beats=(
-            Wait(seconds=0.5, label="the flap stands open, the left hand beside it"),
-            Press(text="Close", within="Arm: left", label="Close"),
-            Wait(seconds=0.6),
-            Drag("left", "z", to=Bench(z=0.162), seconds=0.8, label="down, level with the flap"),
-            Drag("left", "y", to=Bench(y=-0.01), seconds=1.8, label="across: the hand pushes it over"),
-            Drag("left", "z", to=Bench(z=0.062), seconds=1.2, label="down: it presses the flap into the box"),
-            Wait(seconds=0.5, mark="pressed"),
-            Drag("left", "z", to=Bench(z=0.162), seconds=1.0, label="up: the hand leaves"),
-            Wait(seconds=2.5, label="the flap stays shut"),
-        ),
-        expect=(Check(_flap_shut, needs=("flap",)),),
-    ),
     Take(
         "examples/09_teleop/01_force_feedback.py",
         argv=("--simulate",),
@@ -870,7 +787,7 @@ DRAFTS = (
     grasp("examples/06_tasks/01_goals_and_rewards.py", "cube", camera=TASK_VIEW),
     grasp("examples/06_tasks/02_episodes.py", "cube", camera=TASK_VIEW),
     Take(
-        "examples/03_rope/00_cable.py",
+        "examples/03_materials/00_rope.py",
         camera=Orbit(Bench(-0.10, -0.08, 0.10), distance=0.9, azimuth=-30.0, elevation=30.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left")),
@@ -890,7 +807,7 @@ DRAFTS = (
         expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.771)), 0.06, at="lifted"),),
     ),
     Take(
-        "examples/03_rope/03_cable_memory.py",
+        "examples/03_materials/01_rope_memory.py",
         camera=Orbit(Bench(-0.04, -0.13, 0.05), distance=0.95, azimuth=-30.0, elevation=38.0, fov=50.0),
         warmup=1.0,
         budget=1_400_000,  # the whole arm in view: 1.2 MB held it only at quality 46
@@ -913,7 +830,7 @@ DRAFTS = (
         expect=(Check(_carried_round), Check(_kept_bend, needs=("cable",))),
     ),
     Take(
-        "examples/03_rope/04_twist.py",
+        "examples/03_materials/02_twist.py",
         camera=Orbit(Bench(0.02, 0.0, 0.17), distance=0.95, azimuth=12.0, elevation=34.0, fov=50.0),
         budget=1_500_000,  # two hands turning and two gizmos for 15 s
         warmup=1.0,
@@ -936,27 +853,7 @@ DRAFTS = (
         expect=(Check(_twisted, needs=("soft_twist", "stiff_twist")),),
     ),
     Take(
-        "examples/03_rope/02_superdex.py",
-        needs=("superdex",),
-        camera=Orbit(Bench(-0.10, -0.06, 0.10), distance=1.25, azimuth=-30.0, elevation=30.0, fov=40.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        beats=(
-            Wait(seconds=0.5, label="the right hand over the SuperDex cable's middle"),
-            # The cable's axis lies 11.2 mm up; the tool centre closes 10 mm over it, as in 00_cable.
-            Drag("right", "z", to=(0.550, -0.011, 0.771), seconds=1.2, label="drag the gizmo down onto it"),
-            Wait(seconds=0.3),
-            # Close would shut the jaws through it: SuperDex's push on the fingers is not fed back.
-            Slider(text="Grip amount", value=0.80, seconds=0.8, within=RIGHT, label="Grip amount 0.80: jaws on it"),
-            Wait(seconds=1.0, mark="closed"),
-            Drag("right", "z", to=(0.550, -0.011, 0.891), seconds=1.8, label="drag it up, slowly"),
-            Wait(seconds=2.0, mark="lifted", label="held by friction, nothing pinned"),
-        ),
-        # The node in the jaws. Measured 113 mm in tests/test_superdex_cable_robot.
-        expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.761)), 0.08, at="lifted"),),
-    ),
-    Take(
-        "examples/17_knots/00_pull_knot_tight.py",
+        "examples/03_materials/03_knot.py",
         needs=("superdex",),
         budget=1_800_000,  # 24 s, both arms in view: 1.4 MB at quality 46
         camera=Orbit(Bench(0.0, 0.0, 0.08), distance=1.3, azimuth=-15.0, elevation=30.0, fov=40.0),
@@ -980,7 +877,7 @@ DRAFTS = (
         expect=(Check(_knot_tight, needs=("rope",)),),
     ),
     Take(
-        "examples/18_bands/00_band_on_pegs.py",
+        "examples/03_materials/04_band.py",
         needs=("superdex",),
         budget=1_300_000,  # 17 s with the whole arm in view: 966 KB at quality 46 at the default
         camera=Orbit(Bench(0.03, -0.20, 0.17), distance=1.0, azimuth=-62.0, elevation=28.0, fov=40.0),
@@ -1028,7 +925,7 @@ DRAFTS = (
 # Each take is the gesture its example's medium test drives through the arm panel,
 # played on the page at the test's speeds: the right arm's gizmo dragged or turned,
 # Close pressed. Nothing is clicked onto a handle, so what moves the rice, the
-# ketchup, the honey, the dough and the roller is the hand.
+# honey and the dough is the hand.
 
 TOOL_DOWN = (0.0, 1.0, 0.0, 0.0)
 """The YAM's tool pointing down, its jaws closing along world y (xyzw). Its home points the tool along +x."""
@@ -1135,7 +1032,7 @@ def _carried(name: str, along_y: float, *, upright: float, at: str = "end"):
 
 
 def _rice_in_tray(film) -> tuple[bool, str]:
-    """``00_sweep_rice``'s readout: the share of the rice inside the tray, boxed as the example boxes it."""
+    """``03_materials/11_granular``'s readout: the share of the rice inside the tray, boxed as the example boxes it."""
     import numpy as np
 
     from robosimstudio_materials.mpm.measures import fill_fraction
@@ -1145,22 +1042,8 @@ def _rice_in_tray(film) -> tuple[bool, str]:
     return fill >= 0.5, f"{100.0 * fill:.1f}% of the rice is in the tray (tests/test_sweep_rice asks half)"
 
 
-def _ketchup_off(film) -> tuple[bool, str]:
-    """``01_wipe_spill``'s readout: the share of the ketchup off the patch it settled on, at any height."""
-    import numpy as np
-
-    from robosimstudio_materials.mpm.measures import spill_fraction
-
-    sauce = film.sim["ketchup"]
-    rest = sauce.entity.rest["particle_q"][sauce.particles]
-    pad = 0.5 * float(sauce.spec.particle_spacing)
-    lo, hi = rest.min(axis=0) - np.array((pad, pad, 0.0)), rest.max(axis=0) + np.array((pad, pad, 0.03))
-    off = spill_fraction(np.asarray(sauce.particle_q, dtype=np.float64), lo, hi)
-    return off >= 0.5, f"{100.0 * off:.1f}% of the ketchup is off its patch (tests/test_wipe_spill asks half)"
-
-
 def _dough_height(film) -> float:
-    """``01_press_dough``'s readout: the puck's height as a share of the height it settled at [%]."""
+    """``03_materials/13_dough``'s readout: the puck's height as a share of the height it settled at [%]."""
     from robosimstudio_materials.mpm.measures import heap_height
 
     lump = film.sim["dough"]
@@ -1180,7 +1063,7 @@ def _dent_kept(film) -> tuple[bool, str]:
 
 ROBOT_PARTICLES = (
     Take(
-        "examples/10_granular/00_sweep_rice.py",
+        "examples/03_materials/11_granular.py",
         # From the front and the tray's side: the heap comes toward the lens into the tray, and the arm stays behind it.
         camera=Orbit(Bench(0.0, -0.29, 0.08), distance=1.1, azimuth=40.0, elevation=35.0, fov=42.0),
         warmup=1.0,  # the heap settles before the first frame
@@ -1211,36 +1094,7 @@ ROBOT_PARTICLES = (
         ),
     ),
     Take(
-        "examples/11_liquid/01_wipe_spill.py",
-        # From the front and the bench's middle: the push runs left to right toward the lens, the ridge forms on the
-        # wiper's face this view looks at, and the arm stays side-on as the hand backs away at the end.
-        camera=Orbit(Bench(0.0, -0.22, 0.09), distance=1.05, azimuth=50.0, elevation=36.0, fov=42.0),
-        warmup=1.0,  # the puddle settles before the first frame
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        budget=1_200_000,
-        beats=(
-            Wait(seconds=0.5, label="the right hand over the wiper, pointing down"),
-            # The pads' tips on the bench, where tests/test_wipe_spill closes: the tool centre 16.5 mm up.
-            Drag("right", "z", to=At("wiper", dz=0.0015), seconds=1.4, label="drag the gizmo down onto the wiper"),
-            Press(text="Close", within=RIGHT, label="Close: the jaws take its 20 mm faces"),
-            Wait(seconds=0.8, mark="closed"),
-            _note("jaws_mm", _jaws, "the jaw opening"),
-            # The test walks the cursor at 0.09 m/s; eased over 3 s, these 180 mm peak at 0.09.
-            Drag("right", "y", 0.18, seconds=3.0, label="push the puddle toward the middle of the bench"),
-            Wait(seconds=0.8, mark="pushed", label="the ketchup is off its patch"),
-            Press(text="Open", within=RIGHT, label="Open"),
-            Drag("right", "z", 0.08, seconds=1.0, label="lift away"),
-            Drag("right", "x", -0.10, seconds=1.0, label="and back: the ridge stays where the wiper left it"),
-            Wait(seconds=1.0),
-        ),
-        expect=(
-            Check(_jaws_on(20.0, 3.0)),
-            Check(_carried("wiper", 0.15, upright=0.01, at="pushed"), needs=("wiper",)),
-            Check(_ketchup_off),
-        ),
-    ),
-    Take(
-        "examples/12_dough/01_press_dough.py",
+        "examples/03_materials/13_dough.py",
         # From the front and the arm's outside: the hand at its home, 330 mm over the puck, and the puck both in view.
         # The particles are drawn unlit, so a dent shows only as a notch in the outline, seen along the blade.
         camera=Orbit(Bench(0.0, -0.31, 0.14), distance=1.0, azimuth=-35.0, elevation=28.0, fov=40.0),
@@ -1270,7 +1124,7 @@ ROBOT_PARTICLES = (
         expect=(Check(_dent_kept), Squashed("dough", 0.002, at="pressed")),
     ),
     Take(
-        "examples/11_liquid/00_pour_honey.py",
+        "examples/03_materials/12_liquid.py",
         camera=Orbit(Bench(0.09, -0.24, 0.13), distance=1.1, azimuth=-30.0, elevation=30.0, fov=40.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left")),
@@ -1302,35 +1156,6 @@ ROBOT_PARTICLES = (
         ),
         budget=1_300_000,  # 19 s of a moving arm: 1,008 KB at the ladder's last quality, over the default 900
     ),
-    Take(
-        "examples/12_dough/00_roll_dough.py",
-        camera=Orbit(Bench(-0.03, -0.31, 0.10), distance=1.0, azimuth=-40.0, elevation=32.0, fov=40.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        # 1.5 s of scene a second: the three passes are 2.4 s of scene each at the test's pace, and at
-        # real time the clip ran 22 s and 1255 KB at the bottom of the quality ladder.
-        speed=1.5,
-        budget=1_200_000,  # nine drags and a press, the hand in the middle of the frame throughout
-        beats=(
-            Wait(seconds=0.4, label="the right hand over the roller's handle"),
-            Drag("right", "z", to=(0.460, -0.310, 0.820), seconds=1.0, label="drag the gizmo down onto the handle"),
-            Wait(seconds=0.2),
-            Press(text="Close", within=RIGHT, label="Close: the jaws on the handle"),
-            Wait(seconds=0.5, mark="closed"),
-            Drag("right", "z", to=(0.460, -0.310, 0.850), seconds=0.6, label="lift it out of its rest"),
-            Drag("right", "x", to=(0.515, -0.310, 0.850), seconds=0.6, label="over the near edge of the block"),
-            # The cursor 88 mm over the bench: the drum's underside runs about 11 mm over it (tests/test_roll_dough).
-            Drag("right", "z", to=(0.515, -0.310, 0.838), seconds=0.4, label="down onto the dough"),
-            # 160 mm in 2.4 s of scene, eased: under 0.11 m/s, a third of what the MPM's grid allows a tool.
-            Drag("right", "x", to=(0.675, -0.310, 0.838), seconds=1.6, label="roll it across"),
-            Drag("right", "x", to=(0.515, -0.310, 0.838), seconds=1.6, label="back"),
-            Drag("right", "x", to=(0.675, -0.310, 0.838), seconds=1.6, label="and across again"),
-            Wait(seconds=0.3, mark="rolled"),
-            Drag("right", "z", to=(0.675, -0.310, 0.890), seconds=0.7, label="lift away: the dough stays flat"),
-            Wait(seconds=0.7),
-        ),
-        expect=(Held("roller", since="closed", at="rolled"), Check(_rolled_flat, needs=("dough",))),
-    ),
 )
 
 ROBOT_BAGS: tuple[Take, ...] = (
@@ -1338,7 +1163,7 @@ ROBOT_BAGS: tuple[Take, ...] = (
     # down; tests/test_open_a_bag.py drives the same path through the panel. Seen from the mouth's side and
     # a little in front, so the opening shows under the hand: the gizmo's arrows and arcs point +x, +y, +z.
     Take(
-        "examples/16_bags/00_open_a_bag.py",
+        "examples/03_materials/06_bag.py",
         needs=("superdex",),
         camera=Orbit(Bench(0.0, -0.10, 0.04), distance=0.95, azimuth=-80.0, elevation=25.0, fov=38.0),
         warmup=0.5,
@@ -1381,7 +1206,7 @@ def _over_the_sole(film) -> tuple[float, float, float]:
 
 
 def _scrubbed(film) -> tuple[bool, str]:
-    """``00_scrub_the_bench``'s readout: the share of the square's 5 mm cells a bristle tip touched while down."""
+    """``03_materials/07_brush``'s readout: the share of the square's 5 mm cells a bristle tip touched while down."""
     lo, hi = film.bench((-0.025, -0.27, 0.0))[:2], film.bench((0.075, -0.17, 0.0))[:2]
     share = float(film.sim["brush"].entity.scrubbed(lo, hi))
     return share >= 0.5, f"{100.0 * share:.1f}% of the square scrubbed (tests/test_scrub_bench asks half)"
@@ -1389,7 +1214,7 @@ def _scrubbed(film) -> tuple[bool, str]:
 
 ROBOT_BRUSH = (
     Take(
-        "examples/14_brush/00_scrub_the_bench.py",
+        "examples/03_materials/07_brush.py",
         # From in front of the bench, 1.15 m off, the brush end on: its bristles show under the fingers,
         # the strokes run left to right across the drawn square, and no link is near enough to loom.
         camera=Orbit(Bench(0.03, -0.25, 0.06), distance=1.15, azimuth=-20.0, elevation=32.0, fov=30.0),
@@ -1437,7 +1262,7 @@ INTO_PLATE = 0.003
 over it (the Seal readout's gap once ticked, inside the seal's 2 mm), and the panel reads the hand 6 mm behind
 the gizmo: too far to put the gizmo back on the hand, so the arm keeps the face down on the plate."""
 SQUARE = (-0.11, -0.22, 0.11, 0.0)
-"""``00_pick_a_plate``'s square in the bench frame [m]: x0, y0, x1, y1."""
+"""``04_extending/02_suction``'s square in the bench frame [m]: x0, y0, x1, y1."""
 
 
 def _seal(film) -> str:
@@ -1487,7 +1312,7 @@ def _landed(film) -> tuple[bool, str]:
 
 ROBOT_SUCTION = (
     Take(
-        "examples/15_suction/00_pick_a_plate.py",
+        "examples/04_extending/02_suction.py",
         # From in front of the bench, 1.2 m off: the plate, the drawn square and the carry between them.
         camera=Orbit(Bench(0.0, -0.18, 0.06), distance=1.2, azimuth=25.0, elevation=32.0, fov=36.0),
         warmup=1.0,  # the plate settles flat before the first frame
@@ -1532,7 +1357,7 @@ TAPE_CLOSE = TAPE_TOP + 0.0125 + 0.004
 
 
 def _peeled(film) -> tuple[bool, str]:
-    """``00_peel_a_label``'s readout: the share of the label's bonds that have let go."""
+    """``03_materials/08_tape``'s readout: the share of the label's bonds that have let go."""
     label = film.sim["label"].entity
     share = float(label.peeled())
     front = 1000.0 * float(label.peel_front())
@@ -1541,7 +1366,7 @@ def _peeled(film) -> tuple[bool, str]:
 
 ROBOT_TAPE = (
     Take(
-        "examples/19_tape/00_peel_a_label.py",
+        "examples/03_materials/08_tape.py",
         # From in front of the bench, the label running left to right across the frame, so its lift shows.
         camera=Orbit(Bench(0.0, -0.10, 0.06), distance=0.9, azimuth=15.0, elevation=38.0, fov=36.0),
         warmup=0.5,
@@ -1599,7 +1424,7 @@ ROBOT_TAPE = (
 # coupler reads with ``contact_forces``. The fold is carried by contact alone; the scrub's readout
 # is that force. tests/test_fold_paper_robot.py and tests/test_scrub_a_stain.py drive the same paths.
 
-FOLD = "examples/13_paper/00_fold_paper.py"
+FOLD = "examples/03_materials/05_paper.py"
 FOLD_EDGE = -0.435
 """The sheet's near edge in the bench frame [m]: 35 mm past the bench's right edge."""
 FOLD_CREASE = FOLD_EDGE + 0.297 / 3
@@ -2032,7 +1857,7 @@ ROBOT_CONTACT = (
 
 ROBOT_WATER = (
     Take(
-        "examples/21_water/00_pour_water.py",
+        "examples/03_materials/14_water.py",
         # From the front, a little to the glass's side: the cup tips across the view, toward the lens, and the
         # stream falls over the glass's near wall. 1.1 m keeps the raised wrist under a third of the frame.
         camera=Orbit(Bench(0.12, -0.20, 0.13), distance=1.1, azimuth=15.0, elevation=32.0, fov=38.0),
@@ -2080,7 +1905,7 @@ BOARD_TOP = 0.012
 
 
 def _parted(film) -> tuple[bool, str]:
-    """``00_cut_tofu``'s readouts: the tofu's pieces and how far the cut ran."""
+    """``03_materials/10_cutting``'s readouts: the tofu's pieces and how far the cut ran."""
     tofu = film.sim["tofu"].entity
     pieces, fraction = tofu.pieces(), tofu.cut_fraction()
     return pieces == 2, f"the tofu is in {pieces} pieces, the cut {100.0 * fraction:.0f}% through (the test asks 2)"
@@ -2088,7 +1913,7 @@ def _parted(film) -> tuple[bool, str]:
 
 ROBOT_CUTTING = (
     Take(
-        "examples/20_cutting/00_cut_tofu.py",
+        "examples/03_materials/10_cutting.py",
         # From the front-right, 0.95 m off: the knife rest, the board and the hand in one frame.
         camera=Orbit(Bench(0.03, -0.22, 0.04), distance=0.95, azimuth=48.0, elevation=30.0, fov=37.0),
         warmup=0.5,
@@ -2119,7 +1944,7 @@ ROBOT_CUTTING = (
 
 # The stuck label: the right hand carries a loose label by its pull tab, lays it on the box and rubs
 # it down with its shut fingertips, the drive tests/test_stick_a_label makes through the same panel.
-STICK = "examples/19_tape/02_stick_a_label.py"
+STICK = "examples/03_materials/09_adhesion.py"
 STICK_AJAR = 0.6
 """The **Grip amount** the jaws open to around the tab: 38 mm, the far jaw clear of the box."""
 STICK_FAR = (0.0, -0.125, 0.146)
@@ -2298,14 +2123,14 @@ TAKES: tuple[Take, ...] = (
 )
 
 KEPT: dict[str, str] = {
-    "16_bags/01_open_a_bag_scored": "the same bag, hands and gesture as 00_open_a_bag with a goal beside them; its clip is that one's",
-    "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
-    "18_bands/01_band_on_pegs_scored": "the same pegboard, band and hook as 00_band_on_pegs with a goal beside them; its clip is that one's",
-    "14_brush/01_scrub_scored": "the same brush, handle and square as 00_scrub_the_bench with a goal beside them; its clip is that one's",
-    "15_suction/01_pick_scored": "the same plate, cup and square as 00_pick_a_plate with a goal beside them; its clip is that one's",
-    "19_tape/01_peel_a_label_scored": "the same box, label and peel as 00_peel_a_label with a goal beside them; its clip is that one's",
-    "21_water/01_pour_water_scored": "the same cup, water and glass as 00_pour_water with a goal beside them; its clip is that one's",
-    "20_cutting/01_cut_tofu_scored": "the same knife, board, tofu and cut as 00_cut_tofu with a goal beside them; its clip is that one's",
+    "06_tasks/06_bag_scored": "the same bag, hands and gesture as 03_materials/06_bag with a goal beside them; its clip is that one's",
+    "06_tasks/03_granular_scored": "the same rice, pusher and tray as 03_materials/11_granular with a goal beside them; its clip is that one's",
+    "06_tasks/07_band_scored": "the same pegboard, band and hook as 03_materials/04_band with a goal beside them; its clip is that one's",
+    "06_tasks/04_brush_scored": "the same brush, handle and square as 03_materials/07_brush with a goal beside them; its clip is that one's",
+    "06_tasks/05_suction_scored": "the same plate, cup and square as 04_extending/02_suction with a goal beside them; its clip is that one's",
+    "06_tasks/08_tape_scored": "the same box, label and peel as 03_materials/08_tape with a goal beside them; its clip is that one's",
+    "06_tasks/10_water_scored": "the same cup, water and glass as 03_materials/14_water with a goal beside them; its clip is that one's",
+    "06_tasks/09_cutting_scored": "the same knife, board, tofu and cut as 03_materials/10_cutting with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

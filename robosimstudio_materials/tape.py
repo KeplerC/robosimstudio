@@ -7,7 +7,7 @@ body named in the scene; kernels that make and break those bonds, by one of two 
 pull tab clamped on one end, which a hand closes on. Under opening adhesion the sheet is built stuck
 and a bond lets go once the sheet lifts off it; under contact adhesion, ipc-toolkit's adhesion law,
 a bond forms where the sheet is pressed onto the body and holds up to a strength. Run
-``examples/19_tape/00_peel_a_label.py`` and ``02_stick_a_label.py`` first.
+``examples/03_materials/08_tape.py`` and ``03_materials/09_adhesion.py`` first.
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ __all__ = [
 # count, so bonds cost launches rather than arithmetic: a 216-particle label with 180 bonds on a box
 # beside the YAM steps in 38.7 ms a control step and the same label with none in 28.9 ms, graph-captured
 # at ``GENERIC``'s 16 substeps; the break kernel is one launch a substep (``p11_cost.py``, GPU 1).
-# Contact adhesion is two launches a substep, one thread a bond: ``02_stick_a_label``'s 126 bonds beside
+# Contact adhesion is two launches a substep, one thread a bond: ``03_materials/09_adhesion``'s 126 bonds beside
 # the YAM step in 35.1-35.5 ms a control step through the page, carried, laid and rubbed
 # (``m1_screen.py``, five drives, GPU 6).
 
@@ -1510,7 +1510,7 @@ register_atom(
         ),
         calibration=AtomCalibration(
             positives=(
-                "examples/19_tape/00_peel_a_label, its tab taken by the right hand's pads, drawn up 30 mm and then "
+                "examples/03_materials/08_tape, its tab taken by the right hand's pads, drawn up 30 mm and then "
                 "back 20 mm and up 10 mm seven times, reads 1.0 in 24 drives of 24, all 144 bonds (peel_probe.py, "
                 "GPUs 1 and 3).",
             ),
@@ -1521,7 +1521,7 @@ register_atom(
                 "and 3; tests/test_peel_a_label).",
             ),
             gate=None,
-            bench="examples/19_tape/00_peel_a_label driven through its right arm panel, tests/test_peel_a_label.py",
+            bench="examples/03_materials/08_tape driven through its right arm panel, tests/test_peel_a_label.py",
             notes="No gate: a task states its own share. The front is in metres from the fold, along the sheet.",
         ),
     )
@@ -1555,7 +1555,7 @@ register_atom(
         ),
         calibration=AtomCalibration(
             positives=(
-                "examples/19_tape/02_stick_a_label, the loose label carried by its tab, laid on the box and "
+                "examples/03_materials/09_adhesion, the loose label carried by its tab, laid on the box and "
                 "rubbed by the right hand's shut fingertips in four strokes 10 mm apart, reads 0.88-0.92 in five "
                 "drives, 0.25-0.29 after the first stroke (m1_screen.py, GPU 6; tests/test_stick_a_label).",
             ),
@@ -1564,7 +1564,7 @@ register_atom(
                 "page's Adhesive off, 0 in two drives; drawn up by its tab after the rub, 0.008-0.016 (the same).",
             ),
             gate=None,
-            bench="examples/19_tape/02_stick_a_label driven through its right arm panel, tests/test_stick_a_label.py",
+            bench="examples/03_materials/09_adhesion driven through its right arm panel, tests/test_stick_a_label.py",
             notes="No gate: a task states its own share. held is a count of bonds.",
         ),
     )
@@ -1596,7 +1596,7 @@ label peeled, and with self-contact off (31 ms) 81% and 56%; at sixteen it staye
 
 register_material_kind("tape", TapeMaterialSpec)
 
-_PEEL = "examples/19_tape/00_peel_a_label: the right hand takes the tab and draws it up and back over the label"
+_PEEL = "examples/03_materials/08_tape: the right hand takes the tab and draws it up and back over the label"
 
 register_material(
     MaterialRecord(
@@ -1623,7 +1623,7 @@ register_material(
 )
 
 _STICK = (
-    "examples/19_tape/02_stick_a_label: the right hand carries the label by its tab, lays it on the box, rubs it "
+    "examples/03_materials/09_adhesion: the right hand carries the label by its tab, lays it on the box, rubs it "
     "down and draws the tab straight up"
 )
 

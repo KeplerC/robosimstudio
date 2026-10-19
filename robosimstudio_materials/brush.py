@@ -2,7 +2,7 @@
 """The ``brush`` kind: a handle over a field of short stiff bristles, each a capsule chain on rod joints.
 
 This file is what ``rss.brush`` builds, imported as ``robosimstudio_materials.brush``.
-Run ``examples/14_brush/00_scrub_the_bench.py`` first.
+Run ``examples/03_materials/07_brush.py`` first.
 
 A brush is a sole of ``rows`` strips under a grip, and ``rows x columns``
 bristles rooted in the strips' undersides, pointing down: each bristle a few
@@ -38,7 +38,7 @@ eases to 0.14 mm over the next 40 (``brush_probe.py``).
 along one way: Newton 1.6's VBD returns *contact* forces to the other solver
 and never joint forces (``SolverVBD.coupling_harvest_proxy_wrenches``). So a
 handle on MuJoCo is built gravity-compensated -- left without it, the handle
-of ``00_scrub_the_bench`` falls 28.9 mm through its own bristles to the bench
+of ``03_materials/07_brush`` falls 28.9 mm through its own bristles to the bench
 within 1 s (``nogravcomp.py``) -- it stays where a hand lets go of it, and the
 arm feels neither the press nor the bristles' drag: a press goes as deep as the
 hand goes. Pressed 6 mm, 400 nylon bristles bow up to 4.8 mm with their tips

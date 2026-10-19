@@ -121,7 +121,7 @@ class TestADeclarationFromASpecIsAValue(unittest.TestCase):
 
 
 class TestTheScoredBandExampleDeclaresItsBandAsAValue(unittest.TestCase):
-    """``examples/18_bands/01_band_on_pegs_scored``'s ``main()`` again with another band: refused, not the first kept."""
+    """``examples/06_tasks/07_band_scored``'s ``main()`` again with another band: refused, not the first kept."""
 
     def test_a_second_main_with_a_different_band_is_a_clash(self) -> None:
         from unittest import mock
@@ -129,7 +129,7 @@ class TestTheScoredBandExampleDeclaresItsBandAsAValue(unittest.TestCase):
         from robosimstudio.assetlib.registry import ASSETS
         from tests.fixtures.examples import _load
 
-        module = _load("18_bands/01_band_on_pegs_scored.py")
+        module = _load("06_tasks/07_band_scored.py")
         real = module.band
         with (
             mock.patch.dict(ASSETS._items),

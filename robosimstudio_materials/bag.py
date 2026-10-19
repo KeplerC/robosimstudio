@@ -3,7 +3,7 @@
 
 This file is what ``rss.bag`` builds, imported as ``robosimstudio_materials.bag``. A bag is cloth
 (``cloth.py``) sewn on three edges, simulated by SuperDex as one shell that collides with itself.
-Run ``examples/16_bags/00_open_a_bag.py`` first.
+Run ``examples/03_materials/06_bag.py`` first.
 """
 
 from __future__ import annotations
@@ -480,7 +480,7 @@ register_atom(
                 "over the lip's top, 45 mm up, lifts nothing and the bag reads the same 7.7 mm (f_bag.py).",
             ),
             gate=0.03,
-            bench="examples/16_bags/00_open_a_bag driven through its right arm panel, tests/test_open_a_bag.py",
+            bench="examples/03_materials/06_bag driven through its right arm panel, tests/test_open_a_bag.py",
             notes=(
                 "The height is the widest span between the top and bottom rows of the mouth, the area the "
                 "rim's vector area, so a mouth tilted toward the hand reads its true opening. The gate sits "
