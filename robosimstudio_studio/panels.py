@@ -119,18 +119,25 @@ def _role_suffix(panel) -> str:
     return ""
 
 
-def seal_text(suction) -> str:
+def seal_text(suction, looked=None) -> str:
     """The **Seal** readout: sealed or not, the face's gap to the part, and the mass held.
 
     Holding, the gap is the held part's; otherwise it is whatever is under the
     cup (:meth:`~robosimstudio.core.suction.Suction.under`), so the number counts
     down as the hand comes down onto a plate. A look, not a test the cup made:
     it leaves :attr:`~robosimstudio.core.suction.Suction.last` to the holds.
+    ``looked`` is a refusal the cup returned this step, which is that same look
+    already taken: an armed box re-tests every step, and a refresh shows its
+    answer rather than testing again.
     """
-    holding = suction.holding
-    report = suction.seal(suction.held, record=False) if holding else suction.under(record=False)
+    held = suction.held
+    if held >= 0:
+        report = suction.seal(held, record=False)
+    else:
+        report = looked if looked is not None else suction.under(record=False)
     gap = f"gap {report.gap_m * 1000:.1f} mm" if np.isfinite(report.gap_m) else "nothing under the cup"
-    return f"{'sealed' if holding else 'not sealed'}, {gap}, holding {suction.held_mass:.3f} kg"
+    mass = suction.held_mass if held >= 0 else 0.0
+    return f"{'sealed' if held >= 0 else 'not sealed'}, {gap}, holding {mass:.3f} kg"
 
 
 class Panel:
@@ -260,6 +267,8 @@ class PanelArm(Panel):
         self._vacuum = None
         self._seal_readout = None
         self._held_last = False
+        self._looked = None
+        """This step's refused hold while the box is armed, which the **Seal** readout shows instead of looking again."""
 
     @property
     def profile_name(self) -> str:
@@ -363,22 +372,34 @@ class PanelArm(Panel):
                     self._grip.value = self.gripper_command
             self.gripper.command = self.gripper_command
             self.gripper.apply(env.control.joint_target_q)
+        self._looked = None
         if self.suction is not None and not self.suspended:
-            # The box arms the cup and then follows it. Ticked, the cup seals the
-            # first step its face is close enough to something to pass
-            # Suction.seal; unticked, it lets go. A cup
-            # held or let go from code, or whose seal broke, moves the box rather
-            # than being undone by it.
-            holding = self.suction.holding
-            if self.vacuum_request is not None:
-                self.vacuum, self.vacuum_request = bool(self.vacuum_request), None
-                if not self.vacuum and holding:
-                    self.suction.release()
-            elif holding != self._held_last:
-                self.vacuum = holding
-            if self.vacuum and not self.suction.holding:
-                self.suction.hold()
-            self._held_last = self.suction.holding
+            self._drain_vacuum()
+
+    def _drain_vacuum(self) -> None:
+        """The box arms the cup and then follows it.
+
+        Ticked, the cup seals the first step its face is close enough to
+        something to pass Suction.seal; unticked, it lets go. A cup held or let
+        go from code, or whose seal broke, moves the box rather than being
+        undone by it. Armed and not sealed, the hold re-tests every step, and
+        its refusal is kept for the **Seal** readout (:attr:`_looked`) so a
+        refresh does not run the same test again. The cup is asked whether it
+        holds once: on the wrench tier that is a read off the device.
+        """
+        holding = self.suction.holding
+        if self.vacuum_request is not None:
+            self.vacuum, self.vacuum_request = bool(self.vacuum_request), None
+            if not self.vacuum and holding:
+                self.suction.release()
+                holding = False
+        elif holding != self._held_last:
+            self.vacuum = holding
+        if self.vacuum and not holding:
+            report = self.suction.hold()
+            holding = report.sealed
+            self._looked = None if holding else report
+        self._held_last = holding
 
     def _drive(self, env) -> None:
         """Track the gizmo with the hand, and whatever the hand is on.
@@ -531,7 +552,7 @@ class PanelArm(Panel):
         if self._width_readout is not None and self.gripper is not None:
             self._width_readout.value = f"{self.gripper.width(self.env.state) * 1000:.1f} mm"
         if self._seal_readout is not None and self.suction is not None:
-            self._seal_readout.value = seal_text(self.suction)
+            self._seal_readout.value = seal_text(self.suction, self._looked)
         if self._vacuum is not None and self.vacuum_request is None and bool(self._vacuum.value) != self.vacuum:
             self._vacuum.value = self.vacuum
 
@@ -544,7 +565,7 @@ class PanelArm(Panel):
         self.grip_request = None
         if self._grip is not None:
             self._grip.value = 0.0
-        self.vacuum, self.vacuum_request, self._held_last = False, None, False
+        self.vacuum, self.vacuum_request, self._held_last, self._looked = False, None, False, None
         if self._vacuum is not None:
             self._vacuum.value = False
         self._take_hand()

@@ -310,6 +310,47 @@ class TestTheSealSays(unittest.TestCase):
         self.assertTrue(bool(rows.equality_constraint_enabled.numpy()[0]))
         self.assertFalse(cup.broke, "a weld hold still reports a wrench seal broken before it")
 
+    def test_an_armed_box_looks_at_the_cup_once_a_step(self) -> None:
+        """Ticked and 3.5 mm over the plate: the drain's hold is the step's one look, and the readout shows it."""
+        from robosimstudio_studio.panels import PanelArm, seal_text
+
+        looks = [0]
+
+        def body_q():
+            looks[0] += 1
+            return self.poses(_down(z=0.0095))
+
+        cup = self._cup([None])
+        cup.pipeline.state_0.body_q.numpy = body_q
+        panel = types.SimpleNamespace(suction=cup, vacuum=False, vacuum_request=True, _held_last=False, _looked=None)
+        PanelArm._drain_vacuum(panel)
+        text = seal_text(cup, panel._looked)
+        self.assertEqual(1, looks[0], "the readout copied the poses and tested the cup again")
+        self.assertTrue(text.startswith("not sealed, gap 3.5 mm"), text)
+        self.assertFalse(cup.holding)
+
+    def test_a_held_cup_is_asked_once_a_drain(self) -> None:
+        """On the wrench tier whether the cup holds is a read off the device; the drain makes one."""
+        from robosimstudio_studio.panels import PanelArm
+
+        cup = self._cup([self.poses(_down(z=0.0065))])
+        self.assertTrue(cup.hold(self.plate).sealed)
+        reads, device = [0], cup._held_dev
+
+        class _Counted:
+            def numpy(self):
+                reads[0] += 1
+                return device.numpy()
+
+            def assign(self, values):
+                device.assign(values)
+
+        cup._held_dev = _Counted()
+        panel = types.SimpleNamespace(suction=cup, vacuum=True, vacuum_request=None, _held_last=True, _looked=None)
+        PanelArm._drain_vacuum(panel)
+        self.assertEqual(1, reads[0])
+        self.assertTrue(panel.vacuum and cup.holding)
+
     def test_a_refused_part_leaves_the_held_one_held(self) -> None:
         now = [self.poses(_down(z=0.0065))]
         cup = self._cup(now)

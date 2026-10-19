@@ -466,9 +466,13 @@ class Suction:
 
     @property
     def held_mass(self) -> float:
-        """The held part's mass [kg], 0 when nothing is held."""
+        """The held part's mass [kg], 0 when nothing is held.
+
+        Read off the device, since a part's mass is tunable live, and only its
+        own entry: the page's readout asks for it every refresh.
+        """
         held = self.held
-        return float(self.model.body_mass.numpy()[held]) if held >= 0 else 0.0
+        return float(self.model.body_mass[held : held + 1].numpy()[0]) if held >= 0 else 0.0
 
     def hold(self, body: int | None = None, *, tier: str = "auto", check: bool = True) -> SealReport:
         """Seal onto a part and hold it: by weld where MuJoCo steps the part, else by wrench.
