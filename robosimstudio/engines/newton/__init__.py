@@ -211,7 +211,10 @@ VBD = register_backend(
     # and the 1922-particle towel took 193 s to build and 96 s for 20 control
     # steps (0.003x realtime). A CPU scene routes cloth to SuperDex instead;
     # ``newton.solvers.SolverVBD`` by dotted path states no devices and is not refused.
+    # The note is what a CPU build that has nothing else for paper, tape or a
+    # brush says (robosimstudio.scene.physics.devices.unserved).
     devices=("cuda",),
+    cpu_note="its Warp kernels run on one CPU thread there: a 1922-particle towel stepped at 0.003x realtime",
 )
 XPBD = register_backend(
     "xpbd",
@@ -271,4 +274,17 @@ MPM = register_backend(
         "project_gap": 0.03,
         "step_hz": 60.0,
     },
+    # CUDA only, as VBD is and for the same reason: Warp's kernels run on a CPU,
+    # one thread at a time. Measured with the GPUs hidden (examples/10_granular/
+    # 00_sweep_rice, its 28,812-grain rice bed beside the YAM): 60 s to build and
+    # 35.5 s for 20 control steps, 0.009x realtime, against 15.6 ms a step
+    # graph-captured on a GPU -- the capture this solver is written for (see the
+    # module's docstring) has no CPU form. The honey pour and the dough roll
+    # took 111 and 118 s to build and 67 and 74 s for 20 steps. A CPU scene
+    # with a heap, a liquid or a dough is refused naming it;
+    # ``robosimstudio.engines.newton.mpm.SolverMPM`` by dotted path states no
+    # devices and is not.
+    devices=("cuda",),
+    cpu_note="Newton's implicit MPM is captured into a CUDA graph here, and on a CPU a 28,812-grain rice bed "
+    "stepped at 0.009x realtime",
 )

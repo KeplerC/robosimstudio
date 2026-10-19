@@ -507,7 +507,11 @@ class BackendInfo:
     build is refused before the solver's own importer raises from deep inside
     the conversion."""
     cpu_note: str = ""
-    """How the solver runs on a CPU, in a few words, for the platform readout."""
+    """How the solver runs on a CPU, in a few words, for the platform readout.
+
+    For a solver registered without ``"cpu"`` in :attr:`devices`, why it is not
+    run there: the clause a CPU build that has nothing else for its kind prints
+    when it refuses that kind (:func:`robosimstudio.scene.physics.devices.unserved`)."""
 
     def __eq__(self, other: object) -> bool:  # schemas are mappings; compare them by content
         if not isinstance(other, BackendInfo):
@@ -631,7 +635,8 @@ def register_backend(
             leaves it unknown -- see :attr:`BackendInfo.devices`.
         cpu_params: Kwargs a CPU build must have -- see :attr:`BackendInfo.cpu_params`.
         cpu_max_worlds: Worlds it steps on a CPU; 0 is no limit.
-        cpu_note: How it runs on a CPU, for the platform readout.
+        cpu_note: How it runs on a CPU, for the platform readout -- or, for a
+            backend with no CPU path, why not, for the refusal that names it.
     """
     unknown = set(devices) - {"cuda", "cpu"}
     if unknown:
