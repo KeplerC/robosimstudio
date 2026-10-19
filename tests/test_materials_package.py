@@ -167,7 +167,7 @@ def _package_files() -> list[Path]:
 
 SCANNED = dedent(
     """
-    import json, sys
+    import json, os, sys
     import robosimstudio as rss
     from robosimstudio.specs.physics import list_domains
     from robosimstudio.scene.registry import get_entity
@@ -176,7 +176,7 @@ SCANNED = dedent(
     stray = [m for m in loaded if not all(part.isidentifier() for part in m.split("."))]
     from_examples = sorted(
         name for name, module in list(sys.modules.items())
-        if getattr(module, "__file__", None) and "/examples/" in module.__file__
+        if getattr(module, "__file__", None) and os.path.realpath(module.__file__).startswith(__EXAMPLES__)
     )
     print(json.dumps({
         "domains": domains, "loaded": loaded, "stray": stray, "from_examples": from_examples,
@@ -197,6 +197,7 @@ class TestAFreshProcessFindsTheKinds(unittest.TestCase):
             SCANNED.replace("__ENTITIES__", repr([(kind, entity) for kind, (_, _, _, entity) in KINDS.items()]))
             .replace("__FLAT__", repr(tuple(FLAT)))
             .replace("__LISTED__", repr(tuple(LISTED)))
+            .replace("__EXAMPLES__", repr(f"{REPO / 'examples'}{os.sep}"))
         )
         proc = _run(script)
         if proc.returncode != 0:
