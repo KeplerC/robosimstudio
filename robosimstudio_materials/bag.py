@@ -523,6 +523,10 @@ _BAG_SHELL = {
 }
 """What a bag is built with where its record says nothing: :data:`CANVAS`, colliding with itself, undamped."""
 
+_OLD_NAMES = {"shell_young": "young", "shell_poisson": "poisson"}
+"""The names a bag record stated its modulus under before it took the shell's, to the shell's: a record written
+then, which a repro bundle replays verbatim, still states the bag's own modulus."""
+
 
 def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None, tet_materials=None) -> dict:
     """The bag as a SuperDex shell: the bridge's shell builder, under the bag's own defaults.
@@ -534,7 +538,14 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
     modulus is the shell's ``young``/``poisson``, as a sheet's is.
     """
     del particle_q, tet_indices, tet_materials
-    return bridge.build_shell(record, defaults=_BAG_SHELL)
+    # A record from before the bag stated the shell's names says ``shell_young``/``shell_poisson``
+    # (``_OLD_NAMES``): read as the shell's, or a replayed bag is built at the canvas's modulus, not the one
+    # it states. A shell name stated beside one wins.
+    params = dict(record.get("params", {}))
+    for old, new in _OLD_NAMES.items():
+        if old in params:
+            params.setdefault(new, params.pop(old))
+    return bridge.build_shell({**record, "params": params}, defaults=_BAG_SHELL)
 
 
 def _read_bag(model: Any, base: Any) -> Any:
@@ -562,7 +573,8 @@ register_actor_builder(
     "superdex",
     "bag",
     build_bag_actor,
-    # What the shell builder reads, off its own declaration: a key ``build_shell`` learns is the bag's too.
+    # What the shell builder reads, off its own declaration: a key ``build_shell`` learns is the bag's too. Not
+    # ``_OLD_NAMES``: the entity states the shell's, and only a replayed record, which is not composed, the old.
     consumes=actor_consumes("superdex", "shell"),
     summary="SuperDex builds a bag as a self-colliding shell in its own frame.",
 )

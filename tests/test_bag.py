@@ -328,6 +328,40 @@ class TestTheEngineActor(unittest.TestCase):
         entry = build_bag_actor(bridge, {**record, "params": entity.host_actor().params})
         np.testing.assert_allclose(entry["read"](), np.tile([0.6, 0.01, 0.75], (len(vertices), 1)), atol=1e-12)
 
+    def test_a_record_stating_the_old_names_keeps_its_modulus(self) -> None:
+        """A bag record from before it stated the shell's ``young``/``poisson`` says ``shell_young``/``shell_poisson``,
+        and a repro bundle replays it verbatim: read as the shell's, not dropped for the canvas's 1e6 and 0.3. A shell
+        name stated beside one wins."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from robosimstudio.engines.superdex.bridge import SuperdexBridge
+        from robosimstudio_materials.bag import build_bag_actor
+
+        class Arr:
+            def __init__(self, a) -> None:
+                self.a = np.asarray(a)
+
+            def numpy(self):
+                return self.a
+
+        _, vertices, faces = _bag(cells=(4, 4))
+        physics = mock.MagicMock()
+        physics.uses_double_precision.return_value = False
+        bridge = object.__new__(SuperdexBridge)
+        bridge.physics, bridge.recipe, bridge.scenes, bridge.num_worlds = physics, {}, [None], 1
+        bridge.model = SimpleNamespace(particle_q=Arr(vertices), tri_indices=Arr(faces), tri_count=len(faces))
+        record = {"name": "bag", "particle_start": 0, "particle_count": len(vertices)}
+        moduli = physics.experimental.shell_material_params_from3d_isotropic
+        for params, want in (
+            ({"shell_young": 2.0e5, "shell_poisson": 0.35}, (2.0e5, 0.35)),
+            ({"shell_young": 2.0e5, "young": 3.0e5}, (3.0e5, 0.3)),
+            ({}, (1.0e6, 0.3)),
+        ):
+            with self.subTest(**params):
+                build_bag_actor(bridge, {**record, "params": params})
+                self.assertEqual(want, tuple(moduli.call_args.args[:2]))
+
 
 if __name__ == "__main__":
     unittest.main()
