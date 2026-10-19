@@ -126,6 +126,24 @@ class TestTheLoopMeasures(unittest.TestCase):
         self.assertTrue(encircles(hung, *peg), "with no length, the line is enough")
         self.assertFalse(encircles(hung + np.array([0.0, 0.2, 0.0]), *peg, 0.08), "beside the peg")
 
+    def test_on_a_post_is_counted_by_height_along_it_not_by_how_near_the_loop_lies(self) -> None:
+        """A band dropped slack over a post is on it however wide it is; held over its top or slid off, it is not."""
+        from robosimstudio_materials.rod.band import _encircles_rod, encircles, loop_winding
+
+        slack = _circle(32, 0.03, (0.1, 0.0, 0.002))  # a 60 mm band flat on the bench round a 12 mm post
+        post = ((0.1, 0.0, 0.0), (0.0, 0.0, 1.0))
+        self.assertTrue(encircles(slack, *post, 0.06), "lying round a 60 mm post, touching nothing")
+        feature = {"axis": [[0.1, 0.0, 0.0], [0.1, 0.0, 0.06]], "radius": 0.006}
+        self.assertTrue(_encircles_rod(slack, feature)["encircles"])
+        self.assertFalse(encircles(slack + np.array([0.0, 0.0, 0.07]), *post, 0.06), "held 10 mm over its top")
+        self.assertFalse(encircles(slack + np.array([0.08, 0.0, 0.0]), *post, 0.06), "beside it")
+        tipped = slack.copy()
+        tipped[:, 2] = 0.5 * (slack[:, 0] - 0.1) + 0.06  # tipped 27 degrees about y, its middle at the post's top
+        self.assertAlmostEqual(1.0, abs(loop_winding(tipped, *post)), places=6)
+        down, up = np.array([0.0, 0.0, -0.01]), np.array([0.0, 0.0, 0.01])
+        self.assertTrue(encircles(tipped + down, *post, 0.06), "270 degrees of its turn below the top")
+        self.assertFalse(encircles(tipped + up, *post, 0.06), "90 degrees below it")
+
     def test_an_x_y_origin_names_a_vertical_line_and_no_other(self) -> None:
         """Along any other direction a 2-D origin is refused, the same way by both measures and the axis feature."""
         from robosimstudio_materials.rod.band import _encircles_axis, encircles, loop_winding

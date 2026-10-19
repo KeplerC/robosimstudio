@@ -176,14 +176,17 @@ def loop_winding(positions: np.ndarray, origin, direction=(0.0, 0.0, 1.0)) -> fl
     return float(_subtended(points, o, d).sum() / (2.0 * math.pi))
 
 
-def encircles(positions: np.ndarray, origin, direction, length: float | None = None, *, reach: float = 0.02) -> bool:
+def encircles(positions: np.ndarray, origin, direction, length: float | None = None) -> bool:
     """Whether a closed loop is round a peg: once round its axis, and on the peg rather than past its end.
 
     :func:`loop_winding` counts turns round the axis's whole line, so a band
     hanging in front of a peg's tip, the line through the peg passing through
-    the loop, would count. ``length`` closes that: the loop's points within
-    ``reach`` of the axis must lie between ``origin`` and ``origin + length *
-    direction`` -- the peg itself. ``None`` takes the line.
+    the loop, would count. ``length`` closes that: at least half of the turn
+    must be made between ``origin`` and ``origin + length * direction``, each
+    segment placed by its height along the axis, not by how near the axis it
+    is. A band lying slack round a post reads ``True`` however wide it is; one
+    held over the post's top, or slid more than half off its end, ``False``.
+    ``None`` takes the line.
 
     Args:
         positions: ``[n, 3]`` points in loop order [m].
@@ -192,8 +195,6 @@ def encircles(positions: np.ndarray, origin, direction, length: float | None = N
             length is counted from the root, so it needs ``(x, y, z)``.
         direction: Along the peg, root to tip.
         length: The peg's length [m], or ``None``.
-        reach: How near the axis a point must be to count as on it [m]: the
-            peg's radius plus the cord's, and some.
     """
     root = np.asarray(origin, dtype=np.float64).reshape(-1)
     if length is not None and root.shape != (3,):
@@ -204,13 +205,12 @@ def encircles(positions: np.ndarray, origin, direction, length: float | None = N
         return False
     if length is None:
         return True
+    o, d = _axis(root, direction)
     points = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
-    d = np.asarray(direction, dtype=np.float64)
-    d /= float(np.linalg.norm(d))
-    rel = points - root
-    along = rel @ d
-    near = np.linalg.norm(rel - along[:, None] * d, axis=1) <= float(reach)
-    return bool(near.any() and np.all((along[near] >= 0.0) & (along[near] <= float(length))))
+    along = (points - o) @ d
+    middle = 0.5 * (along + np.roll(along, -1))  # each segment's height, the closing one last
+    on = (middle >= 0.0) & (middle <= float(length))
+    return bool(abs(_subtended(points, o, d)[on].sum()) >= math.pi)
 
 
 register_atom(
@@ -228,8 +228,8 @@ register_atom(
         provenance=(
             "Designed here for the closed SuperDex rod (RodSpec.closed): a loop's winding about a line is an "
             "integer, so the check is |turns| >= 0.5 with no calibration band; a rod feature (a peg's two ends) "
-            "or an axis that states a length is held to the peg's span, past which a band hanging in front of "
-            "its tip would also count."
+            "or an axis that states a length is held to the peg's span: half the turn must be made between its "
+            "root and its tip, by height along it, or a band hanging in front of its tip would also count."
         ),
     )
 )
@@ -261,9 +261,7 @@ def _encircles_rod(positions: np.ndarray, rod: dict) -> dict:
     """A loop's points against a ``rod`` feature in world: ``axis`` is the peg's two ends."""
     ends = np.asarray(rod["axis"], dtype=np.float64).reshape(2, 3)
     span = ends[1] - ends[0]
-    length = float(np.linalg.norm(span))
-    reach = float(rod.get("radius", 0.0)) + 0.012  # the peg's radius, a cord's, and some
     return {
         "turns": loop_winding(positions, ends[0], span),
-        "encircles": encircles(positions, ends[0], span, length, reach=max(reach, 0.012)),
+        "encircles": encircles(positions, ends[0], span, float(np.linalg.norm(span))),
     }
