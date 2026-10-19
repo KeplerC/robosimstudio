@@ -182,6 +182,28 @@ class TestTheBoxTakesItsOwnSlot(unittest.TestCase):
         finally:
             session.teardown()
 
+    def test_a_click_grab_pinned_to_the_right_hand_by_hand(self) -> None:
+        """Unticked, the box let go of every handle pinned to the right hand, the user's own among them."""
+        sim, kwargs = _run("13_paper/00_fold_paper.py")
+        session = open_session(sim, 9736, kwargs.get("page"))
+        try:
+            inputs = session.server.gui._gui_input_handle_from_uuid.values()
+            box = next(h for h in inputs if getattr(h, "label", "") == "Edge on the right hand")
+            grips, paper = session.deformables, sim["paper"]
+            q = np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)
+            grips.click_at("paper", q[int(paper.particles[np.argmax(q[paper.particles, 1])])])  # the far edge
+            tick(session, 1)
+            (click,) = [h.index for h in grips.handles.live]
+            grips.follow_arm[click] = "right"  # what the slot's Pin dropdown writes
+            box.value = True
+            tick(session, 1)
+            box.value = False
+            tick(session, 1)
+            self.assertEqual([click], [h.index for h in grips.handles.live], "unticked, the user's grip stays")
+            self.assertEqual("right", grips.follow_arm[click], "on the hand the user put it on")
+        finally:
+            session.teardown()
+
 
 if __name__ == "__main__":
     unittest.main()

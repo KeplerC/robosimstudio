@@ -435,6 +435,118 @@ class TestAGripPinnedToAHandIsTakenWhereItIs(unittest.TestCase):
             session.teardown()
 
 
+def _sim_with_an_edge():
+    """``_sim``'s towel with one declared set, its near edge row, for a set grab to take."""
+    import robosimstudio as rss
+
+    scene = rss.Scene(cell="void", name="panels")
+    scene.add(rss.robot("panda"))
+    edge = ("edge", lambda rest: rest[:, 1] <= rest[:, 1].min() + 1e-4)
+    scene.add(rss.sheet(name="towel", size=(0.2, 0.2), cells=(8, 8), at=(-0.1, -0.1, 0.4), particle_sets=(edge,)))
+    return scene.build()
+
+
+class TestASetGrabsPinGoesWithTheGrab(unittest.TestCase):
+    """A pin ``grab_set(arm=...)`` puts on a slot shows on the slot's dropdown and goes when the grab is let go.
+
+    The pin was written to ``follow_arm`` and nowhere else: the ``Pin N to hand``
+    dropdown went on showing no hand, so the page could not unpin it, and the pin
+    outlived the grab -- the next click that took the slot rode the hand. A pin the
+    user set in the dropdown is the user's and stays through a release.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.sim = _sim_with_an_edge()
+
+    def _open(self, port: int):
+        session = _session(self.sim, port)
+        inputs = session.server.gui._gui_input_handle_from_uuid.values()
+        pins = sorted((h for h in inputs if str(getattr(h, "label", "")).startswith("Pin ")), key=lambda h: h.label)
+        return session, session.deformables, next(iter(session.arms)), pins
+
+    def test_the_dropdown_follows_the_pin_both_ways(self) -> None:
+        session, grips, arm, pins = self._open(8977)
+        try:
+            self.assertTrue(grips.grab_set("edge", arm=arm), "the set grab took nothing, so this is untested")
+            (slot,) = [h.index for h in grips.handles.live]
+            self.assertEqual(arm, pins[slot].value, "the dropdown shows the hand the grab pinned the slot to")
+            pins[slot].value = ""  # what the browser does when the user unpins it
+            self.assertEqual("", grips.follow_arm[slot], "and unpinning it there unpins the slot")
+        finally:
+            session.teardown()
+
+    def test_letting_go_unpins_what_the_grab_pinned(self) -> None:
+        import numpy as np
+
+        session, grips, arm, pins = self._open(8978)
+
+        def reset() -> None:
+            session.reset_requested = True
+            session.tick()
+
+        try:
+            for release in (session.release_all, session.release_last, reset):
+                self.assertTrue(grips.grab_set("edge", arm=arm), "the set grab took nothing, so this is untested")
+                (slot,) = [h.index for h in grips.handles.live]
+                release()
+                self.assertEqual("", grips.follow_arm[slot], "the grab's pin went with it")
+                self.assertEqual("", pins[slot].value, "and the dropdown says so")
+            q = np.asarray(self.sim.state.particle_q.numpy(), dtype=np.float64)
+            grips.click_at("towel", q[int(self.sim["towel"].particles[-1])])
+            grips.drain()
+            (click,) = [h.index for h in grips.handles.live]
+            self.assertEqual("", grips.follow_arm[click], "a click on the freed slot stays on the mouse")
+        finally:
+            session.teardown()
+
+    def test_a_pin_the_user_set_stays(self) -> None:
+        session, grips, arm, pins = self._open(8979)
+        try:
+            pins[0].value = arm  # the user pins slot 1 to the hand
+            self.assertTrue(grips.grab_set("edge"), "the set grab took nothing, so this is untested")
+            self.assertEqual([0], [h.index for h in grips.handles.live])
+            session.release_all()
+            self.assertEqual(arm, grips.follow_arm[0], "a release leaves the user's pin")
+            self.assertEqual(arm, pins[0].value)
+        finally:
+            session.teardown()
+
+
+class TestAPagesSetGrabIsItsOwn(unittest.TestCase):
+    """``request_set`` names its cloth, set and hand, and its release lets go of what it took and nothing else.
+
+    The fold page used to write the panel's selections and its ``grab_set_arm`` to
+    ask, leaving them changed for the panel's own **Grab set**, and let go by hand:
+    every handle pinned to the right hand, a grip the user pinned there included.
+    """
+
+    def test_the_selections_stay_and_the_users_grip_stays(self) -> None:
+        import numpy as np
+
+        sim = _sim_with_an_edge()
+        session = _session(sim, 8980)
+        try:
+            grips, arm = session.deformables, next(iter(session.arms))
+            q = np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)
+            grips.click_at("towel", q[int(sim["towel"].particles[-1])])  # the far corner, nowhere near the edge
+            grips.drain()
+            (click,) = [h.index for h in grips.handles.live]
+            grips.follow_arm[click] = arm  # the user pins it to the same hand
+            grips.selected_set = ""
+            grips.request_set("towel", "edge", arm)
+            grips.drain()
+            (edge,) = [h.index for h in grips.handles.live if h.index != click]
+            self.assertEqual(arm, grips.follow_arm[edge], "the edge rides the hand")
+            self.assertEqual("", grips.selected_set, "and the panel's Set selection is the user's still")
+            grips.request_set("towel", "edge", arm, hold=False)
+            grips.drain()
+            self.assertEqual([click], [h.index for h in grips.handles.live], "only the request's grab is let go")
+            self.assertEqual(arm, grips.follow_arm[click], "and the user's pin stays")
+        finally:
+            session.teardown()
+
+
 class TestTheInspectorWaitsToBeAsked(unittest.TestCase):
     def test_nothing_is_selected_on_a_scene_with_no_goal(self) -> None:
         """A hand-assembled scene has no "first thing the goal is about", and the

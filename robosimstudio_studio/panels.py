@@ -47,6 +47,7 @@ Every panel obeys the same contract:
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -826,10 +827,14 @@ class PanelCloth(Panel):
         self.release_all_requested = False
         self.follow_arm = [""] * len(self.draggers)
         """Which arm each handle rides, by slot. ``""`` leaves it on the mouse."""
-        self.grab_set_arm = ""
-        """The hand ``Grab set`` pins the slot it takes to. ``""`` leaves that slot's pin as it is."""
-        self.release_arm_requested = ""
-        """Let go of every handle pinned to this hand and unpin their slots; the other handles stay."""
+        self.set_requests: deque[tuple[str, str, str, bool]] = deque()
+        """A page's own set grabs and releases, ``(cloth, set, arm, hold)``, waiting for :meth:`drain`. See :meth:`request_set`."""
+        self._follow: list[Any] = []
+        """The ``Pin N to hand`` dropdowns, by slot; none on a page without the fold."""
+        self._grab_pins: dict[int, str] = {}
+        """Slots a set grab pinned to a hand, each with the pin it had before: the grab's to put back when it lets go."""
+        self._requested: dict[int, tuple[str, str, str]] = {}
+        """Slots :meth:`request_set` took, by the ``(cloth, set, arm)`` it was asked for."""
         self.selected = self.names[0] if self.names else ""
         self.pending: tuple[str, np.ndarray] | None = None
         """A click waiting to be serviced on the main thread."""
@@ -893,11 +898,13 @@ class PanelCloth(Panel):
             regrip = gui.add_button("Re-grip here")
             regrip.on_click(lambda _: setattr(self, "regrip_requested", True))
             arms = ("", *self.session.arms.keys())
+            self._follow = []
             for slot in range(len(self.draggers)):
-                follow = gui.add_dropdown(f"Pin {slot + 1} to hand", options=arms, initial_value="")
+                follow = gui.add_dropdown(f"Pin {slot + 1} to hand", options=arms, initial_value=self.follow_arm[slot])
                 # slot is bound per iteration, not read from the loop variable at
                 # callback time -- viser fires these long after the loop is over.
-                follow.on_update(lambda _, s=slot, w=follow: self.follow_arm.__setitem__(s, str(w.value)))
+                follow.on_update(lambda _, s=slot, w=follow: self._pick_arm(s, str(w.value)))
+                self._follow.append(follow)
             self._held = gui.add_text("Held", initial_value="nothing", disabled=True)
             self._state = gui.add_text("Cloth", initial_value="", disabled=True)
 
@@ -915,7 +922,7 @@ class PanelCloth(Panel):
             return ()
         return tuple(sorted(key.split("/", 1)[-1] for key in handle.sets))
 
-    def grab_set(self, set_name: str, arm: str = "") -> int:
+    def grab_set(self, set_name: str, arm: str = "", cloth: str = "") -> int:
         """Take hold of one declared set. Main thread. Returns particles held.
 
         Aimed at the set's own centroid and restricted to its own indices, with
@@ -930,17 +937,21 @@ class PanelCloth(Panel):
 
         ``arm`` pins the slot the grab takes to that hand, whichever slot that
         is: a page that pinned a slot by number before asking pinned the one a
-        click grab held whenever the click came first.
+        click grab held whenever the click came first. That pin is the grab's,
+        shown on the slot's dropdown and put back when the grab lets go
+        (:meth:`_forget`); a pin chosen in the dropdown is the user's and stays.
+        ``cloth`` names the deformable; ``""`` is the selected one.
 
         Restores the click radius afterwards (:meth:`_grab_all`), because that
         number is the aim tolerance for the *other* way of grabbing and a set
         grab has no business changing what counts as a miss.
         """
-        handle = self.env.handles.deformables.get(self.selected)
-        cloth = self.env.scene.by_name.get(self.selected)
-        if handle is None or cloth is None or not set_name:
+        name = cloth or self.selected
+        handle = self.env.handles.deformables.get(name)
+        body = self.env.scene.by_name.get(name)
+        if handle is None or body is None or not set_name:
             return 0
-        indices = handle.sets.get(set_name) or handle.sets.get(f"{self.selected}/{set_name}")
+        indices = handle.sets.get(set_name) or handle.sets.get(f"{name}/{set_name}")
         if indices is None or not len(indices):
             return 0
         points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
@@ -952,13 +963,56 @@ class PanelCloth(Panel):
         if not taken:
             self._release(slot)
             return 0
-        self.follow_arm[slot.index] = arm
+        if arm != self.follow_arm[slot.index]:
+            self._grab_pins[slot.index] = self.follow_arm[slot.index]
+            self._pin(slot.index, arm)
         self.miss = 0.0
-        self._hand_over(slot, self.selected, dragger, centre, quat)
-        slot.place(centre, quat, key=("cloth", self.selected), label=f"{set_name} ({taken})")
-        if hasattr(cloth, "release_handle"):
-            cloth.release_handle()
+        self._hand_over(slot, name, dragger, centre, quat)
+        slot.place(centre, quat, key=("cloth", name), label=f"{set_name} ({taken})")
+        if hasattr(body, "release_handle"):
+            body.release_handle()
         return int(taken)
+
+    def request_set(self, cloth: str, set_name: str, arm: str = "", *, hold: bool = True) -> None:
+        """Ask for a grab of one declared set on the next step, or let go of one asked for. Any thread.
+
+        A page's own way to :meth:`grab_set`: the request carries its cloth, set
+        and hand, so the panel's ``Cloth`` and ``Set`` selections -- the user's
+        -- are left as they are. ``hold=False`` lets go of the handles a request
+        for the same three took, and of nothing else: a grip made by hand stays,
+        pinned to the same hand or not.
+        """
+        self.set_requests.append((str(cloth), str(set_name), str(arm), bool(hold)))
+
+    def _serve(self, cloth: str, set_name: str, arm: str, hold: bool) -> None:
+        """Carry out one :meth:`request_set`. Main thread."""
+        asked = (cloth, set_name, arm)
+        if hold:
+            if self.grab_set(set_name, arm=arm, cloth=cloth):
+                self._requested[self.handles.newest().index] = asked
+            return
+        for handle in self.handles.live:
+            if self._requested.get(handle.index) == asked:
+                self._release(handle)
+
+    def _pin(self, index: int, arm: str) -> None:
+        """Pin slot ``index`` to ``arm`` (``""`` unpins), and show it on the slot's dropdown."""
+        self.follow_arm[index] = arm
+        if index < len(self._follow):
+            self._follow[index].value = arm  # fires _pick_arm, which finds nothing changed
+
+    def _pick_arm(self, index: int, arm: str) -> None:
+        """A ``Pin N to hand`` dropdown changed: the slot's pin is the user's now, and a release leaves it."""
+        if arm == self.follow_arm[index]:
+            return  # :meth:`_pin` showing a pin it made, not the user choosing one
+        self.follow_arm[index] = arm
+        self._grab_pins.pop(index, None)
+
+    def _forget(self, index: int) -> None:
+        """What a slot's grab brought with it goes with the grab: the pin a set grab made, and its request."""
+        self._requested.pop(index, None)
+        if index in self._grab_pins:
+            self._pin(index, self._grab_pins.pop(index))
 
     def owner_of(self, particle: int) -> str:
         """Which cloth a particle belongs to, or ``""``.
@@ -1018,7 +1072,9 @@ class PanelCloth(Panel):
             self._grab(*pending)
         if self.grab_set_requested:
             self.grab_set_requested = False
-            self.grab_set(self.selected_set, arm=self.grab_set_arm)
+            self.grab_set(self.selected_set)
+        while self.set_requests:
+            self._serve(*self.set_requests.popleft())
         if self.regrip_requested:
             self.regrip_requested = False
             self._regrip()
@@ -1029,12 +1085,6 @@ class PanelCloth(Panel):
             self.release_all_requested = False
             for handle in self.handles.live:
                 self._release(handle)
-        if self.release_arm_requested:
-            arm, self.release_arm_requested = self.release_arm_requested, ""
-            for handle in self.handles.live:
-                if self.follow_arm[handle.index] == arm:
-                    self._release(handle)
-                    self.follow_arm[handle.index] = ""
         # Before the targets are read, so a linked drag's followers are pinned
         # to where they are *now* rather than to last step's pose.
         self.handles.drain()
@@ -1098,6 +1148,7 @@ class PanelCloth(Panel):
         slot = self.handles.acquire()
         self._drop_pin(slot.index)
         self.draggers[slot.index].release()
+        self._forget(slot.index)
         return slot
 
     def _seize(self, slot, name: str, cloth, position, quat) -> bool:
@@ -1253,6 +1304,7 @@ class PanelCloth(Panel):
             return
         self._drop_pin(slot.index)
         self.draggers[slot.index].release()
+        self._forget(slot.index)
         slot.clear()
 
     def declared_states(self) -> str:
@@ -1361,6 +1413,8 @@ class PanelCloth(Panel):
         for dragger in self.draggers:
             dragger.release()
         self.handles.release_all()
+        for index in range(len(self.draggers)):
+            self._forget(index)
         self.miss = 0.0
         if self._held is not None:
             self._held.value = "nothing"
