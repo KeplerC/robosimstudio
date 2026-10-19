@@ -286,7 +286,8 @@ class EntityBag(EntityCloth):
         spec, material = self.spec, self.spec.material
         params: dict = {
             "particle_radius": float(material.particle_radius),
-            "self_contact": bool(spec.self_contact),
+            # As cloth reads it: a declared ``sim`` is the scene's answer, so it is the engine's too.
+            "self_contact": bool(self.sim_requirements().self_contact),
             "thickness": float(material.thickness),
             "areal_density": float(material.areal_density),
             "friction": float(material.friction),

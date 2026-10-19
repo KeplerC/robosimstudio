@@ -167,6 +167,16 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual(3, bag(lip=0.026).lip_cells)
         self.assertEqual(0.0, CANVAS.thickness - 1.0e-3)
 
+    def test_a_declared_sim_states_the_engines_self_contact_as_it_states_the_scenes(self) -> None:
+        """The record's requirements are what the scene is composed from, so the shell collides as they say."""
+        from robosimstudio.specs.physics import SimRequirements
+
+        for on in (True, False):
+            with self.subTest(declared=on):
+                entity, _, _ = _bag(self_contact=not on, sim=SimRequirements(domain="bag", self_contact=on))
+                self.assertIs(on, entity.sim_requirements().self_contact)
+                self.assertIs(on, entity.host_actor().params["self_contact"])
+
     def test_the_arrangement_puts_the_bag_on_superdex_beside_the_soft_kind(self) -> None:
         import robosimstudio as rss
 
