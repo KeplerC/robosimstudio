@@ -109,6 +109,14 @@ def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
             "or a heavy mirror. Use precision='64' unless you are deliberately measuring this.",
             precision,
         )
+    elif str(precision) == "64" and coupler == "legacy":
+        # backend("genesis") states no precision, and SolverGenesis's default is the IPC coupler's.
+        log.warning(
+            "genesis initialised at precision=64 for a liquid island: its SPH is right and about 8x slower per "
+            "substep than at 32 (1.93 ms against 0.25 ms for 1,728 particles, p2_cost.py), and its reaction reads "
+            "at 32. State backend('genesis', substeps=20, precision='32'), as rss.WATER_60HZ does, unless an IPC "
+            "island shares the process."
+        )
     if not os.environ.get("CUDA_VISIBLE_DEVICES"):
         log.debug(
             "CUDA_VISIBLE_DEVICES is unset; libuipc takes whatever device Genesis initialises on, "

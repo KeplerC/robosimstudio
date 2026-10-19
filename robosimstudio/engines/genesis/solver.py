@@ -28,12 +28,15 @@ class SolverGenesis(SolverHost):
     Args:
         model: The finalized Newton model.
         recipe: The manifest's host-island record.
-        substeps: Genesis steps per control step.
+        substeps: Genesis steps per control step. A liquid island taking SPH
+            substeps longer than it was measured to hold its walls at is refused
+            (:data:`~robosimstudio.engines.genesis.sph.LONGEST_SUBSTEP`): 20 at 60 Hz.
         precision: ``"64"``, and changing it is a correctness decision rather
             than a performance one for the IPC coupler --- see
             :mod:`robosimstudio.engines.genesis.runtime`. A liquid island reads
             its reaction as a momentum change and states ``"32"``, which is 8x
-            cheaper there (:mod:`robosimstudio.engines.genesis.sph`).
+            cheaper there (:mod:`robosimstudio.engines.genesis.sph`); one that
+            initialises Genesis at 64 is warned.
         feedback: ``"auto"`` or ``"off"`` --- the IPC constraint-reaction harvest
             for two-way mirrors.
         feedback_alpha: EMA coefficient for a *rising* harvested force; 1.0

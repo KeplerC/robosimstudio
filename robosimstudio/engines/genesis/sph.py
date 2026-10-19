@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import math
 from typing import Any
 
 import numpy as np
@@ -85,6 +86,7 @@ from .runtime import ensure_initialized
 
 __all__ = [
     "GENESIS_MASS_VOLUME",
+    "LONGEST_SUBSTEP",
     "MIRROR_DENSITY",
     "SPH_CONSUMES",
     "SphBridge",
@@ -100,6 +102,12 @@ velocity that motion leaves is the reaction read back."""
 
 GENESIS_MASS_VOLUME = 0.8
 """Genesis's particle mass over ``size**3 * rho`` (``SPHSolver._particle_volume``)."""
+
+LONGEST_SUBSTEP = 1.0 / 1200.0
+"""The longest SPH substep [s] a liquid held in its walls in the pour probes: 1e4 Pa water at 4 mm stood in the
+glass at 20 substeps a 60 Hz control step, and 5e3 Pa lost 618 of 1,728 through it at 16 (``p3_pour.py``). Stiffer
+water needs shorter ones: 5e4 Pa fell through the cup at 30 and held at 40 (``p1_rest.py``). A liquid island asking
+for longer is refused (:class:`SphBridge`), because ``backend("genesis")`` with no ``substeps`` asks for one."""
 
 SPH_CONSUMES = ("density", "exponent", "spacing", "stiffness", "surface_tension", "viscosity")
 """What an ``sph`` actor's params may state, and the builder reads."""
@@ -155,7 +163,8 @@ class SphBridge:
         substeps: Genesis substeps per control step. One ``scene.step()`` runs them
             all (``SimOptions.substeps``): the legacy coupler takes its ``dt`` per
             substep, which is the IPC bridge's reason for stepping one at a time
-            and is not this one's.
+            and is not this one's. Substeps longer than :data:`LONGEST_SUBSTEP` are
+            refused before the engine is asked for: 20 a 60 Hz control step is the fewest.
         precision: ``"32"`` (see the module docstring); ``"64"`` runs, 8x slower.
         feedback: ``"auto"`` or ``"off"``.
         pose_source: ``"fresh"`` or ``"snapshot"``.
@@ -171,13 +180,22 @@ class SphBridge:
         feedback: str = "auto",
         pose_source: str = "fresh",
     ) -> None:
+        self.control_dt = 1.0 / float(recipe.get("control_hz", 60.0))
+        self.substeps = max(1, int(substeps))
+        need = math.ceil(self.control_dt / LONGEST_SUBSTEP - 1.0e-9)
+        if self.substeps < need:
+            raise ValueError(
+                f"genesis island {recipe.get('island')!r}: its liquid takes {self.substeps} SPH substep(s) a "
+                f"{1e3 * self.control_dt:.1f} ms control step, {1e3 * self.control_dt / self.substeps:.2f} ms each, "
+                f"where the pour probes held water in its walls at {1e3 * LONGEST_SUBSTEP:.2f} ms and lost it through "
+                f"them at 1.04 ms; state backend('genesis', substeps={need}, precision='32') for the liquid's kind, as "
+                "rss.WATER_60HZ does (more for water stiffer than 1e4 Pa)"
+            )
         gs = ensure_initialized(precision, coupler="legacy")
         self.gs = gs
         self.model = model
         self.recipe = dict(recipe)
-        self.substeps = max(1, int(substeps))
         self.feedback = str(feedback)
-        self.control_dt = 1.0 / float(recipe.get("control_hz", 60.0))
 
         geoms = [actor_geometry(model, record) for record in recipe.get("actors", ())]
         spacing = sorted({float(g.params.get("spacing", 0.004)) for g in geoms})

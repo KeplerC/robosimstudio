@@ -112,6 +112,61 @@ class TestAPrecisionConflictNamesWhoseHarvestItHurts(unittest.TestCase):
     def test_a_liquid_after_an_ipc_island_is_told_it_runs_slow(self):
         self.assertIn("8x slower", self._later("64", "32", "legacy"))
 
+    def _first(self, precision: str, coupler: str) -> None:
+        from unittest import mock
+
+        from robosimstudio.engines.genesis import runtime
+
+        with (
+            mock.patch.object(runtime, "require_genesis", return_value=mock.MagicMock()),
+            mock.patch.dict(runtime._ENGINE, {"precision": None}),
+        ):
+            runtime.ensure_initialized(precision, coupler=coupler)
+
+    def test_a_liquid_that_inits_at_64_is_told_it_runs_slow(self):
+        """``backend("genesis")`` without ``precision="32"`` inits the process at float64 for a liquid island."""
+        from robosimstudio.engines.genesis import runtime
+
+        with self.assertLogs(runtime.log, "WARNING") as logs:
+            self._first("64", "legacy")
+        said = "\n".join(logs.output)
+        self.assertIn("8x slower", said)
+        self.assertIn("rss.WATER_60HZ", said)
+
+    def test_a_liquid_that_inits_at_32_is_not_warned(self):
+        from robosimstudio.engines.genesis import runtime
+
+        with self.assertNoLogs(runtime.log, "WARNING"):
+            self._first("32", "legacy")
+
+
+class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
+    """A liquid island that states no substeps takes one SPH substep a control step, and its water falls through the
+    cup and the bench: it is refused before the engine is asked for, by the arrangement that states them."""
+
+    def _open(self, substeps: int, hz: float = 60.0) -> None:
+        from unittest import mock
+
+        from robosimstudio.engines.genesis import sph
+        from robosimstudio.engines.genesis.solver import SolverGenesis
+
+        recipe = {"island": "water", "control_hz": hz, "actors": [{"kind": "sph", "name": "water"}]}
+        with mock.patch.object(sph, "ensure_initialized", side_effect=LookupError("asked for the engine")):
+            SolverGenesis(None, recipe=recipe, substeps=substeps)
+
+    def test_one_substep_is_refused_by_name(self):
+        with self.assertRaises(ValueError) as caught:
+            self._open(1)
+        for word in ("'water'", "substeps=20", "rss.WATER_60HZ"):
+            self.assertIn(word, str(caught.exception))
+
+    def test_the_measured_substep_is_the_floor_at_any_rate(self):
+        with self.assertRaises(ValueError):
+            self._open(19)
+        for substeps, hz in ((20, 60.0), (10, 120.0), (40, 30.0)):
+            with self.subTest(substeps=substeps, hz=hz), self.assertRaisesRegex(LookupError, "asked for the engine"):
+                self._open(substeps, hz)
+
 
 class TestTheCouplingArithmetic(unittest.TestCase):
     """The numbers that decide whether the two-way coupling is right."""
