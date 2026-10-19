@@ -678,8 +678,12 @@ class Sim(EnvBase):
             entity.reset(self.pipeline, self.episode)
         state = self.pipeline.state_0
         # A deformable-only scene has no rigid state to restore; the entities'
-        # own reset above is the whole of it.
-        if not self.model.body_count:
+        # own reset above is the whole of it. Nor has one whose bodies have no
+        # joint -- a static box (``add_link``) beside a sheet, no robot -- whose
+        # ``joint_qd`` is ``None``: what follows restores joint coordinates and
+        # the bodies they move, which a jointless body is not in a scene with a
+        # robot either (``c5b_drape.py``).
+        if not self.model.body_count or not self.model.joint_count:
             self.pipeline.mark_dirty()
             return
         # After the entities, which have just re-placed every object for this
@@ -709,11 +713,12 @@ class Sim(EnvBase):
         """
         obs, info = super().reset()
         self._warned_nonfinite = False  # the finite flags were just cleared too
-        if self._start_joint_q is None and self.model.body_count:
+        if self._start_joint_q is None and self.model.joint_count:
             # After the base class has warmed up *and* re-posed, so this is the
             # articulation the first episode is actually about to be stepped
             # from -- which is what every later episode has to be given back.
-            # A deformable-only scene has no ``joint_q`` at all, hence the guard.
+            # A scene with no joint has no ``joint_q`` at all, hence the guard:
+            # a deformable-only one, or a static box beside a sheet.
             self._start_joint_q = np.asarray(self.pipeline.snapshot.joint_q, dtype=np.float32).copy()
         self.settled_body_q = self._body_q().copy()
         return obs, info

@@ -101,6 +101,55 @@ class TestASheetOnSuperdex(unittest.TestCase):
         self.assertTrue(self.sim.state_is_finite())
 
 
+@unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing builds the sheet")
+class TestASheetOverAStaticBox(unittest.TestCase):
+    """A towel on SuperDex dropped over a static 10 cm box, no robot, the rest of GENERIC.
+
+    The scene did neither of two things. It did not build: a static box is a body with no joint,
+    and a model with none failed at its first reset (``tests/test_a_model_without_joints.py``),
+    then twice more where the episode reset reads joint coordinates. And with an arm beside it,
+    where it built, the box was no mirror on SuperDex -- a body on VBD, an island of particles too,
+    got no channel -- so the towel lay through it on the bench, its node over the box at 0.751 m;
+    0.855 m now, on the box's 0.849 m top (``c5a_drape.py``), and 0.854 m with no arm
+    (``c5b_drape.py``). The box is not held to its pose here: a static box is a body Newton 1.7's
+    VBD integrates, which slid 9 mm under the towel in those two seconds, and dropped from 0.2 m
+    it falls (``c5_static_air.py``).
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import robosimstudio as rss
+        from robosimstudio.domains.capabilities import host_bridge
+
+        physics = rss.replace(
+            rss.GENERIC, backends=(("cloth", rss.backend("superdex", substeps=2)), *rss.GENERIC.backends)
+        )
+        scene = rss.Scene(cell="bench_075", physics=physics, name="sheet_over_a_box")
+        scene.add(rss.sheet(name="towel", size=(0.3, 0.3), cells=(20, 20), at=(-0.15, -0.15, 0.12), settle_frames=0))
+        cls.box = scene.add(rss.box(name="box", half=(0.05, 0.05, 0.05), at=(0.0, 0.0, 0.05), static=True))
+        cls.sim = scene.build()
+        cls.bridge = host_bridge(cls.sim.pipeline, "towel")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.sim.close()
+
+    def test_the_box_is_a_mirror_and_the_towel_lies_on_it(self) -> None:
+        labels = list(self.sim.model.shape_label)
+        self.assertIn("box", [labels[m.shape].rsplit("/", 1)[-1] for m in self.bridge.mirrors])
+        self.sim.run(120).sync()
+        q = np.asarray(self.bridge.actors[0]["read"](), dtype=np.float64).reshape(-1, 3)
+        box = np.asarray(self.box.position, dtype=np.float64)
+        over = q[np.argmin(np.linalg.norm(q[:, :2] - box[:2], axis=1))]
+        self.assertGreater(over[2], box[2] + 0.05, "the towel lies on the box's top, not through it")
+
+    def test_it_resets_and_steps_again(self) -> None:
+        for _ in range(2):
+            self.sim.reset()
+            self.sim.run(5).sync()
+        self.assertTrue(self.sim.state_is_finite())
+
+
 class _Arr:
     def __init__(self, a) -> None:
         self.a = np.asarray(a)
