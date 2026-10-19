@@ -342,8 +342,8 @@ LABEL = replace(
     # rubbing it 88-92% in four strokes (``m1_screen.py``, five drives).
     press=8.0e3,
 )
-"""A paper label that sticks where it is pressed: it peeled whole at 2.9 N drawn up on the rig, and at
-2.2-2.4 N drawn up by the YAM's pads (``m1_screen.py``, five drives)."""
+"""A paper label that sticks where it is pressed: it peeled whole at 2.9 N drawn up on the rig, and drawn
+up by the YAM's pads at 2.2-2.4 N, all but 1-2 of its 126 bonds (``m1_screen.py``, five drives)."""
 
 MASKING_TAPE = replace(LABEL, strength=1.0e4)
 """:data:`LABEL`'s sheet with 2.5 times the strength: it peeled whole at 4.2 N on the rig. Not driven by
@@ -1436,8 +1436,8 @@ for _name, _spec, _notes in (
     (
         "label",
         LABEL,
-        "Rubbed down by the YAM's shut fingertips, 88-92% of the bonds held, and drawn up by its tab it peeled "
-        "whole at 2.2-2.4 N (m1_screen.py, five drives); on the pull rig, 2.9 N (p4_law.py).",
+        "Rubbed down by the YAM's shut fingertips, 88-92% of the bonds held, and drawn up by its tab all but 1-2 "
+        "of 126 let go at 2.2-2.4 N (m1_screen.py, five drives); on the pull rig it peeled whole at 2.9 N (p4_law.py).",
     ),
     ("masking_tape", MASKING_TAPE, "On the pull rig it peeled whole at 4.2 N (p4_law.py). Not driven by the YAM."),
     (
