@@ -22,6 +22,20 @@ writes ``mjw_data.mocap_pos`` / ``mocap_quat`` only; :func:`sync_mocap` is that
 one. Measured before the copy: a cube's friction set to 0.05 left the C model's
 at 1.0, and a doubled joint stiffness left its actuator gain at 650.
 
+Newton's notify also moves something the C library's collision reads and no
+notify recomputes: each body's inertial frame. Its first one, inside the
+solver's constructor, copies MuJoCo-Warp's re-diagonalized ``body_iquat`` --
+90 or 180 degrees off the compiled one on eight of the YAM's eighteen bodies,
+both left fingers among them -- over the C model, whose bounding-volume tree for
+each body MuJoCo's compiler built in the frame it had then. The midphase then
+tests a finger against a box that is no longer round its geoms and skips the
+pair: measured on ``examples/20_cutting/00_cut_tofu``, the right hand closing
+on the 20 mm knife handle stalled at 20.4 mm on MuJoCo-Warp and passed through
+it to 3.8 mm on the C library, its left finger 8.8 mm inside the handle with no
+contact. :func:`refit_bvh` refits the trees to the frames the model holds, after
+the solver is built (:func:`robosimstudio.scene.physics.backends.build_solver`)
+and after every notify that can move them; with it the hand stalls at 20.3 mm.
+
 ``mujoco`` is imported inside the function that needs it, as every optional
 backend in this tree is.
 """
@@ -38,6 +52,7 @@ __all__ = [
     "host_side",
     "mirror_notify",
     "read_gravcomp",
+    "refit_bvh",
     "set_option",
     "sync_mocap",
     "write_gravcomp",
@@ -159,7 +174,72 @@ def after_notify(solver: Any, flags: int) -> int:
         solver.notify_model_changed(int(flags))
     if int(flags) & int(newton.ModelFlags.JOINT_PROPERTIES):
         sync_mocap(solver)
+    if int(flags) & int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES | newton.ModelFlags.SHAPE_PROPERTIES):
+        refit_bvh(solver)
     return copied
+
+
+_CORNERS = np.array([[x, y, z] for x in (-1.0, 1.0) for y in (-1.0, 1.0) for z in (-1.0, 1.0)])
+"""The eight corners of a box, as signs on its half-extents."""
+
+
+def _rotation(quats: np.ndarray) -> np.ndarray:
+    """Rotation matrices ``[n, 3, 3]`` of MuJoCo's ``(w, x, y, z)`` quaternions ``[n, 4]``."""
+    q = np.asarray(quats, dtype=np.float64)
+    q = q / np.linalg.norm(q, axis=1, keepdims=True)
+    w, x, y, z = q.T
+    return np.stack(
+        [
+            np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)], axis=-1),
+            np.stack([2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)], axis=-1),
+            np.stack([2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)], axis=-1),
+        ],
+        axis=1,
+    )
+
+
+def refit_bvh(solver: Any) -> int:
+    """Refit the C model's per-body bounding-volume trees to the inertial frames and geom poses it now holds.
+
+    MuJoCo's compiler builds each body's tree in the body's inertial frame, a
+    leaf round each geom's box, and the midphase culls a geom pair whose boxes
+    miss. Newton's notify overwrites the inertial frames and the geom poses and
+    never the trees (see the module docstring). This recomputes every node of
+    every body's tree the way the compiler does -- a leaf is the box round its
+    geom's eight corners in the inertial frame, a parent the box round its
+    children -- which reproduces the compiled tree to 1e-16 m in the compiled
+    frames. A geom whose size changed keeps the box the compiler gave it.
+    Nothing on a GPU, where MuJoCo-Warp has no such tree. Returns how many
+    nodes moved by more than a micrometre.
+    """
+    if not host_side(solver):
+        return 0
+    model = getattr(solver, "mj_model", None)
+    if model is None or int(getattr(model, "nbvhstatic", 0)) == 0:
+        return 0
+    old = np.array(model.bvh_aabb, dtype=np.float64)
+    aabb = old.copy()
+    nodeid, child = np.asarray(model.bvh_nodeid), np.asarray(model.bvh_child)
+    inertial = _rotation(model.body_iquat)
+    geom_rot = _rotation(model.geom_quat)
+    for body in range(int(model.nbody)):
+        start, count = int(model.body_bvhadr[body]), int(model.body_bvhnum[body])
+        if start < 0 or count <= 0:
+            continue
+        rot, origin = inertial[body], np.asarray(model.body_ipos[body], dtype=np.float64)
+        # A child's index is past its parent's, so walking the body's nodes backwards meets children first.
+        for node in range(start + count - 1, start - 1, -1):
+            kids = [start + int(k) for k in child[node] if int(k) >= 0]
+            if kids:
+                points = np.concatenate([aabb[kids, :3] - aabb[kids, 3:], aabb[kids, :3] + aabb[kids, 3:]])
+            else:
+                geom = int(nodeid[node])
+                corners = model.geom_aabb[geom, :3] + _CORNERS * model.geom_aabb[geom, 3:]
+                points = (model.geom_pos[geom] + corners @ geom_rot[geom].T - origin) @ rot
+            low, high = points.min(axis=0), points.max(axis=0)
+            aabb[node, :3], aabb[node, 3:] = (low + high) / 2, (high - low) / 2
+    model.bvh_aabb[:] = aabb
+    return int(np.count_nonzero(np.abs(aabb - old).max(axis=1) > 1.0e-6))
 
 
 def sync_mocap(solver: Any) -> None:
