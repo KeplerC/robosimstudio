@@ -177,6 +177,24 @@ class TestTheDeclarations(unittest.TestCase):
                 self.assertIs(on, entity.sim_requirements().self_contact)
                 self.assertIs(on, entity.host_actor().params["self_contact"])
 
+    def test_the_record_states_the_requirements_the_bag_runs(self) -> None:
+        """``Bag.from_spec`` reads the spec as the entity does: a declared ``sim`` first, else its self-contact."""
+        from robosimstudio.specs.physics import SimRequirements
+        from robosimstudio_materials.bag import Bag, EntityBag, bag
+
+        for on in (True, False):
+            for declared in (None, SimRequirements(domain="bag", self_contact=on)):
+                with self.subTest(self_contact=on, declared=declared is not None):
+                    spec = bag(
+                        name="pouch", cells=(4, 4), self_contact=on if declared is None else not on, sim=declared
+                    )
+                    record = Bag.from_spec(spec, name="pouch")
+                    runs = EntityBag(spec).sim_requirements()
+                    self.assertIs(runs.self_contact, record.sim.self_contact)
+                    self.assertIs(on, record.sim.self_contact)
+                    if declared is not None:
+                        self.assertEqual(declared, record.sim)
+
     def test_a_bag_leaves_newtons_soft_contact_to_the_sheet_newton_simulates(self) -> None:
         """A VBD towel and a bag on SuperDex: the bag, applied after the towel, writes nothing over it."""
         from types import SimpleNamespace

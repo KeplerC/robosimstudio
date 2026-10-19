@@ -388,16 +388,20 @@ class Bag:
         """The bag a constructor returned, as the :class:`AssetRecord` a document's ``(:objects ...)`` names.
 
         Its ``at`` and ``quat`` are where the bag starts; the document's object name replaces its
-        ``name``. The record states the spec's self-contact, since a record's requirements are what
-        the scene is composed from.
+        ``name``. The record states the requirements the bag runs, as
+        :meth:`EntityBag.sim_requirements` reads them: the spec's declared ``sim`` when it has one,
+        else the bag's contacts with the spec's self-contact.
         """
         if not isinstance(spec, BagSpec):
             raise TypeError(f"Bag.from_spec takes a BagSpec, got {type(spec).__name__}")
+        declared = spec.sim
         return AssetRecord(
             name=name,
             summary=summary or f"a bag, {spec.size[0]:.2f} x {spec.size[1]:.2f} m",
             tags=("bag",),
-            sim=SimRequirements(
+            sim=declared
+            if isinstance(declared, SimRequirements)
+            else SimRequirements(
                 domain="bag",
                 contacts=contacts_with("surface", "fixtures", "objects", "hands"),
                 self_contact=bool(spec.self_contact),
