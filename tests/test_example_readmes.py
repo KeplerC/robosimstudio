@@ -46,6 +46,20 @@ class TestTheExampleReadmes(unittest.TestCase):
             tool.REPO, tool.EXAMPLES = Path(root), Path(root) / "examples"
             self.assertEqual(["examples/00_x/README.md -> media/gone.webp"], tool.dangling_media())
 
+    def test_the_index_shows_every_script_that_has_a_clip(self) -> None:
+        """``examples/README.md`` is written by hand, so a script can be left off it.
+
+        ``01_cloth/04_your_own_cloth`` and ``07_policies/02_without_privilege`` were, clips and all."""
+        examples = REPO / "examples"
+        index = (examples / "README.md").read_text(encoding="utf-8")
+        for script in sorted(examples.glob("[0-9][0-9]_*/[0-9][0-9]_*.py")):
+            clip = script.parent / "media" / f"{script.stem}.webp"
+            if not clip.is_file():
+                continue
+            with self.subTest(script=script.relative_to(examples).as_posix()):
+                self.assertIn(f"]({script.relative_to(examples).as_posix()})", index)
+                self.assertIn(f'<img src="{clip.relative_to(examples).as_posix()}"', index)
+
     def test_every_demo_shows_its_clip(self) -> None:
         """The demos are what a visitor from the project page looks for: each one is seen running.
 

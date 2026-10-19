@@ -12,9 +12,9 @@
 |---|---|---|
 | <img src="01_cloth/media/00_towel.webp" width="240"> | <img src="01_cloth/media/01_fabrics.webp" width="240"> | <img src="01_cloth/media/02_engines.webp" width="240"> |
 
-| [Scrub a stain](01_cloth/03_scrub_a_stain.py) |
-|---|
-| <img src="01_cloth/media/03_scrub_a_stain.webp" width="240"> |
+| [Scrub a stain](01_cloth/03_scrub_a_stain.py) | [Your own cloth](01_cloth/04_your_own_cloth.py) |
+|---|---|
+| <img src="01_cloth/media/03_scrub_a_stain.webp" width="240"> | <img src="01_cloth/media/04_your_own_cloth.webp" width="240"> |
 
 ## [02 Soft-Body Simulation](02_soft/README.md)
 
@@ -73,9 +73,13 @@
 
 ## [07 Policies as Graphs](07_policies/README.md)
 
-| [Pick and place](07_policies/00_pick_and_place.py) | [Check and retry](07_policies/01_check_and_retry.py) | [Many worlds](07_policies/03_many_worlds.py) |
+| [Pick and place](07_policies/00_pick_and_place.py) | [Check and retry](07_policies/01_check_and_retry.py) | [Without privilege](07_policies/02_without_privilege.py) |
 |---|---|---|
-| <img src="07_policies/media/00_pick_and_place.webp" width="240"> | <img src="07_policies/media/01_check_and_retry.webp" width="240"> | <img src="07_policies/media/03_many_worlds.webp" width="240"> |
+| <img src="07_policies/media/00_pick_and_place.webp" width="240"> | <img src="07_policies/media/01_check_and_retry.webp" width="240"> | <img src="07_policies/media/02_without_privilege.webp" width="240"> |
+
+| [Many worlds](07_policies/03_many_worlds.py) |
+|---|
+| <img src="07_policies/media/03_many_worlds.webp" width="240"> |
 
 ## [08 Demos](08_demos/README.md)
 
