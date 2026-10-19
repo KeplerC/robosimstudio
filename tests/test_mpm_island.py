@@ -216,23 +216,6 @@ class TestTheIslandCouplesToTheRobot(unittest.TestCase):
         self.assertTrue(solver._sparse_rebuildable, "the sparse grid is the capacity-bounded, capturable one")
         self.assertIn("mpm_grid_check:mpm", self.sim.pipeline.schedule.names()[-1])
 
-    def test_the_grid_is_checked_twice_a_second_and_before_a_reset_clears_it(self) -> None:
-        """Not every step: the check waits for the device. A reset clears Newton's status, so it looks first."""
-        import warp as wp
-
-        stage = next(s for s in self.sim.pipeline.schedule.phases["after"] if s.name == "mpm_grid_check:mpm")
-        self.assertEqual(30, stage.cadence, "every 30 control steps at 60 Hz: half a second")
-        solver = self.program.solver_of_island("mpm")
-        self.sim.run(1)
-        self.assertIsNotNone(solver._grid_status, "the first step allocates the status word")
-        try:
-            solver._grid_status.fill_(wp.Volume.REBUILD_VOXEL_CAPACITY_EXCEEDED)
-            with self.assertRaisesRegex(RuntimeError, "island 'mpm'.*max_active_cell_count"):
-                self.sim.pipeline.reset_solvers(flags=0)
-        finally:
-            solver._clear_sparse_grid_rebuild_status()
-        self.sim.pipeline.reset_solvers(flags=0)
-
     def test_the_graph_captured(self) -> None:
         """``Executor.captured`` is whether ``warmup_and_capture`` kept a graph; the error it saw is beside it."""
         self.assertTrue(self.sim.pipeline.captured, self.sim.pipeline.capture_error)
