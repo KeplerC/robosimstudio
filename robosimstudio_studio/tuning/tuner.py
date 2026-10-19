@@ -148,7 +148,7 @@ class MaterialTuner:
         refuses opening adhesion: ``paper_label`` adopted onto one zeroed its strength, so every bond
         let go, and the rebuild raised.
         """
-        return tuple(preset for preset in list_materials() if not self._cannot_wear(self.selected, preset))
+        return tuple(preset for preset in list_materials() if not self._misfit(self.selected, preset))
 
     def adopt(self, preset: str) -> bool:
         """Load a named preset onto the selected cloth. Whether it was taken.
@@ -170,6 +170,10 @@ class MaterialTuner:
         """Why the cloth ``name`` cannot wear the preset ``preset``; empty when it can."""
         if preset not in list_materials():
             return "no preset of that name"
+        return self._misfit(name, preset)
+
+    def _misfit(self, name: str, preset: str) -> str:
+        """Why the cloth ``name`` cannot wear ``preset``, a registered name; empty when it can."""
         material = get_material(preset).spec
         kind = type(self.built[name])
         if type(material) is not kind:

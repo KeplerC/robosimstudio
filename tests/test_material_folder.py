@@ -161,6 +161,19 @@ class TestAPresetIsOneTheSheetCanWear(unittest.TestCase):
         self.assertTrue(panel.tuner.adopt("paper_label"))
         self.assertIs(PAPER_LABEL, panel.tuner.material)
 
+    def test_the_presets_are_listed_once(self) -> None:
+        """Not once more a preset: each name comes from the listing, so none is looked up in it again."""
+        from unittest import mock
+
+        from robosimstudio_materials.tape import PAPER_LABEL
+        from robosimstudio_studio.tuning import tuner
+
+        panel, _, _ = _page(_sheet("label", PAPER_LABEL))
+        with mock.patch.object(tuner, "list_materials", wraps=tuner.list_materials) as listed:
+            offered = panel.tuner.presets()
+        self.assertEqual(("duct_tape", "label", "masking_tape", "paper_label"), offered)
+        self.assertEqual(1, listed.call_count)
+
 
 class TestAnEditTheSpecRefusesIsNotTaken(unittest.TestCase):
     """A tape's reach dragged under its peak_opening: ``replace`` reruns ``TapeMaterialSpec.__post_init__``,
