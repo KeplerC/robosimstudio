@@ -211,13 +211,16 @@ class TestASheetIsBuiltAboutItsCentroid(unittest.TestCase):
         entry = _shell_builder()(self.bridge, _record(self.vertices), None, None, None)
         np.testing.assert_allclose(entry["read"](), np.tile([0.6, 0.01, 0.75], (len(self.vertices), 1)), atol=1e-12)
 
-    def test_its_root_is_read_once_at_build_not_every_control_step(self) -> None:
-        """Nothing moves a shell's root (``c4_root.py``), so the tick's read leaves it alone."""
-        built = self.actor.root_reads
+    def test_its_root_is_read_as_it_stands_at_every_read(self) -> None:
+        """Held from the build, a root moved later read stale; read every call, the cost is inside the control
+        step's spread (``c4_root.py``)."""
+        before = self.actor.root_reads
         for _ in range(5):
             self.entry["read"]()
-        self.assertEqual(built, self.actor.root_reads)
-        self.assertLessEqual(built, 1)
+        self.assertEqual(before + 5, self.actor.root_reads)
+        self.actor.params.world_from_local = _Transform(translation=(0.0, 0.0, 0.1))
+        moved = self.vertices - self.vertices.mean(axis=0) + np.array([0.0, 0.0, 0.1])
+        np.testing.assert_allclose(self.entry["read"](), moved, atol=1e-12)
 
     def test_the_rest_it_reports_is_the_world_rest(self) -> None:
         """``prev`` is what the first tick's speed and every weld's nearest node are measured from."""
