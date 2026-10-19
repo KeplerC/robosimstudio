@@ -915,6 +915,8 @@ class PanelCloth(Panel):
         """Slots a set grab pinned to a hand, each with the pin it had before: the grab's to put back when it lets go."""
         self._requested: dict[int, tuple[str, str, str]] = {}
         """Slots :meth:`request_set` took, by the ``(cloth, set, arm)`` it was asked for."""
+        self._retake: set[int] = set()
+        """Slots pinned in the dropdown while holding a grip, for :meth:`drain` to take again on the hand."""
         self.selected = self.names[0] if self.names else ""
         self.pending: tuple[str, np.ndarray] | None = None
         """A click waiting to be serviced on the main thread."""
@@ -1034,10 +1036,18 @@ class PanelCloth(Panel):
         indices = handle.sets.get(set_name) or handle.sets.get(f"{name}/{set_name}")
         if indices is None or not len(indices):
             return 0
-        points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
+        # Before a slot is taken: an unknown hand raised out of drain with the slot reserved, never placed.
+        arms = self.env.scene.embodiment.iks if self.env.scene.embodiment else {}
+        if arm and arm not in arms:
+            self.session.status = f"{name}: no arm {arm!r} to hold {set_name!r} on; the arms are {sorted(arms)}"
+            return 0
         slot = self._acquire()
         arm = arm or self.follow_arm[slot.index]
-        centre, quat = self._hand_frame(arm) if arm else (points.mean(axis=0), IDENTITY_QUAT)
+        if arm:
+            centre, quat = self._hand_frame(arm)
+        else:  # aimed at the set's own centroid, so only then is it read
+            points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
+            centre, quat = points.mean(axis=0), IDENTITY_QUAT
         dragger = self.draggers[slot.index]
         taken = self._grab_all(dragger, indices, centre, quat)
         if not taken:
@@ -1082,15 +1092,38 @@ class PanelCloth(Panel):
             self._follow[index].value = arm  # fires _pick_arm, which finds nothing changed
 
     def _pick_arm(self, index: int, arm: str) -> None:
-        """A ``Pin N to hand`` dropdown changed: the slot's pin is the user's now, and a release leaves it."""
+        """A ``Pin N to hand`` dropdown changed: the slot's pin is the user's now, and a release leaves it.
+
+        A grip the slot already holds is taken again in the hand's frame by
+        :meth:`drain`, on the main thread, before the slot is first aimed at the
+        hand: kept in the frame it was taken in, the patch was carried onto the
+        hand, which :meth:`_seize` already prevents for a grip taken after the pin.
+        """
         if arm == self.follow_arm[index]:
             return  # :meth:`_pin` showing a pin it made, not the user choosing one
+        # Marked before the pin is written, so a drain that reads the pin reads this too.
+        if arm:
+            self._retake.add(index)
+        else:
+            self._retake.discard(index)
         self.follow_arm[index] = arm
         self._grab_pins.pop(index, None)
+
+    def _retake_on_hand(self, index: int, arm: str) -> None:
+        """Take slot ``index``'s grip again where it lies, in ``arm``'s frame (:meth:`_hand_frame`). Main thread."""
+        position, quat = self._hand_frame(arm)
+        pin = self.pins.get(index)
+        if pin is not None:
+            points = self.env.state.particle_q.numpy()[pin.nodes].astype(np.float64)
+            pin.offsets = (points - position) @ quat_to_mat(quat)
+            return
+        dragger = self.draggers[index]
+        self._grab_all(dragger, dragger.grabbed_indices.copy(), position, quat)
 
     def _forget(self, index: int) -> None:
         """What a slot's grab brought with it goes with the grab: the pin a set grab made, and its request."""
         self._requested.pop(index, None)
+        self._retake.discard(index)
         if index in self._grab_pins:
             self._pin(index, self._grab_pins.pop(index))
 
@@ -1174,6 +1207,9 @@ class PanelCloth(Panel):
                 continue
             arm = self.follow_arm[handle.index]
             if arm:
+                if handle.index in self._retake:
+                    self._retake.discard(handle.index)
+                    self._retake_on_hand(handle.index, arm)
                 # The hand is driving, so the handle follows it rather than the
                 # other way round: a gizmo left behind on the bench while the
                 # cloth rode away on the gripper is a gizmo that lies.
@@ -1484,6 +1520,7 @@ class PanelCloth(Panel):
     def on_reset(self, obs: dict[str, Any], info: dict[str, Any]) -> None:
         del obs, info
         self.pending = None
+        self.set_requests.clear()  # asked of the episode the reset ended
         # The engine has already dropped these -- ``restore_rest`` unpins before
         # it restores, since a pin made since the capture is a constraint the
         # captured composition does not have -- so this is the page catching up

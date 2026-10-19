@@ -434,6 +434,38 @@ class TestAGripPinnedToAHandIsTakenWhereItIs(unittest.TestCase):
         finally:
             session.teardown()
 
+    def test_a_pin_chosen_while_it_holds_keeps_the_patch_where_it_is(self) -> None:
+        """Pinned in the slot's dropdown after the click, the grip stayed in the click's frame and rode onto the hand."""
+        import numpy as np
+
+        from tests.fixtures.grasp import tick
+
+        sim = _sim(cloth=True)
+        session = _session(sim, 8972)
+        try:
+            grips = session.deformables
+            arm = next(iter(session.arms))
+            inputs = session.server.gui._gui_input_handle_from_uuid.values()
+            pins = sorted((h for h in inputs if str(getattr(h, "label", "")).startswith("Pin ")), key=lambda h: h.label)
+            towel = sim["towel"]
+            grips.click_at("towel", np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)[int(towel.particles[0])])
+            tick(session, 1)
+            (slot,) = [h.index for h in grips.handles.live]
+            held = np.asarray(grips.draggers[slot].grabbed_indices, dtype=np.int64)
+            self.assertTrue(len(held), "the click missed, so this is untested")
+            before = np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)
+            pins[slot].value = arm  # what the browser does when the user pins the slot to the hand
+            self.assertEqual(arm, grips.follow_arm[slot])
+            tick(session, 10)
+            after = np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)
+            moved = float(np.linalg.norm(after[held] - before[held], axis=1).max())
+            hand = np.asarray(session.arms[arm].ik.ee_pose(sim.state)[0], dtype=np.float64)
+            self.assertGreater(float(np.linalg.norm(before[held] - hand, axis=1).min()), 0.1, "far from the hand")
+            self.assertLess(moved, 0.005, f"the held patch moved {moved * 1000:.0f} mm toward the hand in 10 steps")
+            self.assertEqual(sorted(held.tolist()), sorted(grips.draggers[slot].grabbed_indices.tolist()))
+        finally:
+            session.teardown()
+
 
 def _sim_with_an_edge():
     """``_sim``'s towel with one declared set, its near edge row, for a set grab to take."""
