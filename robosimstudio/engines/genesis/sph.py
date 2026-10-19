@@ -263,20 +263,24 @@ class SphBridge:
         # Every refusal before the engine is asked for: gs.init runs once a process, so an
         # island refused after it would still have set the precision every later island gets.
         actors = list(recipe.get("actors", ()))
-        spacing = sorted({float(record.get("params", {}).get("spacing", 0.004)) for record in actors})
+        materials = [{**SPH_DEFAULTS, **record.get("params", {})} for record in actors]
+        spacing = sorted({float(params["spacing"]) for params in materials})
         if len(spacing) != 1:
             raise ValueError(
                 f"genesis island {recipe.get('island')!r}: its sph actors state particle spacings {spacing}; "
                 "Genesis's SPH solver has one particle size per scene, so every liquid in an island states the same"
             )
+        builds = []
         for record in actors:
             kind = str(record.get("kind", "tet"))
-            if actor_builder("genesis", kind) is None:
+            build = actor_builder("genesis", kind)
+            if build is None:
                 raise ValueError(
                     f"genesis cannot build a {kind!r} actor ({record.get('name')!r}) under its legacy coupler"
                 )
+            builds.append(build)
         # Genesis logs a substep past its own limit and steps on.
-        self._refuse_long_substeps(recipe.get("island"), actors)
+        self._refuse_long_substeps(recipe.get("island"), actors, materials)
         self.spacing = spacing[0]
         geoms = [actor_geometry(model, record) for record in actors]
         shapes = iter_mirrors(model, recipe.get("mirrors", ()))
@@ -313,8 +317,7 @@ class SphBridge:
             if entry is not None:
                 self.mirrors.append(entry)
         self.actors: list[dict] = []
-        for geom in geoms:
-            build = actor_builder("genesis", geom.kind)
+        for geom, build in zip(geoms, builds, strict=True):
             entity = self.scene.add_entity(
                 material=build(self, geom), morph=gs.morphs.Nowhere(n_particles=int(geom.count))
             )
@@ -352,16 +355,17 @@ class SphBridge:
         """The last control step's reaction per Newton body [N], before shaping. For a reader."""
 
     # ----------------------------------------------------------------- build
-    def _refuse_long_substeps(self, island: Any, records: list[dict]) -> None:
+    def _refuse_long_substeps(self, island: Any, records: list[dict], materials: list[dict]) -> None:
         """Refuse substeps longer than any of the island's liquids holds (:func:`longest_substep`).
 
-        The island steps every liquid at one substep, so the refusal names the most any of them
-        needs, and the liquid that needs it: naming the first that fails sent a water-and-oil
-        island back for 20 where the oil asks 35.
+        ``materials`` are the records' params over :data:`SPH_DEFAULTS`, merged once in
+        ``__init__``, where the spacing is read off the same merge. The island steps every
+        liquid at one substep, so the refusal names the most any of them needs, and the
+        liquid that needs it: naming the first that fails sent a water-and-oil island back
+        for 20 where the oil asks 35.
         """
         worst = None
-        for record in records:
-            params = {**SPH_DEFAULTS, **record.get("params", {})}
+        for record, params in zip(records, materials, strict=True):
             longest, limit = longest_substep(params)
             need = math.ceil(self.control_dt / longest - 1.0e-9)
             if worst is None or need > worst[0]:

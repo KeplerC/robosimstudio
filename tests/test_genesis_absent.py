@@ -245,6 +245,20 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "particle spacings"):
             self._open(40, actors=[{"kind": "sph", "name": "water"}, fine])
 
+    def test_a_liquid_stating_no_spacing_has_the_defaults(self):
+        """The spacing is read off the one merge of the actor's params over ``SPH_DEFAULTS`` the substeps are, not a
+        number of its own beside it: with the default at 3 mm, a liquid stating none and one stating 3 mm agree."""
+        from unittest import mock
+
+        from robosimstudio.engines.genesis import sph
+
+        fine = {"kind": "sph", "name": "fine", "params": {"spacing": 0.003}}
+        with (
+            mock.patch.dict(sph.SPH_DEFAULTS, {"spacing": 0.003}),
+            self.assertRaisesRegex(LookupError, "asked for the engine"),
+        ):
+            self._open(40, actors=[{"kind": "sph", "name": "water"}, fine])
+
     def test_an_empty_box_is_refused_before_the_engine_is_asked_for(self):
         """Water started 0.6 m under the ground leaves the SPH box empty: its floor is the ground, its top 0.5 m over
         the water. Genesis refused it after ``gs.init`` and named neither, and a cloth island built next in the
