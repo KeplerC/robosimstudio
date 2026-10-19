@@ -171,6 +171,8 @@ class BagSpec(ClothSpec):
             with slip; against a gripper pad the deformable's value is the one that counts.
         mass_damping: SuperDex ``mass_damping_coefficient`` [1/s], a drag on every node.
         stiffness_damping: SuperDex ``stiffness_damping_coefficient`` [s].
+        settle_substeps: Newton substeps per settle frame, or 0 for the run's own, as for a soft
+            body: SuperDex steps the bag at its backend's rate either way.
     """
 
     entity: str = "bag"
@@ -320,9 +322,18 @@ class EntityBag(EntityCloth):
         super().on_scene_ready(pipeline)
 
     def settle(self, pipeline) -> None:
-        """Let the top layer come down onto the bottom one. Plain steps: the engine ticks inside them."""
-        for _ in range(int(self.spec.settle_frames)):
-            pipeline.step()
+        """Let the top layer come down onto the bottom one. The engine ticks inside each step, as for a soft body."""
+        spec = self.spec
+        if spec.settle_frames <= 0:
+            return
+        if spec.settle_substeps > 0:
+            with pipeline.substeps_at(int(spec.settle_substeps)):
+                for _ in range(int(spec.settle_frames)):
+                    pipeline.step()
+        else:
+            for _ in range(int(spec.settle_frames)):
+                pipeline.step()
+        # A settle is scene construction, not simulated time.
         pipeline.sim_time = 0.0
         pipeline.step_count = 0
 
@@ -519,9 +530,8 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
     )
     shell.point_cloud_collider.radius = float(params.get("particle_radius", CANVAS.particle_radius))
     shell.point_cloud_collider.self_contact = bool(params.get("self_contact", True))
-    contact = bridge.contact_params(params, penalty=1.0e9, friction=float(CANVAS.friction), padding=0.0)
-    contact.friction_falloff_vel = float(params.get("friction_falloff", 1.0e-3))
-    shell.contact = contact
+    # The falloff too, when the bag states it (``BagSpec.friction_falloff``); unstated, the engine's own 10 mm/s.
+    shell.contact = bridge.contact_params(params, penalty=1.0e9, friction=float(CANVAS.friction), padding=0.0)
     actor = physics.experimental.create_shell_actor(bridge.scene_of(record.get("world", 0)), shell)
     actor.register_query(physics.QueryType.NODE_POSITIONS)
 

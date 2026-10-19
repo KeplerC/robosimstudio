@@ -190,6 +190,31 @@ class TestTheDeclarations(unittest.TestCase):
         towel = (TERRY_TOWELLING.contact_ke, TERRY_TOWELLING.contact_kd, TERRY_TOWELLING.friction)
         self.assertEqual(towel, (model.soft_contact_ke, model.soft_contact_kd, model.soft_contact_mu))
 
+    def test_the_settle_runs_at_the_substeps_it_states_or_the_runs_own(self) -> None:
+        """As a soft body settles: ``settle_substeps`` 0 steps plainly, more steps inside ``substeps_at``."""
+        import contextlib
+
+        class Pipeline:
+            def __init__(self) -> None:
+                self.steps, self.at, self.sim_time, self.step_count = [], [], 1.0, 7
+
+            @contextlib.contextmanager
+            def substeps_at(self, substeps: int):
+                self.at.append(substeps)
+                yield
+
+            def step(self) -> None:
+                self.steps.append(len(self.at))
+
+        for substeps, at in ((0, []), (4, [4])):
+            with self.subTest(settle_substeps=substeps):
+                pipeline = Pipeline()
+                entity, _, _ = _bag(settle_frames=3, settle_substeps=substeps)
+                entity.settle(pipeline)
+                self.assertEqual(at, pipeline.at)
+                self.assertEqual(3, len(pipeline.steps))
+                self.assertEqual((0.0, 0), (pipeline.sim_time, pipeline.step_count))
+
     def test_the_arrangement_puts_the_bag_on_superdex_beside_the_soft_kind(self) -> None:
         import robosimstudio as rss
 

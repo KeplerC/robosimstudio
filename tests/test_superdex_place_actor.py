@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -61,6 +62,33 @@ class TestPlacingAnActorReadsItBackWherePlaced(unittest.TestCase):
     def test_an_actor_at_an_identity_root_places_as_before(self) -> None:
         target, entry = self._place("sponge")
         np.testing.assert_allclose(np.asarray(entry["read"](), dtype=np.float64).reshape(-1, 3), target, atol=1.0e-5)
+
+
+@unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing builds the bag")
+class TestTheBagsContactFalloffIsSaidOnce(unittest.TestCase):
+    """The bag's falloff reaches the engine through ``contact_params``; with none stated, the engine's own stands."""
+
+    def test_a_bag_that_states_no_falloff_keeps_the_engines(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio_materials.bag import BagSpec, build_bag_actor
+
+        scene = rss.Scene(cell="bench_0728", physics=rss.BAG_60HZ, name="bag_falloff")
+        scene.add(rss.bag(name="bag", settle_frames=0))
+        bridge = scene.build()["bag"].entity.bridge
+        record = next(r for r in bridge.recipe["actors"] if r.get("kind") == "bag")
+        experimental = bridge.physics.experimental
+        built = []
+        real = experimental.create_shell_actor
+        with mock.patch.object(experimental, "create_shell_actor", lambda s, p: built.append(p) or real(s, p)):
+            for falloff in (None, 2.0e-3):
+                params = {k: v for k, v in record["params"].items() if k != "friction_falloff"}
+                if falloff is not None:
+                    params["friction_falloff"] = falloff
+                build_bag_actor(bridge, {**record, "name": f"bag_{falloff}", "params": params})
+        engine = float(bridge.physics.ContactParams().friction_falloff_vel)
+        self.assertAlmostEqual(engine, built[0].contact.friction_falloff_vel, places=6)
+        self.assertAlmostEqual(BagSpec().friction_falloff, engine, places=6, msg="the spec's default is the engine's")
+        self.assertAlmostEqual(2.0e-3, built[1].contact.friction_falloff_vel, places=6)
 
 
 if __name__ == "__main__":
