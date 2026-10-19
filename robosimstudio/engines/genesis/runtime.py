@@ -4,7 +4,8 @@
 Three things about ``gs.init`` are worth a module of their own.
 
 **It is process-global and first-caller-wins**, like SuperDex's ``initialize``.
-A second island in the same process gets whatever the first asked for.
+A second island in the same process gets whatever the first asked for, except
+an IPC island after a liquid island's float32, which is refused (below).
 
 **It requires float64 for the two-way harvest, and this is not a preference.**
 The IPC coupler's reaction is ``(k/dt^2) * m_link * (pos_ipc - pos_aim)``. At
@@ -66,7 +67,8 @@ def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
         precision: ``"64"`` -- see the module docstring. ``"32"`` is accepted so
             a caller can measure the difference, and warned about loudly,
             because a scene that harvests wrenches at 32 reads zero rather than
-            reading wrong, which is much harder to notice.
+            reading wrong, which is much harder to notice. An IPC island asking
+            for 64 in a process a liquid island initialised at 32 is refused.
         coupler: ``"ipc"`` or ``"legacy"``: whose harvest the precision serves. The
             legacy coupler's reaction is a momentum change, which float32 reads
             (:mod:`robosimstudio.engines.genesis.sph`), so it asks for 32 without
@@ -76,10 +78,12 @@ def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
     if _ENGINE["precision"] is not None:
         if str(precision) == "64" and _ENGINE["precision"] == "32" and coupler == "ipc":
             # A liquid island (legacy coupler, float32 by choice) was built first in
-            # this process, and an IPC island now wants 64: its harvest reads zero.
-            log.warning(
-                "genesis was initialised at precision=32 by an earlier island in this process, and this one "
-                "asks for 64: an IPC two-way harvest reads ZERO at float32. Build it in a process of its own."
+            # this process, and an IPC island now wants 64: its harvest would read zero.
+            raise RuntimeError(
+                "genesis was initialised at precision=32 by an earlier island in this process (a liquid island's, "
+                "as rss.WATER_60HZ states), and gs.init runs once a process: this IPC island, which asks for 64, "
+                "would run its two-way harvest at float32, where it reads ZERO for a stiff constraint. Build the IPC "
+                "scene in a process of its own."
             )
         elif str(precision) == "64" and _ENGINE["precision"] == "32":
             # A liquid island that asked for 64 gets 32: its harvest still reads, as a momentum change.

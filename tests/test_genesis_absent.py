@@ -87,7 +87,8 @@ class TestRegistrationImportsNothing(unittest.TestCase):
 
 
 class TestAPrecisionConflictNamesWhoseHarvestItHurts(unittest.TestCase):
-    """``gs.init`` is first-caller-wins, so a later island asking for another precision is told what it got."""
+    """``gs.init`` is first-caller-wins, so a later island asking for another precision is told what it got, or is
+    refused where that would read its harvest as zero."""
 
     def _later(self, first: str, precision: str, coupler: str) -> str:
         from unittest import mock
@@ -102,8 +103,12 @@ class TestAPrecisionConflictNamesWhoseHarvestItHurts(unittest.TestCase):
             runtime.ensure_initialized(precision, coupler=coupler)
         return "\n".join(logs.output)
 
-    def test_an_ipc_island_after_a_liquid_is_told_its_harvest_reads_zero(self):
-        self.assertIn("IPC two-way harvest reads ZERO", self._later("32", "64", "ipc"))
+    def test_an_ipc_island_after_a_liquid_is_refused(self):
+        """Its harvest would read zero at the liquid's float32: refused, not warned, since nothing reads the warning."""
+        with self.assertRaises(RuntimeError) as caught:
+            self._later("32", "64", "ipc")
+        for word in ("precision=32", "liquid island", "reads ZERO", "process of its own"):
+            self.assertIn(word, str(caught.exception))
 
     def test_a_liquid_asking_for_64_after_32_is_not_blamed_on_the_ipc_harvest(self):
         said = self._later("32", "64", "legacy")
