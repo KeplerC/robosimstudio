@@ -476,7 +476,8 @@ class EntityRigid(Entity):
             label=self.spec.name,
             cfg=self._contact_cfg(builder),
         )
-        if self.spec.mass is not None:
+        # Not on a static body, as the mesh path does not: it is kinematic, and no solver reads its mass.
+        if self.spec.mass is not None and not self.spec.static:
             set_body_mass(builder, body, float(self.spec.mass))
 
     def _contact_cfg(self, builder: newton.ModelBuilder):
@@ -1087,7 +1088,7 @@ class EntityRigid(Entity):
 
     # ---------------------------------------------------------------- tuning
     def tunables(self, pipeline=None):
-        """Contact material over this object's shapes, and its mass.
+        """Contact material over this object's shapes, and its mass unless it is static.
 
         Over ``self.shapes`` rather than ``range.shape_indices``: a
         scene-declared object does not *build* its shapes -- :meth:`find_in_scene`
@@ -1096,6 +1097,10 @@ class EntityRigid(Entity):
         objects in an imported arena are that case, which is to say: using the
         range here would have offered a working panel that wrote into no shapes
         at all, on the majority of objects in the benchmark's corpus.
+
+        No mass on a static object, as :meth:`EntityStatic.tunables
+        <robosimstudio.domains.static.entity.EntityStatic.tunables>` offers none:
+        its body is welded and kinematic, and a mass written there moves nothing.
         """
         from robosimstudio.core.tuning import BodyWriter, ShapeWriter, Tunable
         from robosimstudio.specs import BodySpec, ContactMaterialSpec
@@ -1113,7 +1118,7 @@ class EntityRigid(Entity):
                     summary=f"What {self.name}'s {len(self.shapes)} shape(s) feel on contact.",
                 )
             )
-        if self.body >= 0:
+        if self.body >= 0 and not self.spec.static:
             bodies = BodyWriter(self.model, [self.body], pipeline)
             out.append(
                 Tunable(

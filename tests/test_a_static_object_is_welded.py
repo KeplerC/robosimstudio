@@ -153,6 +153,54 @@ class TestNoStaticBodyIsWeldedTwice(unittest.TestCase):
                 self.assertEqual(1, len(_world_joints(model, entity.body)), "one weld")
 
 
+class TestAStaticObjectStatesNoMass(unittest.TestCase):
+    """A static body's mass is read by no solver, so the build does not write one and no panel offers one.
+
+    The mesh path already skipped ``set_body_mass`` for a static object. The
+    primitive path, the knife's among them, still wrote ``mass`` onto the
+    kinematic body, which VBD gives an inverse mass of zero and MuJoCo makes a
+    mocap body, and :meth:`EntityRigid.tunables` offered a ``mass`` that moved
+    nothing.
+    """
+
+    def _builds(self):
+        box = ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=True, mass=5.0)
+        out = {"box": (box, EntityRigid)}
+        if has_pack("cutting"):
+            import robosimstudio as rss
+            from robosimstudio_materials.cutting.entity import EntityKnife
+
+            out["knife"] = (rss.knife(name="knife", static=True, mass=0.5), EntityKnife)
+        return out
+
+    def test_a_static_primitive_weighs_what_it_would_with_no_mass_stated(self) -> None:
+        from robosimstudio.specs import replace
+
+        for name, (spec, entity_class) in self._builds().items():
+            with self.subTest(name):
+                entity, model = _built(spec, entity_class)
+                unstated, bare = _built(replace(spec, mass=None), entity_class)
+                mass = float(model.body_mass.numpy()[entity.body])
+                self.assertNotEqual(float(spec.mass), mass, "it wrote the stated mass")
+                self.assertEqual(float(bare.body_mass.numpy()[unstated.body]), mass)
+
+    def test_a_static_object_offers_its_contact_and_no_mass(self) -> None:
+        for name, (spec, entity_class) in self._builds().items():
+            with self.subTest(name):
+                entity, model = _built(spec, entity_class)
+                entity.bind(model)
+                self.assertEqual(["contact"], [t.name for t in entity.tunables()])
+
+    def test_a_free_object_still_offers_its_mass(self) -> None:
+        from robosimstudio.specs import replace
+
+        spec, _ = self._builds()["box"]
+        entity, model = _built(replace(spec, static=False))
+        entity.bind(model)
+        self.assertAlmostEqual(5.0, float(model.body_mass.numpy()[entity.body]), places=5)
+        self.assertEqual(["contact", "mass"], [t.name for t in entity.tunables()])
+
+
 WELDS_ELSEWHERE = {
     "robosimstudio/domains/static/welded.py": "weld_to_world, the recipe itself",
     "robosimstudio_materials/rod/entity.py": (
