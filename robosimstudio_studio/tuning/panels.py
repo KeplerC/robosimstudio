@@ -215,6 +215,23 @@ class PanelTune(Panel):
         if changed or self.physics.drain():
             self.refresh()
 
+    def write(self, sheet: str, changes: dict[str, Any]) -> bool:
+        """An edit to ``sheet``'s material made on another panel. Whether it was taken.
+
+        The inspector's, which binds the same ``material`` tunable: written straight to it, the edit
+        never reached :attr:`MaterialTuner.working`, so ``Apply & rebuild``, Revert and a preset
+        dropped it and ``Pending rebuild`` never listed it (a towel's ``tri_ke`` set to 1000 there
+        held in the model while the working spec and this folder's slider stayed at 10000). Through
+        :meth:`MaterialTuner.set_fields` instead, and this folder's controls follow when ``sheet`` is
+        the one shown. Refused, :attr:`MaterialTuner.refused` says why.
+        """
+        if not self.tuner.set_fields(changes, sheet=sheet):
+            return False
+        if sheet == self.tuner.selected and self.binder is not None:
+            self.binder.follow(self.tuner.material)
+        self.refresh()
+        return True
+
     def _show_selected(self) -> None:
         """Make the selected sheet's class's binder the one drained, and show only its group."""
         kind = type(self.tuner.built[self.tuner.selected])
