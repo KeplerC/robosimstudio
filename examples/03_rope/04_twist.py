@@ -17,6 +17,12 @@ from robosimstudio_materials.rod.measures import twist_turns
 
 
 def main():
+    if rss.platform().is_cpu:  # before anything is built: on a CPU the rope is not the capsule chain
+        raise SystemExit(
+            "this example needs a GPU: the twist it shows is Newton's rod joint (twist_ke) on VBD, and its page "
+            "holds and rolls a capsule of it; on a CPU every rope is SuperDex's Cosserat rod (rss.CPU), which has "
+            "neither"
+        )
     length, radius, segments, bend_ke = 0.4, 0.006, 24, 0.04  # [m], and the shipped cable's bend [N*m/rad]
     top, x, y = 0.55, 0.05, 0.12  # the clamps over the bench [m]: the tips hang 150 mm clear of it, one per hand
     right_q = (0.9814, 1.9063, 0.908, 0.998, 1.505, 0.0)  # [rad]: level, 30 degrees out, 60 mm back from the tip

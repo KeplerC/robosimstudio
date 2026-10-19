@@ -18,6 +18,12 @@ through the examples a reader runs; this module holds the rest:
   made, naming the entity, its kind, the backend, why that backend is not run
   on a CPU, and that the scene needs a GPU; a scene holding one of them beside
   a kind a CPU does step names only the one it cannot.
+* **What a served kind cannot bring along, refused by name.** A cloth's contact
+  forces are VBD's, so reading them on a CPU, where the cloth is on SuperDex,
+  says it needs a GPU rather than falling through to MuJoCo's solver. The two
+  rope examples that show the capsule chain's own physics -- its Dahl memory, its
+  twist joint and a pinned capsule -- say so before building, since a CPU's rope
+  is SuperDex's Cosserat rod.
 
 Built from the library's constructors rather than the example scripts, so the
 scenes say what they are without depending on where an example lives. Run by
@@ -180,6 +186,54 @@ class TestWhatACpuServes(unittest.TestCase):
             info = get_backend(alias)
             self.assertEqual(info.devices, ("cuda",), alias)
             self.assertTrue(info.cpu_note, f"{alias} has no cpu_note for the refusal to give")
+
+
+@unittest.skipUnless(HAS_SUPERDEX, NO_SUPERDEX)
+class TestAClothsContactForcesOnACpu(unittest.TestCase):
+    """The scrub example's readout: staged as on a GPU, the towel lands on SuperDex, and reading it is refused."""
+
+    def test_the_reading_says_it_needs_a_gpu(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio_materials.cloth import ForceGatedWipe, contact_force
+
+        forces = rss.coupler("one_way", contact_forces=True)
+        scene = rss.Scene(cell="bench_075", physics=rss.replace(rss.GENERIC, coupling=forces))
+        scene.add(rss.robot("panda"))
+        scene.add(rss.sheet(name="towel", size=(0.1, 0.1), cells=(4, 4), at=(-0.05, -0.05, 0.02)))
+        sim = scene.build()
+        try:
+            self.assertTrue(sim.platform.is_cpu)
+            for read in (lambda: contact_force(sim, "towel"), lambda: ForceGatedWipe(sim, "towel", "s", "arm", (1, 2))):
+                with self.assertRaises(RuntimeError) as caught:
+                    read()
+                message = str(caught.exception)
+                self.assertIn("contact forces need a GPU", message)
+                self.assertIn("rss.CPU puts the cloth on SuperDex", message)
+                self.assertTrue(message.endswith("Build it on a GPU."), message)
+        finally:
+            sim.close()
+
+
+CAPSULE_CHAIN_EXAMPLES = ("03_rope/03_cable_memory.py", "03_rope/04_twist.py")
+"""The rope examples whose physics is the capsule chain's on VBD, under ``examples/``; they move with the examples."""
+
+
+class TestTheCapsuleChainExamplesOnACpu(unittest.TestCase):
+    """Refused by the example before anything is built, saying what a CPU's rope does not have."""
+
+    def test_each_says_it_needs_a_gpu(self) -> None:
+        from unittest import mock
+
+        import robosimstudio as rss
+        from tests.fixtures.examples import _run
+
+        for rel in CAPSULE_CHAIN_EXAMPLES:
+            with self.subTest(example=rel), mock.patch.object(rss.Scene, "build") as build:
+                with self.assertRaises(SystemExit) as caught:
+                    _run(rel)
+                self.assertIn("this example needs a GPU", str(caught.exception.code))
+                self.assertIn("SuperDex's Cosserat rod (rss.CPU)", str(caught.exception.code))
+                build.assert_not_called()
 
 
 @unittest.skipUnless(HAS_SUPERDEX, NO_SUPERDEX)

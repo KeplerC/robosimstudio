@@ -106,9 +106,9 @@ device runs on the CPU by itself.
 
 | Kind | Made with | Without a GPU |
 |---|---|---|
-| Cloth | `rss.sheet` | Runs, on SuperDex |
+| Cloth | `rss.sheet` | Runs, on SuperDex. Its contact forces are VBD's, so reading them (`01_cloth/03_scrub_a_stain`) is refused |
 | Soft bodies | `rss.sponge` | Runs, on SuperDex |
-| Rope | `rss.rod` | Runs, on SuperDex, one-way: the cable does not push back on what touches it (`rss.CPU` says why) |
+| Rope | `rss.rod` | Runs, on SuperDex, one-way: the cable does not push back on what touches it (`rss.CPU` says why). The capsule chain's Dahl memory, twist joint and pinned capsule are VBD's, so `03_rope/03_cable_memory` and `03_rope/04_twist` say they need a GPU |
 | Bags | `rss.bag` | Runs, on SuperDex, the engine a bag is on with a GPU too |
 | Cutting | `rss.cuttable`, `rss.knife` | Runs: the cage cutter on Warp's CPU device, the knife on MuJoCo's C library |
 | Paper | `rss.paper` | Refused: its yielding hinges are VBD's |
