@@ -92,12 +92,18 @@ def band(
             times the diameter over this) above the cord's diameter.
         normal: The circle's axis: ``(0, 0, 1)`` lies flat; ``(1, 0, 0)`` stands
             in the y-z plane, as a band hung on a peg pointing along x hangs.
-        kwargs: Any other :class:`RodSpec` field.
+        kwargs: Any other :class:`RodSpec` field but ``nodes`` and ``closed``, which the band sets.
 
     Needs the rod kind on SuperDex (``backend("superdex")``): a capsule chain has two ends.
     """
     if segments < 3:
         raise ValueError(f"band {name!r}: a loop needs at least 3 segments, got {segments}")
+    stated = sorted({"nodes", "closed"} & set(kwargs))
+    if stated:
+        raise TypeError(
+            f"band {name!r}: a band is closed round its diameter, so it takes no {' or '.join(stated)}; "
+            "a loop of your own shape is RodSpec(nodes=..., closed=True)"
+        )
     axis = np.asarray(normal, dtype=np.float64)
     axis /= float(np.linalg.norm(axis))
     u = np.cross(axis, [0.0, 0.0, 1.0] if abs(axis[2]) < 0.9 else [0.0, 1.0, 0.0])

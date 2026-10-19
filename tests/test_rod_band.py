@@ -67,6 +67,14 @@ class TestTheBandConstructor(unittest.TestCase):
         np.testing.assert_allclose(nodes[:, 0], 0.0, atol=1e-12)
         np.testing.assert_allclose(np.linalg.norm(nodes[:, 1:] - (0.0, 0.2), axis=1), 0.04, atol=1e-12)
 
+    def test_the_loop_it_sets_is_refused_by_name(self) -> None:
+        """``nodes`` and ``closed`` are the band's own: passed, they are named, not a duplicate keyword."""
+        from robosimstudio_materials.rod.band import band
+
+        for key, value in (("nodes", ((0.0, 0.0, 0.0), (0.1, 0.0, 0.0), (0.0, 0.1, 0.0))), ("closed", True)):
+            with self.subTest(stated=key), self.assertRaisesRegex(TypeError, f"band 'loop'.* no {key};"):
+                band(name="loop", **{key: value})
+
     def test_the_material_reaches_the_spec_the_way_the_rod_reads_it(self) -> None:
         """The rod reads friction as sqrt(mu_cable), so the band passes the square."""
         from robosimstudio_materials.rod.band import O_RING, band
