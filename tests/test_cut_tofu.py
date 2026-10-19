@@ -168,7 +168,7 @@ class TestADullBladeDoesNotPartIt(unittest.TestCase):
 
     def test_the_tofu_pushes_the_knife_back_short_of_the_board(self) -> None:
         # The threshold, 3000 N/m over the edge, is far past what the pads and the arm push: the edge
-        # stops 6-7 mm into the 40 mm block, the knife tipped 13-16 degrees in the pads.
+        # stops 6-8 mm into the 40 mm block, the knife tipped 12-16 degrees in the pads.
         got = self.got
         self.assertGreater(max(got["pushes"]), 5.0, f"pushes peak {max(got['pushes']):.2f} N")
         depth = f"edge {got['edge_depth'] * 1e3:.1f} mm into the tofu, tilted {got['tilt']:.1f} deg"

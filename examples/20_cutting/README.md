@@ -27,7 +27,7 @@ tofu), and the knife feels that push. In three drives through the arm panel (`te
 the tofu read 2 `pieces` with the edge on the board, and 1 piece, cut 88% through, with the hand
 stopped 15 mm higher. Tick **Dull blade**, a blade a thousand times duller, and push the same way: the
 push swings from step to step, up to 17-20 N on the way down and 9-16 N with the hand held low; the
-knife tips 13-16 degrees in the pads and the arm stalls with the edge's lowest point 6-7 mm into the
+knife tips 12-16 degrees in the pads and the arm stalls with the edge's lowest point 6-8 mm into the
 tofu, which stays whole (the test's drive and one without its pause, twice each). 13 ms a control
 step cutting through the page, 9 ms idle (RTX PRO 6000).
 

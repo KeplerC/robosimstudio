@@ -66,9 +66,10 @@ The label carries ipc-toolkit's adhesion law (`rss.tapes.LABEL`, `robosimstudio_
 a bond forms where the sheet is pressed onto the box harder than 8 kPa, pulls hardest, 4 kPa, at a
 0.5 mm lift and lets go at 1 mm. The grasp is contact, the pads on the rigid tab. In five drives the
 laid label held 1-6 of its 126 bonds, the four strokes 88-92%, and the tab drawn straight up 120 mm
-peeled all but 1-2 bonds at 2.2-2.4 N on **pull on the tab**, the box moving 0.6 mm at most; with **Adhesive
-off** the strokes made no bond (`tests/test_stick_a_label`). Rub lightly, the gizmo 3 mm under the
-label: at 5 mm the fingertips dragged it along in two drives of three. 35 ms a control step (RTX PRO 6000).
+peeled all but 1-2 bonds at 2.2-2.4 N on **pull on the tab**; the box moved 0.7 mm at most, as much as it
+does with no bond. With **Adhesive off** the strokes made no bond (`tests/test_stick_a_label`). Rub lightly,
+the gizmo 3 mm under the label: at 5 mm the fingertips dragged it along in two drives of three. 35 ms a control
+step (RTX PRO 6000).
 
 ```bash
 uv run examples/19_tape/02_stick_a_label.py
