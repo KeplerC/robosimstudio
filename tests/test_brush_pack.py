@@ -99,6 +99,44 @@ class TestTheFlatNames(unittest.TestCase):
 
         self.assertIs(add_capsule_chain, rod.add_capsule_chain)
 
+    def test_the_slots_the_brush_and_the_cable_tune_are_the_rod_joints_alone(self) -> None:
+        """A free joint, a chain and the weld under it in one span: the four slots are the chain's rows."""
+        import newton
+        import warp as wp
+        from newton.solvers import SolverVBD
+
+        from robosimstudio_materials.rod import add_capsule_chain, rod_slot_dofs
+
+        builder = newton.ModelBuilder()
+        SolverVBD.register_custom_attributes(builder)
+        grip = builder.add_body(xform=wp.transform_identity())
+        builder.add_shape_box(grip, hx=0.01, hy=0.01, hz=0.01)
+        chain = newton.Rod.create_straight(
+            start=wp.vec3(0.0, 0.0, -0.01),
+            direction=wp.vec3(0.0, 0.0, -1.0),
+            length=0.02,
+            segment_count=4,
+            radius=0.001,
+        )
+        first = builder.body_count
+        gains = dict.fromkeys(("stretch", "shear", "bend", "twist"), 1.0)
+        add_capsule_chain(
+            builder,
+            chain,
+            cfg=builder.default_shape_cfg,
+            color=(1.0, 1.0, 1.0),
+            gains={f"{slot}_{k}": v for slot, v in gains.items() for k in ("ke", "kd")},
+            label="bristle",
+        )
+        builder.add_joint_fixed(parent=grip, child=first)
+        model = builder.finalize(device="cpu")
+        types, starts = model.joint_type.numpy(), model.joint_qd_start.numpy()
+        rods = [j for j in range(model.joint_count) if int(types[j]) == int(newton.JointType.ROD)]
+        self.assertEqual(3, len(rods))
+        slots = rod_slot_dofs(model, range(model.joint_count))
+        for slot, rows in enumerate(slots):
+            np.testing.assert_array_equal(starts[rods] + slot, rows)
+
 
 class TestTheSpec(unittest.TestCase):
     def test_the_defaults_count_their_bodies(self) -> None:

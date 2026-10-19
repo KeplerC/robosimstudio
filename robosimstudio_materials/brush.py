@@ -107,7 +107,7 @@ from robosimstudio.specs.physics import GENERIC, register_domain
 # The rod kind minted the ``rod`` layout this one reads as, so it is imported
 # before the chain below names it; the builder helper is the one a cable is
 # built with.
-from robosimstudio_materials.rod import add_capsule_chain
+from robosimstudio_materials.rod import add_capsule_chain, rod_slot_dofs
 
 __all__ = [
     "BRUSH_60HZ",
@@ -823,26 +823,6 @@ class EntityBrush(Entity):
         """Every bristle capsule's shape: this brush's shapes but the plastic ones."""
         return np.setdiff1d(self.shapes, self.handle_shapes).astype(np.int32)
 
-    def _slot_dofs(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """The bristle joints' dof rows per slot ``(stretch, shear, bend, twist)``, as ``add_rod`` orders them.
-
-        The rod joints are this brush's joints with four dofs; the welds and the
-        own grip's free joint are told apart by their count.
-        """
-        starts = self.model.joint_qd_start.numpy()
-        types = self.model.joint_type.numpy()
-        slots: tuple[list[int], list[int], list[int], list[int]] = ([], [], [], [])
-        for j in (int(v) for v in self.joints):
-            if int(types[j]) == int(newton.JointType.FREE):
-                continue
-            begin = int(starts[j])
-            end = int(starts[j + 1]) if j + 1 < len(starts) else begin
-            if end - begin != 4:
-                continue
-            for slot, rows in enumerate(slots):
-                rows.append(begin + slot)
-        return tuple(np.asarray(rows, dtype=np.int64) for rows in slots)
-
     # -------------------------------------------------------------- phase 3
     def contribute_hooks(self, hooks) -> None:
         """Mark the lattice under every down tip, after every solve."""
@@ -1011,7 +991,8 @@ class EntityBrush(Entity):
         if self.model is None:
             return ()
         out = []
-        stretch, shear, bend, twist = self._slot_dofs()
+        # The bristles' rod joints, a slot each; the welds and an own grip's free joint are not among them.
+        stretch, shear, bend, twist = rod_slot_dofs(self.model, self.joints)
         capsules = self.bristle_shapes
         if len(bend):
 

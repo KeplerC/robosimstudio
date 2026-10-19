@@ -259,6 +259,27 @@ def add_capsule_chain(
     )
 
 
+def rod_slot_dofs(model: newton.Model, joints) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The dof rows of the rod joints among ``joints``, one array per slot: ``(stretch, shear, bend, twist)``.
+
+    ``add_rod`` builds each rod joint with four dofs in that fixed order
+    (``STRETCH=0, SHEAR=1, BEND=2, TWIST=3``). Told apart by type, so the welds
+    and a free joint that share a span with them are left out. A module function
+    beside :func:`add_capsule_chain` for the same reason: a cable's drive
+    tunables and a brush's bristles both read their chains' slots here.
+    """
+    starts = model.joint_qd_start.numpy()
+    types = model.joint_type.numpy()
+    slots: tuple[list[int], list[int], list[int], list[int]] = ([], [], [], [])
+    for j in (int(v) for v in joints):
+        if int(types[j]) != int(newton.JointType.ROD):
+            continue
+        begin = int(starts[j])
+        for slot, rows in enumerate(slots):
+            rows.append(begin + slot)
+    return tuple(np.asarray(rows, dtype=np.int64) for rows in slots)
+
+
 def _segment_mass(spec: RodSpec) -> float:
     """One capsule's mass [kg], from what the spec declares.
 
@@ -1049,21 +1070,11 @@ class EntityRod(Centerline, Entity):
     def _drive_dofs(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """The cable joints' dof rows, one array per slot: ``(stretch, shear, bend, twist)``.
 
-        ``add_rod`` builds each cable joint with four dofs in that fixed order
-        (``STRETCH=0, SHEAR=1, BEND=2, TWIST=3``). Four arrays rather than the
+        :func:`rod_slot_dofs` over the rod's span. Four arrays rather than the
         two pairs this used to return, so a slider moves one slot: the pairs
         are equal only while the spec left ``shear_*``/``twist_*`` at ``None``.
         """
-        starts = self.model.joint_qd_start.numpy()
-        slots: tuple[list[int], list[int], list[int], list[int]] = ([], [], [], [])
-        for j in (int(v) for v in self.joints):
-            begin = int(starts[j])
-            end = int(starts[j + 1]) if j + 1 < len(starts) else begin
-            if end - begin < 4:
-                continue
-            for slot, rows in enumerate(slots):
-                rows.append(begin + slot)
-        return tuple(np.asarray(rows, dtype=np.int64) for rows in slots)
+        return rod_slot_dofs(self.model, self.joints)
 
     def tunables(self, pipeline=None):
         """The rod's stiffness, its contact material, and the latch -- live.
