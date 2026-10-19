@@ -274,56 +274,75 @@ class TestThePressThatMakesABond(unittest.TestCase):
 
 
 class TestAContactBondsSpring(unittest.TestCase):
-    """A contact bond starts at the law's slope at the contact thickness the kernels use, radius plus margin."""
+    """A contact bond starts at the law's slope at the contact thickness the kernels use: the radius plus the
+    margin of the box nearest it, as the model holds them now."""
 
-    def test_the_build_counts_the_boxs_margin(self) -> None:
+    def _label(self, margin: float, *, stuck: bool):
+        """A label over a 100 x 120 x 50 mm box whose shape has ``margin`` [m], built, finalized and bound on the CPU."""
+        from types import SimpleNamespace
+
         import newton
         import warp as wp
 
-        from robosimstudio_materials.tape import LABEL, EntityTape, contact_stiffness, tape
+        from robosimstudio_materials.tape import LABEL, EntityTape, tape
 
         builder = newton.ModelBuilder()
         box = builder.add_body(xform=wp.transform((0.0, 0.0, 0.025), wp.quat_identity()), label="box")
         cfg = builder.default_shape_cfg.copy()
-        cfg.margin = 0.002
+        cfg.margin = margin
         builder.add_shape_box(box, hx=0.05, hy=0.06, hz=0.025, cfg=cfg)
-        label = EntityTape(tape(name="label", on="box", at=(-0.02, -0.05, 0.0505), material=LABEL, stuck=False))
+        label = EntityTape(tape(name="label", on="box", at=(-0.02, -0.05, 0.0505), material=LABEL, stuck=stuck))
         label.build(builder, None)
-        built = np.asarray(builder.attachment_particle_body_stiffness)[label.bonds]
+        model = builder.finalize(device="cpu")
+        label._bind_bonds(SimpleNamespace(model=model))
+        return label, model
+
+    def test_the_bind_counts_the_boxs_margin(self) -> None:
+        from robosimstudio_materials.tape import LABEL, contact_stiffness
+
+        label, model = self._label(0.002, stuck=False)
         want = label.bond_area * contact_stiffness(LABEL, LABEL.particle_radius + 0.002)
-        np.testing.assert_allclose(built, want, rtol=1e-6)
+        np.testing.assert_allclose(model.attachment_particle_body_stiffness.numpy()[label.bonds], want, rtol=1e-5)
+        np.testing.assert_allclose(label._contact["dmin"].numpy(), LABEL.particle_radius + 0.002, rtol=1e-6)
+
+    def test_a_reset_after_the_margin_moved_gives_the_springs_the_kernels_make(self) -> None:
+        """The box's margin written live, as its contact tunable's ``thickness`` writes it: a reset seats every
+        bond at the thickness the stick kernel makes it with now, not the one the bind found."""
+        label, model = self._label(0.002, stuck=False)
+        model.shape_margin.assign(np.full(model.shape_count, 0.004, dtype=np.float32))
+        label._reset_bonds()
+        seated = model.attachment_particle_body_stiffness.numpy()[label.bonds].copy()
+        thick = label._contact["dmin"].numpy().copy()
+        # Lying 4 mm inside the margin, every bond is pressed: the kernels make each and set its spring.
+        label._stick(model.state(), 1.0 / 960.0)
+        self.assertTrue(model.attachment_particle_body_enabled.numpy()[label.bonds].all())
+        np.testing.assert_allclose(thick, label._contact["dmin"].numpy(), rtol=1e-6)
+        np.testing.assert_allclose(seated, model.attachment_particle_body_stiffness.numpy()[label.bonds], rtol=1e-5)
 
     def test_a_reset_puts_back_the_spring_a_bond_starts_at(self) -> None:
-        """Not the secant the last episode's lift left, in the island's copy and the model's alike."""
+        """Not the secant the last episode's lift left, under the law as the kernels hold it now, in the
+        island's copy and the model's alike."""
         import warp as wp
 
-        from robosimstudio_materials.tape import CONTACT_FIELDS, LABEL, EntityTape, contact_stiffness, tape
+        from robosimstudio_materials.tape import CONTACT_FIELDS, LABEL, contact_stiffness
 
-        label = EntityTape(tape(name="label", on="box", material=LABEL))
-        n = 4
-        label.contact, label.bonds = True, np.arange(n, dtype=np.int32)
-        label.bond_area, label.anchors = np.full(n, 2.5e-5), np.zeros((n, 3))
-        label.broken = wp.ones(n, dtype=wp.int32, device="cpu")
-        stale = lambda: wp.array(np.full(n, 7.0, dtype=np.float32), dtype=float, device="cpu")  # noqa: E731
-        label._arrays = {
-            "enabled": [wp.zeros(n, dtype=wp.bool, device="cpu") for _ in range(2)],
-            "body_point": [wp.zeros(n, dtype=wp.vec3, device="cpu") for _ in range(2)],
-            "stiffness": [stale(), stale()],
-        }
-        live = dataclasses.replace(LABEL, strength=1.0e4)
-        label._contact = {
-            "params": wp.array([getattr(live, f) for f in CONTACT_FIELDS], dtype=float, device="cpu"),
-            "normal": wp.zeros(n, dtype=wp.vec3, device="cpu"),
-            "dmin": wp.zeros(n, dtype=float, device="cpu"),
-            "thick": 6.0e-4,
-        }
-        label._reset_bonds()
-        want = 2.5e-5 * contact_stiffness(live, 6.0e-4)
+        label, _ = self._label(0.0, stuck=True)
+        n = len(label.bonds)
+        island = {key: wp.clone(arrays[0]) for key, arrays in label._arrays.items()}
+        label._arrays = {key: [island[key], arrays[0]] for key, arrays in label._arrays.items()}
         for array in label._arrays["stiffness"]:
-            np.testing.assert_allclose(array.numpy(), want, rtol=1e-6, err_msg="the law as the kernels hold it now")
+            array.fill_(7.0)
+        live = dataclasses.replace(LABEL, strength=1.0e4)
+        label._contact["params"].assign(np.array([getattr(live, f) for f in CONTACT_FIELDS], dtype=np.float32))
+        label.broken.fill_(1)
+        label._reset_bonds()
+        want = label.bond_area * contact_stiffness(live, LABEL.particle_radius)
+        for array in label._arrays["stiffness"]:
+            got = array.numpy()[label.bonds]
+            np.testing.assert_allclose(got, want, rtol=1e-5, err_msg="the law as the kernels hold it now")
         for array in label._arrays["enabled"]:
-            self.assertTrue(array.numpy().all(), "a stuck label is stuck again")
-        np.testing.assert_allclose(label._contact["dmin"].numpy(), 6.0e-4)
+            self.assertTrue(array.numpy()[label.bonds].all(), "a stuck label is stuck again")
+        np.testing.assert_allclose(label._contact["dmin"].numpy(), np.full(n, LABEL.particle_radius), rtol=1e-6)
         self.assertFalse(label.broken.numpy().any())
 
 

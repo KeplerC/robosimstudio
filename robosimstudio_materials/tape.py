@@ -646,6 +646,34 @@ def _box_gap(point: wp.vec3, half: wp.vec3) -> wp.vec4:
     return wp.vec4(0.0, 0.0, wp.sign(point[2]), q[2])
 
 
+@wp.func
+def _margin_of(shape_margin: wp.array(dtype=float), s: int) -> float:
+    """A shape's contact margin [m], 0 for none or with no margins on the model."""
+    if s < 0 or shape_margin.shape[0] == 0:
+        return 0.0
+    return shape_margin[s]
+
+
+@wp.func
+def _nearest_box(
+    local: wp.vec3,
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+) -> int:
+    """The body's box nearest a point in the body's frame, its margin counted; -1 with no boxes."""
+    best = float(1.0e9)
+    hit = int(-1)
+    for j in range(boxes.shape[0]):
+        s = boxes[j]
+        g = _box_gap(wp.transform_point(wp.transform_inverse(shape_transform[s]), local), shape_scale[s])
+        if g[3] - _margin_of(shape_margin, s) < best:
+            best = g[3] - _margin_of(shape_margin, s)
+            hit = s
+    return hit
+
+
 @wp.kernel
 def _stick_kernel(
     rows: wp.array(dtype=wp.int32),
@@ -692,27 +720,19 @@ def _stick_kernel(
     p = particle[k]
     pose = body_q[target]
     local = wp.transform_point(wp.transform_inverse(pose), particle_q[p])
-    best = float(1.0e9)
-    face = wp.vec3(0.0, 0.0, 1.0)
-    surface = wp.vec3(0.0)
-    thick = particle_radius[p]
-    pair = soft_ke
-    for j in range(boxes.shape[0]):
-        s = boxes[j]
-        frame = shape_transform[s]
-        inside = wp.transform_point(wp.transform_inverse(frame), local)
-        g = _box_gap(inside, shape_scale[s])
-        margin = float(0.0)
-        if shape_margin.shape[0] > 0:
-            margin = shape_margin[s]
-        n_shape = wp.vec3(g[0], g[1], g[2])
-        if g[3] - margin < best:
-            best = g[3] - margin
-            face = wp.transform_vector(frame, n_shape)
-            surface = wp.transform_point(frame, inside - n_shape * g[3])
-            thick = particle_radius[p] + margin
-            pair = 0.5 * (soft_ke + shape_ke[s])
-    depth = particle_radius[p] - best
+    s = _nearest_box(local, boxes, shape_transform, shape_scale, shape_margin)
+    if s < 0:
+        return
+    frame = shape_transform[s]
+    inside = wp.transform_point(wp.transform_inverse(frame), local)
+    g = _box_gap(inside, shape_scale[s])
+    margin = _margin_of(shape_margin, s)
+    n_shape = wp.vec3(g[0], g[1], g[2])
+    face = wp.transform_vector(frame, n_shape)
+    surface = wp.transform_point(frame, inside - n_shape * g[3])
+    thick = particle_radius[p] + margin
+    pair = 0.5 * (soft_ke + shape_ke[s])
+    depth = particle_radius[p] - (g[3] - margin)
     if pair * depth < params[5] * area[k]:
         return
     anchor = surface + face * thick
@@ -804,6 +824,34 @@ def _bond_kernel(
         moved = wp.transform_point(wp.transform_inverse(pose), anchor + side * (1.0 - hold / pulled))
         body_point[row] = moved
         body_point_model[row] = moved
+
+
+@wp.kernel
+def _seat_kernel(
+    rows: wp.array(dtype=wp.int32),
+    particle: wp.array(dtype=wp.int32),
+    anchor: wp.array(dtype=wp.vec3),
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+    particle_radius: wp.array(dtype=float),
+    area: wp.array(dtype=float),
+    params: wp.array(dtype=float),
+    dmin: wp.array(dtype=float),
+    stiffness: wp.array(dtype=float),
+    stiffness_model: wp.array(dtype=float),
+):
+    """Each bond's contact thickness and its spring at contact, as :func:`_stick_kernel` would make the bond
+    on its anchor: the radius and the margin of the box nearest the anchor, as the model holds them now.
+    One thread per bond; the spring goes into the solver's copy and the model's."""
+    k = wp.tid()
+    s = _nearest_box(anchor[k], boxes, shape_transform, shape_scale, shape_margin)
+    thick = particle_radius[particle[k]] + _margin_of(shape_margin, s)
+    dmin[k] = thick
+    spring = area[k] * adhesion_stiffness(thick, params[1], params[2], params[0])
+    stiffness[rows[k]] = spring
+    stiffness_model[rows[k]] = spring
 
 
 # =============================================================================
@@ -915,10 +963,8 @@ class EntityTape(EntityCloth):
         self.bond_area = sheet_areas(spec.size, spec.cells)[rows]
         stiffness = np.full(len(rows), float(material.tack) * across * along)
         if self.contact:
-            # The contact thickness the kernels measure from: the radius plus the body's shape margin.
-            margins = [float(builder.shape_margin[s]) for s in range(builder.shape_count)]
-            margin = next((m for s, m in enumerate(margins) if int(builder.shape_body[s]) == self.body), 0.0)
-            stiffness = self.bond_area * contact_stiffness(material, float(material.particle_radius) + margin)
+            # At the radius alone: the bind seats each at the box's margin too, as the kernels read it.
+            stiffness = self.bond_area * contact_stiffness(material, float(material.particle_radius))
         bonds, anchors = [], []
         for i, k in zip(rows, stiffness, strict=True):
             p = start + int(i)
@@ -1224,7 +1270,6 @@ class EntityTape(EntityCloth):
                 f"tape {self.spec.name!r}: contact adhesion measures a press against boxes, and {self.spec.on!r} "
                 f"has shapes of types {sorted(set(types[mine].tolist()))}; stick it to an rss.box"
             )
-        thick = float(material.particle_radius) + self._body_margin(model)
         self._contact = {
             "model": model,
             "boxes": wp.array(boxes.astype(np.int32), dtype=wp.int32, device=device),
@@ -1232,21 +1277,41 @@ class EntityTape(EntityCloth):
             "normal": wp.array(
                 np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32), dtype=wp.vec3, device=device
             ),
-            "dmin": wp.full(len(self.bonds), thick, dtype=float, device=device),
+            "dmin": wp.zeros(len(self.bonds), dtype=float, device=device),
             "params": wp.array(
                 np.array([float(getattr(material, f)) for f in CONTACT_FIELDS], dtype=np.float32),
                 dtype=float,
                 device=device,
             ),
-            "thick": thick,
         }
+        self._seat_bonds()
 
-    def _body_margin(self, model) -> float:
-        """The contact margin of the body's first shape [m]: what VBD adds to a particle's radius against it."""
-        margins = model.shape_margin.numpy() if model.shape_margin is not None else np.zeros(0)
-        bodies = model.shape_body.numpy()
-        mine = np.flatnonzero(bodies == self.body)
-        return float(margins[mine[0]]) if len(mine) and len(margins) else 0.0
+    def _seat_bonds(self) -> None:
+        """Every contact bond's contact thickness and its spring at contact, in every array a solver reads.
+
+        From the particle's radius and the margin of the box nearest the bond's anchor, as the model holds
+        them now: a margin moved live since the build is the one the stick kernel makes a bond with.
+        """
+        c = self._contact
+        model, stiffness = c["model"], self._arrays["stiffness"]
+        wp.launch(
+            _seat_kernel,
+            dim=len(self.bonds),
+            inputs=[
+                self._rows,
+                self._particle,
+                self._anchor,
+                c["boxes"],
+                model.shape_transform,
+                model.shape_scale,
+                model.shape_margin,
+                model.particle_radius,
+                c["area"],
+                c["params"],
+            ],
+            outputs=[c["dmin"], stiffness[0], stiffness[-1]],
+            device=c["params"].device,
+        )
 
     # -------------------------------------------------------------- phase 5
     def reset(self, pipeline: ScenePipeline, episode, *, world: int = 0) -> None:
@@ -1271,20 +1336,18 @@ class EntityTape(EntityCloth):
 
     def _reset_bonds(self) -> None:
         """Every bond as built, in every array a solver reads: stuck or loose, at its anchor, and under
-        contact adhesion with the spring a bond starts at, not the secant the last episode left."""
+        contact adhesion with the spring a bond starts at (:meth:`_seat_bonds`), not the secant the last
+        episode left."""
         self.broken.zero_()
         rows = {"enabled": bool(self.spec.stuck), "body_point": self.anchors.astype(np.float32)}
-        if self._contact:
-            values = self._contact["params"].numpy()
-            law = replace(self.spec.material, **{f: float(v) for f, v in zip(CONTACT_FIELDS, values, strict=True)})
-            rows["stiffness"] = (self.bond_area * contact_stiffness(law, self._contact["thick"])).astype(np.float32)
-            self._contact["normal"].assign(np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32))
-            self._contact["dmin"].fill_(self._contact["thick"])
         for key, value in rows.items():
             for array in self._arrays.get(key, ()):
                 values = array.numpy()
                 values[self.bonds] = value
                 array.assign(values)
+        if self._contact:
+            self._contact["normal"].assign(np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32))
+            self._seat_bonds()
 
     # ---------------------------------------------------------------- runtime
     def peeled(self) -> float:
