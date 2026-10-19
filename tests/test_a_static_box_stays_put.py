@@ -117,7 +117,14 @@ class TestAStaticBoxBesideTheYamUnderGeneric(unittest.TestCase):
 
 
 class TestAStaticBoxOnMujoco(unittest.TestCase):
-    """The same cube in one MuJoCo with the arm: it converts, as a body welded to the world."""
+    """The same cube in one MuJoCo with the arm: it converts, as a mocap body welded to the world.
+
+    Read off MuJoCo, not off ``body_q``. ``SolverMuJoCo`` writes ``body_q`` back
+    by forward kinematics over the articulations, and a mocap body is in none, so
+    the cube's row keeps its build value whatever MuJoCo does with it. With its
+    weld moved 100 mm in x on the MuJoCo side, ``mocap_pos`` and ``xpos`` moved
+    100 mm and ``body_q`` did not (``d2_probe.py``).
+    """
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -131,11 +138,24 @@ class TestAStaticBoxOnMujoco(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.sim.close()
 
+    def _held(self) -> tuple[np.ndarray, np.ndarray]:
+        """Where MuJoCo holds the cube: its mocap position and its quaternion as xyzw."""
+        solver = self.sim.pipeline.program.mujoco_solver
+        mjc = np.flatnonzero(solver.mjc_body_to_newton.numpy()[0] == self.cube.entity.body)
+        self.assertEqual(1, len(mjc), "one MuJoCo body is the cube")
+        mocap = int(solver.mj_model.body_mocapid[int(mjc[0])])
+        self.assertGreaterEqual(mocap, 0, "a mocap body: the world root a kinematic weld converts to")
+        w, x, y, z = solver.mjw_data.mocap_quat.numpy()[0, mocap].astype(np.float64)
+        return solver.mjw_data.mocap_pos.numpy()[0, mocap].astype(np.float64), np.array([x, y, z, w])
+
     def test_it_converts_and_stays_in_the_air(self) -> None:
-        before = _at(self.cube)
+        built = np.asarray(self.cube.pose, dtype=np.float64)
         self.sim.run(50).sync()
         self.assertTrue(self.sim.state_is_finite())
-        np.testing.assert_allclose(_at(self.cube), before, atol=1.0e-6)
+        pos, quat = self._held()
+        np.testing.assert_allclose(pos, built[:3], atol=1.0e-6, err_msg="MuJoCo holds it where it was built")
+        np.testing.assert_allclose(quat, built[3:7], atol=1.0e-6)
+        np.testing.assert_allclose(pos, (SURFACE[0], SURFACE[1], SURFACE[2] + 0.2), atol=1.0e-6)
 
 
 class TestATowelOverAStaticBox(unittest.TestCase):
