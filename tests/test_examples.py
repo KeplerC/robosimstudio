@@ -307,7 +307,7 @@ class TestThePageCanTakeHoldOfIt(unittest.TestCase):
                 try:
                     for _ in range(4):
                         session.tick()
-                    self.assertIsNotNone(session.objects, f"examples/{name} has nothing draggable")
+                    self.assertIsNotNone(session.objects, f"{_path(name).relative_to(ROOT)} has nothing draggable")
                     self.assertLessEqual(expected, set(session.objects.names))
                 finally:
                     session.teardown()
