@@ -1383,13 +1383,12 @@ class EntityTape(EntityCloth):
         each (``scene_live.py``, ``scene_live2.py``, GPU 1). That row goes as the tab, which rests on the box
         by its own contact and is not moved here, is thrown up 16 mm by the jump; written in 0.25 mm steps a
         control step apart, as a dragged slider can write it, all 144 of either held to 2 mm, the tab rising
-        4.6 mm at most. Moved by its pose too,
-        the tab came off worse, VBD reading the jump as a velocity against its own pose history, and with
-        the anchors moved alone 46 and 9 bonds held at 1 mm (``a2_variants.py``, VBD on the CPU). It runs
-        once a control step, outside the graph, because a write lands between control steps: in a substep
-        phase the first solve after it has already pushed the sheet out. A particle radius written live
-        moves the thickness too, and is laid again alike: at 1.5 mm, from 0.5, all 144 held on the CPU
-        where 2 and none did (``a2_cpu2.py``)."""
+        4.6 mm at most. Moved by its pose too, the tab came off worse, VBD reading the jump as a velocity
+        against its own pose history, and with the anchors moved alone 46 and 9 bonds held at 1 mm
+        (``a2_variants.py``, VBD on the CPU). It runs once a control step, outside the graph, because a
+        write lands between control steps: in a substep phase the first solve after it has already pushed
+        the sheet out. A particle radius written live moves the thickness too, and is laid again alike: at
+        1.5 mm, from 0.5, all 144 held on the CPU where 2 and none did (``a2_cpu2.py``)."""
         del dt
         if self._laid is None:
             return
