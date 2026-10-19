@@ -61,6 +61,7 @@ particle state.
 
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Any
 
@@ -78,6 +79,7 @@ from robosimstudio.engines.geometry import (
 )
 from robosimstudio.engines.pose import compose_many
 
+from .bridge import write_obj, wxyz
 from .runtime import ensure_initialized
 
 __all__ = [
@@ -116,12 +118,6 @@ def liquid_args(params: dict) -> dict[str, float]:
         "mu": float(params.get("viscosity", 5.0e-4)),
         "gamma": float(params.get("surface_tension", 0.01)),
     }
-
-
-def _wxyz(q: np.ndarray) -> np.ndarray:
-    """``xyzw`` rows as Genesis's ``wxyz``."""
-    q = np.asarray(q, dtype=np.float64).reshape(-1, 4)
-    return q[:, [3, 0, 1, 2]]
 
 
 def _angular_velocity(start: np.ndarray, end: np.ndarray, dt: float) -> np.ndarray:
@@ -280,10 +276,10 @@ class SphBridge:
         gs = self.gs
         if geom.kind == "plane":
             return None
-        place = geom.local if not geom.moving else compose_many(self._body_pose(geom.body), geom.local)[0]
+        place = geom.local if not geom.moving else compose_many(self._built_q[int(geom.body)], geom.local)[0]
         common = {
             "pos": tuple(float(v) for v in place[:3]),
-            "quat": tuple(float(v) for v in _wxyz(place[3:7])[0]),
+            "quat": tuple(float(v) for v in wxyz(place[3:7])),
             "fixed": False,
         }
         scale = geom.scale
@@ -297,8 +293,6 @@ class SphBridge:
             mesh = geom.mesh()
             if mesh is None:
                 return None
-            from .bridge import write_obj
-
             morph = gs.morphs.Mesh(
                 file=write_obj(self, geom, mesh),
                 align=False,
@@ -318,8 +312,10 @@ class SphBridge:
         )
         return {"entity": entity, "geom": geom, "place": np.asarray(place, dtype=np.float64)}
 
-    def _body_pose(self, body: int) -> np.ndarray:
-        return np.asarray(self.model.body_q.numpy()[int(body)], dtype=np.float64)
+    @functools.cached_property
+    def _built_q(self) -> np.ndarray:
+        """Every body's world pose as the model was built, read once: where the moving mirrors start."""
+        return np.asarray(self.model.body_q.numpy(), dtype=np.float64)
 
     def _index_mirrors(self) -> None:
         """The rigid solver's coordinate and velocity indices for every mirror, in one batch each."""
@@ -337,7 +333,7 @@ class SphBridge:
         self._vel = np.zeros((len(self.mirrors), 6))
         for i, entry in enumerate(self.mirrors):
             self._qpos[i, :3] = entry["place"][:3]
-            self._qpos[i, 3:] = _wxyz(entry["place"][3:7])[0]
+            self._qpos[i, 3:] = wxyz(entry["place"][3:7])
 
     # ------------------------------------------------------------------ tick
     def attach_pipeline(self, pipeline: Any) -> None:
@@ -355,7 +351,7 @@ class SphBridge:
             step = float(self.control_dt)
             for row, i in enumerate(self._moving):
                 self._qpos[i, :3] = begin[row, :3]
-                self._qpos[i, 3:] = _wxyz(begin[row, 3:7])[0]
+                self._qpos[i, 3:] = wxyz(begin[row, 3:7])
                 self._vel[i, :3] = (end[row, :3] - begin[row, :3]) / step
                 self._vel[i, 3:] = _angular_velocity(begin[row, 3:7], end[row, 3:7], step)
         if len(self.mirrors):
