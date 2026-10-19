@@ -11,7 +11,10 @@ sentences the page shows (its **Seal** readout looking without overwriting
 :attr:`Suction.last`), a hold asked for again keeps the part it has, and
 ``sim.vacuum`` appears only on a robot with a cup, is tagged privileged, and
 maps its arguments onto :meth:`Suction.hold` and :meth:`Suction.release`. Only
-a robot carrying a cup is kept to one world.
+a robot carrying a cup is kept to one world. The weld holds only the parts on
+the pad's own MuJoCo island, the wrench lets go at one stretch whatever the
+part weighs, and ``sim.suction`` asked for an arm without a cup names the arms
+with one.
 """
 
 from __future__ import annotations
@@ -700,6 +703,20 @@ def _env(cups: dict) -> types.SimpleNamespace:
         embodiment=types.SimpleNamespace(suctions=cups), by_name={"plate": plate, "towel": cloth}
     )
     return types.SimpleNamespace(scene=scene)
+
+
+class TestSimSuction(unittest.TestCase):
+    def test_an_arm_without_a_cup_is_refused_with_the_cup_arms(self) -> None:
+        from robosimstudio.sim.sim import Sim
+
+        cup = object()
+        sim = Sim.__new__(Sim)
+        sim.scene = types.SimpleNamespace(embodiment=types.SimpleNamespace(suctions={"right": cup}))
+        self.assertIs(cup, sim.suction("right"))
+        self.assertIs(cup, sim.suction())
+        with self.assertRaises(KeyError) as caught:
+            sim.suction("left")
+        self.assertIn("no suction hand on arm 'left'; the cups are on ['right']", str(caught.exception))
 
 
 class TestTheVacuumTool(unittest.TestCase):
