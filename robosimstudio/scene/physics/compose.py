@@ -540,10 +540,23 @@ def _warn_lost_material(node: Any, declared: HostActor, island: Any) -> None:
 
 
 def _stated(record: Any, names: tuple[str, ...] | None = None) -> list[str]:
-    """``record``'s fields (or those of ``names``) that differ from a default-built one, in order."""
+    """``record``'s fields (or those of ``names``) that differ from a default-built one, in order.
+
+    Compared as values (:func:`_as_value`): a rope given ``surface_labels=["table"]`` states
+    nothing its default ``("table",)`` does not, and a list never equals a tuple.
+    """
     default = type(record)()
     names = tuple(f.name for f in dataclasses.fields(record)) if names is None else names
-    return [name for name in names if getattr(record, name) != getattr(default, name)]
+    return [name for name in names if _as_value(getattr(record, name)) != _as_value(getattr(default, name))]
+
+
+def _as_value(value: Any) -> Any:
+    """``value`` with every list, tuple and array in it a tuple, for :func:`_stated` to compare."""
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return tuple(_as_value(item) for item in value)
+    return value
 
 
 def _check_in_place_rates(arrangement: ArrangementSpec, islands: list[Island]) -> None:

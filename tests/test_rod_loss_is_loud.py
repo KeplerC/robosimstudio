@@ -85,6 +85,12 @@ class TestARopeOnSuperdexSaysWhatItDrops(unittest.TestCase):
     def test_a_default_rope_is_quiet(self) -> None:
         self.assertEqual([], _lost())
 
+    def test_a_list_equal_to_its_default_tuple_is_not_named(self) -> None:
+        """``surface_labels=["table"]`` and ``bow_range=[0.0, 0.0]`` are the defaults, given as lists: compared
+        with ``!=``, a list never equals a tuple, and both were reported lost."""
+        self.assertEqual([], _lost(surface_labels=["table"], bow_range=[0.0, 0.0]))
+        self.assertIn("'surface_labels'", _lost(surface_labels=["table", "bin"])[0], "a list that differs is stated")
+
 
 @unittest.skipUnless(HAS_ROD, "the rod pack is not in this tree")
 class TestTheListIsTrue(unittest.TestCase):
