@@ -30,6 +30,7 @@ import numpy as np
 
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
+from robosimstudio.core.probes.clearance import _segment_segment
 
 __all__ = ["crossings", "knot_length", "overhand", "self_clearance"]
 
@@ -109,27 +110,13 @@ def overhand(
 
 
 def _segment_distances(points: np.ndarray, skip: int) -> np.ndarray:
-    """Axis-to-axis distance between every pair of segments at least ``skip`` apart along the rod, ``[pairs]``."""
+    """Axis-to-axis distance between every pair of segments at least ``skip`` apart along the rod, ``[pairs]``.
+
+    The clearance probe's closest points of two segments, a zero-length leg measured as the point it is.
+    """
     a0, a1 = points[:-1], points[1:]
-    n = len(a0)
-    i, j = np.triu_indices(n, k=max(1, int(skip)))
-    p, q = a0[i], a0[j]
-    d1, d2 = a1[i] - p, a1[j] - q
-    r = p - q
-    a = np.einsum("ij,ij->i", d1, d1)
-    e = np.einsum("ij,ij->i", d2, d2)
-    f = np.einsum("ij,ij->i", d2, r)
-    c = np.einsum("ij,ij->i", d1, r)
-    b = np.einsum("ij,ij->i", d1, d2)
-    denom = a * e - b * b
-    with np.errstate(divide="ignore", invalid="ignore"):
-        sc = np.where(denom > 1e-18, np.clip((b * f - c * e) / denom, 0.0, 1.0), 0.0)
-        tc = (b * sc + f) / np.where(e > 1e-18, e, 1.0)
-    # Clamp t, then recompute s for the clamped t (the standard closest-point-of-two-segments).
-    tc_clamped = np.clip(tc, 0.0, 1.0)
-    sc = np.where(tc != tc_clamped, np.clip((b * tc_clamped - c) / np.where(a > 1e-18, a, 1.0), 0.0, 1.0), sc)
-    closest = (p + sc[:, None] * d1) - (q + tc_clamped[:, None] * d2)
-    return np.linalg.norm(closest, axis=1)
+    i, j = np.triu_indices(len(a0), k=max(1, int(skip)))
+    return _segment_segment(a0, a1, a0, a1)[i, j]
 
 
 def self_clearance(positions: np.ndarray, radius: float, *, skip: int | None = None) -> float:

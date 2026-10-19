@@ -80,6 +80,13 @@ class TestTheKnotMeasures(unittest.TestCase):
         b = np.stack([np.zeros(26), np.linspace(0.1, -0.1, 26), np.full(26, RADIUS + 0.015)], axis=1)
         self.assertAlmostEqual(0.015 - 2 * RADIUS, self_clearance(np.vstack([a, far, b]), RADIUS), delta=1e-6)
 
+    def test_a_zero_length_leg_is_measured_from_its_point(self) -> None:
+        """Two coincident nodes make a leg that is a point: 12 mm over the middle of a run, it is 12 mm from it."""
+        from robosimstudio_materials.rod.knot import _segment_distances
+
+        rope = np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.1, 0.012, 0.0], [0.05, 0.012, 0.0], [0.05, 0.012, 0.0]])
+        self.assertAlmostEqual(0.012, float(_segment_distances(rope, 3)[0]), places=12)  # the first leg and the point
+
     def test_the_rope_in_the_knot_is_between_its_first_and_last_crossing(self) -> None:
         from robosimstudio_materials.rod.knot import knot_length
 
