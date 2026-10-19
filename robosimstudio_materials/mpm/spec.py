@@ -235,10 +235,10 @@ class ParticleBodySpec:
             run's own is the right choice here: the MPM steps once per control
             step either way, and a finer settle only runs the arm's solver at
             a coarser rate than it was tuned for.
-        render: ``"points"`` draws each particle as a sphere of half the
-            spacing; ``"surface"`` also offers a reconstructed surface mesh to
-            a renderer that can take one per frame (the path tracer), through
-            ``DeformableHandle.surface``.
+        render: ``"points"`` draws each particle as a sphere of its radius,
+            half its lattice cell's cube root; ``"surface"`` also offers a
+            reconstructed surface mesh to a renderer that can take one per
+            frame (the path tracer), through ``DeformableHandle.surface``.
         surface_voxel: Voxel of the surface reconstruction [m], or ``None``
             for 0.45 of the solver's.
         containers: Names of rigid or static entities this body is poured

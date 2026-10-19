@@ -287,6 +287,30 @@ class TestTheSpecs(unittest.TestCase):
         np.testing.assert_allclose(8.0 * radius**3, spec.particle_volume, rtol=1e-9)
         np.testing.assert_allclose(mass / (8.0 * radius**3), density, rtol=1e-9)
         self.assertAlmostEqual(float(mass[0]), entity.particle_mass, places=12)
+        self.assertAlmostEqual(float(radius[0]), entity.particle_radius, places=12)
+
+    def test_the_drawn_radius_is_the_models(self) -> None:
+        """The puddle's points and its surface take the 1.33 mm the model holds, not half the 2.5 mm spacing."""
+        from types import SimpleNamespace
+
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm.entity import EntityParticleBody
+
+        spec = rss.liquid(name="ketchup", size=(0.10, 0.10, 0.006), material="ketchup", render="surface")
+        builder = newton.ModelBuilder()
+        body = EntityParticleBody(spec)
+        body.build(builder, None)
+        model = builder.finalize(device="cpu")
+        radius = float(model.particle_radius.numpy()[0])
+        self.assertAlmostEqual(0.5 * (0.0025 * 0.0025 * 0.003) ** (1.0 / 3.0), radius, places=9)
+        self.assertAlmostEqual(radius, body.handle(model).point_radius, places=9)
+        body.solver = SimpleNamespace(
+            config=SimpleNamespace(voxel_size=0.004), model=SimpleNamespace(device="cpu", world_count=1)
+        )
+        body._install_surface()
+        self.assertAlmostEqual(radius, body.surface.radius, places=9)
 
     def test_a_mesh_is_not_counted_before_it_is_filled(self) -> None:
         """``size`` is ignored for a mesh, so a count, a mass or a summary off it would be the default box's."""

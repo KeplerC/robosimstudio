@@ -258,7 +258,7 @@ class EntityParticleBody(ParticleMixin, Entity):
             pos=[tuple(float(c) for c in row) for row in world],
             vel=[(0.0, 0.0, 0.0)] * n,
             mass=[mass] * n,
-            radius=[0.5 * self._particle_volume ** (1.0 / 3.0)] * n,
+            radius=[self.particle_radius] * n,
             flags=[int(newton.ParticleFlags.ACTIVE)] * n,
             custom_attributes=attributes,
         )
@@ -303,13 +303,13 @@ class EntityParticleBody(ParticleMixin, Entity):
 
     # -------------------------------------------------------------- phase 2
     def handle(self, model: newton.Model) -> Any:
-        """The particles as a point body: no triangles, a draw radius of half the spacing.
+        """The particles as a point body: no triangles, drawn at the radius the model holds.
 
         ``surface`` is installed at scene-ready, once the solver exists to
         reconstruct one; a renderer meeting the handle before then draws points.
         """
         handle = super().handle(model)
-        handle.point_radius = 0.5 * float(self.spec.particle_spacing)
+        handle.point_radius = self.particle_radius
         if self.surface is not None:
             handle.surface = self.surface_mesh  # the compiler may ask for the handle after scene-ready
         self._handle = handle
@@ -426,7 +426,7 @@ class EntityParticleBody(ParticleMixin, Entity):
         voxel = self.spec.surface_voxel
         voxel = 0.45 * float(self.solver.config.voxel_size) if voxel is None else float(voxel)
         self.surface = ParticleSurfacer(
-            0.5 * float(self.spec.particle_spacing),
+            self.particle_radius,
             voxel_size=voxel,
             device=self.solver.model.device,
             kernel_radius=3.0 * voxel,
@@ -515,6 +515,17 @@ class EntityParticleBody(ParticleMixin, Entity):
     def particle_mass(self) -> float:
         """Mass of one particle [kg]: its lattice cell's volume times the density."""
         return self._particle_volume * float(self.material.density)
+
+    @property
+    def particle_radius(self) -> float:
+        """Radius of one particle [m]: half its lattice cell's cube root, as the model holds it.
+
+        What the solver reads back as the particle's volume (``8 r^3``), and so
+        what the points are drawn at and the surface is grown over: the wipe's
+        puddle, 2.5 mm across and 3 mm deep a cell, is 1.33 mm, not the 1.25
+        mm of half the spacing.
+        """
+        return 0.5 * self._particle_volume ** (1.0 / 3.0)
 
     @property
     def floor_z(self) -> float:
