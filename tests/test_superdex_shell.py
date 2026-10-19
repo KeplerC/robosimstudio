@@ -87,8 +87,10 @@ class _Actor:
     def __init__(self, params: _Shell) -> None:
         self.params = params
         self.drift = np.zeros(3)
+        self.root_reads = 0
 
     def get_root_transform(self) -> _Transform:
+        self.root_reads += 1
         return self.params.world_from_local
 
     def get_node_positions_local(self) -> np.ndarray:
@@ -198,12 +200,24 @@ class TestASheetIsBuiltAboutItsCentroid(unittest.TestCase):
         np.testing.assert_allclose(self.entry["read"](), self.vertices + self.actor.drift, atol=1e-12)
         # As a placement writes them: a root turned a quarter about z turns what it reads.
         half = math.sqrt(0.5)
-        self.actor.params.world_from_local = _Transform(_Quaternion(0.0, 0.0, half, half), (0.6, 0.0, 0.75))
-        self.actor.params.shape.coordinates = np.tile([0.01, 0.0, 0.0], len(self.vertices))
-        self.actor.drift = np.zeros(3)
-        np.testing.assert_allclose(
-            self.entry["read"](), np.tile([0.6, 0.01, 0.75], (len(self.vertices), 1)), atol=1e-12
-        )
+        make = self.bridge.physics.experimental.create_shell_actor
+
+        def turned(scene, params):
+            params.world_from_local = _Transform(_Quaternion(0.0, 0.0, half, half), (0.6, 0.0, 0.75))
+            params.shape.coordinates = np.tile([0.01, 0.0, 0.0], len(self.vertices))
+            return make(scene, params)
+
+        self.bridge.physics.experimental.create_shell_actor = turned
+        entry = _shell_builder()(self.bridge, _record(self.vertices), None, None, None)
+        np.testing.assert_allclose(entry["read"](), np.tile([0.6, 0.01, 0.75], (len(self.vertices), 1)), atol=1e-12)
+
+    def test_its_root_is_read_once_at_build_not_every_control_step(self) -> None:
+        """Nothing moves a shell's root (``c4_root.py``), so the tick's read leaves it alone."""
+        built = self.actor.root_reads
+        for _ in range(5):
+            self.entry["read"]()
+        self.assertEqual(built, self.actor.root_reads)
+        self.assertLessEqual(built, 1)
 
     def test_the_rest_it_reports_is_the_world_rest(self) -> None:
         """``prev`` is what the first tick's speed and every weld's nearest node are measured from."""
