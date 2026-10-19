@@ -262,6 +262,40 @@ class TestTheSealSays(unittest.TestCase):
         self.assertIs(cup.seal(self.plate), cup.last)
 
 
+class TestAPartOfSeveralShapes(unittest.TestCase):
+    """A plate with a small boss 50 mm off its middle: two boxes, and the cup is over the plate's."""
+
+    def test_the_face_the_cup_is_over_seals_though_another_is_nearer(self) -> None:
+        import newton
+        import warp as wp
+
+        from robosimstudio.core.suction import Suction
+
+        builder = newton.ModelBuilder()
+        pad = builder.add_body(xform=wp.transform_identity())
+        builder.add_shape_cylinder(pad, radius=0.015, half_height=0.003)
+        plate = builder.add_body(xform=wp.transform_identity())
+        builder.add_shape_box(plate, hx=PLATE_HALF[0], hy=PLATE_HALF[1], hz=PLATE_HALF[2])
+        # 0.5 mm proud of the plate's top, 20 mm square, 50 mm along x: nowhere near the cup's 15 mm radius.
+        builder.add_shape_box(
+            plate, xform=wp.transform((0.05, 0.0, 0.0005), wp.quat_identity()), hx=0.01, hy=0.01, hz=0.003
+        )
+        model = builder.finalize(device="cpu")
+        cup = Suction(model, arm="right", pad_body=pad, pad_radius=0.015, rows={plate: 0})
+        body_q = np.zeros((2, 7))
+        body_q[:, 6] = 1.0
+        body_q[pad], body_q[plate] = _down(z=0.007), PLATE
+        # The boss's top is 0.5 mm from the face and the plate's 1 mm; only the plate's is under the cup.
+        report = cup.seal(plate, body_q)
+        self.assertTrue(report.sealed, report.why)
+        self.assertAlmostEqual(0.001, report.gap_m, places=6)
+        # Off both, the refusal is still the nearest face's.
+        body_q[pad] = _down(z=0.012)
+        report = cup.seal(plate, body_q)
+        self.assertFalse(report.sealed)
+        self.assertAlmostEqual(0.0055, report.gap_m, places=6)
+
+
 class _Registry:
     def __init__(self) -> None:
         self.calls: dict[str, dict] = {}

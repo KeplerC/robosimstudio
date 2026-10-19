@@ -4,11 +4,11 @@
 A cup holds a flat part by sealing onto one of its faces, so there are two
 questions here and they are kept apart. :func:`face_on_box` and
 :meth:`Suction.seal` answer the first from geometry alone: how far the face's
-centre stands off the nearest flat face of the part, how far the cup's normal
-is from that face's, and whether the whole cup is over it. Geometry rather than
-the contact pipeline, because a cup seals across the bellows' give before the
-rubber touches, and a contact list only says touching or not. :meth:`Suction.hold`
-answers the second in one of two tiers:
+centre stands off a flat face of the part (one it seals on, else the nearest),
+how far the cup's normal is from that face's, and whether the whole cup is over
+it. Geometry rather than the contact pipeline, because a cup seals across the
+bellows' give before the rubber touches, and a contact list only says touching
+or not. :meth:`Suction.hold` answers the second in one of two tiers:
 
 * **weld**: a MuJoCo weld equality between the pad body and the part, one row
   per part the scene built, disabled at build and switched on at hold with the
@@ -90,7 +90,7 @@ class SealReport:
     sealed: bool
     """Whether the cup is on the part: gap and tilt inside tolerance, the whole face over it."""
     gap_m: float
-    """The face centre's stand-off from the part's nearest flat face [m], negative when pressed in."""
+    """The face centre's stand-off from the part's face it seals on, else its nearest [m], negative when pressed in."""
     tilt_rad: float
     """The angle between the cup's normal and that face's normal [rad]."""
     body: int
@@ -166,6 +166,19 @@ def flat_faces(model: newton.Model, body: int) -> list[tuple[np.ndarray, np.ndar
             pose[:3] = pose[:3] + quat_to_mat(pose[3:7]) @ (0.5 * (lo + hi))
             out.append((pose, 0.5 * (hi - lo)))
     return out
+
+
+def _refusal(gap: float, tilt: float, covered: bool) -> str:
+    """Why a face with this gap, tilt and cover does not seal, in a sentence, or empty when it does."""
+    if tilt > TILT_TOLERANCE:
+        return f"the cup is {math.degrees(tilt):.1f} degrees off the face; {math.degrees(TILT_TOLERANCE):.0f} is the most it seals at"
+    if gap > GAP_TOLERANCE:
+        return f"the face is {gap * 1e3:.1f} mm off the part; {GAP_TOLERANCE * 1e3:.0f} mm is the most it seals across"
+    if gap < -COMPRESSION_LIMIT:
+        return f"the face reads {-gap * 1e3:.1f} mm inside the part"
+    if not covered:
+        return "the cup hangs over the part's edge"
+    return ""
 
 
 def _compose(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -398,28 +411,21 @@ class Suction:
         return report
 
     def _seal(self, body: int, poses: np.ndarray) -> SealReport:
+        """The part's best face: one that seals, the nearest by gap among several, else the nearest refusal.
+
+        A part of several shapes (convex hulls, a tray's base and rim) offers a
+        box per shape, and the nearest face by gap alone can be one the cup is
+        not over while another seals.
+        """
         faces = self._flat(body)
         if not faces:
             return SealReport(False, math.inf, math.nan, body, "the part offers no flat face: no box or mesh shape")
-        best: tuple[float, float, bool] | None = None
+        reports = []
         for pose, half in faces:
-            found = face_on_box(poses[self.pad_body], self.pad_radius, _compose(poses[body], pose), half)
-            if best is None or abs(found[0]) < abs(best[0]):
-                best = found
-        assert best is not None
-        gap, tilt, covered = best
-        why = ""
-        if tilt > TILT_TOLERANCE:
-            why = f"the cup is {math.degrees(tilt):.1f} degrees off the face; {math.degrees(TILT_TOLERANCE):.0f} is the most it seals at"
-        elif gap > GAP_TOLERANCE:
-            why = (
-                f"the face is {gap * 1e3:.1f} mm off the part; {GAP_TOLERANCE * 1e3:.0f} mm is the most it seals across"
-            )
-        elif gap < -COMPRESSION_LIMIT:
-            why = f"the face reads {-gap * 1e3:.1f} mm inside the part"
-        elif not covered:
-            why = "the cup hangs over the part's edge"
-        return SealReport(not why, gap, tilt, body, why)
+            gap, tilt, covered = face_on_box(poses[self.pad_body], self.pad_radius, _compose(poses[body], pose), half)
+            why = _refusal(gap, tilt, covered)
+            reports.append(SealReport(not why, gap, tilt, body, why))
+        return min([r for r in reports if r.sealed] or reports, key=lambda r: abs(r.gap_m))
 
     def under(self, body_q: Any = None, *, record: bool = True) -> SealReport:
         """The seal test against whatever is under the cup: the part that seals, else the nearest refusal.
