@@ -64,8 +64,9 @@ __all__ = [
 # unstuck, and only being pulled off it peels. The kernel (section 4) runs after every substep inside
 # the captured graph and writes the attachment's own ``enabled`` flag, which VBD reads on every launch,
 # into the array the solver holds (the coupled solver gives the VBD entry its own copy of the
-# attachment arrays). A bond's force at its break is ``tack x cell area x break_opening``: 0.1 N on a
-# 5 mm cell of :data:`PAPER_LABEL`, 0.9 N across a 40 mm label's row.
+# attachment arrays) and into the model's, which Newton copies over the solver's again whenever it is
+# told the constraints changed. A bond's force at its break is ``tack x cell area x break_opening``:
+# 0.1 N on a 5 mm cell of :data:`PAPER_LABEL`, 0.9 N across a 40 mm label's row.
 #
 # The pull tab, and why it is rigid. Peeling needs the hand to hold the sheet's end, and every way of
 # holding it by contact was measured. The attachments need VBD to integrate the body too, so they
@@ -314,12 +315,16 @@ def _break_kernel(
     particle_q: wp.array(dtype=wp.vec3),
     body_q: wp.array(dtype=wp.transform),
     enabled: wp.array(dtype=wp.bool),
+    enabled_model: wp.array(dtype=wp.bool),
     broken: wp.array(dtype=wp.int32),
 ):
     """Break each bond whose particle has lifted off its anchor past the limit. One thread per bond.
 
     Launched every substep, unconditionally, so the block stays capturable; ``limit[0] <= 0`` is the
-    switch for a sheet that never lets go. ``normal`` is the face's, in the body's frame.
+    switch for a sheet that never lets go. ``normal`` is the face's, in the body's frame. ``enabled``
+    is the solver's copy and ``enabled_model`` the model's, the same array when the solver reads the
+    model's: a ``CONSTRAINT_PROPERTIES`` notify copies the model's over the solver's, and a bond the
+    model still held would stick again.
     """
     i = wp.tid()
     if broken[i] != 0:
@@ -332,6 +337,7 @@ def _break_kernel(
     if wp.dot(off, wp.transform_vector(pose, normal)) > lift:
         broken[i] = 1
         enabled[rows[i]] = False
+        enabled_model[rows[i]] = False
 
 
 # =============================================================================
@@ -536,7 +542,7 @@ class EntityTape(EntityCloth):
                 state.particle_q,
                 state.body_q,
             ],
-            outputs=[self._arrays["enabled"][0], self.broken],
+            outputs=[self._arrays["enabled"][0], self._arrays["enabled"][-1], self.broken],
             device=state.particle_q.device,
         )
 
