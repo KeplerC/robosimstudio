@@ -1312,9 +1312,10 @@ ROBOT_BRUSH = (
 
 # The suction hand: down onto the plate, the right arm's Vacuum box ticked, lift, carry, down, unticked.
 # The gestures are tests/test_suction_pick's, through the same arm panel, with the gizmo put 3 mm into the
-# plate rather than 4 and a lowering aimed to stop the held plate 2 mm over the bench (it stops 2.3 mm
-# over and drops that far when the box is unticked). What holds the plate is the vacuum: the Seal readout
-# on the panel says sealed and the mass it holds.
+# plate rather than 4 and a lowering aimed to stop the held plate's lowest corner 2 mm over the bench: it
+# hangs 1.7 degrees off level, so that corner stops 2.2 mm over and its middle 4.5 mm, and it drops that
+# far when the box is unticked. What holds the plate is the vacuum: the Seal readout on the panel says
+# sealed and the mass it holds.
 INTO_PLATE = 0.003
 """How far under the plate's top the gizmo is put [m]. The cup stops on the plate 3 mm short of the gizmo,
 inside the panel's 4 mm tolerance, so the panel puts the gizmo back on the hand (its EE readout says on
@@ -1323,8 +1324,8 @@ it seals, inside the seal's 2 mm."""
 
 
 def _plate_half(film) -> float:
-    """The plate's half-thickness as ``04_extending/02_suction`` lays it [m], off its spec: 3 mm."""
-    return float(film.sim["plate"].spec.shape.half_extents[2])
+    """Half the plate's height along world z as it is turned now [m]: 3 mm for ``04_extending/02_suction``'s, flat."""
+    return film.height("plate") / 2.0
 
 
 def _square(film) -> tuple[float, float, float, float]:
@@ -1341,7 +1342,7 @@ def _seal(film) -> str:
 
 
 def _plate_over_bench(clearance: float):
-    """Where the gizmo goes for the held plate's underside to stop ``clearance`` [m] over the bench."""
+    """Where the gizmo goes for the held plate's lowest corner to stop ``clearance`` [m] over the bench."""
 
     def there(film) -> tuple[float, float, float]:
         cursor = film.where(film.gizmo("right"))

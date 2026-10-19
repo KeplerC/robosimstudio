@@ -162,6 +162,25 @@ def wait_for(check: Callable[[], bool], timeout: float, poll: float = 0.002) -> 
 # =============================================================================
 
 
+def _shape_reach(shape, d) -> float:
+    """How far a primitive reaches from its centre along the unit direction ``d`` of its own frame [m].
+
+    A capsule, cylinder or cone has its axis along its own z; a cone's apex is at ``+half_height``.
+    """
+    dx, dy, dz = (float(v) for v in d)
+    if shape.kind == "box":
+        return sum(abs(u) * float(h) for u, h in zip((dx, dy, dz), shape.half_extents, strict=True))
+    radius = float(shape.radius)
+    if shape.kind == "sphere":
+        return radius
+    along, across = float(shape.half_height) * dz, radius * math.hypot(dx, dy)
+    if shape.kind == "capsule":
+        return abs(along) + radius
+    if shape.kind == "cylinder":
+        return abs(along) + across
+    return max(along, across - along)  # a cone: its apex, or the rim of its base
+
+
 class Film:
     """One take: the session it was handed, the browser on it, the frames and what they show.
 
@@ -377,35 +396,39 @@ class Film:
         """A body's origin, or a deformable's centroid [m]."""
         return tuple(float(v) for v in self._points(name).mean(axis=0))
 
-    def _half_height(self, name: str) -> float:
-        """How far one body's top stands over its origin [m].
+    def _reach(self, name: str) -> tuple[float, float]:
+        """How far one body stands under and over its origin along world z [m].
 
-        A box (``rss.box``) carries its size only in ``spec.shape.half_extents``: its half-height is
-        those halves seen along world z as the body is turned now, 3 mm for a 6 mm plate lying flat.
+        A primitive (``rss.box``, ``sphere``, ``capsule``, ``cylinder``) carries its size only in
+        ``spec.shape``: its reach is that shape's, seen along world z as the body is turned now,
+        3 mm each way for a 6 mm plate lying flat.
         """
+        from robosimstudio.core.math import quat_to_mat
+        from robosimstudio.specs.asset import ShapeSpec
+
         ref = self.sim[name]
         spec = ref.spec
         half = getattr(spec, "half", None)
         if half is not None:
-            return float(half[2])
+            return float(half[2]), float(half[2])
         shape = getattr(spec, "shape", None)
-        if getattr(shape, "kind", "") == "box":
-            qx, qy, qz, qw = (float(v) for v in ref.pose[3:7])
-            up = (2.0 * (qx * qz - qw * qy), 2.0 * (qy * qz + qw * qx), 1.0 - 2.0 * (qx * qx + qy * qy))
-            return sum(abs(u) * float(h) for u, h in zip(up, shape.half_extents, strict=True))
-        return float(getattr(spec, "radius", 0.0) or 0.0) + float(getattr(spec, "half_height", 0.0) or 0.0)
+        if getattr(shape, "kind", "") in ShapeSpec.KINDS:
+            up = quat_to_mat(ref.pose[3:7])[2]  # world z in the body's frame
+            return _shape_reach(shape, -up), _shape_reach(shape, up)
+        reach = float(getattr(spec, "radius", 0.0) or 0.0) + float(getattr(spec, "half_height", 0.0) or 0.0)
+        return reach, reach
 
     def top(self, name: str) -> float:
         points = self._points(name)
         if len(points) > 1:
             return float(points[:, 2].max())
-        return float(points[0, 2]) + self._half_height(name)
+        return float(points[0, 2]) + self._reach(name)[1]
 
     def height(self, name: str) -> float:
         points = self._points(name)
         if len(points) > 1:
             return float(points[:, 2].max() - points[:, 2].min())
-        return 2.0 * self._half_height(name)
+        return sum(self._reach(name))
 
     def highest(self, name: str) -> tuple[float, float, float]:
         points = self._points(name)

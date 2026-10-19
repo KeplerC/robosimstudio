@@ -60,39 +60,95 @@ class TestTheTwistTakeReadsTheMiddleThird(unittest.TestCase):
         self.assertIn(f"let go soft {0.8 / (2 * np.pi):.3f}", said)
 
 
-class TestTheTopOfABoxIsItsTop(unittest.TestCase):
-    """``Top`` on an ``rss.box`` reads the box's size off ``spec.shape``: a plate's top, not its middle.
+def _about_x(degrees: float) -> tuple[float, float, float, float]:
+    """A turn about world x, xyzw."""
+    half = np.radians(degrees) / 2
+    return (float(np.sin(half)), 0.0, 0.0, float(np.cos(half)))
 
-    A box's spec carries its halves only in ``shape.half_extents``, so the film once took its top
-    for its origin, and the suction take's ``Top("plate", dz=-0.003)`` aimed 6 mm under the top.
+
+class TestTheTopOfAPrimitiveIsItsTop(unittest.TestCase):
+    """``Top`` on a primitive reads its size off ``spec.shape``: its top, not its middle.
+
+    A box, sphere, capsule or cylinder (``rss.box`` and the rest) carries its size only in
+    ``spec.shape``, so the film once took its top for its origin, and the suction take's
+    ``Top("plate", dz=-0.003)`` aimed 6 mm under the top. Each is read along world z as the
+    body is turned now.
     """
 
-    @staticmethod
-    def _film(quat) -> object:
+    AT = (0.6, -0.25, 0.753)
+
+    def _film(self, shape, quat=(0.0, 0.0, 0.0, 1.0)) -> object:
         from recording.lockstep import Film
 
-        plate = SimpleNamespace(
-            spec=_box((0.0, -0.25, 0.003), (0.075, 0.075, 0.003)),  # 04_extending/02_suction's plate
+        thing = SimpleNamespace(
+            spec=SimpleNamespace(shape=shape),
             particles=np.zeros(0, dtype=np.int64),
             bodies=np.array([4]),
-            position=np.array([0.6, -0.25, 0.753]),
-            pose=np.array([0.6, -0.25, 0.753, *quat]),
+            position=np.array(self.AT),
+            pose=np.array([*self.AT, *quat]),
         )
         film = Film(None, port=0, scratch=None, software=False, probe=False, log=print)
-        film.sim = _Sim(refs={"plate": plate})
+        film.sim = _Sim(refs={"plate": thing})
         return film
+
+    def assertReach(self, film, over: float, height: float) -> None:
+        self.assertAlmostEqual(self.AT[2] + over, film.top("plate"), 12)
+        self.assertAlmostEqual(height, film.height("plate"), 12)
 
     def test_a_flat_plate_s_top_is_3_mm_over_its_middle(self) -> None:
         from recording.beats import Top
 
-        film = self._film((0.0, 0.0, 0.0, 1.0))
-        self.assertAlmostEqual(0.756, film.top("plate"), 12)
-        self.assertAlmostEqual(0.006, film.height("plate"), 12)
+        from robosimstudio.specs.asset import ShapeSpec
+
+        film = self._film(ShapeSpec(kind="box", half_extents=(0.075, 0.075, 0.003)))  # 04_extending/02_suction's
+        self.assertReach(film, 0.003, 0.006)
         self.assertAlmostEqual(0.753, Top("plate", dz=-0.003).resolve(film)[2], 12)
 
     def test_a_plate_stood_on_its_edge_tops_out_at_its_half_width(self) -> None:
-        film = self._film((np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)))  # turned 90 degrees about x
-        self.assertAlmostEqual(0.753 + 0.075, film.top("plate"), 12)
+        from robosimstudio.specs.asset import ShapeSpec
+
+        film = self._film(ShapeSpec(kind="box", half_extents=(0.075, 0.075, 0.003)), _about_x(90.0))
+        self.assertReach(film, 0.075, 0.15)
+
+    def test_a_sphere_s_top_is_its_radius_over_its_middle_however_it_is_turned(self) -> None:
+        from robosimstudio.specs.asset import ShapeSpec
+
+        for degrees in (0.0, 37.0, 90.0):
+            with self.subTest(degrees=degrees):
+                self.assertReach(self._film(ShapeSpec(kind="sphere", radius=0.02), _about_x(degrees)), 0.02, 0.04)
+
+    def test_a_capsule_s_top_is_its_cap_standing_and_its_radius_lying(self) -> None:
+        from robosimstudio.specs.asset import ShapeSpec
+
+        capsule = ShapeSpec(kind="capsule", radius=0.015, half_height=0.04)
+        self.assertReach(self._film(capsule), 0.055, 0.11)
+        self.assertReach(self._film(capsule, _about_x(90.0)), 0.015, 0.03)
+
+    def test_a_cylinder_s_top_is_its_end_standing_its_radius_lying_and_a_rim_between(self) -> None:
+        from robosimstudio.specs.asset import ShapeSpec
+
+        cylinder = ShapeSpec(kind="cylinder", radius=0.02, half_height=0.05)
+        self.assertReach(self._film(cylinder), 0.05, 0.10)
+        self.assertReach(self._film(cylinder, _about_x(90.0)), 0.02, 0.04)
+        rim = (0.05 + 0.02) * np.sqrt(0.5)  # turned 45 degrees, the top is a point on the rim of an end
+        self.assertReach(self._film(cylinder, _about_x(45.0)), rim, 2.0 * rim)
+
+    def test_a_cone_s_top_is_its_apex_up_and_its_rim_upside_down(self) -> None:
+        from robosimstudio.specs.asset import ShapeSpec
+
+        cone = ShapeSpec(kind="cone", radius=0.03, half_height=0.04)
+        self.assertReach(self._film(cone), 0.04, 0.08)
+        self.assertReach(self._film(cone, _about_x(180.0)), 0.04, 0.08)
+        self.assertReach(self._film(cone, _about_x(90.0)), 0.03, 0.06)
+
+    def test_the_suction_take_s_plate_half_is_the_film_s_half_height(self) -> None:
+        """``_plate_half`` is the plate's as laid, 4 mm here where the example's is 3, and as it is turned."""
+        from robosimstudio.specs.asset import ShapeSpec
+
+        plate = ShapeSpec(kind="box", half_extents=(0.075, 0.075, 0.004))
+        self.assertAlmostEqual(0.004, takes._plate_half(self._film(plate)), 12)
+        tilted = 0.075 * np.sin(np.radians(2.0)) + 0.004 * np.cos(np.radians(2.0))
+        self.assertAlmostEqual(tilted, takes._plate_half(self._film(plate, _about_x(2.0))), 12)
 
 
 # =============================================================================
@@ -221,13 +277,11 @@ class TestTheTakesAimWhereTheirExampleLaysThings(unittest.TestCase):
                 "wall_left": _slab((-0.12, -0.05, 0.02), (0.01, 0.11, 0.02)),
                 "wall_right": _slab((0.18, -0.05, 0.02), (0.01, 0.11, 0.02)),
                 "wall_back": _slab((0.03, 0.05, 0.02), (0.16, 0.01, 0.02)),
-                "plate": _box((0.0, -0.25, 0.004), (0.075, 0.075, 0.004)),
             },
             regions={"square": (-0.05, -0.15, 0.15, 0.05)},
         )
         np.testing.assert_allclose(takes._tray(film), ((-0.11, -0.16, -0.005), (0.17, 0.04, 0.04)), atol=1e-12)
         self.assertEqual((-0.05, -0.15, 0.15, 0.05), takes._square(film))
-        self.assertEqual(0.004, takes._plate_half(film))
 
     def test_the_stick_and_the_fold_work_on_the_box_and_the_sheet_as_laid(self) -> None:
         film = _laid_film(
