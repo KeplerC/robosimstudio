@@ -127,6 +127,36 @@ class TestTheContactTrio(unittest.TestCase):
         self.assertEqual(1, sheet.env.pipeline.invalidated)
 
 
+class TestAPresetIsOneTheSheetCanWear(unittest.TestCase):
+    """A tape's spec refuses a material with no adhesive: a towel preset adopted onto the label moved its
+    sliders, and the rebuild then raised in ``TapeSpec.__post_init__``."""
+
+    def test_each_sheet_is_offered_its_own_material_classs_presets(self) -> None:
+        from robosimstudio_materials.tape import PAPER_LABEL
+
+        panel, gui, _ = _page(_sheet("label", PAPER_LABEL), _sheet("towel", ClothMaterialSpec()))
+        preset = gui.find("Preset")
+        # Every tape preset, the contact adhesion ones too: ``adhesion`` is REBUILD, and a stuck label
+        # rebuilds under either law.
+        self.assertEqual(("(as built)", "duct_tape", "label", "masking_tape", "paper_label"), preset.options)
+        gui.find("Cloth").fire("towel")
+        panel.drain()
+        self.assertIn("terry_towelling", preset.options)
+        self.assertIn("paper_label", preset.options, "a label's material is a cloth's too")
+        for other in ("rice", "soft_foam", "nylon_bristle"):
+            self.assertNotIn(other, preset.options, "no sheet is made of that")
+        self.assertEqual("(as built)", preset.value)
+
+    def test_adopting_a_preset_of_another_class_is_refused(self) -> None:
+        from robosimstudio_materials.tape import PAPER_LABEL
+
+        panel, _, _ = _page(_sheet("label", PAPER_LABEL))
+        with self.assertRaisesRegex(ValueError, "TapeMaterialSpec"):
+            panel.tuner.adopt("terry_towelling")
+        panel.tuner.adopt("paper_label")
+        self.assertIs(PAPER_LABEL, panel.tuner.material)
+
+
 class TestWhatCannotMoveIsNotOffered(unittest.TestCase):
     def test_a_kind_whose_engine_copied_its_material_is_not_on_the_folder(self) -> None:
         panel, gui, _ = _page(_sheet("bag", ClothMaterialSpec(), offers=False))

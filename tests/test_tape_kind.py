@@ -296,6 +296,38 @@ class TestTheDeclarations(unittest.TestCase):
         with self.assertRaises(KeyError):
             _bonded_fraction(SimpleNamespace(entities={}), "label")
 
+    def test_a_strip_stuck_to_nothing_shows_its_adhesive_read_only(self) -> None:
+        from unittest import mock
+
+        import robosimstudio as rss
+        from robosimstudio.core.tuning import Tunable
+        from robosimstudio_materials.cloth import EntityCloth
+        from robosimstudio_materials.tape import ADHESIVE_FIELDS, CONTACT_FIELDS, EntityTape
+
+        cloth = Tunable(
+            name="material", spec=rss.tapes.PAPER_LABEL, write=lambda name, value: True, inert=("core_damping",)
+        )
+        cases = (
+            (False, 0, ("core_damping", *ADHESIVE_FIELDS)),
+            (False, 144, ("core_damping", *CONTACT_FIELDS)),
+            (True, 0, ("core_damping", *ADHESIVE_FIELDS)),
+            (True, 126, ("core_damping", "tack", "break_opening")),
+        )
+        for contact, bonds, inert in cases:
+            with self.subTest(contact=contact, bonds=bonds):
+                entity = EntityTape(rss.tape(name="label", on="box" if bonds else ""))
+                entity.contact = contact
+                entity.bonds = np.arange(bonds, dtype=np.int32)
+                with mock.patch.object(EntityCloth, "tunables", return_value=(cloth,)):
+                    (material,) = entity.tunables()
+                self.assertEqual(inert, material.inert)
+                lands = bool(bonds) and not contact
+                self.assertEqual(lands, material.write("tack", 2.0e6))
+                self.assertEqual(lands, material.write("break_opening", 0.002))
+                if not bonds:
+                    self.assertFalse(material.write("strength", 1.0e3), "a loose strip's contact law lands nothing")
+                self.assertTrue(material.write("tri_ke", 500.0), "the cloth's own fields still land")
+
     def test_the_handler_reads_the_entitys_bonds(self) -> None:
         from types import SimpleNamespace
 

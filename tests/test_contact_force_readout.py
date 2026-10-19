@@ -76,6 +76,27 @@ class TestTheCouplerSumsTheLiveRecordsByShape(unittest.TestCase):
         np.testing.assert_array_equal(shape, [1, 2])
         np.testing.assert_allclose(force, [[0, 0, 2], [1, 0, -5]], atol=1e-6)
 
+    def test_only_the_live_records_come_off_the_device(self) -> None:
+        # The buffers hold soft_contact_max rows, about a million under the scrub example's towel: copied
+        # whole, a read took 1.7 ms, sliced to the 11,522 live ones 0.13 ms (p8_cost.py, GPU 1).
+        from unittest import mock
+
+        import warp as wp
+
+        solver = _coupler([((0,), 1, (0.0, 0.0, 2.0))], capacity=64)
+        copied, numpy = [], wp.array.numpy
+
+        def counting(array):
+            copied.append(int(array.shape[0]))
+            return numpy(array)
+
+        with mock.patch.object(wp.array, "numpy", counting):
+            corners, shape, force = solver.soft_contact_records()
+        self.assertEqual(1, max(copied), f"rows copied, per array: {copied}")
+        np.testing.assert_allclose(force, [[0, 0, 2]], atol=1e-6)
+        corners, shape, force = _coupler([], capacity=64).soft_contact_records()
+        self.assertEqual(((0, 3), (0,), (0, 3)), (corners.shape, shape.shape, force.shape), "none live")
+
     def test_a_coupler_staged_without_forces_says_how_to_stage_them(self) -> None:
         solver = _coupler([])
         solver.observables = None
@@ -194,6 +215,27 @@ class TestTheWipeIsGatedOnThePush(unittest.TestCase):
         self.assertEqual(wipe.update()["wiped"], 0.0)
         body_q[[5, 6], 0] += 0.0005
         self.assertEqual(wipe.update()["wiped"], 0.25)
+
+    def test_a_scene_reset_brings_the_stain_back_and_the_jump_home_is_no_rub(self) -> None:
+        from robosimstudio_materials.cloth import ForceGatedWipe
+
+        sim = _Sim(**vars(_scene(_coupler([((10,), 1, (0.0, 0.0, 30.0))], capacity=8))), step_count=40)
+        body_q = np.zeros((8, 7), dtype=np.float32)
+        sim.state = SimpleNamespace(body_q=SimpleNamespace(numpy=body_q.copy))
+        wipe = ForceGatedWipe(sim, "towel", "stain", "right", (20.0, 60.0), window=1)
+        wipe.update()
+
+        def stroke(along: float, step: int) -> float:
+            body_q[[5, 6], 0] += along
+            sim.step_count = step
+            return wipe.update()["wiped"]
+
+        self.assertEqual(stroke(0.001, 41), 0.25)
+        # The page's Reset: the count back to 0, the hand 50 mm away at home, the record still on the stain.
+        self.assertEqual(stroke(0.05, 0), 0.0, "the towel a reset puts back is clean, and the jump wipes nothing")
+        self.assertEqual(stroke(0.001, 1), 0.25, "a stroke after it wipes again")
+        wipe.reset()  # Clean stain
+        self.assertEqual(stroke(0.05, 2), 0.0, "the jump after Clean stain is no rub either")
 
     def test_a_push_past_the_band_is_too_hard_and_wipes_nothing(self) -> None:
         wipe = self._wipe([((10, 11), 1, (0.0, 0.0, 90.0))])

@@ -73,8 +73,9 @@ __all__ = [
 # unstuck, and only being pulled off it peels. The kernel (section 4) runs after every substep inside
 # the captured graph and writes the attachment's own ``enabled`` flag, which VBD reads on every launch,
 # into the array the solver holds (the coupled solver gives the VBD entry its own copy of the
-# attachment arrays). A bond's force at its break is ``tack x cell area x break_opening``: 0.1 N on a
-# 5 mm cell of :data:`PAPER_LABEL`, 0.9 N across a 40 mm label's row.
+# attachment arrays) and into the model's, which Newton copies over the solver's again whenever it is
+# told the constraints changed. A bond's force at its break is ``tack x cell area x break_opening``:
+# 0.1 N on a 5 mm cell of :data:`PAPER_LABEL`, 0.9 N across a 40 mm label's row.
 #
 # Contact adhesion (:attr:`TapeMaterialSpec.adhesion` ``"contact"``, :data:`LABEL` and the presets after
 # it). A bond forms where the sheet is pressed onto the body and holds by ipc-toolkit's adhesion law
@@ -388,10 +389,13 @@ class TapeSpec(ClothSpec):
             builds the sheet loose, its bonds made only where it is pressed onto ``on``, which needs
             contact adhesion (:attr:`TapeMaterialSpec.adhesion`).
         settle_frames: ``0``, unlike cloth's 60: a reset puts the body back at its spawn pose and the
-            tab where it was built, so the sheet is snapshotted where it was built too, on that pose.
+            tab where it was built, so the sheet goes back where it was built too, on that pose.
             Settled for 30 frames first, the box came back to its spawn pose with the settled label
             0.7 mm inside its top, the label sprang off and every bond broke within 30 control steps
-            (``d1.py``).
+            (``d1.py``). Another thing's settle steps the label too, so a reset does not take the
+            sheet from that snapshot: beside a towel settled 60 frames the label came back 1.5 to
+            1.7 mm inside the box top and every bond broke within 30 control steps, untouched
+            (``p1c.py``, GPU 1).
     """
 
     entity: str = "tape"
@@ -518,12 +522,16 @@ def _break_kernel(
     particle_q: wp.array(dtype=wp.vec3),
     body_q: wp.array(dtype=wp.transform),
     enabled: wp.array(dtype=wp.bool),
+    enabled_model: wp.array(dtype=wp.bool),
     broken: wp.array(dtype=wp.int32),
 ):
     """Break each bond whose particle has lifted off its anchor past the limit. One thread per bond.
 
     Launched every substep, unconditionally, so the block stays capturable; ``limit[0] <= 0`` is the
-    switch for a sheet that never lets go. ``normal`` is the face's, in the body's frame.
+    switch for a sheet that never lets go. ``normal`` is the face's, in the body's frame. ``enabled``
+    is the solver's copy and ``enabled_model`` the model's, the same array when the solver reads the
+    model's: a ``CONSTRAINT_PROPERTIES`` notify copies the model's over the solver's, and a bond the
+    model still held would stick again.
     """
     i = wp.tid()
     if broken[i] != 0:
@@ -536,6 +544,7 @@ def _break_kernel(
     if wp.dot(off, wp.transform_vector(pose, normal)) > lift:
         broken[i] = 1
         enabled[rows[i]] = False
+        enabled_model[rows[i]] = False
 
 
 # Contact adhesion. The force law is ipc-toolkit's (v1.6.0, MIT, Copyright (c) 2020-2025 Zachary
@@ -812,6 +821,8 @@ class EntityTape(EntityCloth):
         self.tab_shapes: list[int] = []
         self.coord_start: int = -1
         self.tab_q0: np.ndarray = np.zeros(0)
+        self.built: np.ndarray = np.zeros((0, 3))
+        """The sheet's particles where it was built, on the body's spawn pose [m, world]: what a reset restores."""
         self._arrays: dict[str, list[Any]] = {}
         self._rows: Any = None
         self._particle: Any = None
@@ -939,7 +950,9 @@ class EntityTape(EntityCloth):
         Only the law the tape was built with reads its fields. Under contact adhesion the law sets each
         bond's spring every substep and no break kernel runs, so ``tack`` and ``break_opening`` move
         nothing; under opening adhesion no contact kernel runs, so :data:`CONTACT_FIELDS` move nothing.
-        Those are the tunable's ``inert`` fields, shown read-only, and a write to one does not land.
+        A strip stuck to nothing has no bonds for any of them to reach, so there every adhesive field
+        moves nothing. Those are the tunable's ``inert`` fields, shown read-only, and a write to one
+        does not land.
         """
         base = super().tunables(pipeline)
         if not base:
@@ -947,6 +960,8 @@ class EntityTape(EntityCloth):
         (material,) = base
         inner = material.write
         idle = ("tack", "break_opening") if self.contact else CONTACT_FIELDS
+        if not len(self.bonds):
+            idle = ADHESIVE_FIELDS
 
         def write(name: str, value: Any) -> bool:
             if name in idle:
@@ -1081,13 +1096,14 @@ class EntityTape(EntityCloth):
                 state.particle_q,
                 state.body_q,
             ],
-            outputs=[self._arrays["enabled"][0], self.broken],
+            outputs=[self._arrays["enabled"][0], self._arrays["enabled"][-1], self.broken],
             device=state.particle_q.device,
         )
 
     # -------------------------------------------------------------- phase 4
     def on_scene_ready(self, pipeline: ScenePipeline) -> None:
         """Find the attachment arrays the solver reads, then settle and snapshot like cloth."""
+        self.built = np.asarray(pipeline.model.particle_q.numpy()[self.particles], dtype=np.float32).copy()
         if len(self.bonds) or len(self.clamps):
             self._bind_bonds(pipeline)
         super().on_scene_ready(pipeline)
@@ -1175,7 +1191,17 @@ class EntityTape(EntityCloth):
 
     # -------------------------------------------------------------- phase 5
     def reset(self, pipeline: ScenePipeline, episode, *, world: int = 0) -> None:
-        """The sheet back where it settled, every bond stuck again, the tab back where it was built."""
+        """The sheet, the tab and every bond back as they were built.
+
+        A particle thing's reset restores its whole-array snapshot, taken after the scene's settle, and
+        a settle steps the label too. So this sheet's rows are put back where it was built in every
+        such snapshot, the ones later things restore included (``TapeSpec.settle_frames``).
+        """
+        for thing in getattr(pipeline, "particle_settles", {}).get("things", [self]):
+            rest = getattr(thing, "rest", None)
+            if rest and len(self.built):
+                rest["particle_q"][self.particles] = self.built
+                rest["particle_qd"][self.particles] = 0.0
         super().reset(pipeline, episode, world=world)
         if self.broken is not None:
             self.broken.zero_()
