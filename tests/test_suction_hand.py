@@ -89,6 +89,40 @@ class TestThePairing(unittest.TestCase):
         self.assertIn("ArmSpec.gripper", why)
         self.assertEqual((True, ""), _admits_gripper(get_embodiment("panda"), "suction"))
 
+    def test_a_hand_the_binding_names_does_not_inherit_the_cups_mount(self) -> None:
+        """A binding's hand replaces every arm's, and the mount the right arm states for its cup goes with it.
+
+        The compiler is stopped where it builds the robot, with the spec it would build from.
+        """
+        from unittest import mock
+
+        from robosimstudio.scene import compiler
+        from robosimstudio.scene.request import BuildRequest
+        from robosimstudio.specs import Binding
+
+        class _Stop(Exception):
+            pass
+
+        specs = []
+
+        def robot(spec, **kwargs):
+            specs.append(spec)
+            raise _Stop
+
+        real = compiler._resolve_entity
+        request = BuildRequest(
+            embodiment="yam_bimanual_suction",
+            binding=Binding(embodiment="yam_bimanual_suction", gripper="yam_linear_arena"),
+        )
+        with mock.patch.object(
+            compiler, "_resolve_entity", lambda path: robot if path == compiler._EMBODIMENT_ENTITY else real(path)
+        ):
+            with self.assertRaises(_Stop):
+                compiler._build_base(request, None)
+        (spec,) = specs
+        self.assertEqual("yam_linear_arena", spec.gripper)
+        self.assertEqual([("", None), ("", None)], [(arm.gripper, arm.gripper_mount) for arm in spec.arms])
+
 
 class TestOnlyACupKeepsARobotToOneWorld(unittest.TestCase):
     """The compiler refuses to replicate an entity that puts kernels in the substep.

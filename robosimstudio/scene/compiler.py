@@ -591,13 +591,16 @@ def _build_base(
             # A hand named by the pairing replaces every arm's. It has to clear
             # the per-arm names as well as set the robot's, because an arm's own
             # entry wins over the robot's default -- leaving them would put the
-            # requested hand on nothing and read as the flag being ignored.
+            # requested hand on nothing and read as the flag being ignored. And
+            # the arm's mount with its name: it says where *that* hand bolts on
+            # and wins over a hand's own, so left behind it would bolt the new
+            # hand where the old one sat (a cup 105 mm out on the YAM's wrist).
             from dataclasses import replace as _replace
 
             embodiment_spec = _replace(
                 embodiment_spec,
                 gripper=binding.gripper,
-                arms=tuple(_replace(a, gripper="") for a in embodiment_spec.arms),
+                arms=tuple(_replace(a, gripper="", gripper_mount=None) for a in embodiment_spec.arms),
             )
         arm_gains = binding.arm_actuation or request.arm_actuation
         gripper_gains = binding.gripper_actuation or request.gripper_actuation
