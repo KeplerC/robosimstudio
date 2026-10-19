@@ -113,7 +113,8 @@ def _water(builder, centre: np.ndarray, n: int = 4, spacing: float = 0.004) -> i
 @unittest.skipUnless(HAS_GENESIS, "the [genesis] extra is not installed")
 class TestWaterOnAMirrorOffItsCentre(unittest.TestCase):
     """Water resting on a 40 mm mesh block whose centre is 50 mm off its body's origin. Genesis's midpoint rule for a
-    lone free body left the water's push out of its motion, so it read 0.0000 N."""
+    lone free body left the water's push out of its motion, so it read 0.0000 N; and the reaction, read at the
+    block's centre, was applied at the origin, a couple of ``(origin - centre) x F`` that no water made."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -150,6 +151,13 @@ class TestWaterOnAMirrorOffItsCentre(unittest.TestCase):
     def test_it_carries_the_water(self) -> None:
         carried = float(np.mean(self.carried[10:]))
         self.assertGreater(carried, 0.6 * self.weight, f"the block carries {carried:.4f} N of {self.weight:.4f} N")
+
+    def test_the_torque_is_the_force_at_its_centre(self) -> None:
+        force, torque = self.wrench[:3], self.wrench[3:]
+        self.assertGreater(-force[2], 0.2 * self.weight, "a force to place")
+        com = self.origin + self.model.body_com.numpy()[self.body].astype(np.float64)
+        centre = self.origin + np.array([0.05, 0.0, 0.0])
+        np.testing.assert_allclose(torque, np.cross(centre - com, force), atol=1.0e-3 * abs(force[2]))
 
 
 if __name__ == "__main__":

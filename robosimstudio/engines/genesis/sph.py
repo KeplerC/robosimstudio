@@ -42,8 +42,8 @@ genesis-world 1.3.3), and each one decides something below:
   0.039 N (``w6_probe.py``). Only the force is read: a
   heavy wall turned 3 degrees in one step ends 0.02 degrees off its aim with no water
   at all, from its own gyroscopic term (``p11_track.py``), so a mirror's couple is
-  left out and the torque on the Newton body is each mirror's force about the body's
-  centre of mass.
+  left out and the torque on the Newton body is each mirror's force, acting at the
+  mirror's centre of mass where it is read, about the body's.
 * **float32, not float64.** Genesis's legacy reaction is a momentum change, not the
   IPC coupler's difference of two nearly equal coordinates, so the 64-bit rule of
   :mod:`~robosimstudio.engines.genesis.runtime` does not apply to it, and on this GPU
@@ -85,7 +85,7 @@ from robosimstudio.engines.geometry import (
     iter_mirrors,
     register_actor_builder,
 )
-from robosimstudio.engines.pose import compose_many
+from robosimstudio.engines.pose import compose, compose_many
 
 from .bridge import write_obj, wxyz
 from .runtime import ensure_initialized
@@ -369,6 +369,8 @@ class SphBridge:
                 entity.control_dofs_velocity(np.zeros(6))
             # A tessellated capsule's centre comes back 1e-18 m off its origin: that is its origin.
             entry["com"] = com if float(np.linalg.norm(com)) > 1.0e-9 else np.zeros(3)
+            # Where its reaction is read, so where it acts: the centre of mass, in its body's frame.
+            entry["at"] = compose(entry["geom"].local, np.array([*entry["com"], 0.0, 0.0, 0.0, 1.0]))
         self._q_idx = np.concatenate(q_idx) if q_idx else np.zeros(0, np.int64)
         self._d_idx = np.concatenate(d_idx) if d_idx else np.zeros(0, np.int64)
         self._moving = [i for i, m in enumerate(self.mirrors) if m["geom"].moving]
@@ -422,7 +424,9 @@ class SphBridge:
         reports: a mesh whose centre is off its origin, turned with nothing touching it,
         has an origin velocity that turns too, and read there it is ``m w^2 r`` of force:
         6.23 N for 125 kg turned at 1 rad/s 50 mm off its origin, 0.0003 N at the centre
-        (``w5_probe.py``). A primitive's centre is its origin, so its read is unchanged.
+        (``w5_probe.py``). It acts there too: applied at the origin, it added a couple of
+        ``(origin - centre) x F`` the water never made. A primitive's centre is its
+        origin, so its read and its torque are unchanged.
         """
         acc = self._acc
         acc.begin()
@@ -443,7 +447,7 @@ class SphBridge:
                 com = entry["com"]
                 dv += _spin(qpos[i, 3:], velocity[i, 3:], com) - _spin(self._qpos[i, 3:], self._vel[i, 3:], com)
             force = entry["mass"] * dv / float(self.control_dt)
-            acc.add_at_shape(geom.body, force, targets[geom.body], geom.local)
+            acc.add_at_shape(geom.body, force, targets[geom.body], entry["at"])
             self.last_force[geom.body] = self.last_force.get(geom.body, np.zeros(3)) + force
         self.apply_wrenches(acc.shape(self.control_dt))
 
