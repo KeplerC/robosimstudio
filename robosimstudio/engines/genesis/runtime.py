@@ -5,7 +5,8 @@ Three things about ``gs.init`` are worth a module of their own.
 
 **It is process-global and first-caller-wins**, like SuperDex's ``initialize``.
 A second island in the same process gets whatever the first asked for, except
-an IPC island after a liquid island's float32, which is refused (below).
+an IPC island asking for 64 after any island initialised float32 (a liquid's, or
+an IPC island's that asked for 32), which is refused (below).
 
 **It requires float64 for the two-way harvest, and this is not a preference.**
 The IPC coupler's reaction is ``(k/dt^2) * m_link * (pos_ipc - pos_aim)``. At
@@ -68,7 +69,9 @@ def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
             a caller can measure the difference, and warned about loudly,
             because a scene that harvests wrenches at 32 reads zero rather than
             reading wrong, which is much harder to notice. An IPC island asking
-            for 64 in a process a liquid island initialised at 32 is refused.
+            for 64 in a process an earlier island initialised at 32 is refused,
+            and the refusal names whose island that was: a liquid's, or an IPC
+            island's that asked for 32.
         coupler: ``"ipc"`` or ``"legacy"``: whose harvest the precision serves. The
             legacy coupler's reaction is a momentum change, which float32 reads
             (:mod:`robosimstudio.engines.genesis.sph`), so it asks for 32 without

@@ -29,6 +29,41 @@ TIER = "fast"
 """No GPU, no engine, no scene."""
 
 
+class _Arr:
+    def __init__(self, a) -> None:
+        self._a = np.asarray(a)
+
+    def numpy(self) -> np.ndarray:
+        return self._a
+
+
+def _model(particles, *, tris=(), shapes=()):
+    """A finalized model as both bridges read it before ``gs.init``: its particles, triangles and shapes.
+
+    ``shapes`` are world-fixed ``(GeoType, half extents, transform)``; a mirror record ``{"shape": i, "body": -1}``
+    names the i-th.
+    """
+    from types import SimpleNamespace
+
+    shapes = list(shapes)
+    tris = np.asarray(tris, dtype=np.int64).reshape(-1, 3)
+    return SimpleNamespace(
+        particle_q=_Arr(np.asarray(particles, dtype=np.float32)),
+        tri_count=len(tris),
+        tri_indices=_Arr(tris.reshape(-1)),
+        shape_type=_Arr([int(kind) for kind, _, _ in shapes]),
+        shape_scale=_Arr(np.asarray([half for _, half, _ in shapes], dtype=np.float32).reshape(-1, 3)),
+        shape_transform=_Arr(np.asarray([pose for _, _, pose in shapes], dtype=np.float32).reshape(-1, 7)),
+        shape_body=_Arr(np.full(len(shapes), -1)),
+        shape_material_mu=_Arr(np.full(len(shapes), 0.5)),
+    )
+
+
+def _block(at: float) -> np.ndarray:
+    """Eight particles of a 4 mm liquid, a cube 4 mm a side whose bottom stands ``at`` [m]."""
+    return np.array([[x, y, at + z] for x in (0.0, 0.004) for y in (0.0, 0.004) for z in (0.0, 0.004)])
+
+
 def _geom(**kw):
     from robosimstudio.engines.geometry import ShapeGeometry
 
@@ -156,15 +191,25 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
     """A liquid island that states no substeps takes one SPH substep a control step, and its water falls through the
     cup and the bench: it is refused before the engine is asked for, by the arrangement that states them."""
 
-    def _open(self, substeps: int, hz: float = 60.0, *, actors: list | None = None) -> None:
+    def _open(
+        self, substeps: int, hz: float = 60.0, *, actors: list | None = None, at: float = 0.1, ground: bool = False
+    ) -> None:
+        """Each actor a block of eight particles standing ``at``, over a world-fixed ground plane at 0 if ``ground``."""
         from unittest import mock
+
+        from newton import GeoType
 
         from robosimstudio.engines.genesis import sph
         from robosimstudio.engines.genesis.solver import SolverGenesis
 
-        recipe = {"island": "water", "control_hz": hz, "actors": actors or [{"kind": "sph", "name": "water"}]}
+        actors = actors or [{"kind": "sph", "name": "water"}]
+        records = [{**actor, "particle_start": 8 * i, "particle_count": 8} for i, actor in enumerate(actors)]
+        plane = [(GeoType.PLANE, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0))] if ground else []
+        model = _model(np.concatenate([_block(at)] * len(actors)), shapes=plane)
+        mirrors = [{"shape": 0, "body": -1}] if ground else []
+        recipe = {"island": "water", "control_hz": hz, "actors": records, "mirrors": mirrors}
         with mock.patch.object(sph, "ensure_initialized", side_effect=LookupError("asked for the engine")):
-            SolverGenesis(None, recipe=recipe, substeps=substeps)
+            SolverGenesis(model, recipe=recipe, substeps=substeps)
 
     def test_one_substep_is_refused_by_name(self):
         with self.assertRaises(ValueError) as caught:
@@ -199,6 +244,73 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
         fine = {"kind": "sph", "name": "fine", "params": {"spacing": 0.003}}
         with self.assertRaisesRegex(ValueError, "particle spacings"):
             self._open(40, actors=[{"kind": "sph", "name": "water"}, fine])
+
+    def test_a_liquid_stating_no_spacing_has_the_defaults(self):
+        """The spacing is read off the one merge of the actor's params over ``SPH_DEFAULTS`` the substeps are, not a
+        number of its own beside it: with the default at 3 mm, a liquid stating none and one stating 3 mm agree."""
+        from unittest import mock
+
+        from robosimstudio.engines.genesis import sph
+
+        fine = {"kind": "sph", "name": "fine", "params": {"spacing": 0.003}}
+        with (
+            mock.patch.dict(sph.SPH_DEFAULTS, {"spacing": 0.003}),
+            self.assertRaisesRegex(LookupError, "asked for the engine"),
+        ):
+            self._open(40, actors=[{"kind": "sph", "name": "water"}, fine])
+
+    def test_an_empty_box_is_refused_before_the_engine_is_asked_for(self):
+        """Water started 0.6 m under the ground leaves the SPH box empty: its floor is the ground, its top 0.5 m over
+        the water. Genesis refused it after ``gs.init`` and named neither, and a cloth island built next in the
+        process was refused for the float32 it left (``g1_box.py``)."""
+        with self.assertRaises(ValueError) as caught:
+            self._open(20, at=-0.6, ground=True)
+        for word in ("'water'", "is empty", "sph_reach=0.5", "the ground at 0 m", "Start the liquid over the ground"):
+            self.assertIn(word, str(caught.exception))
+        with self.assertRaisesRegex(LookupError, "asked for the engine"):
+            self._open(20, at=0.1, ground=True)
+
+
+class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
+    """``gs.init`` runs once a process: an IPC island refused after it still set float64 for every later island, and a
+    water island built next stepped at 64 where it asked for 32, warned 8x slower (``g1_order.py``). Each refusal the
+    model and the recipe can make comes first; the mass check alone reads Genesis's own entity, and follows the build."""
+
+    BENCH = (0.3, 0.65, 0.375), (0.6, 0.0, 0.375, 0.0, 0.0, 0.0, 1.0)
+    """bench_075's top as a world-fixed box: half extents, and its pose, its top face at 0.75 m."""
+
+    def _open(self, kind: str = "shell", *, at: float = 0.76) -> None:
+        """A 100 mm sheet of four particles standing ``at`` over the bench's middle, its mirror the bench."""
+        from unittest import mock
+
+        from newton import GeoType
+
+        from robosimstudio.engines.genesis import bridge
+        from robosimstudio.engines.genesis.solver import SolverGenesis
+
+        sheet = [[0.55 + x, y, at] for y in (-0.05, 0.05) for x in (0.0, 0.1)]
+        model = _model(sheet, tris=[[0, 1, 2], [1, 3, 2]], shapes=[(GeoType.BOX, *self.BENCH)])
+        recipe = {
+            "island": "cloth",
+            "actors": [{"kind": kind, "name": "towel", "particle_start": 0, "particle_count": 4}],
+            "mirrors": [{"shape": 0, "body": -1}],
+        }
+        with mock.patch.object(bridge, "ensure_initialized", side_effect=LookupError("asked for the engine")):
+            SolverGenesis(model, recipe=recipe, substeps=2)
+
+    def test_a_kind_it_cannot_build_is_refused_by_name(self):
+        with self.assertRaises(ValueError) as caught:
+            self._open("rod")
+        for word in ("'rod'", "'towel'", "'shell'", "register_actor_builder('genesis'"):
+            self.assertIn(word, str(caught.exception))
+
+    def test_a_sheet_started_inside_the_bench_is_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            self._open(at=0.74)
+        for word in ("'towel'", "inside mirror shape 0", "intersection-free"):
+            self.assertIn(word, str(caught.exception))
+        with self.assertRaisesRegex(LookupError, "asked for the engine"):
+            self._open(at=0.76)
 
 
 class TestTheLongestSubstepIsTheMaterials(unittest.TestCase):
