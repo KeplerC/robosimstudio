@@ -124,6 +124,91 @@ class TestThePairing(unittest.TestCase):
         self.assertEqual([("", None), ("", None)], [(arm.gripper, arm.gripper_mount) for arm in spec.arms])
 
 
+TWIN_ARMS = """<mujoco model="twin_arms">
+  <worldbody>
+    <body name="base">
+      <geom type="box" size="0.05 0.05 0.05" mass="2"/>
+      <body name="left_link1" pos="0 0.2 0.1">
+        <joint name="left_joint1" type="hinge" axis="0 0 1" range="-3 3"/>
+        <geom type="capsule" fromto="0 0 0 0.2 0 0" size="0.02" mass="0.5"/>
+        <body name="left_link2" pos="0.2 0 0">
+          <joint name="left_joint2" type="hinge" axis="0 1 0" range="-3 3"/>
+          <geom type="capsule" fromto="0 0 0 0 0 -0.1" size="0.02" mass="0.3"/>
+        </body>
+      </body>
+      <body name="right_link1" pos="0 -0.2 0.1">
+        <joint name="right_joint1" type="hinge" axis="0 0 1" range="-3 3"/>
+        <geom type="capsule" fromto="0 0 0 0.2 0 0" size="0.02" mass="0.5"/>
+        <body name="right_link2" pos="0.2 0 0">
+          <joint name="right_joint2" type="hinge" axis="0 1 0" range="-3 3"/>
+          <geom type="capsule" fromto="0 0 0 0 0 -0.1" size="0.02" mass="0.3"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position joint="left_joint1" kp="100"/>
+    <position joint="left_joint2" kp="100"/>
+    <position joint="right_joint1" kp="100"/>
+    <position joint="right_joint2" kp="100"/>
+  </actuator>
+</mujoco>
+"""
+"""Two two-joint arms on one base, one articulation: the shape on which both arms can take a welded hand."""
+
+
+class TestTwoCupsOnOneRobot(unittest.TestCase):
+    """A cup on each arm of :data:`TWIN_ARMS`: the two imports carry the same labels, and each arm finds its own."""
+
+    def test_each_arm_seals_with_its_own_pad(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        import newton
+        import warp as wp
+
+        from robosimstudio.robots.entity import EntityEmbodiment
+        from robosimstudio.specs import ArmSpec, EmbodimentSpec
+        from robosimstudio.specs.asset import AssetSpec
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "twin_arms.xml"
+            path.write_text(TWIN_ARMS)
+            arms = tuple(
+                ArmSpec(
+                    name=side,
+                    joint_names=(f"{side}_joint1", f"{side}_joint2"),
+                    ee_body_name=f"{side}_link2",
+                    gripper="suction",
+                )
+                for side in ("left", "right")
+            )
+            spec = EmbodimentSpec(name="twin_cups", asset=AssetSpec(path=str(path)), arms=arms)
+            robot = EntityEmbodiment(spec)
+            builder = newton.ModelBuilder()
+            robot.build_into(builder, None)
+        plate = builder.add_body(xform=wp.transform((0.3, 0.0, 0.0), wp.quat_identity()), label="plate")
+        builder.add_shape_box(plate, hx=PLATE_HALF[0], hy=PLATE_HALF[1], hz=PLATE_HALF[2])
+        part = types.SimpleNamespace(name="plate", range=types.SimpleNamespace(bodies=(plate, plate + 1)))
+        robot.after_scene_built(builder, [robot, part])
+        model = builder.finalize(device="cpu")
+        robot.bind(model)
+        labels = model.body_label
+        parent_of = dict(zip(model.joint_child.numpy(), model.joint_parent.numpy(), strict=True))
+        pads = {arm: cup.pad_body for arm, cup in robot.suctions.items()}
+        self.assertEqual(["left", "right"], sorted(pads))
+        self.assertEqual(2, len(set(pads.values())), "both arms took one pad")
+        for arm, pad in pads.items():
+            with self.subTest(arm):
+                self.assertTrue(labels[pad].endswith("/suction_pad"))
+                self.assertEqual(pad, robot.arms[arm].ee_body, "the tool centre is this arm's face")
+                body = pad
+                while not labels[body].endswith("_link2"):
+                    body = int(parent_of[body])
+                self.assertTrue(labels[body].endswith(f"{arm}_link2"), f"{arm}'s pad hangs off {labels[body]}")
+                self.assertEqual([plate], sorted(robot.suctions[arm].rows))
+
+
 class TestOnlyACupKeepsARobotToOneWorld(unittest.TestCase):
     """The compiler refuses to replicate an entity that puts kernels in the substep.
 
