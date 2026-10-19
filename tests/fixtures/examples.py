@@ -33,6 +33,7 @@ from pathlib import Path
 
 __all__ = [
     "DEMOS",
+    "DEMO_ENGINES",
     "EXAMPLES",
     "HAS_ROPE",
     "NO_ROPE",
@@ -97,14 +98,20 @@ DEMOS = (
     "17_knots/00_pull_knot_tight.py",
     "18_bands/00_band_on_pegs.py",
     "18_bands/01_band_on_pegs_scored.py",
+    "21_water/00_pour_water.py",
+    "21_water/01_pour_water_scored.py",
 )
 """The multi-engine demos, which the ones above cannot stand in for: each needs a
 foreign engine, and each is the *acceptance* scene for one kind or feature on it
 (the sponge, the cable, the bag's self-contacting shell, the rope's knot, the
-closed rod's band). They are not in :data:`SCRIPTS` because none satisfies its
+closed rod's band, the water). They are not in :data:`SCRIPTS` because none satisfies its
 rules on a base checkout -- the sponge stands under a single-armed Panda where
-the scene scripts ship a bimanual robot, and the SuperDex cable, bag, knot and
-band need the ``[superdex]`` extra to build."""
+the scene scripts ship a bimanual robot, the SuperDex cable, bag, knot and
+band need the ``[superdex]`` extra to build, and the water the ``[genesis]`` one,
+which lives in a virtual environment of its own."""
+
+DEMO_ENGINES = {name: ("genesis" if name.startswith("21_water/") else "superdex") for name in DEMOS}
+"""The foreign engine each demo is about."""
 
 HAS_ROPE = bool(ROPE)
 NO_ROPE = "the older rope scripts (examples/scenes/) are not in this tree"

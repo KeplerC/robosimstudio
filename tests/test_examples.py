@@ -46,7 +46,7 @@ import unittest
 from pathlib import Path
 from textwrap import dedent
 
-from tests.fixtures.examples import DEMOS, EXAMPLES, HAS_ROPE, NUMBERED, ROOT, SCRIPTS, _load, _run
+from tests.fixtures.examples import DEMO_ENGINES, DEMOS, EXAMPLES, HAS_ROPE, NUMBERED, ROOT, SCRIPTS, _load, _run
 from tests.fixtures.packs import PYTHON_FLAGS, env_without
 
 TIER = "medium"
@@ -190,9 +190,25 @@ class TestTheMultiEngineDemos(unittest.TestCase):
         sim.run(20).sync()
         self.assertTrue(sim.state_is_finite(), "examples/03_rope/02_superdex.py diverged in twenty steps")
 
+    def test_the_water_is_an_sph_liquid_on_genesis(self) -> None:
+        """The water's scene: it builds, it steps, the water is Genesis's and the cup the arm's island's.
+
+        Skips where Genesis is absent, which is the checkout's own environment: the
+        extra lives in a virtual environment of its own (``examples/21_water``)."""
+        import importlib.util
+
+        if importlib.util.find_spec("genesis") is None:
+            self.skipTest("[genesis] is not installed here; it lives in a virtual environment of its own")
+        sim, _ = _run("21_water/00_pour_water.py")
+        self.assertEqual("genesis", sim.request.physics.backend_for("water").solver)
+        self.assertEqual("mujoco", sim.request.physics.backend_for("rigid").solver)
+        self.assertEqual(1728, len(sim["water"].particles))
+        sim.run(20).sync()
+        self.assertTrue(sim.state_is_finite(), "examples/21_water/00_pour_water.py diverged in twenty steps")
+
     def test_each_demo_stages_its_engine_for_the_domain_it_is_about(self) -> None:
         """Static, so it holds whichever wheels are present: the arrangement is data."""
-        for name, engine in zip(DEMOS, ("superdex",) * len(DEMOS), strict=True):
+        for name, engine in DEMO_ENGINES.items():
             with self.subTest(demo=name):
                 text = (EXAMPLES / name).read_text()
                 ast.parse(text)
