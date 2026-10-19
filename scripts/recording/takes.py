@@ -180,11 +180,11 @@ def _kept_bend(film) -> tuple[bool, str]:
     """The cable with plastic memory is still bent after the hand let go: straightness under 0.9."""
     import numpy as np
 
+    from robosimstudio_materials.rod.measures import straightness
+
     ref = film.sim["cable"]
-    points = np.asarray(film.sim.pipeline.state_0.body_q.numpy())[ref.bodies, :3]
-    path = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
-    straightness = float(np.linalg.norm(points[-1] - points[0]) / path) if path > 0 else 1.0
-    return straightness < 0.9, f"straightness {straightness:.3f} after release (need under 0.9)"
+    measured = straightness(np.asarray(film.sim.pipeline.state_0.body_q.numpy())[ref.bodies, :3])
+    return measured < 0.9, f"straightness {measured:.3f} after release (need under 0.9)"
 
 
 def _rolled_flat(film) -> tuple[bool, str]:
@@ -206,8 +206,6 @@ def _rolled_flat(film) -> tuple[bool, str]:
 
 def _flap_shut(film) -> tuple[bool, str]:
     """The box flap's hinge kept 1.8 rad once the hand had gone, and its free edge rests no higher than the rim."""
-    import math
-
     import numpy as np
 
     from robosimstudio.assetlib.semantics.snapshot import Snapshot
@@ -219,7 +217,7 @@ def _flap_shut(film) -> tuple[bool, str]:
     angle = float(crease_angle(Snapshot(sim.make_context()), "flap", line)["angle"])
     rest = np.asarray(flap.entity.rest["particle_q"], dtype=np.float64)[flap.particles]
     edge = np.asarray(flap.particle_q, dtype=np.float64)[rest[:, 2] > rest[:, 2].max() - 0.003].mean(axis=0)
-    above = float(edge[2]) - (0.728 + 0.10)
+    above = float(edge[2]) - film.bench((0.0, 0.0, 0.10))[2]  # the box's rim, 100 mm over whatever bench
     return angle >= 1.8 and above < 0.015, (
         f"the hinge kept {angle:.2f} rad (need 1.8) and the free edge is {above * 1000:+.0f} mm off the rim (need under 15)"
     )
@@ -272,8 +270,6 @@ def _round_the_post(film) -> dict:
     shrinking by what the wrap lays on the post; the capsule's distance from the
     hand at the end is kept for :func:`_carried_round`.
     """
-    import math
-
     import numpy as np
 
     from robosimstudio.core.math import quat_multiply
@@ -304,6 +300,21 @@ def _carried_round(film) -> tuple[bool, str]:
     return gap < 0.02, f"the nearest capsule ended {gap * 1000:.1f} mm from the tool centre (need under 20)"
 
 
+def _mid_twists(film) -> dict[str, float]:
+    """The twist example's readouts: each cable's turns through the middle third of its capsules, unsigned."""
+    import numpy as np
+
+    from robosimstudio_materials.rod.measures import twist_turns
+
+    body_q = np.asarray(film.sim.state.body_q.numpy())
+    out = {}
+    for name in ("soft_twist", "stiff_twist"):
+        bodies = film.sim[name].bodies
+        n = len(bodies)
+        out[name] = abs(twist_turns(body_q[bodies[n // 3 : 2 * n // 3 + 1], 3:7]))
+    return out
+
+
 def _turn_both(film) -> dict:
     """The twist take's turn: each hand's cursor turned 120 degrees inward about the vertical, over four seconds.
 
@@ -311,12 +322,9 @@ def _turn_both(film) -> dict:
     turns them the same way, a degree a control step. The mid-cable twists at the
     end are kept for :func:`_twisted`.
     """
-    import math
-
     import numpy as np
 
     from robosimstudio.core.math import quat_multiply, quat_to_mat
-    from robosimstudio_materials.rod.measures import twist_turns
 
     level = np.array([0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)])
     arms = {"right": 1.0, "left": -1.0}
@@ -334,22 +342,14 @@ def _turn_both(film) -> dict:
             panel.aim(panel.cursor_pos, quat, moving=i < frames)
         film.hold(1.0 / film.take.fps)
     film.hold(1.0)
-    body_q = film.sim.state.body_q.numpy()
-    film.twist_held = {
-        n: abs(twist_turns(body_q[film.sim[n].bodies[8:17], 3:7])) for n in ("soft_twist", "stiff_twist")
-    }
+    film.twist_held = _mid_twists(film)
     return {"turned_deg": 120.0, "held": {n: round(v, 3) for n, v in film.twist_held.items()}}
 
 
 def _twisted(film) -> tuple[bool, str]:
     """The turn reached both middles while held, and once let go only the stiff cable gave it back."""
-    import numpy as np
-
-    from robosimstudio_materials.rod.measures import twist_turns
-
     held = getattr(film, "twist_held", {"soft_twist": 0.0, "stiff_twist": 0.0})
-    body_q = film.sim.state.body_q.numpy()
-    now = {n: abs(twist_turns(np.asarray(body_q)[film.sim[n].bodies[8:17], 3:7])) for n in held}
+    now = _mid_twists(film)
     ok = (
         held["soft_twist"] > 0.09
         and held["stiff_twist"] > 0.03
@@ -629,13 +629,22 @@ def handle(example: str, thing: str, at: Any, *, camera: Any, lift: float = 0.10
     )
 
 
-def routine(example: str, *, speed: float, success: str, done: Any = None, budget: int = 1_500_000) -> Take:
+def routine(
+    example: str,
+    *,
+    speed: float,
+    success: str,
+    done: Any = None,
+    budget: int = 1_500_000,
+    needs: tuple[str, ...] = (),
+) -> Take:
     """A demo: the home pose, then its Run button, filmed to the routine's end.
 
     ``done(film)`` is the demo's own success measure; a take without one is still a draft.
     """
     return Take(
         example,
+        needs=needs,
         fps=12,
         speed=speed,
         warmup=0.5,
@@ -745,6 +754,7 @@ DRAFTS = (
     ),
     Take(
         "examples/02_soft/00_sponge.py",
+        needs=("superdex",),
         # The sponge under the Panda's tool-down hand, from the bench's open side.
         camera=Camera(eye=(0.80, -0.50, 1.02), look_at=(0.457, -0.115, 0.80)),
         warmup=1.0,  # the foam settles on the bench before the first frame
@@ -766,6 +776,7 @@ DRAFTS = (
     Take(
         "examples/02_soft/00_sponge.py",
         name="press_sponge",
+        needs=("superdex",),
         camera=Camera(eye=(0.80, -0.50, 1.02), look_at=(0.457, -0.115, 0.80)),
         warmup=1.0,
         beats=(
@@ -984,6 +995,7 @@ DRAFTS = (
         success="the bar is wiped:",
         done=_wiped,
         budget=2_000_000,
+        needs=("superdex",),
     ),
     routine(
         "examples/08_demos/route_the_cable/route_the_cable.py", speed=2.0, success="the cable is routed:", done=_routed
@@ -1011,24 +1023,24 @@ def _turn(arm: str, quat, seconds: float, label: str) -> Do:
 
     What a drag of the gizmo's rotation ring writes, written through the panel's
     own ``aim``: no beat drags a ring, so the clip shows the gizmo turning with
-    the pointer off it.
+    the pointer off it. To an orientation, eased, where :class:`~.beats.Turn`
+    turns by an angle about an axis at an even rate.
     """
 
     def turn(film):
         import numpy as np
+
+        from robosimstudio.core.math import quat_slerp
 
         from .page import ease
 
         panel = film.session.arms[arm]
         a = np.asarray(panel.cursor_quat, dtype=np.float64)
         b = np.asarray(quat, dtype=np.float64)
-        b = -b if float(a @ b) < 0.0 else b
-        half = math.acos(min(1.0, float(a @ b)))
+        half = math.acos(min(1.0, abs(float(a @ b))))
         frames = max(1, round(seconds * film.take.fps))
         for k in range(1, frames + 1):
-            t = ease(k / frames)
-            q = b if half < 1e-6 else (math.sin((1.0 - t) * half) * a + math.sin(t * half) * b) / math.sin(half)
-            panel.aim(panel.cursor_pos, q / np.linalg.norm(q), moving=k < frames)
+            panel.aim(panel.cursor_pos, quat_slerp(a, b, ease(k / frames)), moving=k < frames)
             film.advance()
         return {"turned_deg": round(math.degrees(2.0 * half), 1)}
 
@@ -1311,6 +1323,7 @@ ROBOT_BAGS: tuple[Take, ...] = (
     # a little in front, so the opening shows under the hand: the gizmo's arrows and arcs point +x, +y, +z.
     Take(
         "examples/16_bags/00_open_a_bag.py",
+        needs=("superdex",),
         camera=Orbit(Bench(0.0, -0.10, 0.04), distance=0.95, azimuth=-80.0, elevation=25.0, fov=38.0),
         warmup=0.5,
         layout=Layout(collapse=("Simulation", "Arm: left")),

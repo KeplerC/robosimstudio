@@ -32,6 +32,7 @@ What is particular to this backend, and why each piece is here:
 from __future__ import annotations
 
 import math
+import re
 import warnings
 import zlib
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -43,6 +44,7 @@ import warp as wp
 from robosimstudio.assetlib.materials import MaterialRecord, get_material
 from robosimstudio.core.math import quat_to_mat
 from robosimstudio.core.probes.particle import ParticleProbe
+from robosimstudio.core.render.particles import ParticleSurfacer
 from robosimstudio.domains.capabilities import ParticleMixin
 from robosimstudio.domains.selection import resolve_selector
 from robosimstudio.scene.entity import Entity
@@ -52,7 +54,13 @@ from .spec import _STRESS_KEYS, MPM_KEYS, NEWTON_MPM_STRESS_SCALE, ParticleBodyS
 if TYPE_CHECKING:
     from robosimstudio.core.pipeline import ScenePipeline
 
-__all__ = ["DEFAULT_CONTAINER_MARGIN", "EntityParticleBody", "island_solver", "resolve_material", "sample_positions"]
+__all__ = [
+    "DEFAULT_CONTAINER_MARGIN",
+    "EntityParticleBody",
+    "island_solver",
+    "resolve_material",
+    "sample_positions",
+]
 
 DEFAULT_CONTAINER_MARGIN = 0.002
 """Half the registered 4 mm voxel [m]: the signed-distance margin a container's
@@ -110,6 +118,11 @@ def sample_positions(spec: ParticleBodySpec) -> np.ndarray:
     inside, over the mesh's own bound. The jitter is drawn once per spec name,
     so two builds of one spec sample the same positions.
     """
+    return _sample(spec)[0]
+
+
+def _sample(spec: ParticleBodySpec) -> tuple[np.ndarray, np.ndarray]:
+    """:func:`sample_positions`, and the lattice cell each particle stands in ``[3]``."""
     spacing = float(spec.particle_spacing)
     if spec.shape == "mesh":
         points, cell = _mesh_points(spec, spacing)
@@ -122,7 +135,7 @@ def sample_positions(spec: ParticleBodySpec) -> np.ndarray:
     if spec.jitter > 0.0 and len(points):
         rng = np.random.default_rng(zlib.crc32(spec.name.encode("utf-8")))
         points = points + (rng.random(points.shape) - 0.5) * (2.0 * float(spec.jitter)) * cell
-    return np.ascontiguousarray(points, dtype=np.float64)
+    return np.ascontiguousarray(points, dtype=np.float64), cell
 
 
 def _mesh_points(spec: ParticleBodySpec, spacing: float) -> tuple[np.ndarray, np.ndarray]:
@@ -217,11 +230,11 @@ class EntityParticleBody(ParticleMixin, Entity):
         """The material as resolved from the spec: a name becomes its record's spec here, once."""
         self.solver: Any = None
         """The MPM solver stepping this body, found at scene-ready; ``None`` on another backend."""
-        self.surface: Any = None
-        """The :class:`newton.geometry.ParticleSurface` context, when ``render == "surface"``."""
+        self.surface: ParticleSurfacer | None = None
+        """The :class:`~robosimstudio.core.render.particles.ParticleSurfacer` over this body, when ``render == "surface"``."""
         self._handle: Any = None
-        self._radii: Any = None
         self._count = 0
+        self._particle_volume = float(spec.particle_volume)
 
     # -------------------------------------------------------------- phase 1
     def build(self, builder: newton.ModelBuilder, episode) -> None:
@@ -230,19 +243,22 @@ class EntityParticleBody(ParticleMixin, Entity):
 
         SolverImplicitMPM.register_custom_attributes(builder)
         spec = self.spec
-        local = sample_positions(spec)
+        local, cell = _sample(spec)
         placed = self.placed((*spec.at, *spec.quat))
         rotation = quat_to_mat(np.asarray(placed[3:7], dtype=np.float64))
         world = local @ rotation.T + np.asarray(placed[:3], dtype=np.float64)
         n = len(world)
-        spacing = float(spec.particle_spacing)
-        mass = spacing**3 * float(self.material.density)
+        # One cell's volume per particle, as mass and as radius: Newton's
+        # implicit MPM takes a particle's volume to be ``8 r^3``, so the radius
+        # is half the cell's cube root and the density it derives is the material's.
+        self._particle_volume = float(np.prod(cell))
+        mass = self._particle_volume * float(self.material.density)
         attributes = {key: [value] * n for key, value in self.material.custom_attributes().items()}
         builder.add_particles(
             pos=[tuple(float(c) for c in row) for row in world],
             vel=[(0.0, 0.0, 0.0)] * n,
             mass=[mass] * n,
-            radius=[0.5 * spacing] * n,
+            radius=[self.particle_radius] * n,
             flags=[int(newton.ParticleFlags.ACTIVE)] * n,
             custom_attributes=attributes,
         )
@@ -252,9 +268,15 @@ class EntityParticleBody(ParticleMixin, Entity):
     def _apply_container_margins(self, builder: newton.ModelBuilder) -> None:
         """Give every collision shape of the named container entities a signed-distance margin.
 
-        Found by label: an entity's body carries its name, its shapes carry
-        the name or ``<name>_<part>`` (a shell collider's floor and walls). A
-        name that matches nothing is a warning rather than an error, because
+        Found by label, and by the whole name: a container's shapes are the
+        ones on the body that carries its name (a rigid body's, with a shell
+        collider's floor and walls) and the world-fixed ones a static builds,
+        labelled with the name, ``<name>_collision`` or ``<name>_collision_<i>``,
+        each followed by ``_convex_<i>`` for the hulls past the first that
+        Newton's convex decomposition adds (a static bowl with
+        ``approximate="coacd"`` is ``bowl`` and ``bowl_convex_1`` to ``_26``). A
+        prefix is not enough, since ``cup`` would then also take ``cup_holder``
+        and ``cup_2``. A name that matches nothing is a warning rather than an error, because
         the container may be built in a later stage of a scene that will be
         compiled again with it -- but a liquid poured into a wall with no
         margin leaks, and the warning says which name was missed.
@@ -266,11 +288,8 @@ class EntityParticleBody(ParticleMixin, Entity):
         bodies = list(getattr(builder, "body_label", []))
         for name in self.spec.containers:
             owned = {i for i, label in enumerate(bodies) if label == name}
-            shapes = [
-                s
-                for s in range(len(labels))
-                if builder.shape_body[s] in owned or labels[s] == name or labels[s].startswith(f"{name}_")
-            ]
+            own = re.compile(rf"{re.escape(name)}(?:_collision(?:_\d+)?)?(?:_convex_\d+)?")
+            shapes = [s for s in range(len(labels)) if builder.shape_body[s] in owned or own.fullmatch(labels[s])]
             if not shapes:
                 warnings.warn(
                     f"particle body {self.spec.name!r}: container {name!r} has no shapes in the builder yet, "
@@ -284,13 +303,13 @@ class EntityParticleBody(ParticleMixin, Entity):
 
     # -------------------------------------------------------------- phase 2
     def handle(self, model: newton.Model) -> Any:
-        """The particles as a point body: no triangles, a draw radius of half the spacing.
+        """The particles as a point body: no triangles, drawn at the radius the model holds.
 
         ``surface`` is installed at scene-ready, once the solver exists to
         reconstruct one; a renderer meeting the handle before then draws points.
         """
         handle = super().handle(model)
-        handle.point_radius = 0.5 * float(self.spec.particle_spacing)
+        handle.point_radius = self.particle_radius
         if self.surface is not None:
             handle.surface = self.surface_mesh  # the compiler may ask for the handle after scene-ready
         self._handle = handle
@@ -334,8 +353,7 @@ class EntityParticleBody(ParticleMixin, Entity):
             if key in _STRESS_KEYS:
                 value /= NEWTON_MPM_STRESS_SCALE
             values[key] = value
-        spacing = float(self.spec.particle_spacing)
-        values["density"] = float(model.particle_mass.numpy()[first]) / spacing**3
+        values["density"] = float(model.particle_mass.numpy()[first]) / self._particle_volume
         return ParticleMaterialSpec(color=self.material.color, **values)
 
     def _all_world_indices(self) -> np.ndarray:
@@ -397,29 +415,40 @@ class EntityParticleBody(ParticleMixin, Entity):
             )
 
     def _install_surface(self) -> None:
-        """A surface-reconstruction context over this body, offered on the handle as a callable."""
+        """A surfacer over this body at the solver's resolution, offered on the handle as a callable.
+
+        The context ``SolverImplicitMPM.create_particle_surface`` would make:
+        0.45 of the solver's voxel unless the spec names one, a kernel of
+        three of those voxels, one per world of the solver's model.
+        """
         voxel = self.spec.surface_voxel
-        self.surface = self.solver.create_particle_surface(voxel_size=None if voxel is None else float(voxel))
-        device = self.model.particle_q.device if self.model is not None else None
-        self._radii = wp.full(self._count, 0.5 * float(self.spec.particle_spacing), dtype=wp.float32, device=device)
+        voxel = 0.45 * float(self.solver.config.voxel_size) if voxel is None else float(voxel)
+        self.surface = ParticleSurfacer(
+            self.particle_radius,
+            voxel_size=voxel,
+            device=self.solver.model.device,
+            kernel_radius=3.0 * voxel,
+            world_count=max(int(self.solver.model.world_count), 1),
+        )
         if self._handle is not None:
             self._handle.surface = self.surface_mesh
 
     def surface_mesh(self, positions: Any) -> tuple[Any, Any, Any]:
-        """``(vertices, triangles, normals)`` device arrays over ``positions`` ``[n, 3]`` of this body's particles.
+        """``(vertices, triangles, normals)`` over ``positions`` ``[n, 3]`` of this body's particles.
 
-        What ``DeformableHandle.surface`` points at. The vertex count varies per
-        call, which is why a renderer that cannot re-log a mesh per frame draws
-        the points instead. Empty arrays when the reconstruction finds no
-        triangles (a body scattered thinner than a voxel).
+        What ``DeformableHandle.surface`` points at. The vertices come back on
+        the host, the triangles and normals on the device. Extracted by
+        :attr:`surface`, which moves the particles into the positive octant
+        first: on a bench they sit at negative y, where the extraction returned
+        about a third of the surface, and moved to straddle z = 0 it never came
+        back. The vertex count varies per call, which is why a renderer that cannot
+        re-log a mesh per frame draws the points instead. Empty arrays when the
+        reconstruction finds no triangles (a body scattered thinner than a voxel).
         """
-        device = self._radii.device
+        device = self.surface.device
         if isinstance(positions, wp.array):
-            pos = positions
-        else:
-            pos = wp.array(np.asarray(positions, dtype=np.float32).reshape(-1, 3), dtype=wp.vec3, device=device)
-        mesh = self.surface.extract(pos, self._radii, compute_normals=True)
-        vertices, indices, normals = mesh.to_arrays()
+            positions = positions.numpy()
+        vertices, indices, normals = self.surface(positions)
         if vertices is None or indices is None or len(indices) == 0:
             empty = wp.empty(0, dtype=wp.vec3, device=device)
             return empty, wp.empty((0, 3), dtype=wp.int32, device=device), wp.empty(0, dtype=wp.vec3, device=device)
@@ -482,8 +511,19 @@ class EntityParticleBody(ParticleMixin, Entity):
 
     @property
     def particle_mass(self) -> float:
-        """Mass of one particle [kg]."""
-        return float(self.spec.particle_spacing) ** 3 * float(self.material.density)
+        """Mass of one particle [kg]: its lattice cell's volume times the density."""
+        return self._particle_volume * float(self.material.density)
+
+    @property
+    def particle_radius(self) -> float:
+        """Radius of one particle [m]: half its lattice cell's cube root, as the model holds it.
+
+        What the solver reads back as the particle's volume (``8 r^3``), and so
+        what the points are drawn at and the surface is grown over: the wipe's
+        puddle, 2.5 mm across and 3 mm deep a cell, is 1.33 mm, not the 1.25
+        mm of half the spacing.
+        """
+        return 0.5 * self._particle_volume ** (1.0 / 3.0)
 
     @property
     def floor_z(self) -> float:

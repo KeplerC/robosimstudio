@@ -1343,17 +1343,21 @@ class ViewerStudio(newton.viewer.ViewerViser):
         *,
         opacity: float = 1.0,
     ) -> None:
-        """A mesh whose vertex count may change: rewritten in place while the counts hold, re-added when they move.
+        """A mesh whose connectivity may change: vertices rewritten in place while the faces hold, re-added when they move.
 
         viser's mesh handle takes new ``vertices`` and new ``faces`` as two
         separate messages, and between them the client would hold faces that
         index vertices it does not have; one ``add_mesh_simple`` under the same
-        name replaces the node whole.
+        name replaces the node whole. Equal counts are not equal faces: an
+        isosurface regrown over moved particles can come back with as many
+        vertices and triangles as the last one and different triangles, which
+        rewritten as vertices alone would draw the old faces across the new
+        vertices, so the faces themselves are compared.
         """
         name, handle = self._node(name)
         if handle is not None and not hidden:
             try:
-                if len(handle.vertices) == len(vertices) and len(handle.faces) == len(faces):
+                if len(handle.vertices) == len(vertices) and np.array_equal(handle.faces, faces):
                     handle.vertices = vertices.astype(np.float32)
                     self._set_hidden(name, handle, False)
                     return

@@ -57,10 +57,10 @@ class SolverSuperdex(SolverHost):
         linear_iterations: A cap on the linear solver's iterations per Newton
             step, or ``None`` for the engine's own (it ran 1000 per contact).
         integration: The engine's time integrator by name (``"backward_euler"``,
-            the engine's own, or ``"bdf2"``...), or ``None`` to leave it.
-            Backward Euler damps every motion a little each step; BDF2 is second
-            order and damps less, so a rod swings and springs back more as a real
-            one does, at the same cost per step.
+            the engine's own, or ``"bdf2"``...), or ``None`` to leave it. An
+            unknown name is refused with the names there are. On the knot the
+            two hands pull (``examples/17_knots``), BDF2 drew the knot to 239 mm
+            but let a tail slide 88 mm through a hand, so no shipped scene sets it.
     """
 
     def open(

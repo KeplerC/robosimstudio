@@ -8,15 +8,15 @@ Run ``examples/16_bags/00_open_a_bag.py`` first.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 import newton
 import numpy as np
 import warp as wp
 
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
 from robosimstudio.assetlib.sim import contacts_with
@@ -35,6 +35,7 @@ __all__ = [
     "Bag",
     "BagSpec",
     "EntityBag",
+    "EntityBagSuperdex",
     "bag",
     "bag_mesh",
     "bags",
@@ -171,6 +172,8 @@ class BagSpec(ClothSpec):
             with slip; against a gripper pad the deformable's value is the one that counts.
         mass_damping: SuperDex ``mass_damping_coefficient`` [1/s], a drag on every node.
         stiffness_damping: SuperDex ``stiffness_damping_coefficient`` [s].
+        settle_substeps: Newton substeps per settle frame, or 0 for the run's own, as for a soft
+            body: SuperDex steps the bag at its backend's rate either way.
     """
 
     entity: str = "bag"
@@ -198,6 +201,13 @@ class BagSpec(ClothSpec):
             raise ValueError(f"bag {self.name!r}: a bag is a membrane, not a slab")
         if not self.material.particle_radius > 0.0:
             raise ValueError(f"bag {self.name!r}: the contact radius sets the layer gap and must be positive")
+        if int(self.cells[0]) < 1 or int(self.cells[1]) < 2:
+            # One cell across sews every node up to the mouth: the two layers would be the same
+            # triangles twice, which sent SuperDex's solve to NaN on its first step.
+            raise ValueError(
+                f"bag {self.name!r}: cells needs at least 1 along and 2 across (with 1 across, every node "
+                f"up to the mouth is on a sewn side and the two layers are one), got {tuple(self.cells)}"
+            )
 
     @property
     def cell(self) -> float:
@@ -224,6 +234,10 @@ class EntityBag(EntityCloth):
 
     spec: BagSpec
     domain = "bag"
+    hosted: ClassVar[bool] = False
+    """Whether SuperDex integrates this bag, as :class:`EntityBagSuperdex` says. Only it builds one:
+    on a Newton solver the inactive particles would never move, and VBD has no self-contact for
+    the two layers. Decided by the class the compiler picks for the arrangement, as for a soft body."""
 
     def __init__(self, spec: BagSpec, *, world: int = 0) -> None:
         super().__init__(spec, world=world)
@@ -256,6 +270,12 @@ class EntityBag(EntityCloth):
     def build(self, builder: newton.ModelBuilder, episode) -> None:
         del episode
         spec = self.spec
+        if not self.hosted:
+            # Refused rather than built frozen: no Newton solver would move the inactive layers.
+            raise NotImplementedError(
+                f"bag {spec.name!r}: a bag is a self-colliding SuperDex shell; route the 'bag' kind to "
+                "backend('superdex'), as rss.BAG_60HZ does"
+            )
         material = spec.material
         vertices, faces = self.surface()
         placed = self.placed((*spec.pose, *spec.quat))
@@ -286,7 +306,8 @@ class EntityBag(EntityCloth):
         spec, material = self.spec, self.spec.material
         params: dict = {
             "particle_radius": float(material.particle_radius),
-            "self_contact": bool(spec.self_contact),
+            # As cloth reads it: a declared ``sim`` is the scene's answer, so it is the engine's too.
+            "self_contact": bool(self.sim_requirements().self_contact),
             "thickness": float(material.thickness),
             "areal_density": float(material.areal_density),
             "friction": float(material.friction),
@@ -300,6 +321,15 @@ class EntityBag(EntityCloth):
             params["shell_poisson"] = float(material.shell_poisson)
         return HostActor(kind="bag", params=params)
 
+    def apply_model_materials(self, model: newton.Model) -> None:
+        """Nothing: SuperDex reads the bag's contact off :meth:`host_actor`.
+
+        Cloth writes its contact as the model's one ``soft_contact_ke``/``kd``/``mu``, which only a
+        sheet a Newton solver integrates reads. A bag that wrote CANVAS there would hand a VBD towel
+        in the same scene the bag's values whenever it came after the towel.
+        """
+        del model
+
     def tunables(self, pipeline=None):
         """None: the engine copied the material when it built the shell, so nothing here is live."""
         del pipeline
@@ -310,9 +340,18 @@ class EntityBag(EntityCloth):
         super().on_scene_ready(pipeline)
 
     def settle(self, pipeline) -> None:
-        """Let the top layer come down onto the bottom one. Plain steps: the engine ticks inside them."""
-        for _ in range(int(self.spec.settle_frames)):
-            pipeline.step()
+        """Let the top layer come down onto the bottom one. The engine ticks inside each step, as for a soft body."""
+        spec = self.spec
+        if spec.settle_frames <= 0:
+            return
+        if spec.settle_substeps > 0:
+            with pipeline.substeps_at(int(spec.settle_substeps)):
+                for _ in range(int(spec.settle_frames)):
+                    pipeline.step()
+        else:
+            for _ in range(int(spec.settle_frames)):
+                pipeline.step()
+        # A settle is scene construction, not simulated time.
         pipeline.sim_time = 0.0
         pipeline.step_count = 0
 
@@ -348,16 +387,6 @@ def bag(
     return BagSpec(name=name, size=size, cells=cells, pose=at, **extra, **kwargs)
 
 
-@dataclass(frozen=True)
-class _Spec:
-    """A build factory returning one spec, as a value, so two declarations of one type compare equal."""
-
-    spec: Any
-
-    def __call__(self) -> Any:
-        return self.spec
-
-
 class Bag:
     """A bag as a task document's type: ``register_asset(Bag.from_spec(rss.bag(...), name="canvas_bag"))``."""
 
@@ -366,21 +395,25 @@ class Bag:
         """The bag a constructor returned, as the :class:`AssetRecord` a document's ``(:objects ...)`` names.
 
         Its ``at`` and ``quat`` are where the bag starts; the document's object name replaces its
-        ``name``. The record states the spec's self-contact, since a record's requirements are what
-        the scene is composed from.
+        ``name``. The record states the requirements the bag runs, as
+        :meth:`EntityBag.sim_requirements` reads them: the spec's declared ``sim`` when it has one,
+        else the bag's contacts with the spec's self-contact.
         """
         if not isinstance(spec, BagSpec):
             raise TypeError(f"Bag.from_spec takes a BagSpec, got {type(spec).__name__}")
+        declared = spec.sim
         return AssetRecord(
             name=name,
             summary=summary or f"a bag, {spec.size[0]:.2f} x {spec.size[1]:.2f} m",
             tags=("bag",),
-            sim=SimRequirements(
+            sim=declared
+            if isinstance(declared, SimRequirements)
+            else SimRequirements(
                 domain="bag",
                 contacts=contacts_with("surface", "fixtures", "objects", "hands"),
                 self_contact=bool(spec.self_contact),
             ),
-            build=_Spec(spec),
+            build=SpecFactory(spec),
         )
 
 
@@ -480,7 +513,7 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
     The bridge's ``shell`` builder, with three differences: the rest coordinates are about the
     centroid and the offset is the root transform (section 1), the contact (friction, falloff) is
     the bag's own rather than the engine's defaults, and so is the material's damping. Read back,
-    the nodes are put into the world frame by adding the centroid back: the root never turns.
+    the nodes are put into the world frame through the root, as ``place_actor`` writes them.
     """
     del particle_q, tet_indices, tet_materials
     physics = bridge.physics
@@ -509,20 +542,15 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
     )
     shell.point_cloud_collider.radius = float(params.get("particle_radius", CANVAS.particle_radius))
     shell.point_cloud_collider.self_contact = bool(params.get("self_contact", True))
-    contact = bridge.contact_params(params, penalty=1.0e9, friction=float(CANVAS.friction), padding=0.0)
-    contact.friction_falloff_vel = float(params.get("friction_falloff", 1.0e-3))
-    shell.contact = contact
+    # The falloff too, when the bag states it (``BagSpec.friction_falloff``); unstated, the engine's own 10 mm/s.
+    shell.contact = bridge.contact_params(params, penalty=1.0e9, friction=float(CANVAS.friction), padding=0.0)
     actor = physics.experimental.create_shell_actor(bridge.scene_of(record.get("world", 0)), shell)
     actor.register_query(physics.QueryType.NODE_POSITIONS)
-
-    def read() -> np.ndarray:
-        return np.asarray(actor.get_node_positions_local(), dtype=np.float64).reshape(-1, 3) + centre
-
     real = np.float64 if physics.uses_double_precision() else np.float32
     return {
         "name": str(record.get("name", "")),
         "actor": actor,
-        "read": read,
+        "read": bridge.root_reader(actor),
         "start": geom.start,
         "count": geom.count,
         "prev": geom.rest.astype(real).copy(),
@@ -540,18 +568,14 @@ def _read_bag(model: Any, base: Any) -> Any:
 # =============================================================================
 
 
-BAG_60HZ = replace(
-    GENERIC,
-    backends=(
-        ("articulated", backend("mujoco")),
-        # Two engine steps per control step, GENERIC's for the soft kind, and the same backend so a
-        # sponge and a bag share the one host island.
-        ("soft", backend("superdex", substeps=2, feedback_dv_max=20.0)),
-        ("bag", backend("superdex", substeps=2, feedback_dv_max=20.0)),
-        ("*", backend("vbd", rigid_body_contact_buffer_size=256)),
-    ),
-)
-"""GENERIC with ``bag`` on SuperDex beside the soft kind: the arm on MuJoCo, 60 Hz control."""
+_BAG_HOST = backend("superdex", substeps=2, feedback_dv_max=20.0)
+"""Two engine steps per control step, GENERIC's for the soft kind; the soft kind takes the same backend, so a
+sponge and a bag share the one host island."""
+
+BAG_60HZ = GENERIC.with_backend("soft", _BAG_HOST).with_backend("bag", _BAG_HOST)
+"""GENERIC with ``bag`` on SuperDex beside the soft kind: the arm on MuJoCo, 60 Hz control, the particle
+materials on GENERIC's implicit MPM and everything else on its VBD. A sponge here takes the bag's
+``feedback_dv_max`` of 20, not GENERIC's default, since one host island serves both."""
 
 register_actor_kind("bag", _read_bag, summary="A bag: a shell's triangles.")
 register_actor_builder(
@@ -583,6 +607,15 @@ DOMAIN = register_domain(
 )
 
 register_entity("bag")(EntityBag)
+
+
+class EntityBagSuperdex(EntityBag):
+    """:class:`EntityBag` for SuperDex, which integrates the bag itself: Newton must leave it alone."""
+
+    hosted = True
+
+
+register_entity("bag", engine="superdex")(EntityBagSuperdex)
 
 
 # Import-only; running it directly would register the bag twice.

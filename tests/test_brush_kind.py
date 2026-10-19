@@ -77,6 +77,14 @@ def _in_strips(entity, body_q, *, every: bool = False) -> np.ndarray:
     return np.concatenate(rows).reshape(-1, 3)
 
 
+def _on_handle(body_q, handle: int, bodies) -> np.ndarray:
+    """Each of ``bodies``' centres in the handle's frame: where the field sits on the handle, wherever it stands."""
+    from robosimstudio.core.math import quat_to_mat
+
+    pose = body_q[handle]
+    return (body_q[bodies][:, :3] - pose[:3]) @ quat_to_mat(pose[3:7])
+
+
 class TestTheBrushOnItsOwnGrip(unittest.TestCase):
     """The whole brush on VBD: the field holds the grip up, as a brush on a bench is held."""
 
@@ -232,15 +240,19 @@ class TestTheBrushOnANamedHandle(unittest.TestCase):
         self.assertGreater(float((entity.tip_positions(lifted)[:, 2] - floor).min()), 0.015, "the brush is up")
 
     def test_z_a_reset_restores_the_field(self) -> None:
-        """Back where they were built within a few steps, and the lattice cleared.
+        """Back where they were built on the reset itself, still there a few steps on, and the lattice cleared.
 
-        Not to the bit on the reset itself, as the own grip's are: the strips'
-        welds hang off another entity's body, so a forward-kinematics pass during
-        the reset can place them from where that body was a moment earlier, and
-        the welds carry them back as the scene steps.
+        The strips' welds hang off another entity's body, and the
+        forward-kinematics pass during the reset places them from wherever that
+        body's pose then reads, so the reset puts the handle's body where its own
+        reset put its coordinates. Left where the press test lifted it, the
+        strips came back 25 mm off and the welds pulled them back as the scene
+        stepped, the bristles after them.
         """
         entity = self.brush.entity
         self.sim.reset()
+        at_once = _body_q(self.sim)
+        np.testing.assert_allclose(at_once[entity.bodies, :3], self.built[entity.bodies, :3], atol=1.0e-5)
         self.assertEqual(0, int(entity.scrub_grid().cells.sum()))
         self.assertEqual(
             {"n_bristles": 400.0, "scrubbed_cells": 0.0}, entity.published_states(self.sim.pipeline.state_0)
@@ -249,6 +261,32 @@ class TestTheBrushOnANamedHandle(unittest.TestCase):
         now = _body_q(self.sim)
         drift = np.linalg.norm(now[entity.bodies, :3] - self.built[entity.bodies, :3], axis=1)
         self.assertLess(float(drift.max()), 5.0e-4)
+
+    def test_z_b_an_episode_that_moves_the_handle_carries_the_field_with_it(self) -> None:
+        """An episode may put the handle elsewhere; the field goes back onto it there, not where it was built.
+
+        The handle's reset writes the episode's pose, and the brush's reset after
+        it must neither undo that (a solver reset to the model's coordinates did)
+        nor leave the strips and bristles where the handle was built.
+        """
+        sim, entity = self.sim, self.brush.entity
+        handle = entity.handle_body
+        z = float(entity.spec.sole_top + HANDLE_HALF[2])
+        sim.episode = {"object_poses": {"handle": (AT[0] + 0.03, AT[1] + 0.02, z, 0.3)}}
+        try:
+            sim.reset()
+            at_once = _body_q(sim)
+            sim.run(10)
+            later = _body_q(sim)
+        finally:
+            sim.episode = None
+            sim.reset()
+        np.testing.assert_allclose(at_once[handle, :3] - self.built[handle, :3], (0.03, 0.02, 0.0), atol=1.0e-4)
+        built = _on_handle(self.built, handle, entity.bodies)
+        for when, now in (("at once", at_once), ("10 steps on", later)):
+            self.assertTrue(np.isfinite(now).all(), when)
+            off = np.linalg.norm(_on_handle(now, handle, entity.bodies) - built, axis=1)
+            self.assertLess(float(off.max()), 5.0e-4, f"{when}: a body of the field is {off.max() * 1e3:.2f} mm off")
 
 
 if __name__ == "__main__":

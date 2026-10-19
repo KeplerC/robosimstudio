@@ -58,7 +58,7 @@ def main() -> None:
     register_asset(Body.from_spec(tip, name="peg_tip"))
     hang = (0.035, y, pegs["upper"][0] + side + RUBBER.cord_radius + 0.001 - diameter / 2)
     loop = band(name="band", diameter=diameter, at=hang, normal=(1, 0, 0), segments=64, skin_samples="P1Q6")
-    register_asset(Rod.from_length(name="rubber_band", length=loop.length, radius=loop.radius, build=lambda: loop))
+    register_asset(Rod.from_spec(loop, name="rubber_band"))
 
     env = bench.Env(bench.task(TASK))
     env.reset()

@@ -47,7 +47,7 @@ its own docstring gives at length.
 from __future__ import annotations
 
 import functools
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -190,7 +190,9 @@ def reach_island_copies(pipeline: Any, *attrs: str) -> int:
     return moved
 
 
-def set_kinematic(pipeline: Any, bodies: Iterable[int], on: bool) -> dict[int, int]:
+def set_kinematic(
+    pipeline: Any, bodies: Iterable[int], on: bool, *, restore: Mapping[int, int] | None = None
+) -> dict[int, int]:
     """Flag bodies kinematic, or give them back their old flags, in the model and in every island's copy.
 
     A kinematic body keeps whatever pose the state hands the solver: that is a
@@ -213,12 +215,20 @@ def set_kinematic(pipeline: Any, bodies: Iterable[int], on: bool) -> dict[int, i
     straightness and twisted it unevenly; with the mass gone too it stays at
     1.000 and twists uniformly, ``probe5.py``).
 
+    Only the two state bits are written. A stored body is ``DYNAMIC`` or
+    ``KINEMATIC``, and an island's copy may also carry
+    :attr:`newton.BodyFlags.PROXY`, Newton's mark on a body another island
+    owns; that bit, and any other, is kept as it was.
+
     Args:
         pipeline: The scene's pipeline (``model`` and, in a coupled scene, ``solver``).
         bodies: Model body indices.
-        on: ``True`` sets each body's flags to ``KINEMATIC``; ``False`` clears
-            it and sets ``DYNAMIC``, which is what every body the builder makes
-            carries.
+        on: ``True`` makes each body ``KINEMATIC``; ``False`` makes it
+            ``DYNAMIC``, which is what every body the builder makes carries,
+            or what ``restore`` says it was.
+        restore: What a call with ``on=True`` returned. ``on=False`` puts each
+            body it lists back into the state it had then, so a body that was
+            kinematic before the pin is kinematic after the release.
 
     Returns:
         The flags each body had in the model before this call, keyed by body.
@@ -242,12 +252,20 @@ def set_kinematic(pipeline: Any, bodies: Iterable[int], on: bool) -> dict[int, i
             rows = {b: int(local[b]) for b in bodies if 0 <= b < len(local) and local[b] >= 0}
             if rows:
                 targets.append((override, rows))
+    state = kinematic | dynamic
     for array, rows in targets:
         flags = array.numpy()
         for body, row in rows.items():
+            old = int(flags[row])
             if array is pipeline.model.body_flags:
-                before[body] = int(flags[row])
-            flags[row] = kinematic if on else (int(flags[row]) & ~kinematic) | dynamic
+                before[body] = old
+            if on:
+                want = kinematic
+            elif restore is not None and body in restore:
+                want = int(restore[body]) & state
+            else:
+                want = dynamic
+            flags[row] = (old & ~state) | want
         array.assign(flags)
     return before
 

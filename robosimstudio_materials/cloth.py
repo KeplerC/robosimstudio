@@ -7,6 +7,7 @@ Run ``examples/01_cloth/00_towel.py`` first. Copy this file to write a kind of y
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
@@ -1120,6 +1121,9 @@ class ForceGatedWipe:
             in the first steps while it finishes the stroke (``scrub_lift.py``). 0 counts every touch.
     """
 
+    KEEP = 600
+    """How many of the last updates' unfiltered pushes :attr:`raw` keeps: 10 s at 60 Hz."""
+
     def __init__(
         self,
         sim,
@@ -1138,7 +1142,8 @@ class ForceGatedWipe:
         self.crushed = np.zeros(len(self.stain), dtype=bool)
         self.window = max(1, int(window))
         self.recent: list[float] = []
-        self.raw: list[float] = []
+        self.raw: deque[float] = deque(maxlen=self.KEEP)
+        """The push each update read, before the median [N]; bounded, since a page updates it every step."""
         self.push = 0.0
         self.hard = False
         """Whether the press the hand is in went past the band; cleared once the push is under it."""
