@@ -11,8 +11,10 @@ pull tab, and a label that never lets go staying stuck -- is driven through the 
 * **The break law**, on positions written by hand: only lifting off the face opens a bond; sliding
   along it and pressing into it do not.
 * **The declarations**: the spec refuses what cannot be built, the presets carry the adhesive and
-  stay soft enough for a tab to pull them, ``TAPE_60HZ`` puts every free body on the tape's solver
-  with compliant ALM, the flat names resolve, and the atom, record, materials and domain register.
+  stay soft enough for a tab to pull them, the contact presets share one sheet and rank by strength,
+  ``TAPE_60HZ`` puts every free body on the tape's solver with compliant ALM, the flat names resolve,
+  and the atoms, record, materials and domain register. The contact law itself is checked against
+  ipc-toolkit by ``tests/test_tape_adhesion_law.py``.
 """
 
 from __future__ import annotations
@@ -52,6 +54,22 @@ class TestTheSurface(unittest.TestCase):
         self.assertTrue(np.all(vertices[bonded, 1] >= 0.02 - 1.0e-9), "the fold row is free, so the end can lift")
         self.assertEqual(2 * 9, len(clamped), "the turned-up end's upper two rows")
         self.assertFalse(set(bonded) & set(clamped))
+
+    def test_a_dry_margin_leaves_the_rows_past_the_fold_unbonded(self) -> None:
+        from robosimstudio_materials.tape import bonded_rows, tape_surface
+
+        vertices, _, _ = tape_surface((0.04, 0.095), (8, 19), 0.015)
+        dry = bonded_rows(vertices, 0.015, 0.005, 0.012)
+        self.assertEqual(14 * 9, len(dry), "the rows 5 and 10 mm past the fold carry no adhesive")
+        self.assertGreaterEqual(float(vertices[dry, 1].min()), 0.015 + 0.012)
+        self.assertTrue(set(dry) <= set(bonded_rows(vertices, 0.015, 0.005)))
+
+    def test_each_vertex_carries_its_share_of_the_sheet(self) -> None:
+        from robosimstudio_materials.tape import sheet_areas
+
+        areas = sheet_areas((0.04, 0.095), (8, 19))
+        self.assertAlmostEqual(0.04 * 0.095, float(areas.sum()), places=12)
+        self.assertAlmostEqual(25.0e-6, float(np.median(areas)), places=12, msg="an inner vertex: one 5 mm cell")
 
     def test_without_a_tab_the_whole_sheet_is_stuck(self) -> None:
         from robosimstudio_materials.tape import bonded_rows, clamped_rows, tape_surface
@@ -131,6 +149,29 @@ class TestThePresets(unittest.TestCase):
                 self.assertGreater(material.tack, 0.0)
                 self.assertGreater(material.break_opening, 0.0)
 
+    def test_the_contact_presets_share_a_sheet_and_rank_by_strength(self) -> None:
+        from robosimstudio_materials.tape import CONTACT_FIELDS, DUCT_TAPE, LABEL, MASKING_TAPE, PAPER_LABEL
+
+        self.assertEqual("opening", PAPER_LABEL.adhesion)
+        for material in (LABEL, MASKING_TAPE, DUCT_TAPE):
+            with self.subTest(strength=material.strength):
+                self.assertEqual("contact", material.adhesion)
+                self.assertEqual(PAPER_LABEL.tri_ke, material.tri_ke)
+                self.assertEqual(PAPER_LABEL.edge_ke, material.edge_ke)
+                self.assertTrue(
+                    all(getattr(material, f) == getattr(LABEL, f) for f in CONTACT_FIELDS if f != "strength")
+                )
+        self.assertLess(LABEL.strength, MASKING_TAPE.strength)
+        self.assertLess(MASKING_TAPE.strength, DUCT_TAPE.strength)
+
+    def test_a_label_bond_starts_near_the_opening_laws_stiffness(self) -> None:
+        # The ipc pull's slope at contact on a 5 mm cell, within a factor of two of PAPER_LABEL's 100 N/m.
+        from robosimstudio_materials.tape import LABEL, contact_stiffness
+
+        per_bond = contact_stiffness(LABEL, LABEL.particle_radius) * 0.005 * 0.005
+        self.assertGreater(per_bond, 50.0)
+        self.assertLess(per_bond, 200.0)
+
     def test_a_label_row_lets_go_at_under_a_newton(self) -> None:
         from robosimstudio_materials.tape import PAPER_LABEL
 
@@ -175,6 +216,10 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertIs(EntityTape, ENTITIES.get("tape"))
         self.assertIs(PAPER_LABEL, get_material("paper_label").spec)
         self.assertEqual("tape", kind_of(PAPER_LABEL))
+        from robosimstudio_materials.tape import DUCT_TAPE, LABEL, MASKING_TAPE
+
+        for name, spec in (("label", LABEL), ("masking_tape", MASKING_TAPE), ("duct_tape", DUCT_TAPE)):
+            self.assertIs(spec, get_material(name).spec)
 
     def test_a_record_carries_the_domain_and_builds_the_spec(self) -> None:
         import robosimstudio as rss
@@ -196,6 +241,27 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual(("fraction", "front"), spec.returns)
         self.assertEqual([], spec.problems())
         self.assertEqual("peeled_fraction", dispatch("peeled_fraction", ("",), ("tape",)).atom)
+
+    def test_the_bonded_atom_is_catalogued_on_the_tapes_layout(self) -> None:
+        from robosimstudio.assetlib.semantics.atoms import ATOMS
+        from robosimstudio.assetlib.semantics.handlers import dispatch
+
+        spec = ATOMS.get("bonded_fraction")
+        self.assertEqual(("tape",), spec.args[0].substrates)
+        self.assertEqual(("fraction", "held"), spec.returns)
+        self.assertEqual([], spec.problems())
+        self.assertEqual("bonded_fraction", dispatch("bonded_fraction", ("",), ("tape",)).atom)
+
+    def test_the_bonded_handler_reads_the_bonds_holding(self) -> None:
+        from types import SimpleNamespace
+
+        from robosimstudio_materials.tape import _bonded_fraction
+
+        entity = SimpleNamespace(bonded=lambda: 0.75, held=lambda: 3)
+        got = _bonded_fraction(SimpleNamespace(entities={"label": entity}), "label")
+        self.assertEqual({"fraction": 0.75, "held": 3.0, "label/bonded_fraction": 0.75}, got)
+        with self.assertRaises(KeyError):
+            _bonded_fraction(SimpleNamespace(entities={}), "label")
 
     def test_the_handler_reads_the_entitys_bonds(self) -> None:
         from types import SimpleNamespace
