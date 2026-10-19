@@ -102,40 +102,29 @@ class SolverGenesis(SolverHost):
         """
         from .bridge import GenesisBridge, coupler_for
 
+        shared = {**recipe, "feedback_alpha": float(feedback_alpha), "feedback_dv_max": float(feedback_dv_max)}
+        options = {
+            "substeps": int(substeps),
+            "precision": str(precision),
+            "feedback": str(feedback),
+            "pose_source": str(pose_source),
+        }
         if coupler_for(recipe) == "legacy":
             from .sph import SphBridge
 
-            return SphBridge(
-                model,
-                {
-                    **recipe,
-                    "feedback_alpha": float(feedback_alpha),
-                    "feedback_dv_max": float(feedback_dv_max),
-                    "pressure_solver": str(pressure_solver),
-                    "sph_reach": float(sph_reach),
-                    "sph_reach_down": float(sph_reach_down),
-                    "wall_friction": float(wall_friction),
-                },
-                substeps=int(substeps),
-                precision=str(precision),
-                feedback=str(feedback),
-                pose_source=str(pose_source),
-            )
-        return GenesisBridge(
-            model,
-            {
-                **recipe,
-                "feedback_alpha": float(feedback_alpha),
-                "feedback_dv_max": float(feedback_dv_max),
-                "shell_young": float(shell_young),
-                "shell_poisson": float(shell_poisson),
-                "bending_stiffness": float(bending_stiffness),
-                "contact_d_hat": float(contact_d_hat),
-                "constraint_strength_translation": float(constraint_strength_translation),
-                "constraint_strength_rotation": float(constraint_strength_rotation),
-            },
-            substeps=int(substeps),
-            precision=str(precision),
-            feedback=str(feedback),
-            pose_source=str(pose_source),
-        )
+            liquid = {
+                "pressure_solver": str(pressure_solver),
+                "sph_reach": float(sph_reach),
+                "sph_reach_down": float(sph_reach_down),
+                "wall_friction": float(wall_friction),
+            }
+            return SphBridge(model, {**shared, **liquid}, **options)
+        cloth = {
+            "shell_young": float(shell_young),
+            "shell_poisson": float(shell_poisson),
+            "bending_stiffness": float(bending_stiffness),
+            "contact_d_hat": float(contact_d_hat),
+            "constraint_strength_translation": float(constraint_strength_translation),
+            "constraint_strength_rotation": float(constraint_strength_rotation),
+        }
+        return GenesisBridge(model, {**shared, **cloth}, **options)
