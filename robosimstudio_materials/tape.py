@@ -1081,6 +1081,7 @@ class EntityTape(EntityCloth):
         self._model: Any = None
         self._under: Any = None
         self._radius: np.ndarray = np.zeros(0, dtype=np.float32)
+        """Each bond's particle radius as the bonds were bound [m]: what :meth:`radius_moved` measures from."""
         self._laid: Any = None
         """Opening adhesion: per bond, the contact thickness its particle and anchor are laid at [m], on the device:
         the particle's radius plus the margin the sheet is laid at (:meth:`_relay`). Contact adhesion's is its
@@ -1390,7 +1391,8 @@ class EntityTape(EntityCloth):
         (``a2_variants.py``, VBD on the CPU). It runs once a control step, outside the graph, because a
         write lands between control steps: in a substep phase the first solve after it has already pushed
         the sheet out. A particle radius written live moves the thickness too, and is laid again alike: at
-        1.5 mm, from 0.5, all 144 held on the CPU where 2 and none did (``a2_cpu2.py``)."""
+        1.5 mm, from 0.5, all 144 held on the CPU where 2 and none did (``a2_cpu2.py``); a reset lays it too
+        (:meth:`radius_moved`)."""
         del dt
         if self._laid is None:
             return
@@ -1624,17 +1626,21 @@ class EntityTape(EntityCloth):
         a settle steps the label too. So this sheet's rows are put back where it was built in every
         such snapshot, the ones later things restore included (``TapeSpec.settle_frames``). A stuck
         sheet whose box's margin has moved since the build goes back that much further off the face,
-        its tab and its opening bonds' anchors with it (:meth:`margin_moved`).
+        its tab and its opening bonds' anchors with it (:meth:`margin_moved`), and one whose particle
+        radius has moved that much further again, its anchors with it and the tab and the end it clamps
+        not, as :meth:`_relay` lays it between resets (:meth:`radius_moved`).
         """
-        moved = self.margin_moved()
+        moved, raised = self.margin_moved(), self.radius_moved()
+        lifts = np.full((len(self.built), 1), moved + raised)
+        lifts[np.isin(self.particles, self.clamp_particles)] = moved
         for thing in getattr(pipeline, "particle_settles", {}).get("things", [self]):
             rest = getattr(thing, "rest", None)
             if rest and len(self.built):
-                rest["particle_q"][self.particles] = self.built + (moved * self.up).astype(np.float32)
+                rest["particle_q"][self.particles] = self.built + (lifts * self.up).astype(np.float32)
                 rest["particle_qd"][self.particles] = 0.0
         super().reset(pipeline, episode, world=world)
         if self.broken is not None:
-            self._reset_bonds(moved)
+            self._reset_bonds(moved, raised)
         if self.coord_start >= 0:
             c, tab = self.coord_start, self.tab_q0.copy()
             tab[:3] += moved * self.up
@@ -1654,20 +1660,41 @@ class EntityTape(EntityCloth):
             return 0.0
         return float(self._margins.numpy()[self.lift_shapes].max()) - self.lift
 
-    def _laid_at(self, margin: float) -> np.ndarray:
-        """Each bond's contact thickness laid at ``margin`` [m], in float32 as :func:`_relay_kernel` sums it."""
-        return self._radius + np.float32(margin)
+    def radius_moved(self) -> float:
+        """How far the particle radius a stuck sheet was laid at has moved since the build [m]: what a reset lays
+        it further off the face by, past :meth:`margin_moved`. The sheet's material ``particle_radius`` writes it
+        live; 0 for a loose sheet.
 
-    def _reset_bonds(self, moved: float | None = None) -> None:
+        Reset at the radius it was built at after a live write from 0.5 to 1.5 mm, a contact bond was seated
+        at the new thickness over a particle laid at the old, 1 mm inside the contact, and the relay, finding
+        the bond already at the new thickness, moved nothing: :data:`LABEL` kept 8 of its 144 bonds one control
+        step in. An opening bond was laid at the old thickness and moved by the relay at the next control
+        step. Laid here, all 144 of either held (``r2_probe.py``, VBD on the CPU)."""
+        if not len(self.lift_shapes) or self._model is None or not len(self._radius):
+            return 0.0
+        return float((self._radii() - self._radius).max())
+
+    def _radii(self) -> np.ndarray:
+        """Each bond's particle radius as the model holds it now [m]."""
+        return self._model.particle_radius.numpy()[self.bond_particles].astype(np.float32)
+
+    def _laid_at(self, margin: float) -> np.ndarray:
+        """Each bond's contact thickness laid at ``margin`` and its radius now [m], in float32 as
+        :func:`_relay_kernel` sums it."""
+        return self._radii() + np.float32(margin)
+
+    def _reset_bonds(self, moved: float | None = None, raised: float | None = None) -> None:
         """Every bond as built, in every array a solver reads: made or not (:attr:`made`), at its anchor, and
         under contact adhesion seated as a bond starts (:meth:`_seat_bonds`), not with the secant, the anchor
         and the face the last episode left. The seat writes a contact bond's anchor into every copy itself;
-        an opening bond's goes ``moved`` further off the face (:meth:`margin_moved`, read when not given)."""
+        an opening bond's goes ``moved`` and ``raised`` further off the face (:meth:`margin_moved` and
+        :meth:`radius_moved`, read when not given)."""
         self.broken.zero_()
         rows = {"enabled": self.made}
         if not self._contact:
             moved = self.margin_moved() if moved is None else moved
-            anchors = (self.anchors + moved * self.normal).astype(np.float32)
+            raised = self.radius_moved() if raised is None else raised
+            anchors = (self.anchors + (moved + raised) * self.normal).astype(np.float32)
             rows["body_point"] = anchors
             self._anchor.assign(anchors)
             self._laid.assign(self._laid_at(self.lift + moved))

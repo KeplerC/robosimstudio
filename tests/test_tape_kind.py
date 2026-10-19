@@ -11,9 +11,10 @@ go staying stuck -- is driven through the example's page by ``tests/test_peel_a_
 * **The break law**, on positions written by hand: only lifting off the face opens a bond; sliding
   along it and pressing into it do not.
 * **Where a stuck sheet lies**: the box's margin past a particle radius off the face, at the build,
-  at a reset after the margin moved and at the next control step after a live write, so every bond
-  holds at rest over a 2 mm margin and through a 1 mm write; and bonded only over a face of the
-  box, none past its edge, stuck at the build or pressed, by the same rule in numpy and in warp.
+  at a reset after the margin or the radius moved and at the next control step after a live write,
+  so every bond holds at rest over a 2 mm margin and through a 1 mm write; and bonded only over a
+  face of the box, none past its edge, stuck at the build or pressed, by the same rule in numpy and
+  in warp.
 * **The declarations**: the spec refuses what cannot be built, the presets carry the adhesive and
   stay soft enough for a tab to pull them, the contact presets share one sheet and rank by strength,
   ``TAPE_60HZ`` puts every free body on the tape's solver with compliant ALM, the flat names resolve,
@@ -29,7 +30,7 @@ import unittest
 import numpy as np
 
 TIER = "fast"
-"""Numpy, the spec classes and warp on the CPU: four labels stepped 40 substeps and two 80, about 6 s."""
+"""Numpy, the spec classes and warp on the CPU: four labels stepped 40 substeps, two 80 and two 32, about 7 s."""
 
 
 class TestTheSurface(unittest.TestCase):
@@ -536,6 +537,68 @@ class TestAStuckSheetIsLaidWhereTheContactRestsIt(unittest.TestCase):
                         (label._stick if label.contact else label._break)(s1, dt)
                         s0, s1 = s1, s0
                 self.assertEqual(len(label.bonds), label.held(), "every bond holds through the write")
+                self.assertLess(float(np.abs(self._lift(label, s0)).max()), 5.0e-4)
+
+    def _radius(self, label, model, radius: float) -> None:
+        """The sheet's particle radius written live, as its material's ``particle_radius`` writes it."""
+        radii = model.particle_radius.numpy().copy()
+        radii[label.particles] = radius
+        model.particle_radius.assign(radii)
+
+    def test_a_reset_lays_it_at_the_radius_the_sheet_holds_now(self) -> None:
+        """Written from 0.5 to 1.5 mm and reset: the sheet and every anchor 1 mm further off the face, the tab and the
+        end it clamps not, each bond laid at the thickness the relay reads, so the relay moves nothing after. Reset at
+        the radius it was built at, a contact bond was seated 1 mm over its particle, and the relay, finding it already
+        laid there, left the contact to push the sheet out through it on the first substep."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                built, tab, now = label.built.copy(), label.tab_q0.copy(), material.particle_radius + 0.001
+                self._radius(label, model, now)
+                label.reset(pipeline, None)
+                self.assertAlmostEqual(0.001, label.radius_moved(), places=7)
+                clamped = np.isin(label.particles, label.clamp_particles)
+                up = np.where(clamped[:, None], 0.0, np.array([[0.0, 0.0, 0.001]]))
+                for state in (pipeline.state_0, pipeline.state_1):
+                    np.testing.assert_allclose(state.particle_q.numpy()[label.particles], built + up, atol=1e-6)
+                    c = label.coord_start
+                    np.testing.assert_allclose(state.joint_q.numpy()[c : c + 7], tab, atol=1e-6)
+                np.testing.assert_allclose(self._lift(label, pipeline.state_0), 0.0, atol=1e-6)
+                laid = label._contact["dmin"] if label.contact else label._laid
+                np.testing.assert_allclose(laid.numpy(), now, atol=1e-7)
+                q = pipeline.state_0.particle_q.numpy().copy()
+                label._relay(pipeline.state_0, 1.0 / 60.0)
+                np.testing.assert_array_equal(q, pipeline.state_0.particle_q.numpy(), "laid where the relay lays it")
+
+    def test_every_bond_holds_through_a_live_radius_write_and_a_reset(self) -> None:
+        """The radius written to 1.5 mm, the scene reset, then two control steps of VBD on the CPU: all 144 of either
+        law's bonds hold. Reset at the radius it was built at, :data:`LABEL` kept 8 (``r2_probe.py``)."""
+        import newton
+
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                s0, s1 = pipeline.state_0, pipeline.state_1
+                solver = newton.solvers.SolverVBD(model, iterations=10, rigid_compliant_alm=True)
+                collide = newton.CollisionPipeline(model, soft_contact_gap=0.005)
+                contacts, control, dt = collide.contacts(), model.control(), 1.0 / 960.0
+                self._radius(label, model, material.particle_radius + 0.001)
+                label.reset(pipeline, None)
+                for state in (s0, s1):
+                    newton.eval_fk(model, state.joint_q, state.joint_qd, state)
+                for _ in range(2):
+                    label._relay(s0, 16 * dt)
+                    for _ in range(16):
+                        collide.collide(s0, contacts)
+                        s0.clear_forces()
+                        solver.step(s0, s1, control, contacts, dt)
+                        (label._stick if label.contact else label._break)(s1, dt)
+                        s0, s1 = s1, s0
+                self.assertEqual(len(label.bonds), label.held(), "every bond holds through the write and the reset")
                 self.assertLess(float(np.abs(self._lift(label, s0)).max()), 5.0e-4)
 
 
