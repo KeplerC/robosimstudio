@@ -22,12 +22,13 @@ import newton
 import numpy as np
 import warp as wp
 
+from robosimstudio.core.math import quat_to_mat
 from robosimstudio.core.schedule import Stage
 from robosimstudio.domains.rigid.entity import EntityRigid
 from robosimstudio.scene.build.bodies import set_body_mass
-from robosimstudio.scene.entity import Entity
+from robosimstudio.scene.entity import Entity, label_index
 
-from .law import BlockFrame, blade_normal, box_cage, cut_line, edge_contact, edge_push, quat_to_matrix
+from .law import BlockFrame, blade_normal, box_cage, cut_line, edge_contact, edge_push
 from .spec import CuttableSpec, KnifeSpec
 
 __all__ = ["EntityCuttable", "EntityKnife"]
@@ -106,7 +107,7 @@ class EntityKnife(EntityRigid):
 def knife_edge(spec: KnifeSpec, pose) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(edge0, edge1, edgeward)`` in world for a knife at ``pose`` ``(x, y, z, qx, qy, qz, qw)``."""
     pose = np.asarray(pose, dtype=np.float64).reshape(-1)
-    rotation = quat_to_matrix(pose[3:7])
+    rotation = quat_to_mat(pose[3:7])
     origin, direction, length = spec.edge
     e0 = pose[:3] + rotation @ np.asarray(origin)
     e1 = e0 + rotation @ (np.asarray(direction) * length)
@@ -169,13 +170,13 @@ class EntityCuttable(Entity):
             builder.add_particle(
                 wp.vec3(*[float(c) for c in corner]), wp.vec3(0.0, 0.0, 0.0), mass=0.0, radius=1.0e-3, flags=0
             )
-        hits = [b for b, label in enumerate(builder.body_label) if str(label).split("/")[-1] == spec.knife.name]
-        if len(hits) != 1:
+        try:
+            self.knife_body = label_index(builder.body_label, spec.knife.name)
+        except KeyError as exc:
             raise KeyError(
-                f"cuttable {spec.name!r}: its knife {spec.knife.name!r} names {len(hits)} bodies; add the knife to the "
-                "scene before the block, under a name nothing else uses"
-            )
-        self.knife_body = int(hits[0])
+                f"cuttable {spec.name!r}: its knife {exc.args[0]}; add the knife to the scene before the block, "
+                "under a name nothing else uses"
+            ) from None
 
     def owned_shapes(self) -> np.ndarray:
         return np.zeros(0, dtype=np.int32)

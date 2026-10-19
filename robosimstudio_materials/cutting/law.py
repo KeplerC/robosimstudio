@@ -34,6 +34,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from robosimstudio.core.math import quat_to_mat
+
 __all__ = [
     "BlockFrame",
     "EdgeContact",
@@ -49,20 +51,6 @@ __all__ = [
 # =============================================================================
 # 1. Frames
 # =============================================================================
-
-
-def quat_to_matrix(quat) -> np.ndarray:
-    """Rotation matrix of an xyzw quaternion."""
-    x, y, z, w = (float(v) for v in quat)
-    n = math.sqrt(x * x + y * y + z * z + w * w) or 1.0
-    x, y, z, w = x / n, y / n, z / n, w / n
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-    )
 
 
 @dataclass(frozen=True)
@@ -85,7 +73,7 @@ class BlockFrame:
     def from_base(cls, base_pose, size) -> BlockFrame:
         """From the world pose ``(x, y, z, qx, qy, qz, qw)`` of the middle of the block's base."""
         pose = np.asarray(base_pose, dtype=np.float64).reshape(-1)
-        rotation = quat_to_matrix(pose[3:7])
+        rotation = quat_to_mat(pose[3:7])
         size = np.asarray(size, dtype=np.float64)
         origin = pose[:3] - rotation @ np.array([0.5 * size[0], 0.5 * size[1], 0.0])
         return cls(origin=origin, rotation=rotation, size=size, scale=1.0 / float(size.max()))

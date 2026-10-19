@@ -129,6 +129,18 @@ class TestTheKnifeAndTheBlockAsBuilt(unittest.TestCase):
         self.assertNotIn(int(newton.JointType.FREE), [int(t) for t in builder.joint_type])
         self.assertEqual(2, sum(int(b) == knife.body for b in builder.shape_body), "the handle and the blade")
 
+    def test_the_block_finds_its_knife_by_name_and_says_where_a_missing_one_goes(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio_materials.cutting.entity import EntityCuttable
+
+        builder, knife = self._knife()
+        block = EntityCuttable(rss.cuttable(name="tofu", knife=rss.knife(name="knife")))
+        block.build(builder, None)
+        self.assertEqual(knife.body, block.knife_body)
+        lone = EntityCuttable(rss.cuttable(name="tofu", knife=rss.knife(name="cleaver")))
+        with self.assertRaisesRegex(KeyError, "its knife 'cleaver'.* before the block"):
+            lone.build(builder, None)
+
     def test_every_live_field_of_the_block_has_a_writer(self) -> None:
         """A LIVE field promises a write lands on the next step, which needs a tunable to carry it."""
         from dataclasses import fields
