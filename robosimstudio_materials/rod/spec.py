@@ -322,7 +322,11 @@ class RodSpec:
         }
 
     def rest_polyline(self) -> np.ndarray:
-        """``(segments + 1, 3)`` rest nodes in the work-surface frame: :attr:`nodes`, or the straight line."""
+        """The rest nodes in the work-surface frame: :attr:`nodes`, or the straight line.
+
+        ``(segments + 1, 3)`` for an open rod; a closed one's ``segments`` is its node count, so it gives
+        ``(segments, 3)``, the seam left for the reader to repeat.
+        """
         if self.nodes is not None:
             return np.asarray(self.nodes, dtype=np.float64).reshape(-1, 3)
         start = np.asarray(self.start, dtype=np.float64)
