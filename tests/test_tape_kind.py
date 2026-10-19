@@ -319,6 +319,33 @@ class TestAContactBondsSpring(unittest.TestCase):
         np.testing.assert_allclose(thick, label._contact["dmin"].numpy(), rtol=1e-6)
         np.testing.assert_allclose(seated, model.attachment_particle_body_stiffness.numpy()[label.bonds], rtol=1e-5)
 
+    def test_a_stuck_bond_is_anchored_where_the_margin_rests_its_particle(self) -> None:
+        """Built a radius off the face, a stuck label is rested a margin further out by VBD's contact: each
+        bond is anchored there, built over a box with a margin or reset after one moved live, so it starts
+        at no lift rather than the margin into it. At 1.5 mm that is past ``reach``: every bond let go at
+        rest. Stepped by VBD on the CPU, a 0.8 mm margin let all 180 go within two substeps."""
+        from robosimstudio_materials.tape import LABEL
+
+        margin, up = 1.5e-3, np.array([0.0, 0.0, 1.0])
+        for when in ("bind", "reset"):
+            with self.subTest(when=when):
+                label, model = self._label(margin if when == "bind" else 0.0, stuck=True)
+                if when == "reset":
+                    model.shape_margin.assign(np.full(model.shape_count, margin, dtype=np.float32))
+                    label._reset_bonds()
+                np.testing.assert_allclose(
+                    model.attachment_particle_body_body_point.numpy()[label.bonds],
+                    label.anchors + margin * up,
+                    atol=1e-6,
+                )
+                state = model.state()
+                rested = state.particle_q.numpy()
+                rested[label.bond_particles] += margin * up
+                state.particle_q.assign(rested)
+                label._stick(state, 1.0 / 960.0)
+                self.assertGreater(margin, LABEL.reach)
+                self.assertEqual(len(label.bonds), label.held(), "every bond holds at rest")
+
     def test_a_reset_puts_back_the_spring_a_bond_starts_at(self) -> None:
         """Not the secant the last episode's lift left, under the law as the kernels hold it now, in the
         island's copy and the model's alike."""

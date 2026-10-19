@@ -839,12 +839,16 @@ def _seat_kernel(
     area: wp.array(dtype=float),
     params: wp.array(dtype=float),
     dmin: wp.array(dtype=float),
+    normal: wp.array(dtype=wp.vec3),
     stiffness: wp.array(dtype=float),
     stiffness_model: wp.array(dtype=float),
+    body_point: wp.array(dtype=wp.vec3),
+    body_point_model: wp.array(dtype=wp.vec3),
 ):
-    """Each bond's contact thickness and its spring at contact, as :func:`_stick_kernel` would make the bond
-    on its anchor: the radius and the margin of the box nearest the anchor, as the model holds them now.
-    One thread per bond; the spring goes into the solver's copy and the model's."""
+    """Each bond's contact thickness, its spring at contact and its anchor, as :func:`_stick_kernel` would
+    make the bond over its built anchor: the radius and the margin of the box nearest it, as the model
+    holds them now, and the anchor that far off the face, where VBD's contact rests the particle. One
+    thread per bond; the spring and the anchor go into the solver's copy and the model's."""
     k = wp.tid()
     s = _nearest_box(anchor[k], boxes, shape_transform, shape_scale, shape_margin)
     thick = particle_radius[particle[k]] + _margin_of(shape_margin, s)
@@ -852,6 +856,17 @@ def _seat_kernel(
     spring = area[k] * adhesion_stiffness(thick, params[1], params[2], params[0])
     stiffness[rows[k]] = spring
     stiffness_model[rows[k]] = spring
+    if s < 0:
+        return
+    frame = shape_transform[s]
+    inside = wp.transform_point(wp.transform_inverse(frame), anchor[k])
+    g = _box_gap(inside, shape_scale[s])
+    n_shape = wp.vec3(g[0], g[1], g[2])
+    face = wp.transform_vector(frame, n_shape)
+    seated = wp.transform_point(frame, inside - n_shape * g[3]) + face * thick
+    normal[k] = face
+    body_point[rows[k]] = seated
+    body_point_model[rows[k]] = seated
 
 
 # =============================================================================
@@ -963,7 +978,8 @@ class EntityTape(EntityCloth):
         self.bond_area = sheet_areas(spec.size, spec.cells)[rows]
         stiffness = np.full(len(rows), float(material.tack) * across * along)
         if self.contact:
-            # At the radius alone: the bind seats each at the box's margin too, as the kernels read it.
+            # At the radius alone: the bind seats each at the box's margin too, spring and anchor, as the
+            # kernels read it.
             stiffness = self.bond_area * contact_stiffness(material, float(material.particle_radius))
         bonds, anchors = [], []
         for i, k in zip(rows, stiffness, strict=True):
@@ -1287,13 +1303,17 @@ class EntityTape(EntityCloth):
         self._seat_bonds()
 
     def _seat_bonds(self) -> None:
-        """Every contact bond's contact thickness and its spring at contact, in every array a solver reads.
+        """Every contact bond's contact thickness, its spring at contact and its anchor, in every array a
+        solver reads.
 
-        From the particle's radius and the margin of the box nearest the bond's anchor, as the model holds
-        them now: a margin moved live since the build is the one the stick kernel makes a bond with.
+        From the particle's radius and the margin of the box nearest the bond's built anchor, as the model
+        holds them now: a margin moved live since the build is the one the stick kernel makes a bond with.
+        The anchor goes that far off the face, as the stick kernel puts it: a stuck sheet is built a radius
+        off the face, VBD's contact rests it a margin further out, and a bond anchored where it was built
+        would start that margin into its lift, past ``reach`` at a margin of 1 mm.
         """
         c = self._contact
-        model, stiffness = c["model"], self._arrays["stiffness"]
+        model, stiffness, body_point = c["model"], self._arrays["stiffness"], self._arrays["body_point"]
         wp.launch(
             _seat_kernel,
             dim=len(self.bonds),
@@ -1309,7 +1329,7 @@ class EntityTape(EntityCloth):
                 c["area"],
                 c["params"],
             ],
-            outputs=[c["dmin"], stiffness[0], stiffness[-1]],
+            outputs=[c["dmin"], c["normal"], stiffness[0], stiffness[-1], body_point[0], body_point[-1]],
             device=c["params"].device,
         )
 
@@ -1336,8 +1356,8 @@ class EntityTape(EntityCloth):
 
     def _reset_bonds(self) -> None:
         """Every bond as built, in every array a solver reads: stuck or loose, at its anchor, and under
-        contact adhesion with the spring a bond starts at (:meth:`_seat_bonds`), not the secant the last
-        episode left."""
+        contact adhesion seated as a bond starts (:meth:`_seat_bonds`), not with the secant, the anchor and
+        the face the last episode left."""
         self.broken.zero_()
         rows = {"enabled": bool(self.spec.stuck), "body_point": self.anchors.astype(np.float32)}
         for key, value in rows.items():
@@ -1346,7 +1366,6 @@ class EntityTape(EntityCloth):
                 values[self.bonds] = value
                 array.assign(values)
         if self._contact:
-            self._contact["normal"].assign(np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32))
             self._seat_bonds()
 
     # ---------------------------------------------------------------- runtime
