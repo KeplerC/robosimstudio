@@ -23,11 +23,13 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.features import FeatureSpec
 from robosimstudio.assetlib.semantics.published import PublishedState
 from robosimstudio.assetlib.semantics.states import StateSpec
 from robosimstudio.assetlib.sim import SimRequirements, contacts_with
+
+from .spec import RodSpec
 
 __all__ = ["Rod"]
 
@@ -117,4 +119,27 @@ class Rod:
             ),
             provenance=provenance,
             build=build,
+        )
+
+    @staticmethod
+    def from_spec(spec: RodSpec, *, name: str, **kwargs: Any) -> AssetRecord:
+        """A rod a constructor returned (``rss.rod``, ``band``), as the record a document's ``(:objects ...)`` names.
+
+        :meth:`from_length` with the spec's own length, radius and self-contact, and the
+        spec as a :class:`~robosimstudio.assetlib.record.SpecFactory`: the same rod
+        declared twice is one asset, and a different one under the same name is a clash
+        where a ``build=lambda: spec`` kept the first. The document's object name
+        replaces the spec's ``name``.
+
+        Args:
+            spec: The :class:`~robosimstudio_materials.rod.spec.RodSpec` to place.
+            name: What the task calls it.
+            **kwargs: Any other :meth:`from_length` argument but ``length``,
+                ``radius`` and ``build``; ``self_contact`` defaults to the spec's.
+        """
+        if not isinstance(spec, RodSpec):
+            raise TypeError(f"Rod.from_spec takes a RodSpec, got {type(spec).__name__}")
+        kwargs.setdefault("self_contact", bool(spec.self_contact))
+        return Rod.from_length(
+            name=name, length=float(spec.length), radius=float(spec.radius), build=SpecFactory(spec), **kwargs
         )
