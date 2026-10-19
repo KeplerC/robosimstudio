@@ -142,7 +142,8 @@ __all__ = [
 # at ``GENERIC``'s 16 substeps; the break kernel is one launch a substep (``p11_cost.py``, GPU 1).
 # Contact adhesion is two launches a substep, one thread a bond: ``02_stick_a_label``'s 126 bonds beside
 # the YAM step in 35.1-35.5 ms a control step through the page, carried, laid and rubbed
-# (``m1_screen.py``, five drives, GPU 6).
+# (``m1_screen.py``, five drives, GPU 6). Either law adds one launch a control step, outside the graph,
+# that lays the bonds again where the box's contact margin has moved (``EntityTape._relay``).
 
 
 # =============================================================================
@@ -339,17 +340,17 @@ LABEL = replace(
     reach=1.0e-3,
     # A bond's hold along the face, 0.4 N on a 5 mm cell. At 1, with stiction_speed 0.01 m/s, the shut
     # fingertips rubbing at 30 mm/s, 5 mm under the label, dragged it along with them (``p18_film.py``,
-    # one drive); at these two, four strokes 3 mm under it made 88-92% of the bonds in five.
+    # one drive); at these two, four strokes 3 mm under it made 87-93% of the bonds in eight drives.
     stiction=4.0,
     stiction_speed=0.1,
-    # 0.125 N on a 5 mm cell: a label laid by the hand makes 1-6 of 126 bonds, the shut fingertips
-    # rubbing it 88-92% in four strokes (``m1_screen.py``, five drives). Measured as 8 kPa when the press
-    # was read off the sheet's 10 kN/m alone; the pair's mean with the box's 2.5 kN/m is 6.25 kN/m, so
-    # 5 kPa is the same depth, 20 um on a 5 mm cell.
+    # 0.125 N on a 5 mm cell: a label laid by the hand makes 1-6 of 126 bonds (``m1_screen.py``, five
+    # drives), the shut fingertips rubbing it 87-93% in four strokes (``stick_ab.py``, eight drives,
+    # GPU 1). Measured as 8 kPa when the press was read off the sheet's 10 kN/m alone; the pair's mean
+    # with the box's 2.5 kN/m is 6.25 kN/m, so 5 kPa is the same depth, 20 um on a 5 mm cell.
     press=5.0e3,
 )
 """A paper label that sticks where it is pressed: it peeled whole at 2.9 N drawn up on the rig, and drawn
-up by the YAM's pads at 2.2-2.4 N, all but 1-2 of its 126 bonds (``m1_screen.py``, five drives)."""
+up by the YAM's pads at 2.15-2.38 N, all but 0-3 of its 126 bonds (``stick_ab.py``, eight drives)."""
 
 MASKING_TAPE = replace(LABEL, strength=1.0e4)
 """:data:`LABEL`'s sheet with 2.5 times the strength: it peeled whole at 4.2 N on the rig. Not driven by
@@ -695,10 +696,11 @@ class _Seat:
     """Where a point would rest on the box under it, in the body's frame: what :func:`_seat_on` finds.
 
     ``shape`` is the box, -1 with none; ``over`` whether the point lies over the face, within its
-    extent and :data:`_FLUSH`; ``face`` the face's outward normal; ``gap`` the point's distance off the
-    box's surface less the box's margin [m], so a particle presses ``radius - gap`` into the contact;
-    ``thick`` the contact thickness, the particle's radius plus that margin [m]; and ``anchor`` the point
-    on the surface under it, ``thick`` off it along ``face``, where VBD's contact rests the particle.
+    extent and :data:`_FLUSH`, ``False`` with no box, so it alone says a bond can be placed there;
+    ``face`` the face's outward normal; ``gap`` the point's distance off the box's surface less the
+    box's margin [m], so a particle presses ``radius - gap`` into the contact; ``thick`` the contact
+    thickness, the particle's radius plus that margin [m]; and ``anchor`` the point on the surface
+    under it, ``thick`` off it along ``face``, where VBD's contact rests the particle.
     """
 
     shape: int
@@ -723,13 +725,14 @@ def _seat_on(
     A point lies over a face when at most one of its coordinates in the box's frame is past the box's
     half extent, by more than :data:`_FLUSH`: over that face, or inside the box. Past an edge or a corner
     nothing is under it, and the box's nearest point is that edge, its normal tilted between the faces:
-    a vertex 5 mm past the top's edge and 0.5 mm over it gets ``(0.995, 0, 0.1)``.
+    a vertex 5 mm past the top's edge and 0.5 mm over it gets ``(0.995, 0, 0.1)``. With no box nothing is.
     """
     seat = _Seat()
     seat.shape = _nearest_box(local, boxes, shape_transform, shape_scale, shape_margin)
     margin = _margin_of(shape_margin, seat.shape)
     seat.thick = radius + margin
     if seat.shape < 0:
+        seat.over = False
         return seat
     frame = shape_transform[seat.shape]
     half = shape_scale[seat.shape]
@@ -747,54 +750,36 @@ def _seat_on(
     return seat
 
 
-@wp.kernel
-def _over_kernel(
-    points: wp.array(dtype=wp.vec3),
-    boxes: wp.array(dtype=wp.int32),
-    shape_transform: wp.array(dtype=wp.transform),
-    shape_scale: wp.array(dtype=wp.vec3),
-    shape_margin: wp.array(dtype=float),
-    over: wp.array(dtype=wp.bool),
-    shape: wp.array(dtype=wp.int32),
-):
-    i = wp.tid()
-    seat = _seat_on(points[i], 0.0, boxes, shape_transform, shape_scale, shape_margin)
-    over[i] = seat.shape >= 0 and seat.over
-    shape[i] = seat.shape
-
-
 def over_a_face(
     points: np.ndarray, transforms: np.ndarray, halves: np.ndarray, margins: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """Which points lie over a face of a body's boxes, within its extent, and the box nearest each.
 
-    The test the stick kernel makes a bond by, through the same warp function, on the CPU: what the
-    build bonds a stuck sheet by. ``points`` are in the body's frame [m]; ``transforms`` are the boxes'
-    in it, ``(x, y, z, qx, qy, qz, qw)``, ``halves`` their half extents and ``margins`` their contact
-    margins [m]. Returns ``(over, box)``, ``box`` an index into the boxes given, -1 for none. On the
-    CPU because the build has no device model yet: the tape's kernels compile for it once, 1.8 s on a
-    cold kernel cache.
+    :func:`_seat_on`'s rule, in numpy: what the build bonds a stuck sheet by. The nearest box is the
+    one whose surface less its margin is nearest, and a point lies over it when at most one of its
+    coordinates in the box's frame is past the half extent by more than :data:`_FLUSH`. ``points`` are
+    in the body's frame [m]; ``transforms`` are the boxes' in it, ``(x, y, z, qx, qy, qz, qw)``,
+    ``halves`` their half extents and ``margins`` their contact margins [m]. Returns ``(over, box)``,
+    ``box`` an index into the boxes given, -1 for none. In numpy because through the warp function the
+    build compiled the tape's kernels for the CPU, inside a GPU process: a stuck :data:`LABEL` on the
+    example's box built in 1.77-1.81 s on a cold kernel cache, and builds in 8 ms (``a4_build_time.py``).
+    ``tests/test_tape_kind`` checks the two agree.
     """
-    points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
-    count = len(np.asarray(margins).reshape(-1))
-    cpu = "cpu"
-    over = wp.zeros(len(points), dtype=wp.bool, device=cpu)
-    box = wp.zeros(len(points), dtype=wp.int32, device=cpu)
-    if len(points):
-        wp.launch(
-            _over_kernel,
-            dim=len(points),
-            inputs=[
-                wp.array(points, dtype=wp.vec3, device=cpu),
-                wp.array(np.arange(count, dtype=np.int32), dtype=wp.int32, device=cpu),
-                wp.array(np.asarray(transforms, dtype=np.float32).reshape(-1, 7), dtype=wp.transform, device=cpu),
-                wp.array(np.asarray(halves, dtype=np.float32).reshape(-1, 3), dtype=wp.vec3, device=cpu),
-                wp.array(np.asarray(margins, dtype=np.float32).reshape(-1), dtype=float, device=cpu),
-            ],
-            outputs=[over, box],
-            device=cpu,
-        )
-    return over.numpy().astype(bool), box.numpy().astype(np.int64)
+    from robosimstudio.core.math import quat_to_mat
+
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    transforms = np.asarray(transforms, dtype=np.float64).reshape(-1, 7)
+    halves = np.asarray(halves, dtype=np.float64).reshape(-1, 3)[:, None, :]
+    margins = np.asarray(margins, dtype=np.float64).reshape(-1)[:, None]
+    if not len(transforms) or not len(points):
+        return np.zeros(len(points), dtype=bool), np.full(len(points), -1, dtype=np.int64)
+    # Every point in every box's frame, (boxes, points, 3), and :func:`_box_gap`'s distance off each box.
+    inside = np.stack([(points - t[:3]) @ quat_to_mat(t[3:7]) for t in transforms])
+    q = np.abs(inside) - halves
+    gap = np.where((q > 0.0).any(axis=2), np.linalg.norm(np.maximum(q, 0.0), axis=2), q.max(axis=2))
+    box = np.argmin(gap - margins, axis=0)
+    past = (np.abs(inside) > halves + float(_FLUSH))[box, np.arange(len(points))].sum(axis=1)
+    return past <= 1, box.astype(np.int64)
 
 
 @wp.kernel
@@ -846,7 +831,7 @@ def _stick_kernel(
     pose = body_q[target]
     local = wp.transform_point(wp.transform_inverse(pose), particle_q[p])
     seat = _seat_on(local, particle_radius[p], boxes, shape_transform, shape_scale, shape_margin)
-    if seat.shape < 0 or not seat.over:
+    if not seat.over:
         return
     pair = 0.5 * (soft_ke + shape_ke[seat.shape])
     if pair * (particle_radius[p] - seat.gap) < params[5] * area[k]:
@@ -978,6 +963,64 @@ def _seat_kernel(
     body_point_model[rows[k]] = seat.anchor
 
 
+@wp.kernel
+def _relay_kernel(
+    rows: wp.array(dtype=wp.int32),
+    particle: wp.array(dtype=wp.int32),
+    target: int,
+    contact: int,
+    under: wp.array(dtype=wp.int32),
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+    particle_radius: wp.array(dtype=float),
+    normal: wp.array(dtype=wp.vec3),
+    body_q: wp.array(dtype=wp.transform),
+    enabled: wp.array(dtype=wp.bool),
+    laid: wp.array(dtype=float),
+    anchor: wp.array(dtype=wp.vec3),
+    body_point: wp.array(dtype=wp.vec3),
+    body_point_model: wp.array(dtype=wp.vec3),
+    particle_q: wp.array(dtype=wp.vec3),
+):
+    """Each held bond whose contact thickness has moved since it was laid, laid again where VBD's contact rests
+    its particle now: the particle and the anchor moved off the face by the change. One thread per bond.
+
+    ``laid`` is the thickness each was laid at, the particle's radius plus a margin [m]. Under contact
+    adhesion (``contact`` 1) it is the bond's ``dmin``, against the margin of the box under its anchor
+    (:func:`_seat_on`); under opening adhesion, against the largest margin of the boxes ``under`` the
+    sheet, as a reset lays it (:meth:`EntityTape.margin_moved`), and ``anchor`` is the break kernel's
+    copy of the anchors. The anchor goes into the solver's copy and the model's (:func:`_stick_kernel`).
+    """
+    k = wp.tid()
+    row = rows[k]
+    if not enabled[row]:
+        return
+    p = particle[k]
+    thick = laid[k]
+    if contact != 0:
+        seat = _seat_on(body_point[row], particle_radius[p], boxes, shape_transform, shape_scale, shape_margin)
+        if seat.shape >= 0:
+            thick = seat.thick
+    elif under.shape[0] > 0:
+        margin = _margin_of(shape_margin, under[0])
+        for j in range(1, under.shape[0]):
+            margin = wp.max(margin, _margin_of(shape_margin, under[j]))
+        thick = particle_radius[p] + margin
+    moved = thick - laid[k]
+    if moved == 0.0:
+        return
+    n = normal[k]
+    point = body_point[row] + n * moved
+    body_point[row] = point
+    body_point_model[row] = point
+    if contact == 0:
+        anchor[k] = point
+    laid[k] = thick
+    particle_q[p] = particle_q[p] + wp.transform_vector(body_q[target], n) * moved
+
+
 # =============================================================================
 # 5. The entity: cloth, plus the bonds, the tab and the break kernel
 # =============================================================================
@@ -1033,6 +1076,14 @@ class EntityTape(EntityCloth):
         self.lift_shapes: np.ndarray = np.zeros(0, dtype=np.int64)
         """The shapes whose margin :attr:`lift` is: the body's boxes under the sheet's bonds."""
         self._margins: Any = None
+        self._model: Any = None
+        self._under: Any = None
+        self._radius: np.ndarray = np.zeros(0, dtype=np.float32)
+        self._laid: Any = None
+        """Opening adhesion: per bond, the contact thickness its particle and anchor are laid at [m], on the device:
+        the particle's radius plus the margin the sheet is laid at (:meth:`_relay`). Contact adhesion's is its
+        ``dmin``."""
+        self._normals: Any = None
         self._arrays: dict[str, list[Any]] = {}
         self._rows: Any = None
         self._particle: Any = None
@@ -1312,10 +1363,60 @@ class EntityTape(EntityCloth):
 
     # -------------------------------------------------------------- phase 3
     def contribute_hooks(self, hooks) -> None:
+        if len(self.bonds):
+            hooks.add("before", self._relay, name=f"relay:{self.spec.name}")
         if len(self.bonds) and self.contact:
             hooks.add("post_solve", self._stick, name=f"stick:{self.spec.name}")
         elif len(self.bonds):
             hooks.add("post_solve", self._break, name=f"bonds:{self.spec.name}")
+
+    def _relay(self, state: newton.State, dt: float) -> None:
+        """Once a control step, before its substeps: every held bond laid again where VBD's contact rests its
+        particle, the particle and the anchor moved off the face by how far the contact thickness has moved
+        since the bond was laid. What a reset does for the sheet (:meth:`margin_moved`), between resets.
+
+        The box's contact ``thickness`` writes its margin live, and the next collide rests a particle that
+        much further off the face; a sheet left where it lay was pushed out through it and overshot. A
+        tabbed label stuck at no margin beside the YAM, the margin written live with no reset, kept none of
+        :data:`PAPER_LABEL`'s 144 bonds at 1 and 2 mm and 5 and 8 of :data:`LABEL`'s; laid again here, all
+        144 of either at 1 mm, and at 2 mm all but the row by the fold or part of it, 135-140 in two drives
+        each (``scene_live.py``, ``scene_live2.py``, GPU 1). That row goes as the tab, which rests on the box
+        by its own contact and is not moved here, is thrown up 16 mm by the jump; written in 0.25 mm steps a
+        control step apart, as a dragged slider can write it, all 144 of either held to 2 mm, the tab rising
+        4.6 mm at most. Moved by its pose too, the tab came off worse, VBD reading the jump as a velocity
+        against its own pose history, and with the anchors moved alone 46 and 9 bonds held at 1 mm
+        (``a2_variants.py``, VBD on the CPU). It runs once a control step, outside the graph, because a
+        write lands between control steps: in a substep phase the first solve after it has already pushed
+        the sheet out. A particle radius written live moves the thickness too, and is laid again alike: at
+        1.5 mm, from 0.5, all 144 held on the CPU where 2 and none did (``a2_cpu2.py``)."""
+        del dt
+        if self._laid is None:
+            return
+        c = self._contact
+        model = self._model
+        arrays = (c["dmin"], c["normal"]) if c else (self._laid, self._normals)
+        body_point = self._arrays["body_point"]
+        wp.launch(
+            _relay_kernel,
+            dim=len(self.bonds),
+            inputs=[
+                self._rows,
+                self._particle,
+                self.body,
+                1 if c else 0,
+                self._under,
+                c["boxes"] if c else self._under,
+                model.shape_transform,
+                model.shape_scale,
+                model.shape_margin,
+                model.particle_radius,
+                arrays[1],
+                state.body_q,
+                self._arrays["enabled"][0],
+            ],
+            outputs=[arrays[0], self._anchor, body_point[0], body_point[-1], state.particle_q],
+            device=state.particle_q.device,
+        )
 
     def _stick(self, state: newton.State, dt: float) -> None:
         """Contact adhesion's substep: make bonds where pressed, then hold or release each by the law."""
@@ -1435,6 +1536,13 @@ class EntityTape(EntityCloth):
         self._anchor = wp.array(self.anchors.astype(np.float32), dtype=wp.vec3, device=device)
         self._limit = wp.array([float(self.spec.material.break_opening)], dtype=wp.float32, device=device)
         self._margins = model.shape_margin
+        self._model = model
+        self._under = wp.array(self.lift_shapes.astype(np.int32), dtype=wp.int32, device=device)
+        self._radius = model.particle_radius.numpy()[self.bond_particles].astype(np.float32)
+        self._laid = wp.array(self._laid_at(self.lift), dtype=float, device=device)
+        self._normals = wp.array(
+            np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32), dtype=wp.vec3, device=device
+        )
         self.broken = wp.zeros(len(self.bonds), dtype=wp.int32, device=device)
         if self.contact and len(self.bonds):
             self._bind_contact(pipeline)
@@ -1534,6 +1642,7 @@ class EntityTape(EntityCloth):
     def margin_moved(self) -> float:
         """How far the margin a stuck sheet was laid at has moved since the build [m]: what a reset lays it
         further off the face by. The box's contact ``thickness`` writes the margin live; 0 for a loose sheet.
+        Between resets :meth:`_relay` lays the held bonds again by the change, at the next control step.
 
         Built over no margin, the margin then written and the scene reset with the sheet where it was
         built, a tabbed label's 144 bonds let go: :data:`LABEL` kept 8 at 1 mm and none from 1.5 mm,
@@ -1542,6 +1651,10 @@ class EntityTape(EntityCloth):
         if not len(self.lift_shapes) or self._margins is None:
             return 0.0
         return float(self._margins.numpy()[self.lift_shapes].max()) - self.lift
+
+    def _laid_at(self, margin: float) -> np.ndarray:
+        """Each bond's contact thickness laid at ``margin`` [m], in float32 as :func:`_relay_kernel` sums it."""
+        return self._radius + np.float32(margin)
 
     def _reset_bonds(self, moved: float | None = None) -> None:
         """Every bond as built, in every array a solver reads: made or not (:attr:`made`), at its anchor, and
@@ -1555,6 +1668,7 @@ class EntityTape(EntityCloth):
             anchors = (self.anchors + moved * self.normal).astype(np.float32)
             rows["body_point"] = anchors
             self._anchor.assign(anchors)
+            self._laid.assign(self._laid_at(self.lift + moved))
         for key, value in rows.items():
             for array in self._arrays.get(key, ()):
                 values = array.numpy()
@@ -1564,11 +1678,21 @@ class EntityTape(EntityCloth):
             self._seat_bonds()
 
     # ---------------------------------------------------------------- runtime
+    def _counted(self) -> np.ndarray:
+        """Per bond, whether :meth:`peeled` and :meth:`bonded` count it: on a stuck sheet the bonds made at the
+        build (:attr:`made`), on a loose one every bond.
+
+        Opening adhesion gives a stuck sheet no bond past the box's edge, and contact adhesion one left
+        unmade there until it is pressed onto a face. Counted over every bond, an untouched stuck
+        :data:`LABEL` half over the edge read 100/180 bonded, and peeled at most that, where the same
+        sheet under :data:`PAPER_LABEL` read 1.0 and 0.0 (``tests/test_tape_kind``)."""
+        return self.made if self.made.any() else np.ones(len(self.bonds), dtype=bool)
+
     def peeled(self) -> float:
-        """The share of the bonds that have let go, in ``[0, 1]``."""
+        """The share of the bonds counted (:meth:`_counted`) that have let go, in ``[0, 1]``."""
         if self.broken is None or not len(self.bonds):
             return 0.0
-        return float(self.broken.numpy().mean())
+        return float(self.broken.numpy()[self._counted()].mean())
 
     def held(self) -> int:
         """How many bonds hold now: under contact adhesion, the ones made and not yet let go."""
@@ -1578,8 +1702,13 @@ class EntityTape(EntityCloth):
         return int(enabled[0].numpy()[self.bonds].sum())
 
     def bonded(self) -> float:
-        """The share of the bonds holding now, in ``[0, 1]``."""
-        return self.held() / len(self.bonds) if len(self.bonds) else 0.0
+        """The share of the bonds counted (:meth:`_counted`) holding now, in ``[0, 1]``: on a stuck sheet, under
+        either law, one less :meth:`peeled`."""
+        if not len(self.bonds):
+            return 0.0
+        enabled = self._arrays.get("enabled")
+        holding = enabled[0].numpy()[self.bonds] if enabled else self.made
+        return float(holding[self._counted()].mean())
 
     def pull(self, state: newton.State) -> float:
         """How hard the sheet pulls on its tab [N]: the tab's clamps' springs, summed as vectors."""
@@ -1690,9 +1819,10 @@ register_atom(
         cost="cheap",
         reads_scene=True,
         provenance=(
-            "Designed here, on the tape's own bonds: the share the break kernel has marked broken, a history "
-            "over the episode that a reset clears. A broken bond stays broken, so a label laid back down on "
-            "the face still reads peeled."
+            "Designed here, on the tape's own bonds: the share the bond kernels have marked broken, of a stuck "
+            "sheet's bonds made at the build or of every bond of a loose one, a history over the episode that "
+            "a reset clears. Under opening adhesion a broken bond stays broken, so a label laid back down on "
+            "the face still reads peeled; under contact adhesion one pressed back on is made again."
         ),
         calibration=AtomCalibration(
             positives=(
@@ -1735,19 +1865,21 @@ register_atom(
         reads_scene=True,
         provenance=(
             "Designed here, on the tape's own bonds: the share whose attachment is enabled in the solver's "
-            "copy, read this step. Under contact adhesion a bond is made where the sheet is pressed onto its "
-            "body and let go past its reach, so the share rises as a hand rubs the sheet down and falls as it "
-            "peels; under opening adhesion it is one less peeled_fraction."
+            "copy, read this step, of a stuck sheet's bonds made at the build or of every bond of a loose one. "
+            "Under contact adhesion a bond is made where the sheet is pressed onto its body and let go past its "
+            "reach, so the share rises as a hand rubs the sheet down and falls as it peels; on a stuck sheet, "
+            "under either law, it is one less peeled_fraction."
         ),
         calibration=AtomCalibration(
             positives=(
                 "examples/19_tape/02_stick_a_label, the loose label carried by its tab, laid on the box and "
-                "rubbed by the right hand's shut fingertips in four strokes 10 mm apart, reads 0.88-0.92 in five "
-                "drives, 0.25-0.29 after the first stroke (m1_screen.py, GPU 6; tests/test_stick_a_label).",
+                "rubbed by the right hand's shut fingertips in four strokes 10 mm apart, reads 0.87-0.93 in eight "
+                "drives (stick_ab.py, GPU 1; tests/test_stick_a_label), 0.25-0.29 after the first stroke "
+                "(m1_screen.py, five drives, GPU 6).",
             ),
             negatives=(
                 "The same label laid and not rubbed reads 0.008-0.048, 1-6 of its 126 bonds; rubbed with the "
-                "page's Adhesive off, 0 in two drives; drawn up by its tab after the rub, 0.008-0.016 (the same).",
+                "page's Adhesive off, 0 in two drives; drawn up by its tab after the rub, 0-0.024 in eight.",
             ),
             gate=None,
             bench="examples/19_tape/02_stick_a_label driven through its right arm panel, tests/test_stick_a_label.py",
@@ -1817,8 +1949,9 @@ for _name, _spec, _notes in (
     (
         "label",
         LABEL,
-        "Rubbed down by the YAM's shut fingertips, 88-92% of the bonds held, and drawn up by its tab all but 1-2 "
-        "of 126 let go at 2.2-2.4 N (m1_screen.py, five drives); on the pull rig it peeled whole at 2.9 N (p4_law.py).",
+        "Rubbed down by the YAM's shut fingertips, 87-93% of the bonds held, and drawn up by its tab all but 0-3 "
+        "of 126 let go at 2.15-2.38 N (stick_ab.py, eight drives); on the pull rig it peeled whole at 2.9 N "
+        "(p4_law.py).",
     ),
     ("masking_tape", MASKING_TAPE, "On the pull rig it peeled whole at 4.2 N (p4_law.py). Not driven by the YAM."),
     (
