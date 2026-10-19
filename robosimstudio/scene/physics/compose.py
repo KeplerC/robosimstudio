@@ -52,7 +52,16 @@ from .islands import Island, partition
 from .routing import Routing, route
 from .world import REPLICATED_HOSTS, expand_indices, expand_shapes
 
-__all__ = ["Channel", "CompositionError", "Island", "PhysicsProgram", "compose"]
+__all__ = ["MPM_GRID_CHECK_SECONDS", "Channel", "CompositionError", "Island", "PhysicsProgram", "compose"]
+
+MPM_GRID_CHECK_SECONDS = 0.5
+"""How often a capacity-bounded sparse MPM grid's overflow is looked for [s of scene time].
+
+Every 30 control steps at 60 Hz, and at every reset. The look is a
+device-to-host read that waits for the device, so it is not taken every
+step; an overflow is named within this much scene time of happening rather
+than on the step it happened, and the grid steps on in the meantime, as it
+would anyway."""
 
 
 @dataclass
@@ -73,6 +82,8 @@ class PhysicsProgram:
         hooks: The phase lists over :attr:`schedule`, for entities.
         manifest: All of it as data.
         worlds: The world map when replicated.
+        reset_checks: Called before every :meth:`reset`, with no argument:
+            what has to look at a solver's state before the reset clears it.
     """
 
     model: newton.Model
@@ -89,6 +100,7 @@ class PhysicsProgram:
     manifest: PhysicsManifest
     worlds: Any = None
     warnings: list[str] = field(default_factory=list)
+    reset_checks: list[Any] = field(default_factory=list)
 
     # ---------------------------------------------------------------- lookup
     @property
@@ -162,7 +174,15 @@ class PhysicsProgram:
         self.solver.notify_model_changed(int(flags))
 
     def reset(self, state: newton.State, *, flags: Any = None, world_mask: Any = None) -> None:
-        """Reset every solver's internal buffers (warm starts, contact anchors)."""
+        """Reset every solver's internal buffers (warm starts, contact anchors).
+
+        :attr:`reset_checks` run first: a sparse MPM grid's overflow status is
+        cleared by Newton's reset, and the grid check runs only every
+        :data:`MPM_GRID_CHECK_SECONDS`, so an overflow in an episode's last
+        steps would otherwise be forgotten.
+        """
+        for check in self.reset_checks:
+            check()
         reset = getattr(self.solver, "reset", None)
         if reset is None:
             return
@@ -701,6 +721,7 @@ def compose(
 
     schedule = Schedule()
     hooks = SubstepHooks(schedule)
+    reset_checks: list[Any] = []
     coupled = len(islands) > 1 or bool(host_solvers)
     entry_states = hasattr(solver, "entry_state")
     # ``solver(name)`` is the coupled solvers' accessor; a coupler kind a task
@@ -721,11 +742,12 @@ def compose(
 
             schedule.add(Stage(name=f"rebuild_bvh:{island.name}", fn=rebuild, phase="before"))
         if getattr(inner, "grid_type", None) == "sparse" and hasattr(inner, "check_sparse_grid_rebuild_status"):
-            # Once per control step, outside the graph: a capacity-bounded
-            # sparse grid that overflows keeps stepping and keeps the failure
-            # in a device-side status word, so nothing raises on its own. The
-            # check reads that word (a device sync) and names the knobs.
-            def grid_check(state, dt, _inner=inner, _name=island.name) -> None:
+            # Every MPM_GRID_CHECK_SECONDS and at every reset, outside the
+            # graph: a capacity-bounded sparse grid that overflows keeps
+            # stepping and keeps the failure in a device-side status word, so
+            # nothing raises on its own. The check reads that word (a device
+            # sync) and names the knobs; Newton's reset clears the word.
+            def grid_check(state=None, dt=0.0, _inner=inner, _name=island.name) -> None:
                 del state, dt
                 try:
                     _inner.check_sparse_grid_rebuild_status()
@@ -738,7 +760,9 @@ def compose(
                         "island's backend, or keep the material in a smaller volume."
                     ) from exc
 
-            schedule.add(Stage(name=f"mpm_grid_check:{island.name}", fn=grid_check, phase="after"))
+            every = max(1, round(float(arrangement.control_hz) * MPM_GRID_CHECK_SECONDS))
+            schedule.add(Stage(name=f"mpm_grid_check:{island.name}", fn=grid_check, phase="after", cadence=every))
+            reset_checks.append(grid_check)
     for name, host in host_solvers.items():
         # The co-simulation tick: eager, once per control step, after the
         # substeps and before the batched read-back -- ``after`` rather than
@@ -842,6 +866,7 @@ def compose(
         hooks=hooks,
         manifest=manifest,
         worlds=worlds,
+        reset_checks=reset_checks,
     )
     hooks.program = program
     if verbose:
