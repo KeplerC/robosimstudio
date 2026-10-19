@@ -257,22 +257,30 @@ class SphBridge:
     ) -> None:
         self.control_dt = 1.0 / float(recipe.get("control_hz", 60.0))
         self.substeps = max(1, int(substeps))
-        for record in recipe.get("actors", ()):
-            # Before the engine is asked for: Genesis logs a substep past its own limit and steps on.
-            self._refuse_long_substeps(recipe.get("island"), record)
+        # Every refusal before the engine is asked for: gs.init runs once a process, so an
+        # island refused after it would still have set the precision every later island gets.
+        actors = list(recipe.get("actors", ()))
+        spacing = sorted({float(record.get("params", {}).get("spacing", 0.004)) for record in actors})
+        if len(spacing) != 1:
+            raise ValueError(
+                f"genesis island {recipe.get('island')!r}: its sph actors state particle spacings {spacing}; "
+                "Genesis's SPH solver has one particle size per scene, so every liquid in an island states the same"
+            )
+        for record in actors:
+            kind = str(record.get("kind", "tet"))
+            if actor_builder("genesis", kind) is None:
+                raise ValueError(
+                    f"genesis cannot build a {kind!r} actor ({record.get('name')!r}) under its legacy coupler"
+                )
+        # Genesis logs a substep past its own limit and steps on.
+        self._refuse_long_substeps(recipe.get("island"), actors)
         gs = ensure_initialized(precision, coupler="legacy")
         self.gs = gs
         self.model = model
         self.recipe = dict(recipe)
         self.feedback = str(feedback)
 
-        geoms = [actor_geometry(model, record) for record in recipe.get("actors", ())]
-        spacing = sorted({float(g.params.get("spacing", 0.004)) for g in geoms})
-        if len(spacing) != 1:
-            raise ValueError(
-                f"genesis island {recipe.get('island')!r}: its sph actors state particle spacings {spacing}; "
-                "Genesis's SPH solver has one particle size per scene, so every liquid in an island states the same"
-            )
+        geoms = [actor_geometry(model, record) for record in actors]
         self.spacing = spacing[0]
         shapes = iter_mirrors(model, recipe.get("mirrors", ()))
         lo, hi = self._domain(geoms, _ground(shapes))
@@ -308,8 +316,6 @@ class SphBridge:
         self.actors: list[dict] = []
         for geom in geoms:
             build = actor_builder("genesis", geom.kind)
-            if build is None:
-                raise ValueError(f"genesis cannot build a {geom.kind!r} actor ({geom.name!r}) under its legacy coupler")
             entity = self.scene.add_entity(
                 material=build(self, geom), morph=gs.morphs.Nowhere(n_particles=int(geom.count))
             )
@@ -347,13 +353,23 @@ class SphBridge:
         """The last control step's reaction per Newton body [N], before shaping. For a reader."""
 
     # ----------------------------------------------------------------- build
-    def _refuse_long_substeps(self, island: Any, record: dict) -> None:
-        """Refuse substeps longer than a liquid's material holds (:func:`longest_substep`), naming the ones it needs."""
-        params = {**SPH_DEFAULTS, **record.get("params", {})}
-        longest, limit = longest_substep(params)
-        need = math.ceil(self.control_dt / longest - 1.0e-9)
-        if self.substeps >= need:
+    def _refuse_long_substeps(self, island: Any, records: list[dict]) -> None:
+        """Refuse substeps longer than any of the island's liquids holds (:func:`longest_substep`).
+
+        The island steps every liquid at one substep, so the refusal names the most any of them
+        needs, and the liquid that needs it: naming the first that fails sent a water-and-oil
+        island back for 20 where the oil asks 35.
+        """
+        worst = None
+        for record in records:
+            params = {**SPH_DEFAULTS, **record.get("params", {})}
+            longest, limit = longest_substep(params)
+            need = math.ceil(self.control_dt / longest - 1.0e-9)
+            if worst is None or need > worst[0]:
+                worst = (need, record, params, longest, limit)
+        if worst is None or self.substeps >= worst[0]:
             return
+        need, record, params, longest, limit = worst
         what = {
             "viscosity": f"viscosity, mu {params['viscosity']:g} (Genesis's own limit),",
             "stiffness": f"stiffness, {params['stiffness']:g} Pa at {params['density']:g} kg/m^3,",

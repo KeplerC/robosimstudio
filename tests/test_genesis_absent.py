@@ -90,14 +90,14 @@ class TestAPrecisionConflictNamesWhoseHarvestItHurts(unittest.TestCase):
     """``gs.init`` is first-caller-wins, so a later island asking for another precision is told what it got, or is
     refused where that would read its harvest as zero."""
 
-    def _later(self, first: str, precision: str, coupler: str) -> str:
+    def _later(self, first: str, precision: str, coupler: str, coupler_first: str = "legacy") -> str:
         from unittest import mock
 
         from robosimstudio.engines.genesis import runtime
 
         with (
             mock.patch.object(runtime, "require_genesis", return_value=object()),
-            mock.patch.dict(runtime._ENGINE, {"precision": first}),
+            mock.patch.dict(runtime._ENGINE, {"precision": first, "coupler": coupler_first}),
             self.assertLogs(runtime.log, "DEBUG") as logs,
         ):
             runtime.ensure_initialized(precision, coupler=coupler)
@@ -109,6 +109,12 @@ class TestAPrecisionConflictNamesWhoseHarvestItHurts(unittest.TestCase):
             self._later("32", "64", "ipc")
         for word in ("precision=32", "liquid island", "reads ZERO", "process of its own"):
             self.assertIn(word, str(caught.exception))
+
+    def test_an_ipc_island_after_an_ipc_island_at_32_is_not_blamed_on_a_liquid(self):
+        with self.assertRaises(RuntimeError) as caught:
+            self._later("32", "64", "ipc", coupler_first="ipc")
+        self.assertIn("an IPC island that asked for 32", str(caught.exception))
+        self.assertNotIn("liquid", str(caught.exception))
 
     def test_a_liquid_asking_for_64_after_32_is_not_blamed_on_the_ipc_harvest(self):
         said = self._later("32", "64", "legacy")
@@ -181,8 +187,18 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
             self._open(20, actors=[water, oil])
         for word in ("'oil'", "surface tension, gamma 0.03", "0.48 ms", "substeps=35"):
             self.assertIn(word, str(caught.exception))
+        with self.assertRaises(ValueError) as caught:
+            self._open(1, actors=[water, oil])
+        self.assertIn("substeps=35", str(caught.exception), "the most either liquid needs, not the first's 20")
+        self.assertIn("'oil'", str(caught.exception))
         with self.assertRaisesRegex(LookupError, "asked for the engine"):
             self._open(35, actors=[water, oil])
+
+    def test_liquids_at_two_spacings_are_refused_before_the_engine_is_asked_for(self):
+        """Refused after ``gs.init``, the island would still have set the precision every later island gets."""
+        fine = {"kind": "sph", "name": "fine", "params": {"spacing": 0.003}}
+        with self.assertRaisesRegex(ValueError, "particle spacings"):
+            self._open(40, actors=[{"kind": "sph", "name": "water"}, fine])
 
 
 class TestTheLongestSubstepIsTheMaterials(unittest.TestCase):
