@@ -85,6 +85,34 @@ class TestRegistrationImportsNothing(unittest.TestCase):
         self.assertIn("genesis-world", message)
 
 
+class TestAPrecisionConflictNamesWhoseHarvestItHurts(unittest.TestCase):
+    """``gs.init`` is first-caller-wins, so a later island asking for another precision is told what it got."""
+
+    def _later(self, first: str, precision: str, coupler: str) -> str:
+        from unittest import mock
+
+        from robosimstudio.engines.genesis import runtime
+
+        with (
+            mock.patch.object(runtime, "require_genesis", return_value=object()),
+            mock.patch.dict(runtime._ENGINE, {"precision": first}),
+            self.assertLogs(runtime.log, "DEBUG") as logs,
+        ):
+            runtime.ensure_initialized(precision, coupler=coupler)
+        return "\n".join(logs.output)
+
+    def test_an_ipc_island_after_a_liquid_is_told_its_harvest_reads_zero(self):
+        self.assertIn("IPC two-way harvest reads ZERO", self._later("32", "64", "ipc"))
+
+    def test_a_liquid_asking_for_64_after_32_is_not_blamed_on_the_ipc_harvest(self):
+        said = self._later("32", "64", "legacy")
+        self.assertNotIn("IPC", said)
+        self.assertIn("liquid island, which asks for 64, steps its SPH at float32", said)
+
+    def test_a_liquid_after_an_ipc_island_is_told_it_runs_slow(self):
+        self.assertIn("8x slower", self._later("64", "32", "legacy"))
+
+
 class TestTheCouplingArithmetic(unittest.TestCase):
     """The numbers that decide whether the two-way coupling is right."""
 

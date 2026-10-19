@@ -74,12 +74,19 @@ def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
     """
     gs = require_genesis()
     if _ENGINE["precision"] is not None:
-        if str(precision) == "64" and _ENGINE["precision"] == "32":
+        if str(precision) == "64" and _ENGINE["precision"] == "32" and coupler == "ipc":
             # A liquid island (legacy coupler, float32 by choice) was built first in
             # this process, and an IPC island now wants 64: its harvest reads zero.
             log.warning(
                 "genesis was initialised at precision=32 by an earlier island in this process, and this one "
                 "asks for 64: an IPC two-way harvest reads ZERO at float32. Build it in a process of its own."
+            )
+        elif str(precision) == "64" and _ENGINE["precision"] == "32":
+            # A liquid island that asked for 64 gets 32: its harvest still reads, as a momentum change.
+            log.warning(
+                "genesis was initialised at precision=32 by an earlier island in this process, so this liquid "
+                "island, which asks for 64, steps its SPH at float32: its reaction still reads (a momentum "
+                "change), but not at the precision it asked for. Build it in a process of its own for float64."
             )
         elif str(precision) == "32" and coupler == "legacy" and _ENGINE["precision"] == "64":
             # An IPC island initialised the process at 64 first: the liquid is right, and slow.
