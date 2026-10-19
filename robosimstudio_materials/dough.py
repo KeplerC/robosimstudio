@@ -279,14 +279,14 @@ class EntityRoller(EntityRigid):
         web = _shape_corners_local(builder, self.web_shape)
         lo, hi = web.min(axis=0), web.max(axis=0)
         centre, half = (lo + hi) / 2.0, (hi - lo) / 2.0
-        long_axis = 0
-        heavy = np.sign(float(builder.body_com[self.handle_body][long_axis]) - centre[long_axis])
+        # The web is symmetric along x, so no end of it is the heavy one: a sign
+        # read off its centre of mass would be rounding noise.
         self.obb = _WebGrasp(
             body=self.handle_body,
             center_local=centre,
             half=half,
-            long_axis=long_axis,
-            handle_sign=-(float(heavy) or 1.0),
+            long_axis=0,
+            handle_sign=1.0,
             gripper_span=self.gripper_span,
         )
         if self.bbox is None:
