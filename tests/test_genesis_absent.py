@@ -368,6 +368,22 @@ class TestTheLiquidCouplerArithmetic(unittest.TestCase):
         self.assertAlmostEqual(args["stiffness"] / args["rho"], 10.0)
         self.assertEqual((5.0e-4, 0.01), (args["mu"], args["gamma"]))
 
+    def test_only_a_world_fixed_plane_facing_up_is_the_floor(self):
+        """The SPH box's floor is the ground's height: a tilted plane, one facing down or one a body carries would lift
+        it over the water."""
+        from robosimstudio.core.math import quat_from_axis_angle
+        from robosimstudio.engines.genesis.sph import _ground
+
+        tilted, down = quat_from_axis_angle((1.0, 0.0, 0.0), 0.3), quat_from_axis_angle((1.0, 0.0, 0.0), np.pi)
+        shapes = [
+            _geom(kind="plane", body=-1, local=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])),
+            _geom(kind="plane", body=-1, local=np.array([0.0, 0.0, 0.4, *tilted])),
+            _geom(kind="plane", body=-1, local=np.array([0.0, 0.0, 0.5, *down])),
+            _geom(kind="plane", body=3, local=np.array([0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 1.0])),
+            _geom(kind="box", body=-1, local=np.array([0.0, 0.0, 0.7, 0.0, 0.0, 0.0, 1.0])),
+        ]
+        self.assertEqual([0.0], _ground(shapes))
+
     def test_a_mirror_turns_at_a_rate_in_its_own_frame(self):
         """Genesis integrates a free joint's angular dofs in the body's frame. A body yawed 90 degrees about z and
         turned about world x has its rate on its own -y axis."""

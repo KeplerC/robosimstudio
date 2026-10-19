@@ -85,7 +85,7 @@ from robosimstudio.engines.geometry import (
     iter_mirrors,
     register_actor_builder,
 )
-from robosimstudio.engines.pose import compose, compose_many
+from robosimstudio.engines.pose import compose, compose_many, quat_rotate
 
 from .bridge import write_obj, wxyz
 from .runtime import ensure_initialized
@@ -205,6 +205,20 @@ def _angular_velocity(start: np.ndarray, end: np.ndarray, dt: float) -> np.ndarr
     return quat_to_axis_angle(quat_multiply(quat_inverse(start), end)) / float(dt)
 
 
+def _ground(shapes: list[ShapeGeometry]) -> list[float]:
+    """The heights [m] of the mirrored planes that are the ground: world-fixed and facing up.
+
+    A tilted plane, one facing down or one a body carries is no floor of the SPH box:
+    taken for one, its height would lift the floor over the water.
+    """
+    up = np.array([0.0, 0.0, 1.0])
+    return [
+        float(g.local[2])
+        for g in shapes
+        if g.kind == "plane" and not g.moving and float(quat_rotate(g.local[3:7], up)[2]) > 1.0 - 1.0e-6
+    ]
+
+
 def _spin(q_wxyz: np.ndarray, w_body: np.ndarray, com: np.ndarray) -> np.ndarray:
     """The world velocity [m/s] of a link's centre of mass relative to its origin: ``R (w x c)``, both in its frame."""
     return quat_to_mat(quat_wxyz_to_xyzw(q_wxyz)) @ np.cross(w_body, com)
@@ -258,7 +272,7 @@ class SphBridge:
             )
         self.spacing = spacing[0]
         shapes = iter_mirrors(model, recipe.get("mirrors", ()))
-        lo, hi = self._domain(geoms, [float(g.local[2]) for g in shapes if g.kind == "plane"])
+        lo, hi = self._domain(geoms, _ground(shapes))
         self._box = (lo, hi)
         self._at_wall = False
         """Whether water has reached the box's sides or top, which is said once (:meth:`_check_walls`)."""
@@ -358,7 +372,7 @@ class SphBridge:
         the spatial hash is capped at 150 cells a side (an SPH substep of 1,728
         particles took 0.50 ms with 88 x 88 x 46 cells and 0.49 ms with 25 x 25 x 46,
         ``p2_cost.py`` at float32). A mirrored ground plane (``ground``, the heights
-        of the compiler's one horizontal plane) is its floor, half a spacing up, where
+        :func:`_ground` reads) is its floor, half a spacing up, where
         a particle's centre rests on a surface: under ``sph_reach_down`` alone, water
         poured on a void cell's ground fell through it to the box's floor, 218 mm under
         (``w4_probe.py``).
@@ -375,9 +389,9 @@ class SphBridge:
     def _add_mirror(self, geom: ShapeGeometry) -> dict | None:
         """One Newton shape as a free, heavy, gravity-compensated Genesis body, or ``None`` for a plane.
 
-        A plane is left out: it is the solver's box's floor (:meth:`_domain`), and a
-        plane mirrored as a box would be a body the size of the room. Each mirror is
-        built at its pose, so the first hold is no jump.
+        A plane is left out: the ground is the solver's box's floor (:meth:`_domain`),
+        and a plane mirrored as a box would be a body the size of the room. Each mirror
+        is built at its pose, so the first hold is no jump.
         """
         gs = self.gs
         if geom.kind == "plane":
