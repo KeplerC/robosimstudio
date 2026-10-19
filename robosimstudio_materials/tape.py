@@ -747,54 +747,36 @@ def _seat_on(
     return seat
 
 
-@wp.kernel
-def _over_kernel(
-    points: wp.array(dtype=wp.vec3),
-    boxes: wp.array(dtype=wp.int32),
-    shape_transform: wp.array(dtype=wp.transform),
-    shape_scale: wp.array(dtype=wp.vec3),
-    shape_margin: wp.array(dtype=float),
-    over: wp.array(dtype=wp.bool),
-    shape: wp.array(dtype=wp.int32),
-):
-    i = wp.tid()
-    seat = _seat_on(points[i], 0.0, boxes, shape_transform, shape_scale, shape_margin)
-    over[i] = seat.shape >= 0 and seat.over
-    shape[i] = seat.shape
-
-
 def over_a_face(
     points: np.ndarray, transforms: np.ndarray, halves: np.ndarray, margins: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """Which points lie over a face of a body's boxes, within its extent, and the box nearest each.
 
-    The test the stick kernel makes a bond by, through the same warp function, on the CPU: what the
-    build bonds a stuck sheet by. ``points`` are in the body's frame [m]; ``transforms`` are the boxes'
-    in it, ``(x, y, z, qx, qy, qz, qw)``, ``halves`` their half extents and ``margins`` their contact
-    margins [m]. Returns ``(over, box)``, ``box`` an index into the boxes given, -1 for none. On the
-    CPU because the build has no device model yet: the tape's kernels compile for it once, 1.8 s on a
-    cold kernel cache.
+    :func:`_seat_on`'s rule, in numpy: what the build bonds a stuck sheet by. The nearest box is the
+    one whose surface less its margin is nearest, and a point lies over it when at most one of its
+    coordinates in the box's frame is past the half extent by more than :data:`_FLUSH`. ``points`` are
+    in the body's frame [m]; ``transforms`` are the boxes' in it, ``(x, y, z, qx, qy, qz, qw)``,
+    ``halves`` their half extents and ``margins`` their contact margins [m]. Returns ``(over, box)``,
+    ``box`` an index into the boxes given, -1 for none. In numpy because through the warp function the
+    build compiled the tape's kernels for the CPU, inside a GPU process: a stuck :data:`LABEL` on the
+    example's box built in 1.77-1.81 s on a cold kernel cache, and builds in 8 ms (``a4_build_time.py``).
+    ``tests/test_tape_kind`` checks the two agree.
     """
-    points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
-    count = len(np.asarray(margins).reshape(-1))
-    cpu = "cpu"
-    over = wp.zeros(len(points), dtype=wp.bool, device=cpu)
-    box = wp.zeros(len(points), dtype=wp.int32, device=cpu)
-    if len(points):
-        wp.launch(
-            _over_kernel,
-            dim=len(points),
-            inputs=[
-                wp.array(points, dtype=wp.vec3, device=cpu),
-                wp.array(np.arange(count, dtype=np.int32), dtype=wp.int32, device=cpu),
-                wp.array(np.asarray(transforms, dtype=np.float32).reshape(-1, 7), dtype=wp.transform, device=cpu),
-                wp.array(np.asarray(halves, dtype=np.float32).reshape(-1, 3), dtype=wp.vec3, device=cpu),
-                wp.array(np.asarray(margins, dtype=np.float32).reshape(-1), dtype=float, device=cpu),
-            ],
-            outputs=[over, box],
-            device=cpu,
-        )
-    return over.numpy().astype(bool), box.numpy().astype(np.int64)
+    from robosimstudio.core.math import quat_to_mat
+
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    transforms = np.asarray(transforms, dtype=np.float64).reshape(-1, 7)
+    halves = np.asarray(halves, dtype=np.float64).reshape(-1, 3)[:, None, :]
+    margins = np.asarray(margins, dtype=np.float64).reshape(-1)[:, None]
+    if not len(transforms) or not len(points):
+        return np.zeros(len(points), dtype=bool), np.full(len(points), -1, dtype=np.int64)
+    # Every point in every box's frame, (boxes, points, 3), and :func:`_box_gap`'s distance off each box.
+    inside = np.stack([(points - t[:3]) @ quat_to_mat(t[3:7]) for t in transforms])
+    q = np.abs(inside) - halves
+    gap = np.where((q > 0.0).any(axis=2), np.linalg.norm(np.maximum(q, 0.0), axis=2), q.max(axis=2))
+    box = np.argmin(gap - margins, axis=0)
+    past = (np.abs(inside) > halves + float(_FLUSH))[box, np.arange(len(points))].sum(axis=1)
+    return past <= 1, box.astype(np.int64)
 
 
 @wp.kernel

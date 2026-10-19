@@ -515,6 +515,115 @@ class TestNothingUnderItMakesNoBond(unittest.TestCase):
         self.assertFalse(over[0], "no box: nothing is under it")
         self.assertEqual(-1, box[0])
 
+    def test_the_builds_rule_is_the_kernels(self) -> None:
+        """:func:`over_a_face` is numpy and the stick kernel's :func:`_seat_on` warp: the same box and the same
+        answer on the edge cases, on the example's box, one turned and off its body's origin, and two boxes
+        with margins, whichever is nearest. No box, neither has one under any point."""
+        import warp as wp
+
+        from robosimstudio.core.math import quat_to_mat
+        from robosimstudio_materials.tape import _FLUSH, _seat_on, over_a_face
+
+        @wp.kernel
+        def seats(
+            points: wp.array(dtype=wp.vec3),
+            boxes: wp.array(dtype=wp.int32),
+            shape_transform: wp.array(dtype=wp.transform),
+            shape_scale: wp.array(dtype=wp.vec3),
+            shape_margin: wp.array(dtype=float),
+            over: wp.array(dtype=wp.bool),
+            shape: wp.array(dtype=wp.int32),
+        ):
+            i = wp.tid()
+            seat = _seat_on(points[i], 0.0, boxes, shape_transform, shape_scale, shape_margin)
+            over[i] = seat.over
+            shape[i] = seat.shape
+
+        def kernel(points, transforms, halves, margins):
+            cpu, n = "cpu", len(margins)
+            over = wp.zeros(len(points), dtype=wp.bool, device=cpu)
+            shape = wp.zeros(len(points), dtype=wp.int32, device=cpu)
+            inputs = [
+                wp.array(np.asarray(points, dtype=np.float32), dtype=wp.vec3, device=cpu),
+                wp.array(np.arange(n, dtype=np.int32), dtype=wp.int32, device=cpu),
+                wp.array(np.asarray(transforms, dtype=np.float32).reshape(-1, 7), dtype=wp.transform, device=cpu),
+                wp.array(np.asarray(halves, dtype=np.float32).reshape(-1, 3), dtype=wp.vec3, device=cpu),
+                wp.array(np.asarray(margins, dtype=np.float32), dtype=float, device=cpu),
+            ]
+            wp.launch(seats, dim=len(points), inputs=inputs, outputs=[over, shape], device=cpu)
+            return over.numpy().astype(bool), shape.numpy().astype(np.int64)
+
+        h, f = np.array(self.HALF), float(_FLUSH)
+        local = np.array(
+            [
+                (0.0, 0.0, h[2] + 5e-4),  # over the top
+                (h[0] - 1e-3, h[1] - 1e-3, h[2] + 5e-4),  # by its corner
+                (h[0] + 0.5 * f, 0.0, h[2] + 5e-4),  # half the allowance past an edge: on it
+                (h[0] + 2.0 * f, 0.0, h[2] + 5e-4),  # twice it: past
+                (h[0] + 0.5 * f, h[1] + 0.5 * f, h[2] + 5e-4),  # on the corner
+                (h[0] + 2.0 * f, h[1] + 0.5 * f, h[2] + 5e-4),  # past one edge, on the other: over neither face
+                (h[0] + 2.0 * f, h[1] + 2.0 * f, h[2] + 5e-4),  # past the corner
+                (h[0] + 5e-4, 0.0, 0.0),  # over the +x side
+                (h[0] + 5e-4, 0.0, h[2] + 5e-4),  # past the top's edge, over the side's: past two
+                (0.0, 0.0, 0.5 * h[2]),  # inside
+            ]
+        )
+        turn = np.array([0.0, 0.0, np.sin(0.2), np.cos(0.2)])  # 23 degrees about z
+        # A second box 4 mm past the first's +x side, with a 2 mm margin: a point 1.5 mm off the first's side
+        # is 2.5 mm off the second's, 0.5 mm past its margin, so the second is the nearer, and it lies over
+        # that one's -x side.
+        beside = 2 * h[0] + 0.004
+        cases = {
+            "the example's box": (local, [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)], [h], [0.0]),
+            "turned, off the origin": (
+                local @ quat_to_mat(turn).T + (0.41, -0.083, 0.025),
+                [(0.41, -0.083, 0.025, *turn)],
+                [h],
+                [0.001],
+            ),
+            "two boxes with margins": (
+                np.array([*local, *(local + np.array([beside, 0.0, 0.0])), (h[0] + 0.0015, 0.0, 0.0)]),
+                [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0), (beside, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)],
+                [h, h],
+                [0.0, 0.002],
+            ),
+            "no box": (local, np.zeros((0, 7)), np.zeros((0, 3)), np.zeros(0)),
+        }
+        for name, (points, transforms, halves, margins) in cases.items():
+            with self.subTest(name):
+                over, box = over_a_face(points, transforms, halves, margins)
+                want_over, want_box = kernel(points, transforms, halves, margins)
+                np.testing.assert_array_equal(want_box, box)
+                np.testing.assert_array_equal(want_over, over)
+                if name == "the example's box":
+                    np.testing.assert_array_equal([1, 1, 1, 0, 1, 0, 0, 1, 0, 1], over)
+                if name == "two boxes with margins":
+                    np.testing.assert_array_equal([0] * len(local) + [1] * len(local), box[:-1])
+                    self.assertEqual((True, 1), (bool(over[-1]), int(box[-1])), "the nearer counting its margin")
+                if name == "no box":
+                    self.assertFalse(over.any())
+
+    def test_the_build_launches_no_kernel(self) -> None:
+        """A stuck sheet's bonds are found in numpy at the build: through the warp function on the CPU, the build
+        compiled the tape's kernels for the CPU inside a GPU process, 1.8 s on a cold kernel cache, where it
+        takes 8 ms now (``a4_build_time.py``)."""
+        from unittest import mock
+
+        import newton
+        import warp as wp
+
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL, EntityTape, tape
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                builder = newton.ModelBuilder()
+                box = builder.add_body(xform=wp.transform((0.0, 0.0, 0.025), wp.quat_identity()), label="box")
+                builder.add_shape_box(box, hx=self.HALF[0], hy=self.HALF[1], hz=self.HALF[2])
+                label = EntityTape(tape(name="label", on="box", at=(0.03, -0.05, 0.0505), material=material, tab=0.0))
+                with mock.patch.object(wp, "launch", side_effect=AssertionError("a kernel launched at the build")):
+                    label.build(builder, None)
+                self.assertEqual(100, int(label.made.sum()), "the bonds over the top, none past its edge")
+
     def test_a_stuck_label_over_the_edge_bonds_only_over_the_face(self) -> None:
         """Half over the +x edge: four of its nine columns, 80 vertices, past it. Bonded there, a contact bond
         was seated on the edge along ``(0.995, 0, 0.1)`` and let go on the first substep, reading 44% peeled
