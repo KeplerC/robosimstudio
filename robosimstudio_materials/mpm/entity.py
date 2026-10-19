@@ -44,7 +44,7 @@ import warp as wp
 from robosimstudio.assetlib.materials import MaterialRecord, get_material
 from robosimstudio.core.math import quat_to_mat
 from robosimstudio.core.probes.particle import ParticleProbe
-from robosimstudio.core.render.particles import extract_shifted
+from robosimstudio.core.render.particles import ParticleSurfacer
 from robosimstudio.domains.capabilities import ParticleMixin
 from robosimstudio.domains.selection import resolve_selector
 from robosimstudio.scene.entity import Entity
@@ -56,7 +56,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_CONTAINER_MARGIN",
-    "SURFACE_MARGIN_VOXELS",
     "EntityParticleBody",
     "island_solver",
     "resolve_material",
@@ -67,11 +66,6 @@ DEFAULT_CONTAINER_MARGIN = 0.002
 """Half the registered 4 mm voxel [m]: the signed-distance margin a container's
 shapes get when a spec names no other (``probe_c_water``: 1.5-2 mm at 3-4 mm
 voxels cut the leak from 60% to 5% of the water)."""
-
-SURFACE_MARGIN_VOXELS = 16
-"""How far inside the positive octant a surface extraction puts the nearest
-particle, in surface voxels: Newton's default kernel (three voxels) reaches
-twice its radius, and a leaf tile is eight voxels; sixteen covers both."""
 
 VOXEL_RATIO_BAND = (1.5, 4.0)
 """Samples per voxel axis (``voxel_size / particle_spacing``) outside which the
@@ -236,10 +230,9 @@ class EntityParticleBody(ParticleMixin, Entity):
         """The material as resolved from the spec: a name becomes its record's spec here, once."""
         self.solver: Any = None
         """The MPM solver stepping this body, found at scene-ready; ``None`` on another backend."""
-        self.surface: Any = None
-        """The :class:`newton.geometry.ParticleSurface` context, when ``render == "surface"``."""
+        self.surface: ParticleSurfacer | None = None
+        """The :class:`~robosimstudio.core.render.particles.ParticleSurfacer` over this body, when ``render == "surface"``."""
         self._handle: Any = None
-        self._radii: Any = None
         self._count = 0
         self._particle_volume = float(spec.particle_volume)
 
@@ -424,11 +417,21 @@ class EntityParticleBody(ParticleMixin, Entity):
             )
 
     def _install_surface(self) -> None:
-        """A surface-reconstruction context over this body, offered on the handle as a callable."""
+        """A surfacer over this body at the solver's resolution, offered on the handle as a callable.
+
+        The context ``SolverImplicitMPM.create_particle_surface`` would make:
+        0.45 of the solver's voxel unless the spec names one, a kernel of
+        three of those voxels, one per world of the solver's model.
+        """
         voxel = self.spec.surface_voxel
-        self.surface = self.solver.create_particle_surface(voxel_size=None if voxel is None else float(voxel))
-        device = self.model.particle_q.device if self.model is not None else None
-        self._radii = wp.full(self._count, 0.5 * float(self.spec.particle_spacing), dtype=wp.float32, device=device)
+        voxel = 0.45 * float(self.solver.config.voxel_size) if voxel is None else float(voxel)
+        self.surface = ParticleSurfacer(
+            0.5 * float(self.spec.particle_spacing),
+            voxel_size=voxel,
+            device=self.solver.model.device,
+            kernel_radius=3.0 * voxel,
+            world_count=max(int(self.solver.model.world_count), 1),
+        )
         if self._handle is not None:
             self._handle.surface = self.surface_mesh
 
@@ -436,20 +439,18 @@ class EntityParticleBody(ParticleMixin, Entity):
         """``(vertices, triangles, normals)`` over ``positions`` ``[n, 3]`` of this body's particles.
 
         What ``DeformableHandle.surface`` points at. The vertices come back on
-        the host, the triangles and normals on the device. Extracted through
-        :func:`~robosimstudio.core.render.particles.extract_shifted`, at
-        :data:`SURFACE_MARGIN_VOXELS` inside the positive octant: on a bench the
-        particles sit at negative y, where the extraction returned about a
-        third of the surface, and moved to straddle z = 0 it never came back.
-        The vertex count varies per call, which is why a renderer that cannot
+        the host, the triangles and normals on the device. Extracted by
+        :attr:`surface`, which moves the particles into the positive octant
+        first: on a bench they sit at negative y, where the extraction returned
+        about a third of the surface, and moved to straddle z = 0 it never came
+        back. The vertex count varies per call, which is why a renderer that cannot
         re-log a mesh per frame draws the points instead. Empty arrays when the
         reconstruction finds no triangles (a body scattered thinner than a voxel).
         """
-        device = self._radii.device
+        device = self.surface.device
         if isinstance(positions, wp.array):
             positions = positions.numpy()
-        margin = SURFACE_MARGIN_VOXELS * float(self.surface.voxel_size)
-        vertices, indices, normals = extract_shifted(self.surface, positions, self._radii, margin)
+        vertices, indices, normals = self.surface(positions)
         if vertices is None or indices is None or len(indices) == 0:
             empty = wp.empty(0, dtype=wp.vec3, device=device)
             return empty, wp.empty((0, 3), dtype=wp.int32, device=device), wp.empty(0, dtype=wp.vec3, device=device)

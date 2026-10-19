@@ -133,6 +133,35 @@ class TestTheStudioResolvesAParticleBody(unittest.TestCase):
         self.assertEqual(visual.color, (0.9, 0.1, 0.1))
 
 
+class TestOneSurfacerForEveryParticleKind(unittest.TestCase):
+    """The MPM kinds' surface is a :class:`ParticleSurfacer` at the solver's resolution, with the one margin rule."""
+
+    def test_the_default_margin_is_twice_the_kernel_the_padding_and_a_tile(self) -> None:
+        from robosimstudio.core.render.particles import ParticleSurfacer
+
+        surfacer = ParticleSurfacer(0.001)
+        self.assertEqual((0.001, 0.006), (surfacer.voxel_size, surfacer.options["kernel_radius"]))
+        self.assertAlmostEqual(0.022, surfacer.margin)
+
+    def test_an_mpm_body_surfaces_through_it_at_the_solvers_voxel(self) -> None:
+        """0.45 of a 4 mm voxel, a kernel of three of those, and sixteen of them as the margin, as before."""
+        import robosimstudio as rss
+        from robosimstudio.core.render.particles import ParticleSurfacer
+        from robosimstudio_materials.mpm.entity import EntityParticleBody
+
+        entity = EntityParticleBody(rss.dough(name="d", render="surface"))
+        entity.solver = SimpleNamespace(
+            config=SimpleNamespace(voxel_size=0.004), model=SimpleNamespace(device="cpu", world_count=1)
+        )
+        entity._install_surface()
+        surfacer = entity.surface
+        self.assertIsInstance(surfacer, ParticleSurfacer)
+        self.assertAlmostEqual(0.00125, surfacer.radius)
+        self.assertAlmostEqual(0.0018, surfacer.voxel_size)
+        self.assertAlmostEqual(0.0054, surfacer.options["kernel_radius"])
+        self.assertAlmostEqual(16 * 0.0018, surfacer.margin)
+
+
 class TestASurfaceNodeKeepsItsFaces(unittest.TestCase):
     """The page's surface node, over a scene that records what viser would have been sent."""
 

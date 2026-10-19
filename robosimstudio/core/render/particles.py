@@ -13,13 +13,14 @@ tracer agree about what the handle means:
   of one shape whatever the callable returned, because the two renderers push
   vertices through different channels and neither should have to know whether
   a kind returned warp or numpy, two arrays or three.
-* :class:`ParticleSurfacer` is a ``surface`` a kind can hand its handle: the
+* :class:`ParticleSurfacer` is the ``surface`` a kind hands its handle: the
   isosurface Newton's :class:`~newton.geometry.ParticleSurface` wraps round the
   particles, from the positions it is given and nothing else -- which is what
-  lets an offline replay of a recorded ``particle_q`` regrow it.
-* :func:`extract_shifted` is the one extraction both that and a kind's own
-  context go through, because Newton's needs the particles moved into the
-  positive octant first.
+  lets an offline replay of a recorded ``particle_q`` regrow it. The MPM kinds
+  hand it their solver's voxel and kernel; a kind with no grid of its own
+  takes the defaults, sized by the particle radius.
+* :func:`extract_shifted` is the extraction it goes through, because Newton's
+  needs the particles moved into the positive octant first.
 """
 
 from __future__ import annotations
@@ -142,9 +143,12 @@ class ParticleSurfacer:
     """A ``DeformableHandle.surface``: the isosurface Newton wraps round the particles.
 
     One :class:`~newton.geometry.ParticleSurface` kept for the body's life,
-    sized by the particle radius: voxels of one radius, so the mesh resolves a
-    single grain's bump, and a kernel of three spacings (six radii), which is
-    what Newton's own dam-break example uses relative to its particle spacing.
+    sized by the particle radius unless told otherwise: voxels of one radius,
+    so the mesh resolves a single grain's bump, and a kernel of three spacings
+    (six radii), which is what Newton's own dam-break example uses relative to
+    its particle spacing. An MPM kind states its own: 0.45 of the solver's
+    voxel and a kernel of three of those, Newton's defaults for the solver's
+    ``create_particle_surface``.
     Each call allocates the mesh exactly (no ``max_grid_cells``), which is a
     host synchronisation per frame and fine for a renderer; a graph-captured
     extraction is a different object.
@@ -157,9 +161,9 @@ class ParticleSurfacer:
     RTX PRO 6000 Blackwell, warp 1.18.0: an 8 x 8 x 10 block at ``+0.02`` or
     ``+0.5`` m extracts in 43 ms cold and 3 ms warm; the same block at
     ``-0.5`` m, or astride the origin as every bench scene is, never comes
-    back). The shift is by the particles' minimum less the kernel reach and a
-    tile of voxels, so the whole support stays positive; the vertices and the
-    normals are exact under it. A body astride only a vertical plane does come
+    back). The shift is by the particles' minimum less :attr:`margin`, so the
+    whole support stays positive; the vertices and the normals are exact under
+    it. A body astride only a vertical plane does come
     back, with the wrong mesh: the MPM solver's own context over the dough puck
     on ``bench_075``, whose particles all sit at negative y, returned 3,480
     triangles where the same 7,168 particles moved into the positive octant
@@ -172,16 +176,21 @@ class ParticleSurfacer:
 
     Args:
         radius: The particle radius [m], the handle's own ``point_radius``.
+        voxel_size: The surface's voxel [m], or ``None`` for one radius.
         device: Where the particles live; the mesh is extracted there.
-        options: Anything :class:`~newton.geometry.ParticleSurface` takes
-            beyond ``voxel_size`` and ``device`` -- ``anisotropic=True`` for a
-            liquid's flat free surface, ``mesh_smooth_iterations`` for a heap.
+        options: Anything else :class:`~newton.geometry.ParticleSurface` takes
+            -- ``kernel_radius`` (six radii unless stated), ``anisotropic=True``
+            for a liquid's flat free surface, ``mesh_smooth_iterations`` for a
+            heap, ``world_count``.
     """
 
-    def __init__(self, radius: float, *, device: Any = None, **options: Any) -> None:
+    def __init__(self, radius: float, *, voxel_size: float | None = None, device: Any = None, **options: Any) -> None:
         if not radius > 0.0:
             raise ValueError(f"a particle surface needs a positive radius, got {radius!r}")
         self.radius = float(radius)
+        self.voxel_size = self.radius if voxel_size is None else float(voxel_size)
+        if not self.voxel_size > 0.0:
+            raise ValueError(f"a particle surface needs a positive voxel, got {voxel_size!r}")
         self.device = device
         self.options = dict(options)
         self.options.setdefault("kernel_radius", 6.0 * self.radius)
@@ -190,8 +199,16 @@ class ParticleSurfacer:
 
     @property
     def margin(self) -> float:
-        """How far inside the positive octant the nearest particle is placed [m]: the kernel reach plus a tile."""
-        return float(self.options["kernel_radius"]) + 8.0 * self.radius
+        """How far inside the positive octant the nearest particle is placed [m].
+
+        Twice the kernel radius, Newton's grid padding, and a leaf tile of
+        eight voxels: the isotropic density kernel reaches one kernel radius,
+        an anisotropic one further along its long axis, the field is padded
+        past that, and the extraction walks whole tiles. Sixteen voxels for an
+        MPM kind (a kernel of three, a padding of two), 22 radii by default.
+        """
+        padding = int(self.options.get("padding", 2))
+        return 2.0 * float(self.options["kernel_radius"]) + (padding + 8) * self.voxel_size
 
     def __call__(self, positions: np.ndarray) -> tuple[Any, Any, Any]:
         """``(vertices, triangles, normals)`` as warp arrays, or ``(None, None, None)`` for nothing to draw."""
@@ -202,7 +219,7 @@ class ParticleSurfacer:
         if not len(positions):
             return None, None, None
         if self._surface is None:
-            self._surface = ParticleSurface(self.radius, device=self.device, **self.options)
+            self._surface = ParticleSurface(self.voxel_size, device=self.device, **self.options)
         if self._radii is None or len(self._radii) != len(positions):
             self._radii = wp.full(len(positions), self.radius, dtype=wp.float32, device=self.device)
         return extract_shifted(self._surface, positions, self._radii, self.margin)
