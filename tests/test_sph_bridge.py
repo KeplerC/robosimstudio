@@ -20,7 +20,7 @@ import unittest
 import numpy as np
 
 TIER = "medium"
-"""One GPU, the [genesis] extra: a 64-particle scene, three bridges built by hand, and a cup of oil."""
+"""One GPU, the [genesis] extra: a 64-particle scene, four bridges built by hand, and a cup of oil."""
 
 
 def _importable(module: str) -> bool:
