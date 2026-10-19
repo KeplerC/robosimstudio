@@ -28,7 +28,8 @@ genesis-world 1.3.3), and each one decides something below:
   and a zero velocity every substep instead, the walls the water saw would stand still
   while they jumped, and every substep would be a round trip from the host.
 * **The reaction is the velocity the water gave the mirror.** A heavy mirror is
-  pushed by microns, and ``mass * dv / dt`` is the force over the whole control step:
+  pushed by microns, and ``mass * dv / dt`` is the force over the whole control step,
+  ``dv`` read at the mirror's centre of mass (:meth:`SphBridge._harvest`):
   the water at rest in the cup reads 1.003 to 1.009 of its weight at float32 in five
   runs. It stays honest while the hand moves: a cup tipped 60 degrees and turned back
   upright still full reads 1.09 N through the turn, the water's weight, and a cup
@@ -67,7 +68,7 @@ from typing import Any
 
 import numpy as np
 
-from robosimstudio.core.math import quat_inverse, quat_multiply
+from robosimstudio.core.math import quat_inverse, quat_multiply, quat_to_mat, quat_wxyz_to_xyzw
 from robosimstudio.engines.cosim import CosimRig
 from robosimstudio.engines.feedback import WrenchAccumulator
 from robosimstudio.engines.geometry import (
@@ -137,6 +138,11 @@ def _angular_velocity(start: np.ndarray, end: np.ndarray, dt: float) -> np.ndarr
     if s < 1.0e-12:
         return np.zeros(3)
     return (2.0 * np.arctan2(s, float(rel[3])) / s) * rel[:3] / float(dt)
+
+
+def _spin(q_wxyz: np.ndarray, w_body: np.ndarray, com: np.ndarray) -> np.ndarray:
+    """The world velocity [m/s] of a link's centre of mass relative to its origin: ``R (w x c)``, both in its frame."""
+    return quat_to_mat(quat_wxyz_to_xyzw(q_wxyz)) @ np.cross(w_body, com)
 
 
 class SphBridge:
@@ -332,9 +338,11 @@ class SphBridge:
             q_idx.append(np.arange(entity.q_start, entity.q_start + 7))
             d_idx.append(np.arange(entity.dof_start, entity.dof_start + 6))
             entry["mass"] = float(entity.get_mass())
+            entry["com"] = np.asarray(entity.links[0].inertial_pos, dtype=np.float64).reshape(3)
         self._q_idx = np.concatenate(q_idx) if q_idx else np.zeros(0, np.int64)
         self._d_idx = np.concatenate(d_idx) if d_idx else np.zeros(0, np.int64)
         self._moving = [i for i, m in enumerate(self.mirrors) if m["geom"].moving]
+        self._off_centre = any(m["com"].any() for m in self.mirrors if m["geom"].two_way and m["geom"].moving)
         self._locals = np.asarray([self.mirrors[i]["geom"].local for i in self._moving]).reshape(-1, 7)
         self._qpos = np.zeros((len(self.mirrors), 7))
         self._vel = np.zeros((len(self.mirrors), 6))
@@ -378,18 +386,33 @@ class SphBridge:
             )
 
     def _harvest(self, targets: dict[int, np.ndarray]) -> None:
-        """Each two-way mirror's force: its mass times the velocity the water gave it, over the step."""
+        """Each two-way mirror's force: its mass times the velocity the water gave its centre of mass, over the step.
+
+        At the centre of mass, not at the link origin whose velocity Genesis's free joint
+        reports: a mesh whose centre is off its origin, turned with nothing touching it,
+        has an origin velocity that turns too, and read there it is ``m w^2 r`` of force:
+        6.23 N for 125 kg turned at 1 rad/s 50 mm off its origin, 0.0003 N at the centre
+        (``w5_probe.py``). A primitive's centre is its origin, so its read is unchanged.
+        """
         acc = self._acc
         acc.begin()
-        velocity = np.asarray(
-            self.scene.sim.rigid_solver.get_dofs_velocity(dofs_idx=self._d_idx).cpu(), dtype=np.float64
-        ).reshape(-1, 6)
+        solver = self.scene.sim.rigid_solver
+        velocity = np.asarray(solver.get_dofs_velocity(dofs_idx=self._d_idx).cpu(), dtype=np.float64).reshape(-1, 6)
+        qpos = (
+            np.asarray(solver.get_qpos(qs_idx=self._q_idx).cpu(), dtype=np.float64).reshape(-1, 7)
+            if self._off_centre
+            else None
+        )
         self.last_force = {}
         for i, entry in enumerate(self.mirrors):
             geom = entry["geom"]
             if not (geom.two_way and geom.moving) or geom.body not in targets:
                 continue
-            force = entry["mass"] * (velocity[i, :3] - self._vel[i, :3]) / float(self.control_dt)
+            dv = velocity[i, :3] - self._vel[i, :3]
+            if entry["com"].any():
+                com = entry["com"]
+                dv += _spin(qpos[i, 3:], velocity[i, 3:], com) - _spin(self._qpos[i, 3:], self._vel[i, 3:], com)
+            force = entry["mass"] * dv / float(self.control_dt)
             acc.add_at_shape(geom.body, force, targets[geom.body], geom.local)
             self.last_force[geom.body] = self.last_force.get(geom.body, np.zeros(3)) + force
         self.apply_wrenches(acc.shape(self.control_dt))
