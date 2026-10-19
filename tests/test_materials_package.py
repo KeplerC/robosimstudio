@@ -180,6 +180,7 @@ SCANNED = dedent(
     )
     print(json.dumps({
         "domains": domains, "loaded": loaded, "stray": stray, "from_examples": from_examples,
+        "library": os.path.realpath(rss.__file__),
         "entities": {kind: get_entity(entity).__module__ for kind, entity in __ENTITIES__},
         "flat": {name: getattr(rss, name).__module__ for name in __FLAT__},
         "dir": sorted(n for n in dir(rss) if n in __LISTED__),
@@ -213,6 +214,10 @@ class TestAFreshProcessFindsTheKinds(unittest.TestCase):
         self.assertEqual(LISTED, self.got["dir"])
 
     def test_the_scan_imports_no_example_script(self) -> None:
+        """Of this checkout's ``examples/``, so the library it scanned with must be this checkout's too."""
+        self.assertEqual(
+            str((LIBRARY / "__init__.py").resolve()), self.got["library"], "robosimstudio came from another checkout"
+        )
         self.assertEqual([], self.got["stray"], "a non-identifier name was imported under robosimstudio_materials")
         self.assertEqual([], self.got["from_examples"], "the scan imported a file out of examples/")
         self.assertLessEqual({f"robosimstudio_materials.{kind}" for kind in KINDS}, set(self.got["loaded"]))
