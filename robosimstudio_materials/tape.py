@@ -217,10 +217,13 @@ class TapeSpec(ClothSpec):
             the clamp, sets how it answers the pads (section 1's "Why the sheet is soft").
         tab_color: Display RGB of the tab.
         settle_frames: ``0``, unlike cloth's 60: a reset puts the body back at its spawn pose and the
-            tab where it was built, so the sheet is snapshotted where it was built too, on that pose.
+            tab where it was built, so the sheet goes back where it was built too, on that pose.
             Settled for 30 frames first, the box came back to its spawn pose with the settled label
             0.7 mm inside its top, the label sprang off and every bond broke within 30 control steps
-            (``d1.py``).
+            (``d1.py``). Another thing's settle steps the label too, so a reset does not take the
+            sheet from that snapshot: beside a towel settled 60 frames the label came back 1.5 to
+            1.7 mm inside the box top and every bond broke within 30 control steps, untouched
+            (``p1c.py``, GPU 1).
     """
 
     entity: str = "tape"
@@ -373,6 +376,8 @@ class EntityTape(EntityCloth):
         self.tab_shapes: list[int] = []
         self.coord_start: int = -1
         self.tab_q0: np.ndarray = np.zeros(0)
+        self.built: np.ndarray = np.zeros((0, 3))
+        """The sheet's particles where it was built, on the body's spawn pose [m, world]: what a reset restores."""
         self._arrays: dict[str, list[Any]] = {}
         self._rows: Any = None
         self._particle: Any = None
@@ -538,6 +543,7 @@ class EntityTape(EntityCloth):
     # -------------------------------------------------------------- phase 4
     def on_scene_ready(self, pipeline: ScenePipeline) -> None:
         """Find the attachment arrays the solver reads, then settle and snapshot like cloth."""
+        self.built = np.asarray(pipeline.model.particle_q.numpy()[self.particles], dtype=np.float32).copy()
         if len(self.bonds) or len(self.clamps):
             self._bind_bonds(pipeline)
         super().on_scene_ready(pipeline)
@@ -580,7 +586,17 @@ class EntityTape(EntityCloth):
 
     # -------------------------------------------------------------- phase 5
     def reset(self, pipeline: ScenePipeline, episode, *, world: int = 0) -> None:
-        """The sheet back where it settled, every bond stuck again, the tab back where it was built."""
+        """The sheet, the tab and every bond back as they were built.
+
+        A particle thing's reset restores its whole-array snapshot, taken after the scene's settle, and
+        a settle steps the label too. So this sheet's rows are put back where it was built in every
+        such snapshot, the ones later things restore included (``TapeSpec.settle_frames``).
+        """
+        for thing in getattr(pipeline, "particle_settles", {}).get("things", [self]):
+            rest = getattr(thing, "rest", None)
+            if rest and len(self.built):
+                rest["particle_q"][self.particles] = self.built
+                rest["particle_qd"][self.particles] = 0.0
         super().reset(pipeline, episode, world=world)
         if self.broken is not None:
             self.broken.zero_()
