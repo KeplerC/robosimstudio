@@ -102,5 +102,24 @@ class TestTheKnotMeasures(unittest.TestCase):
         self.assertEqual(("crossings", "knot_length"), tuple(atom.returns))
 
 
+class TestTheRopesSelfContact(unittest.TestCase):
+    """What SuperDex is told: a declared ``sim`` first, as a bag and a cloth read it, else the spec's field."""
+
+    def test_a_declared_sim_turns_it_on_and_off_whatever_the_spec_says(self) -> None:
+        from robosimstudio.specs.physics import SimRequirements
+        from robosimstudio_materials.rod import RodSpec
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
+
+        for field in (True, False):
+            with self.subTest(spec=field):
+                rope = EntityRodSuperdex(RodSpec(name="rope", nodes=tuple(map(tuple, _knot())), self_contact=field))
+                self.assertIs(field, rope.host_actor().params["self_contact"])
+            for declared in (True, False):
+                with self.subTest(spec=field, declared=declared):
+                    sim = SimRequirements(domain="rod", self_contact=declared)
+                    spec = RodSpec(name="rope", nodes=tuple(map(tuple, _knot())), self_contact=field, sim=sim)
+                    self.assertIs(declared, EntityRodSuperdex(spec).host_actor().params["self_contact"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,7 +35,7 @@ import warp as wp
 from robosimstudio.core.probes.particle import ParticleProbe
 from robosimstudio.domains.capabilities import ParticleMixin, host_bridge
 from robosimstudio.scene.entity import Entity
-from robosimstudio.specs.physics import HostActor
+from robosimstudio.specs.physics import HostActor, SimRequirements
 
 from .centerline import Centerline
 from .entity import RodSpec
@@ -79,6 +79,17 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
         """The engine's bridge, once the scene is ready; ``None`` on a Newton solver."""
         self._pins: dict[int, tuple[int, int]] = {}
         """Slot -> ``(pin id, global node)``. The engine carries the pin on the hand's body."""
+
+    def sim_requirements(self) -> SimRequirements:
+        """The spec's ``sim`` when it declares one, else the rod default with the spec's self-contact.
+
+        As a bag reads it: a declared ``sim`` is the scene's answer, so a declared
+        ``self_contact=False`` turns the engine's off whatever the spec's field says.
+        """
+        declared = self.spec.sim
+        if isinstance(declared, SimRequirements):
+            return declared
+        return SimRequirements(domain="rod", self_contact=bool(self.spec.self_contact))
 
     # -------------------------------------------------------------- phase 1
     def nodes(self) -> np.ndarray:
@@ -155,7 +166,7 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
             "linear_rotational_inertia": float(spec.density) * 2.0 * second_moment,
             "stiffness_damping": float(spec.stiffness_damping),
             "friction": float(spec.mu_cable) ** 0.5,
-            "self_contact": bool(spec.self_contact or self.sim_requirements().self_contact),
+            "self_contact": bool(self.sim_requirements().self_contact),
             "contact_padding": float(spec.contact_gap),
             "contact_penalty": float(spec.contact_penalty),
             "skin": bool(spec.skin),

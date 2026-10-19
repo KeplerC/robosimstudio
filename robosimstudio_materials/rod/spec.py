@@ -244,8 +244,8 @@ class RodSpec:
 
     Read by the foreign-engine rod (SuperDex tests the rod's skin against itself,
     segments within one and a half radii of each other along it left out); the
-    capsule chain's own collision filter decides for it. Also set by an asset's
-    ``SimRequirements.self_contact``. Off by default: it costs a broad phase over
+    capsule chain's own collision filter decides for it. A declared :attr:`sim`
+    decides in its place, by its ``self_contact``. Off by default: it costs a broad phase over
     the rod's own samples every Newton iteration, which a cable that never folds
     back on itself does not need."""
     closed: bool = False
