@@ -692,7 +692,10 @@ class SuperdexBridge:
 
         Every world has its own scene, so an actor keeps its own rest
         coordinates and node positions read back *local* mean the Newton world
-        frame -- there is nothing to translate on the way in or out.
+        frame -- there is nothing to translate on the way in or out. That is
+        this bridge's builders' rule; a builder registered from outside may set
+        another root (a bag's is its centroid) and reads through it, and
+        :meth:`place_actor` writes through whichever root an actor has.
         """
         del record
         return self.physics.TransformRT()
@@ -1391,9 +1394,11 @@ class SuperdexBridge:
         one.
 
         ``positions`` is this actor's nodes in the Newton world frame, in the
-        order the model holds them. Local **is** world for every actor this
-        bridge builds -- recentering is off and the root is identity -- which is
-        the same assumption every read-back above already makes.
+        order the model holds them. They are written through the actor's own
+        root transform: identity for every actor this bridge's builders make
+        (recentering is off), so local **is** world there, and the centroid for
+        a bag, whose builder (``robosimstudio_materials.bag``) solves about its
+        own middle in float32 and whose ``read`` adds the centroid back.
 
         Velocities go to zero and ``prev`` is refreshed from what the engine
         reports back, because a teleport is not motion: the first speed reading
@@ -1412,7 +1417,8 @@ class SuperdexBridge:
             if "skinned" in entry:
                 # Its nodes are the skeleton's pose plus a deformation; a placement is a skeleton pose.
                 raise NotImplementedError(f"{entity!r} has a rigid core: place it by its skeleton, not its nodes")
-            actor.set_node_positions_local(rows.ravel())
+            rot, offset = _root_matrix(actor)  # local -> world, so world -> local is its inverse
+            actor.set_node_positions_local(((rows - offset) @ rot).ravel())
             actor.set_node_velocities_local(np.zeros(rows.size, dtype=np.float64))
             touched.append(entry)
             moved = True
