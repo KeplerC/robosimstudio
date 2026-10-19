@@ -10,11 +10,13 @@ both on a GPU. A geometry-only USD stage built a *free* body for
 
 Checked here on a CPU builder, finalized and never stepped, for each of the
 three paths: a primitive, a mesh file and a geometry-only USD stage. A free
-object's FREE joint is checked too, and is unchanged.
+object's FREE joint is checked too, and is unchanged. And no entity that builds
+on ``EntityRigid`` welds a static body a second time.
 """
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,13 +25,18 @@ import newton
 import numpy as np
 
 from robosimstudio.domains.rigid.entity import EntityRigid
+from robosimstudio.scene.entity import label_index
 from robosimstudio.specs import AssetSpec, ObjectSpec
 from robosimstudio.specs.asset import ShapeSpec
+from tests.fixtures.packs import has_pack
 
 TIER = "fast"
 """Builds one object into a CPU builder and finalizes it; no solver, no GPU."""
 
 POSE = (0.1, -0.2, 0.3)
+
+WIPE_THE_BAR = Path(__file__).resolve().parents[1] / "examples" / "08_demos" / "wipe_the_bar"
+"""The demo whose ``GrabBar`` extends ``EntityRigid``'s build of a static object with elbows and legs."""
 
 _USD_CUBE = """#usda 1.0
 def Mesh "cube"
@@ -43,11 +50,17 @@ def Mesh "cube"
 """A 10 cm cube with no physics schema: geometry, which ``_build_usd`` treats as an ``.obj``."""
 
 
-def _built(spec: ObjectSpec):
-    entity = EntityRigid(spec)
+def _built(spec: ObjectSpec, entity_class=EntityRigid):
+    entity = entity_class(spec)
     builder = newton.ModelBuilder()
     entity.build_into(builder, episode=None)
     return entity, builder.finalize(device="cpu")
+
+
+def _world_joints(model, body: int) -> list[int]:
+    """The joints from the world to ``body``."""
+    parents, children = model.joint_parent.numpy(), model.joint_child.numpy()
+    return [int(j) for j in np.flatnonzero((children == body) & (parents == -1))]
 
 
 class TestAStaticObjectIsWelded(unittest.TestCase):
@@ -96,6 +109,45 @@ class TestAStaticObjectIsWelded(unittest.TestCase):
                 self.assertEqual([int(newton.JointType.FREE)], [int(model.joint_type.numpy()[j]) for j in joints])
                 self.assertEqual(int(newton.BodyFlags.DYNAMIC), int(model.body_flags.numpy()[entity.body]))
                 self.assertEqual(0, entity.coord_start)
+
+
+class TestNoStaticBodyIsWeldedTwice(unittest.TestCase):
+    """One joint to the world per static body, however an entity extends ``EntityRigid``'s build.
+
+    ``EntityRigid`` welds a static object itself, so a subclass that welds it
+    again after ``super().build()`` gives it a second fixed joint to the world
+    under the same label. The wipe-the-bar demo's ``GrabBar`` did: the bar had two
+    ``bar_weld`` joints, ``SolverMuJoCo`` made the first the mocap root and the
+    second a weld equality, and ``label_index`` found the label twice.
+    """
+
+    @staticmethod
+    def _bar():
+        if str(WIPE_THE_BAR) not in sys.path:
+            sys.path.insert(0, str(WIPE_THE_BAR))
+        import bar
+
+        return _built(bar.BarSpec(), bar.GrabBar)
+
+    def test_the_grab_bar_has_one_weld_and_its_label_names_it(self) -> None:
+        entity, model = self._bar()
+        welds = _world_joints(model, entity.body)
+        self.assertEqual(1, len(welds), "the bar had two, both 'bar_weld'")
+        self.assertEqual(welds[0], label_index(model.joint_label, "bar_weld"))
+
+    def test_every_static_body_the_shipped_rigid_entities_build(self) -> None:
+        builds = {"primitive": _built(ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), static=True))}
+        builds["grab_bar"] = self._bar()
+        if has_pack("cutting"):
+            import robosimstudio as rss
+            from robosimstudio_materials.cutting.entity import EntityKnife
+
+            builds["knife"] = _built(rss.knife(name="knife", static=True), EntityKnife)
+        for name, (entity, model) in builds.items():
+            with self.subTest(name):
+                kinematic = np.flatnonzero(model.body_flags.numpy() == int(newton.BodyFlags.KINEMATIC))
+                self.assertEqual([entity.body], [int(b) for b in kinematic], "the one static body")
+                self.assertEqual(1, len(_world_joints(model, entity.body)), "one weld")
 
 
 if __name__ == "__main__":
