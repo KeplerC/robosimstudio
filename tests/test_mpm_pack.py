@@ -332,6 +332,38 @@ class TestTheContainerMargins(unittest.TestCase):
         self.assertEqual(set(labels[:5]), given)
 
 
+class TestTheCupMesh(unittest.TestCase):
+    def test_the_mesh_is_written_beside_its_name_and_renamed_onto_it(self) -> None:
+        """Two processes building one cup share the cache file; neither may read it half written."""
+        import os
+        import pathlib
+        import tempfile
+        from unittest import mock
+
+        import trimesh
+
+        from robosimstudio_materials.liquid import cup
+
+        export = trimesh.Trimesh.export
+        writes = []
+
+        def recorded(mesh, file_obj=None, *args, **kwargs):
+            path = pathlib.Path(file_obj)
+            writes.append((path, sorted(p.name for p in path.parent.iterdir())))
+            return export(mesh, file_obj, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_CACHE": root}):
+            with mock.patch.object(trimesh.Trimesh, "export", recorded):
+                spec = cup(inner=(0.031, 0.032, 0.033), wall=0.005)
+            final = pathlib.Path(spec.asset.path)
+            ((written, present),) = writes
+            self.assertNotEqual(final, written, "the mesh was exported straight onto the name others read")
+            self.assertEqual(final.parent, written.parent, "a rename is atomic only within one directory")
+            self.assertNotIn(final.name, present, "the final name existed before the mesh was whole")
+            self.assertEqual([final.name], sorted(p.name for p in final.parent.iterdir()), "no temporary file is left")
+            self.assertGreater(len(trimesh.load(final, force="mesh").faces), 0)
+
+
 class TestTheRecords(unittest.TestCase):
     def test_a_record_carries_the_specs_domain_and_builds_the_spec(self) -> None:
         import robosimstudio as rss
