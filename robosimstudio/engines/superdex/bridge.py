@@ -1427,6 +1427,11 @@ class SuperdexBridge:
         reports back, because a teleport is not motion: the first speed reading
         after one must not be the jump. The mirrors are marked for teleport for
         the same reason ``restore_rest`` marks them.
+
+        A rod is refused by name, as a body on a rigid core is: the engine takes
+        node positions on a soft body or a shell only, and a rod's nodes are its
+        displacements, moved only as it is built
+        (``robosimstudio_materials.rod.actor.teleport_rod``).
         """
         rows = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
         touched: list[dict] = []
@@ -1434,6 +1439,12 @@ class SuperdexBridge:
         for entry in self.actors_by_world.get(int(world), ()):
             if entry.get("entity") != str(entity):
                 continue
+            if "skinned" not in entry and entry["actor"].get_type() == self.physics.ActorType.ROD:
+                # Asked anyway, the engine raises from inside ("CDisplacementSlice ... required"), open or closed.
+                raise NotImplementedError(
+                    f"{entity!r} is a rod: SuperDex sets the nodes of a soft body or a shell only, "
+                    "so a rod starts where its spec lays it"
+                )
             if len(rows) != int(entry["count"]):
                 raise ValueError(f"{entity!r} in world {world} has {entry['count']} nodes, given {len(rows)}")
             actor = entry["actor"]

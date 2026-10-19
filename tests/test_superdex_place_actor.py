@@ -7,7 +7,8 @@ own centroid, with the offset in its root transform, because the engine is
 float32 and a bag solved in bench-height coordinates never converged. A
 placement written straight into its local nodes read back a whole centroid away,
 0.61 m along x and 0.73 m up, and the next step started from there. Here a bag
-and a sponge (an identity root) in one scene are each moved and read back.
+and a sponge (an identity root) in one scene are each moved and read back, and a
+band, a rod the engine sets no nodes of, is refused by name.
 """
 
 from __future__ import annotations
@@ -62,6 +63,31 @@ class TestPlacingAnActorReadsItBackWherePlaced(unittest.TestCase):
     def test_an_actor_at_an_identity_root_places_as_before(self) -> None:
         target, entry = self._place("sponge")
         np.testing.assert_allclose(np.asarray(entry["read"](), dtype=np.float64).reshape(-1, 3), target, atol=1.0e-5)
+
+
+@unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing builds the band")
+class TestARodIsRefusedByName(unittest.TestCase):
+    """The engine takes node positions on a soft body or a shell only: asked to place a rod, it raised
+    from inside ("CDisplacementSlice ... required"), a band or an open cable alike. Refused by name,
+    as a body on a rigid core is, and the band is where it was."""
+
+    def test_placing_a_band_is_refused_and_moves_nothing(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio_materials.rod.band import band
+
+        engine = rss.backend("superdex", substeps=2, feedback="off")
+        physics = rss.replace(rss.GENERIC, backends=(("rod", engine), *rss.GENERIC.backends))
+        scene = rss.Scene(cell="bench_075", physics=physics, name="place_band")
+        loop = scene.add(band(name="band", diameter=0.06, segments=16))
+        scene.build()
+        bridge = loop.entity.bridge
+        entry = _entry(bridge, "band")
+        before = np.asarray(entry["read"](), dtype=np.float64).reshape(-1, 3)
+        self.assertEqual(17, len(before), "16 nodes and the seam")
+        for rows in (before, before[:-1]):  # with the seam row and without it
+            with self.subTest(rows=len(rows)), self.assertRaisesRegex(NotImplementedError, "'band' is a rod"):
+                bridge.place_actor("band", 0, rows + SHIFT)
+        np.testing.assert_array_equal(before, np.asarray(entry["read"](), dtype=np.float64).reshape(-1, 3))
 
 
 @unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing builds the bag")
