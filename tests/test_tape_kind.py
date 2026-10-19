@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """``robosimstudio_materials/tape.py``: the sheet a tape is built as, what it bonds, and what it declares.
 
-No GPU: nothing is built or stepped. The tape's physics -- a hand peeling a label off a box by its
-pull tab, and a label that never lets go staying stuck -- is driven through the example's page by
-``tests/test_peel_a_label.py``. Here:
+No GPU: a label is built on the CPU, and stepped there by VBD only to show its bonds hold at rest.
+The tape's physics -- a hand peeling a label off a box by its pull tab, and a label that never lets
+go staying stuck -- is driven through the example's page by ``tests/test_peel_a_label.py``. Here:
 
 * **The surface.** The sheet's first ``tab`` metres stand straight up at the fold, the rest lies
   flat; the bonded vertices are the flat ones past the fold row, the clamped ones the upper half of
   the turned-up end, and the two never overlap.
 * **The break law**, on positions written by hand: only lifting off the face opens a bond; sliding
   along it and pressing into it do not.
+* **Where a stuck sheet lies**: the box's margin past a particle radius off the face, at the build
+  and at a reset after the margin moved, so every bond holds at rest over a 2 mm margin; and bonded
+  only over a face of the box, none past its edge, stuck at the build or pressed.
 * **The declarations**: the spec refuses what cannot be built, the presets carry the adhesive and
   stay soft enough for a tab to pull them, the contact presets share one sheet and rank by strength,
   ``TAPE_60HZ`` puts every free body on the tape's solver with compliant ALM, the flat names resolve,
@@ -25,7 +28,7 @@ import unittest
 import numpy as np
 
 TIER = "fast"
-"""Numpy and the spec classes only."""
+"""Numpy, the spec classes and warp on the CPU: four labels stepped 40 substeps, under 4 s."""
 
 
 class TestTheSurface(unittest.TestCase):
