@@ -440,24 +440,29 @@ class PanelReadings(Panel):
             entity = self._cloth()
             if entity is not None:
                 pipeline = self.session.env.pipeline
-                # A kind that does not settle -- a SuperDex rope, the cloth example's
-                # own ``MyCloth``: each joins the record without a run -- is
-                # re-baselined where it lies. Called outright, the button took the
-                # page loop down with ``'EntityRodSuperdex' object has no attribute
-                # 'settle'`` (``examples/03_rope/02_superdex``, and ``MyCloth`` on
-                # ``examples/01_cloth/04_your_own_cloth``).
-                settle = getattr(entity, "settle", None)
-                if callable(settle):
-                    settle(pipeline)
-                # The settle stepped the whole particle array, so every thing that
-                # shares it takes its baseline again, not only this cloth.
-                for thing in getattr(pipeline, "particle_settles", {}).get("things", [entity]):
+                things = getattr(pipeline, "particle_settles", {}).get("things", [entity])
+                # Every thing on the settle record that has a settle runs it, in the
+                # order they joined; a kind that does not settle -- a SuperDex rope,
+                # the cloth example's own ``MyCloth``: each joins the record without
+                # a run -- is re-baselined where it lies (asked to settle, it raised
+                # ``AttributeError`` out of the page loop). Settling the first thing
+                # alone skipped a towel or a sponge on the record behind a rope.
+                settled, lying = [], []
+                for thing in things:
+                    settle = getattr(thing, "settle", None)
+                    if callable(settle):
+                        settle(pipeline)
+                        settled.append(thing.name)
+                    else:
+                        lying.append(thing.name)
+                # The settles stepped the whole particle array, so every thing that
+                # shares it takes its baseline again, after the last of them.
+                for thing in things:
                     thing.snapshot_rest(pipeline)
-                self._note.value = (
-                    "re-settled; baseline moved with it"
-                    if callable(settle)
-                    else f"{entity.name} does not settle; re-baselined where it lies"
-                )
+                note = [f"re-settled {', '.join(settled)}"] if settled else []
+                if lying:
+                    note.append(f"re-baselined {', '.join(lying)} where {'it lies' if len(lying) == 1 else 'they lie'}")
+                self._note.value = "; ".join(note)
             self.refresh()
 
     def refresh(self) -> None:
