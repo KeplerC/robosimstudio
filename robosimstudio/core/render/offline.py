@@ -40,6 +40,11 @@ colours of the shapes a scene recolours while it runs, written back into
 mark fading rather than frozen at the frame the stage was built. It needs the
 recording's ``shape_color_live_index`` anchor to say which rows those are.
 
+A particle body's surface is not a channel: its handle's ``surface`` is a
+function of the particle positions alone, so a replay that writes
+``particle_q`` regrows the surface the recording showed, frame by frame, with
+nothing recorded but the particles.
+
 Named rather than left implicit because it is what a reader has to select *on*
 before slicing. A recording that stores an episode's constants beside its
 per-step state -- bond indices, bond anchors, a particle subset -- otherwise

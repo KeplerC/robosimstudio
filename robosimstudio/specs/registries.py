@@ -39,6 +39,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 
 from .params import REBUILD, RECAPTURE, ParamUI, ui
 
@@ -277,7 +278,7 @@ belongs to none of them, and hanging it off whichever domain happened to need it
 first is how a registry acquires a wrong shape it then keeps.
 """
 
-DOMAINS: Registry[DomainInfo] = Registry("domain", ("robosimstudio.domains",), same=operator.eq)
+DOMAINS: Registry[DomainInfo] = Registry("domain", DOMAIN_PACKAGES, same=operator.eq)
 """Registered domains, by name.
 
 Scanned rather than listed. Each built-in used to register here, next to the type
@@ -444,6 +445,21 @@ class BackendInfo:
     native_contacts: bool = False
     """The solver generates its own contacts (MuJoCo), so the composer routes
     none of the scene's contact pairs to it."""
+    steps_in_place: bool = False
+    """The solver advances ``state_in`` to ``state_out`` with the two being one
+    object -- :attr:`newton.solvers.SolverCoupled.Entry.in_place` -- which is
+    how Newton's implicit MPM is stepped: its particle history (strain, plastic
+    volume, stress) lives on the state and is carried forward in place rather
+    than copied through a scratch state every substep. A registered fact, like
+    :attr:`native_contacts`, so the coupler builder can set the entry flag
+    without naming a solver. Only meaningful under a coupled solver; a bare
+    solver is stepped between the pipeline's two states whatever it says here.
+
+    An in-place island may step at a slower rate than the substep loop by
+    taking a ``step_hz`` parameter and skipping the calls in between; the
+    composer then checks that the rate divides the arrangement's substep rate
+    (``control_hz * substeps``) so a captured control step holds a whole number
+    of its steps (:func:`~robosimstudio.scene.physics.compose.compose`)."""
     defaults: tuple[tuple[str, Any], ...] = ()
     """Constructor kwargs applied under whatever an arrangement states.
 
@@ -480,6 +496,7 @@ class BackendInfo:
             self.consumes,
             self.maximal_coordinates,
             self.native_contacts,
+            self.steps_in_place,
         ) == (
             other.alias,
             other.cls,
@@ -492,6 +509,7 @@ class BackendInfo:
             other.consumes,
             other.maximal_coordinates,
             other.native_contacts,
+            other.steps_in_place,
         )
 
     def effective(self, spec: BackendSpec, *, has_particles: bool = True) -> BackendSpec:
@@ -553,6 +571,7 @@ def register_backend(
     consumes: Sequence[str] = (),
     maximal_coordinates: bool = False,
     native_contacts: bool = False,
+    steps_in_place: bool = False,
 ) -> BackendInfo:
     """Register a solver under an alias. Identical re-registration is accepted.
 
@@ -582,6 +601,7 @@ def register_backend(
         consumes=tuple(consumes),
         maximal_coordinates=bool(maximal_coordinates),
         native_contacts=bool(native_contacts),
+        steps_in_place=bool(steps_in_place),
     )
     return BACKENDS.register(alias, info, origin=path)
 

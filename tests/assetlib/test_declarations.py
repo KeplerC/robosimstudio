@@ -144,20 +144,26 @@ class TestTheShippedAssets(unittest.TestCase):
         the general kinds; a kind only one kind of thing can carry is registered
         by that thing's domain pack, which keeps a ``KIND_NAMES`` of its own --
         the arc-length ``point`` is the rod's. So the registry is checked
-        against the library's tuple plus every *installed* pack's, and a
-        checkout without a pack is not expected to hold that pack's kinds.
+        against the library's tuple plus every *installed* pack's, over the same
+        packages the registries scan (:data:`robosimstudio.roots.DOMAIN_PACKAGES`),
+        and a checkout without a pack is not expected to hold that pack's kinds.
         """
         import importlib
         import pkgutil
 
-        import robosimstudio.domains as domains
+        from robosimstudio.roots import DOMAIN_PACKAGES
 
         declared = set(KIND_NAMES)
-        for info in pkgutil.iter_modules(domains.__path__):
-            if not info.name.isidentifier():
-                continue  # ``04_your_own_cloth.py``: an example beside a pack, as the registries' own scan skips it
-            pack = importlib.import_module(f"robosimstudio.domains.{info.name}")
-            declared |= set(getattr(pack, "KIND_NAMES", ()))
+        for package_name in DOMAIN_PACKAGES:
+            try:
+                package = importlib.import_module(package_name)
+            except ModuleNotFoundError:
+                continue  # a tree without the sibling package, as the registries' own scan allows
+            for info in pkgutil.iter_modules(package.__path__):
+                if not info.name.isidentifier():
+                    continue  # a numbered example beside a pack on a root, as the registries' own scan skips it
+                pack = importlib.import_module(f"{package_name}.{info.name}")
+                declared |= set(getattr(pack, "KIND_NAMES", ()))
         shipped = [name for name in list_kinds() if not name.startswith("test_")]
         self.assertEqual(sorted(declared), shipped)
         self.assertNotIn("point", KIND_NAMES, "the arc-length point is the rod pack's kind, not the library's")

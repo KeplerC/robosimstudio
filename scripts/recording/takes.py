@@ -171,6 +171,17 @@ def _wiped(film) -> tuple[bool, str]:
     return cleaned >= 0.9, f"{cleaned:.3f} of the stripe clean (need 0.9)"
 
 
+def _kept_bend(film) -> tuple[bool, str]:
+    """The cable with plastic memory is still bent after the hand let go: straightness under 0.9."""
+    import numpy as np
+
+    from robosimstudio_materials.rod.measures import straightness
+
+    ref = film.sim["cable"]
+    measured = straightness(np.asarray(film.sim.pipeline.state_0.body_q.numpy())[ref.bodies, :3])
+    return measured < 0.9, f"straightness {measured:.3f} after release (need under 0.9)"
+
+
 def _succeeded(film) -> tuple[bool, str]:
     """The task's own verdict on the scene as the take left it."""
     result = film.sim.evaluate()[-1]
@@ -595,6 +606,26 @@ DRAFTS = (
         lift=0.12,
         radius=0.012,  # the one link the handle took: the links are loose, and the rest stay in the heap
     ),
+    handle(
+        "examples/13_paper/00_fold_paper.py",
+        "paper",
+        Corner("paper", sx=1, sy=1, inset=0.02),
+        camera=Orbit(At("paper", dz=0.05), distance=0.8, azimuth=-25.0, elevation=35.0),
+        lift=0.08,
+        across=("y", -0.25),
+        pending="a fold is a carry, a press and a release, which the one-handle beat does not do: "
+        "the take needs a second click on the standing loop and a drag down before Release all",
+    ),
+    handle(
+        "examples/13_paper/01_box_flap.py",
+        "flap",
+        Corner("flap", sx=0, sy=1, inset=0.02),
+        camera=Orbit(At("flap", dz=0.05), distance=0.7, azimuth=-30.0, elevation=30.0),
+        lift=0.04,
+        across=("y", -0.14),
+        pending="the flap is closed by a hand pushing it over the box, not by a handle lifting a corner: "
+        "the take wants a Drag of the left gizmo onto the free end and down",
+    ),
     Take(
         "examples/09_teleop/01_force_feedback.py",
         argv=("--simulate",),
@@ -625,6 +656,35 @@ DRAFTS = (
         # The capsule in the jaws. Measured 92 mm.
         expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.771)), 0.06, at="lifted"),),
     ),
+    Take(
+        "examples/03_rope/03_cable_memory.py",
+        camera=Orbit(At("post_end", dz=0.10), distance=0.65, azimuth=-30.0, elevation=22.0, fov=50.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left", "Arm: right")),
+        beats=(
+            Wait(seconds=0.5, label="a cable clamped at one post, its free end over the other"),
+            Click(Segment("cable", 0.95), label="click near its free end: a handle"),
+            Wait(seconds=0.3),
+            Drag("handle", "x", 0.08, seconds=1.0, label="drag it out round the far post"),
+            Drag("handle", "y", -0.12, seconds=1.2, label="and back along the span"),
+            Wait(seconds=0.6, mark="wrapped", label="the cable is bent round the post"),
+            Press(text="Release all", label="let go"),
+            Wait(seconds=2.0, label="it keeps the bend"),
+        ),
+        expect=(Check(_kept_bend, needs=("cable",)),),
+        pending="the drag round the far post has not been tried on the page yet; filmed to outputs until it has",
+    ),
+    Take(
+        "examples/03_rope/04_twist.py",
+        camera=Orbit(At("stiff_twist", dz=0.05), distance=0.75, azimuth=-30.0, elevation=25.0, fov=50.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left", "Arm: right")),
+        beats=(Wait(seconds=0.5, label="two cables clamped at one end: one rolls easily, one does not"),),
+        pending=(
+            "the page rolls a tip with the **tip roll** slider and lets go with the **hold the tips** box "
+            "(tests/test_rod_twist.py drives both); the recorder has no slider beat yet, so no gesture is filmed"
+        ),
+    ),
     handle(
         "examples/03_rope/02_superdex.py",
         "cable",
@@ -650,9 +710,74 @@ DRAFTS = (
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS)
+# The particle kinds: a tool on the page's handle, dragged through what it works on. Drafts:
+# none has been filmed, and each take says what it would show.
+RICE_VIEW = Orbit(At("rice"), distance=0.9, azimuth=-50.0, elevation=35.0)
+PARTICLE_DRAFTS = (
+    handle(
+        "examples/10_granular/00_sweep_rice.py",
+        "pusher",
+        (0.600, -0.450, 0.770),
+        camera=RICE_VIEW,
+        lift=0.005,
+        across=("y", 0.25),
+        expect=(Rose("pusher", 0.002, at="lifted"),),
+        pending="the pusher rides the handle into the tray; the clip should show the hand's sweep, the gesture "
+        "tests/test_sweep_rice drives, once it is written as beats",
+    ),
+    handle(
+        "examples/11_liquid/00_pour_honey.py",
+        "cup",
+        (0.600, -0.310, 0.790),
+        camera=Orbit(At("cup"), distance=0.9, azimuth=-40.0, elevation=30.0),
+        lift=0.10,
+        across=("y", 0.22),
+        expect=(Rose("cup", 0.05, at="lifted"),),
+        pending="the handle carries the cup over the bowl; the tip is the gizmo's rotation ring, which no beat turns yet",
+    ),
+    handle(
+        "examples/11_liquid/01_wipe_spill.py",
+        "wiper",
+        (0.625, -0.310, 0.765),
+        camera=Orbit(At("ketchup"), distance=0.8, azimuth=-50.0, elevation=40.0),
+        lift=0.005,
+        across=("y", 0.18),
+        expect=(Rose("wiper", 0.002, at="lifted"),),
+        pending="the handle tips the wiper over the puddle (it holds tilt with a soft spring; tests/test_wipe_spill "
+        "pushes 96% off the patch with the hand); the clip wants the grasp gesture, not the handle",
+    ),
+    handle(
+        "examples/12_dough/00_roll_dough.py",
+        "pin",
+        (0.730, -0.310, 0.765),
+        camera=Orbit(At("dough"), distance=0.8, azimuth=-50.0, elevation=35.0),
+        lift=0.01,
+        across=("x", -0.20),
+        expect=(Rose("pin", 0.005, at="lifted"),),
+        pending="the pin is dragged across the block on the handle; a roll that flattens it needs the pin held at a height",
+    ),
+    Take(
+        "examples/12_dough/01_press_dough.py",
+        camera=Orbit(At("dough"), distance=0.7, azimuth=-50.0, elevation=30.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the right hand, open, over the puck"),
+            Press(text="Close", within=RIGHT, label="Close: one blade"),
+            Drag("right", "z", to=(0.600, -0.310, 0.830), seconds=1.2, label="drag the gizmo down to the puck"),
+            Drag("right", "z", to=(0.600, -0.310, 0.775), seconds=1.0, label="and 15 mm into it"),
+            Wait(seconds=0.5, mark="pressed"),
+            Drag("right", "z", to=(0.600, -0.310, 0.850), seconds=1.2, label="lift away: the dent stays"),
+            Wait(seconds=1.5, mark="lifted"),
+        ),
+        pending="the press gesture, to be filmed once the gizmo path over the puck is measured on the page",
+    ),
+)
+
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS)
 
 KEPT: dict[str, str] = {
+    "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

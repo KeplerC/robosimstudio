@@ -37,17 +37,34 @@ So two things live here, and both are needed:
 The lock is one process-wide reentrant lock rather than one per device: it
 guards Warp's global, not ours, and reentrancy matters because a capture body
 may legitimately read.
+
+A third thing lives here for the same reason -- Warp state that is global to
+the process and that Python can move under us. :func:`quiet_gc` keeps the
+cyclic garbage collector out of a scene build. A dropped scene is a cycle
+(entities hold the scene, the scene holds them), so it dies when the collector
+next runs, not when the last name goes; and among what dies are Warp's
+``ModuleExec`` objects, whose finaliser unloads a CUDA module. Run from inside
+another scene's build -- a collection can fire on any allocation -- that unload
+leaves the device in a state where the next copy fails with ``CUDA error 1:
+invalid argument`` or a scan with ``error 101: invalid device ordinal``.
+Measured on Newton 1.6.0 / warp 1.18.0: build the sixteen numbered examples in
+one process without stepping them, then build the rice heap again -- its first
+coupled step fails every time; with the dead scenes' eight module unloads held
+back it passes, and so does collecting before each build. Newton guards its own
+conditional-graph captures the same way (``_ScopedDisableGC`` in
+``solve_rheology``).
 """
 
 from __future__ import annotations
 
+import gc
 import threading
 from contextlib import contextmanager
 from typing import Any
 
 import warp as wp
 
-__all__ = ["capturable", "capturing", "reading", "stream_lock"]
+__all__ = ["capturable", "capturing", "quiet_gc", "reading", "stream_lock"]
 
 stream_lock = threading.RLock()
 """Held across anything that moves a device's current stream. See the module docstring."""
@@ -95,3 +112,33 @@ def capturing(device: Any = None, **kwargs: Any):
         capturable(resolved)
         with wp.ScopedCapture(device=device, **kwargs) as capture:
             yield capture
+
+
+@contextmanager
+def quiet_gc():
+    """Collect what is already dead, keep the collector off for the block, collect once more after.
+
+    Wrap a scene build in this. The full collection on the way in finalises the
+    scenes dropped since the last build while no device work is in flight; the
+    block then runs without a collection landing in the middle of a module
+    load, an eager settle or a capture; the generation-0 collection on the way
+    out returns the build's own garbage at a point that is just as quiet, so it
+    does not surface in the first steps instead. Generation 0 is enough there
+    and nothing less would do on the way in: an object is promoted only by a
+    collection, so everything the block allocated is still in generation 0
+    when it ends, while a scene dropped between builds has long been promoted.
+    Measured in one process on this tree: the full pass costs 0.74 s with one
+    scene alive (1.17 M tracked objects, most of them Warp's) and 0.94 s with
+    four; the generation-0 pass costs under a millisecond. Nesting is fine: an
+    inner block leaves the collector as it found it, and the outermost one
+    turns it back on.
+    """
+    gc.collect()
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was_enabled:
+            gc.enable()
+        gc.collect(0)

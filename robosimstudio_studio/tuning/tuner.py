@@ -17,11 +17,10 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from robosimstudio.domains.cloth import ClothMaterialSpec
-
 from robosimstudio.assetlib.materials import get_material
 from robosimstudio.specs import restage
 from robosimstudio.specs.params import LIVE, RECAPTURE, param_ui
+from robosimstudio_materials.cloth import ClothMaterialSpec
 
 from .apply import LiveMaterial, apply_contact, contact_differs, locate_cloth, rebuild_fields
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``examples/01_cloth/cloth.py``: a membrane mesh is simplified, and a sheet zeroes only its own creases.
+"""``robosimstudio_materials/cloth.py``: a membrane mesh is simplified, and a sheet zeroes only its own creases.
 
 No GPU: a recording builder and a model made of CPU warp arrays.
 """
@@ -31,9 +31,9 @@ class _Builder:
 class TestTheMembraneMeshIsSimplified(unittest.TestCase):
     def test_simplify_faces_and_scale_reach_the_builder(self) -> None:
         import trimesh
-        from robosimstudio.domains.cloth import ClothMaterialSpec, ClothSpec, EntityCloth
 
         import robosimstudio as rss
+        from robosimstudio_materials.cloth import ClothMaterialSpec, ClothSpec, EntityCloth
 
         sphere = trimesh.creation.icosphere(subdivisions=2)  # 320 faces
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,7 +67,8 @@ class TestTheMembraneMeshIsSimplified(unittest.TestCase):
 class TestZeroRestAngleIsPerSheet(unittest.TestCase):
     def test_one_sheet_does_not_flatten_anothers_creases(self) -> None:
         import warp as wp
-        from robosimstudio.domains.cloth import ClothMaterialSpec, ClothSpec, EntityCloth
+
+        from robosimstudio_materials.cloth import ClothMaterialSpec, ClothSpec, EntityCloth
 
         wp.init()
         # Two sheets of four particles each; one edge per sheet, column 2 on the sheet.
@@ -88,7 +89,8 @@ class TestZeroRestAngleIsPerSheet(unittest.TestCase):
 
     def test_every_world_of_a_replicated_sheet_is_flattened(self) -> None:
         import warp as wp
-        from robosimstudio.domains.cloth import ClothMaterialSpec, ClothSpec, EntityCloth
+
+        from robosimstudio_materials.cloth import ClothMaterialSpec, ClothSpec, EntityCloth
 
         wp.init()
         # Two worlds of eight particles: in each, a flat sheet on 0..3 and a creased one on 4..7.
@@ -115,8 +117,8 @@ class TestSpecHintsResolve(unittest.TestCase):
     def test_get_type_hints_on_the_cloth_and_soft_specs(self) -> None:
         import typing
 
-        from robosimstudio.domains.cloth import ClothSpec, HeldClothSpec
-        from robosimstudio.domains.soft import SoftSpec
+        from robosimstudio_materials.cloth import ClothSpec, HeldClothSpec
+        from robosimstudio_materials.soft import SoftSpec
 
         for spec in (ClothSpec, HeldClothSpec, SoftSpec):
             with self.subTest(spec=spec.__name__):

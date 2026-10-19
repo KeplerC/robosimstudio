@@ -67,7 +67,7 @@ __all__ = [
 
 
 CableDriveSpec = RodMaterialSpec
-"""Alias of :class:`~robosimstudio.domains.rod.spec.RodMaterialSpec`, under the name ``cable_route`` imports."""
+"""Alias of :class:`~robosimstudio_materials.rod.spec.RodMaterialSpec`, under the name ``cable_route`` imports."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -191,6 +191,15 @@ HOLD_KD_REFERENCE = 12.0
 """The latch's position gains [N/m, N.s/m], as the reference tuned them. They
 are forces, so :meth:`EntityRod.hold_gains` scales them by segment mass."""
 
+ROLL_STEP = 0.1
+"""How far :meth:`EntityRod.roll` turns a pinned capsule per call at most [rad]:
+a full turn in 63 control steps at 60 Hz. The rate is not what the cable
+feels -- 0.26 rad (15 degrees) per step puts the same uniform 0.348 turns into
+the middle third of the twist example's cables with straightness 1.000
+throughout, as 0.05 does (``probe6.py``, GPU 1) -- it is what a hand
+turning a cable end looks like on the page, and it keeps a slider yanked
+across its range from being a jump the joint never sees."""
+
 
 def _half_heights_of(points) -> np.ndarray:
     """Each capsule's half-length, from the centreline nodes it spans.
@@ -216,7 +225,7 @@ def _segment_mass(spec: RodSpec) -> float:
 
 
 class EntityRod(Centerline, Entity):
-    """The capsule-chain cable: built by ``add_rod``, indexed for everyone else."""
+    """The capsule-chain cable: built by ``add_rod(rod=newton.Rod(...))``, indexed for everyone else."""
 
     spec: RodSpec
     domain = "rod"
@@ -248,6 +257,8 @@ class EntityRod(Centerline, Entity):
         self._hold_gains: wp.array | None = None
         self._grip_bodies: dict[str, int] = {}
         self._tcp_offsets: dict[str, np.ndarray] = {}
+        self._pins: dict[int, dict[str, Any]] = {}
+        """Capsules held by :meth:`pin`, by model body: which segment and world, the pose held, the roll since, and the mass to give back."""
 
     # -------------------------------------------------------------- phase 1
     def _shape_cfg(self) -> Any:
@@ -268,39 +279,58 @@ class EntityRod(Centerline, Entity):
         Shared by :meth:`build` and :meth:`place`, so a wave's rods match a
         serial build.
         """
-        from newton.utils import create_straight_cable_points_and_quaternions
-
         spec = self.spec
         # ``start`` is in the work-surface frame; lift it to world. The frame
         # has no rotation, so ``direction`` is unchanged.
         if spec.nodes is not None:
-            # A stated polyline: lift every node; ``add_rod`` derives the frames
-            # from consecutive legs when given ``None``.
+            # A stated polyline: lift every node; ``newton.Rod`` parallel-transports
+            # the frames along it when given ``None``, so an untwisted polyline
+            # is built untwisted (the deprecated chain form aligned each frame
+            # to its own leg, which put a twist between legs that turn).
             return [
                 wp.vec3(*[float(v) for v in self.placed((*node, 0.0, 0.0, 0.0, 1.0))[:3]]) for node in spec.nodes
             ], None
         start = wp.vec3(*[float(v) for v in self.placed((*spec.start, 0.0, 0.0, 0.0, 1.0))[:3]])
         direction = wp.vec3(*[float(v) for v in spec.direction])
-        points, quats = create_straight_cable_points_and_quaternions(
-            start=start, direction=direction, length=float(spec.length), num_segments=int(spec.segments)
+        rod = newton.Rod.create_straight(
+            start=start,
+            direction=direction,
+            length=float(spec.length),
+            segment_count=int(spec.segments),
+            radius=float(spec.radius),
         )
+        # The same points and frames the deprecated helper gave, to the bit
+        # (``tests/test_rod_new_api.py``), as lists so the bow can turn them.
+        points = [wp.vec3(*[float(v) for v in p]) for p in rod.points]
+        quats = [wp.quat(*[float(v) for v in q]) for q in rod.quaternions]
         # Only the straight spawn is bowed.
         return _bow_cable(points, quats, spec, episode)
 
     def _add_rod(self, builder: newton.ModelBuilder, points, quats) -> None:
-        """``add_rod`` at this spec's own numbers. Shared by :meth:`build` and :meth:`place`."""
+        """``add_rod`` at this spec's own numbers. Shared by :meth:`build` and :meth:`place`.
+
+        The ``rod=`` form of Newton 1.6: geometry and frames on a
+        :class:`newton.Rod`, the eight stiffness and damping numbers stated
+        outright. All eight, because the builder pairs a slot's damping with its
+        stiffness only while *both* are left ``None`` -- a shear stiffness given
+        alone would silently take 0 damping -- and :meth:`RodSpec.drive_gains`
+        is where the ``None`` pairs are resolved.
+        """
         spec = self.spec
+        gains = spec.drive_gains()
         builder.add_rod(
-            positions=points,
-            quaternions=quats,
-            radius=float(spec.radius),
+            rod=newton.Rod(points, quaternions=quats, radius=float(spec.radius)),
             body_frame_origin="com",
             cfg=self._shape_cfg(),
             color=spec.color,
-            stretch_stiffness=float(spec.stretch_ke),
-            stretch_damping=float(spec.stretch_kd),
-            bend_stiffness=float(spec.bend_ke),
-            bend_damping=float(spec.bend_kd),
+            stretch_stiffness=gains["stretch_ke"],
+            stretch_damping=gains["stretch_kd"],
+            shear_stiffness=gains["shear_ke"],
+            shear_damping=gains["shear_kd"],
+            bend_stiffness=gains["bend_ke"],
+            bend_damping=gains["bend_kd"],
+            twist_stiffness=gains["twist_ke"],
+            twist_damping=gains["twist_kd"],
             label=spec.name,
             wrap_in_articulation=self.wrap_rod_in_articulation(),
         )
@@ -735,6 +765,62 @@ class EntityRod(Centerline, Entity):
         model.shape_material_mu.assign(mu)
         model.shape_material_ke.assign(ke)
         model.shape_material_kd.assign(kd)
+        self._apply_dahl(model)
+
+    def _cable_joints(self, model: newton.Model) -> np.ndarray:
+        """The rod joints among :attr:`joints`, template-indexed.
+
+        :attr:`joints` is the rod's whole span, which also holds the anchor
+        welds (``FIXED``); the stiffness rows and the Dahl rows belong to the
+        ``ROD`` joints alone.
+        """
+        if not len(self.joints):
+            return np.zeros(0, dtype=np.int64)
+        types = model.joint_type.numpy()
+        return np.asarray([int(j) for j in self.joints if int(types[j]) == int(newton.JointType.ROD)], dtype=np.int64)
+
+    def _apply_dahl(self, model: newton.Model) -> None:
+        """Author the cable joints' Dahl rows, in every world, when the spec asks for memory.
+
+        Here rather than in ``build`` because the attributes are per-joint
+        *model* arrays: the builder's custom-attribute defaults are what
+        ``finalize`` writes, and this runs on the finalized model -- the
+        replicated one in a wave -- in the window before the solver is
+        constructed. That window is the whole point: ``SolverVBD`` decides at
+        construction whether to run its Dahl kernels at all, from whether any
+        joint has both rows positive, and binds the arrays by pointer after
+        that. A rod built at ``dahl_eps_max=0`` writes nothing, so a scene with
+        no memory in it is the scene it always was.
+
+        The anchor welds are left at 0: they are ``FIXED`` joints and the
+        kernels skip them, but a row that reads 2.0 on a weld is a row somebody
+        will one day have to explain.
+        """
+        spec = self.spec
+        if float(spec.dahl_eps_max) <= 0.0:
+            return
+        vbd = getattr(model, "vbd", None)
+        eps_array = getattr(vbd, "dahl_eps_max", None)
+        tau_array = getattr(vbd, "dahl_tau", None)
+        if eps_array is None or tau_array is None:
+            raise RuntimeError(
+                f"rod {self.name!r}: dahl_eps_max={spec.dahl_eps_max} needs VBD's custom attributes on the model, "
+                "and this model has none; the rod is built on a backend that is not VBD"
+            )
+        joints = self._cable_joints(model)
+        if not len(joints):
+            return
+        worlds = self.worlds
+        if worlds is not None:
+            joints = np.asarray(
+                [worlds.joint(int(j), w) for w in range(self._num_worlds) for j in joints], dtype=np.int64
+            )
+        eps = eps_array.numpy()
+        tau = tau_array.numpy()
+        eps[joints] = float(spec.dahl_eps_max)
+        tau[joints] = float(spec.dahl_tau)
+        eps_array.assign(eps)
+        tau_array.assign(tau)
 
     # -------------------------------------------------------------- phase 3
     def contribute_hooks(self, hooks) -> None:
@@ -858,6 +944,7 @@ class EntityRod(Centerline, Entity):
         if self._rest_joint_q is None:
             return
         if world == 0:
+            self._release_pins(pipeline)
             self._straighten(pipeline)
         self._pose_anchor(pipeline, world=world)
 
@@ -926,24 +1013,24 @@ class EntityRod(Centerline, Entity):
         return 4.0 * _segment_mass(self.spec) * self.spec.segments * 9.81
 
     # --------------------------------------------------------------- tunables
-    def _drive_dofs(self) -> tuple[np.ndarray, np.ndarray]:
-        """The cable joints' dof rows, split ``(stretch+shear, bend+twist)``.
+    def _drive_dofs(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """The cable joints' dof rows, one array per slot: ``(stretch, shear, bend, twist)``.
 
-        ``add_rod`` builds each cable joint with four dofs in a fixed order --
-        stretch, shear, bend, twist -- and seeds shear from stretch and twist
-        from bend. Writing the pairs together keeps that isotropy under tuning.
+        ``add_rod`` builds each cable joint with four dofs in that fixed order
+        (``STRETCH=0, SHEAR=1, BEND=2, TWIST=3``). Four arrays rather than the
+        two pairs this used to return, so a slider moves one slot: the pairs
+        are equal only while the spec left ``shear_*``/``twist_*`` at ``None``.
         """
         starts = self.model.joint_qd_start.numpy()
-        stretch: list[int] = []
-        bend: list[int] = []
+        slots: tuple[list[int], list[int], list[int], list[int]] = ([], [], [], [])
         for j in (int(v) for v in self.joints):
             begin = int(starts[j])
             end = int(starts[j + 1]) if j + 1 < len(starts) else begin
             if end - begin < 4:
                 continue
-            stretch += [begin, begin + 1]
-            bend += [begin + 2, begin + 3]
-        return np.asarray(stretch, dtype=np.int64), np.asarray(bend, dtype=np.int64)
+            for slot, rows in enumerate(slots):
+                rows.append(begin + slot)
+        return tuple(np.asarray(rows, dtype=np.int64) for rows in slots)
 
     def tunables(self, pipeline=None):
         """The rod's stiffness, its contact material, and the latch -- live.
@@ -951,8 +1038,9 @@ class EntityRod(Centerline, Entity):
         What the studio's Parameters folder renders when the cable is
         selected. Three groups:
 
-        * **drive** -- bend and stretch stiffness/damping over the cable
-          joints' own dof rows. ``~``: the write is live but reaches the
+        * **drive** -- stretch, shear, bend and twist stiffness/damping over
+          the cable joints' own dof rows, a slot each, and the Dahl pair.
+          ``~``: the write is live but reaches the
           coupled solver's view through ``notify_model_changed``, so a
           captured graph drops and retakes.
         * **contact** -- the standard shape material over the rod's capsules.
@@ -966,9 +1054,10 @@ class EntityRod(Centerline, Entity):
             return ()
         out = []
 
-        stretch_dofs, bend_dofs = self._drive_dofs()
+        stretch_dofs, shear_dofs, bend_dofs, twist_dofs = self._drive_dofs()
         if len(bend_dofs):
             joints = tuple(int(j) for j in self.joints)
+            cable_joints = self._cable_joints(self.model)
 
             class _DriveWriter(ArrayWriter):
                 flags = 1 << 1
@@ -979,7 +1068,18 @@ class EntityRod(Centerline, Entity):
                     "bend_kd": ("joint_target_kd", bend_dofs),
                     "stretch_ke": ("joint_target_ke", stretch_dofs),
                     "stretch_kd": ("joint_target_kd", stretch_dofs),
+                    "shear_ke": ("joint_target_ke", shear_dofs),
+                    "shear_kd": ("joint_target_kd", shear_dofs),
+                    "twist_ke": ("joint_target_ke", twist_dofs),
+                    "twist_kd": ("joint_target_kd", twist_dofs),
+                    "dahl_eps_max": ("vbd.dahl_eps_max", cable_joints),
+                    "dahl_tau": ("vbd.dahl_tau", cable_joints),
                 }
+
+                LIVE_ROWS: ClassVar[frozenset[str]] = frozenset({"dahl_eps_max", "dahl_tau"})
+                """Rows VBD reads by pointer every substep: written, not notified
+                (``flags=0``) and not relanded -- there is no penalty copy of them.
+                Per *joint*, where the stiffness rows are per dof."""
 
                 def read(self) -> dict[str, float]:
                     return {name: self._read(attr, rows) for name, (attr, rows) in self.ROWS.items()}
@@ -988,6 +1088,8 @@ class EntityRod(Centerline, Entity):
                     row = self.ROWS.get(field_name)
                     if row is None:
                         return False
+                    if field_name in self.LIVE_ROWS:
+                        return self._write(row[0], row[1], float(value))
                     landed = self.landed(self._write(row[0], row[1], float(value)))
                     if landed:
                         self._reland_vbd_penalties()
@@ -1007,7 +1109,12 @@ class EntityRod(Centerline, Entity):
                     takes effect now), and the damping row follows. In place,
                     so a captured graph's pointers stay valid; if newton
                     renames these internals, this falls back to
-                    write-and-notify rather than raising.
+                    write-and-notify rather than raising -- which is where
+                    Newton 1.6 lands: it has no ``joint_penalty_k_max``, and its
+                    ``notify_model_changed(JOINT_DOF_PROPERTIES)`` reseeds the
+                    ROD slots' penalty, floor and damping itself
+                    (``_refresh_joint_material_params``), so the notify alone is
+                    the reland there.
                     """
                     program = getattr(self.pipeline, "program", None)
                     solvers = list(program.solvers().values()) if program is not None else []
@@ -1047,7 +1154,11 @@ class EntityRod(Centerline, Entity):
                     name="drive",
                     spec=RodMaterialSpec(**drive.read()),
                     write=drive,
-                    summary=f"Bend and stretch over {len(self.joints)} cable joints. Bend is why it feels stiff.",
+                    summary=(
+                        f"Stretch, shear, bend and twist over {len(cable_joints)} cable joints. Bend is why it "
+                        "feels stiff; twist is whether a roll reaches the far end. The plastic pair is live, and "
+                        "inert when built at 0."
+                    ),
                 )
             )
 
@@ -1090,7 +1201,7 @@ class EntityRod(Centerline, Entity):
     def hold(
         self, on: bool, state=None, *, arm: str = "right", slot: int = 0, at: int | None = None, world: int = 0
     ) -> int:
-        """The body-latch answer to :meth:`~robosimstudio.domains.rod.centerline.Centerline.hold`."""
+        """The body-latch answer to :meth:`~robosimstudio_materials.rod.centerline.Centerline.hold`."""
         return self.hold_segment(on, state, arm=arm, slot=slot, at=at, world=world)
 
     def hold_segment(
@@ -1147,6 +1258,110 @@ class EntityRod(Centerline, Entity):
         flags[row] = 1
         self._hold_flag.assign(flags)
         return seg
+
+    # ---------------------------------------------------------- a hand's hold
+    def pin(self, pipeline, *, segment: int = -1, on: bool = True, world: int = 0) -> int:
+        """Hold one capsule where it is now, kinematically, or let it go. Returns its body index.
+
+        A hand with a cable end in a hard latch: the capsule keeps the pose it
+        has when pinned, whatever the chain does, until :meth:`roll` or another
+        pin moves it. Its inverse mass and inertia go to zero and it is flagged
+        kinematic in the model and in every island
+        (:func:`robosimstudio.core.tuning.set_kinematic` says why both are
+        needed once a robot shares the scene). Let go, it gets its mass back
+        where it is, so a cable released mid-roll unwinds from there.
+        Pinning a pinned capsule re-reads its pose; releasing a free one does
+        nothing. A reset releases every pin. This is a kinematic hold and not
+        a grasp: the page's object handle is a clamped wrench, which cannot
+        roll a capsule (its torque is bounded by the capsule's own inertia,
+        3.2e-6 N*m on this chain's 6 mm capsules, against the 1e-3 to 1e-1
+        N*m a turn of twist takes; lifting the bound whips both cables into
+        loops -- ``probe4.py``, GPU 1).
+
+        Args:
+            segment: Which capsule, chain-indexed; ``-1`` is the free end of a
+                cable clamped at its start.
+            on: ``False`` releases it.
+            world: The fleet world, for a batched build.
+        """
+        from robosimstudio.core.tuning import notify, set_kinematic
+
+        body = self._global(int(self.bodies[int(segment)]), world)
+        model = self._fleet_model
+        pin = self._pins.get(body)
+        if not on:
+            if pin is None:
+                return body
+            inv_mass, inv_inertia = model.body_inv_mass.numpy(), model.body_inv_inertia.numpy()
+            inv_mass[body], inv_inertia[body] = pin["inv_mass"], pin["inv_inertia"]
+            model.body_inv_mass.assign(inv_mass)
+            model.body_inv_inertia.assign(inv_inertia)
+            set_kinematic(pipeline, [body], False, restore=pin["flags"])
+            notify(pipeline, int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES))
+            del self._pins[body]
+            return body
+        pose = np.asarray(pipeline.state_0.body_q.numpy()[body], dtype=np.float64).copy()
+        if pin is None:
+            inv_mass, inv_inertia = model.body_inv_mass.numpy(), model.body_inv_inertia.numpy()
+            pin = {
+                "segment": int(segment),
+                "world": int(world),
+                "inv_mass": float(inv_mass[body]),
+                "inv_inertia": inv_inertia[body].copy(),
+            }
+            inv_mass[body], inv_inertia[body] = 0.0, 0.0
+            model.body_inv_mass.assign(inv_mass)
+            model.body_inv_inertia.assign(inv_inertia)
+            pin["flags"] = set_kinematic(pipeline, [body], True)
+            notify(pipeline, int(newton.ModelFlags.BODY_INERTIAL_PROPERTIES))
+            self._pins[body] = pin
+        pin["pose"], pin["angle"] = pose, 0.0
+        self._write_pin(pipeline, body)
+        return body
+
+    def roll(self, pipeline, angle: float, *, segment: int = -1, max_step: float = ROLL_STEP, world: int = 0) -> float:
+        """Turn a pinned capsule about its own axis to ``angle`` from where it was pinned, and say where it got to.
+
+        Right-handed about the capsule's axis (its local ``+Z``, pointing along
+        the chain), in radians, absolute since the pin: calling with the same
+        angle every step holds it there, and ``0.0`` rolls it back. The turn
+        is rate-limited to ``max_step`` per call because the capsule is
+        kinematic: a jump of a full turn is the same frame as no turn at all
+        to the joint and to :func:`~robosimstudio_materials.rod.measures.twist_turns`,
+        and a jump of half a turn is a shock. Pins the capsule first when it
+        is free. Returns the angle it now stands at, which lags the request
+        while it is still turning.
+        """
+        from robosimstudio.core.math import quat_from_axis_angle, quat_multiply, quat_to_mat
+
+        body = self._global(int(self.bodies[int(segment)]), world)
+        if body not in self._pins:
+            self.pin(pipeline, segment=segment, world=world)
+        pin = self._pins[body]
+        step = float(max_step) if max_step and max_step > 0 else float("inf")
+        pin["angle"] += float(np.clip(float(angle) - pin["angle"], -step, step))
+        rest = pin["pose"]
+        axis = quat_to_mat(rest[3:7])[:, 2]
+        self._write_pin(pipeline, body, quat_multiply(quat_from_axis_angle(axis, pin["angle"]), rest[3:7]))
+        return float(pin["angle"])
+
+    def _write_pin(self, pipeline, body: int, quat=None) -> None:
+        """Put a pinned capsule's pose into both state buffers, at rest: what the solver reads next substep."""
+        pose = self._pins[body]["pose"].copy()
+        if quat is not None:
+            pose[3:7] = quat
+        for state in (pipeline.state_0, pipeline.state_1):
+            q = state.body_q.numpy()
+            q[body] = pose
+            state.body_q.assign(q)
+            qd = state.body_qd.numpy()
+            qd[body] = 0.0
+            state.body_qd.assign(qd)
+
+    def _release_pins(self, pipeline) -> None:
+        """Every pin let go, with the mass given back: a reset's rod is nobody's."""
+        for pin in list(self._pins.values()):
+            self.pin(pipeline, segment=pin["segment"], world=pin["world"], on=False)
 
     # ---------------------------------------------------------------- runtime
     def positions(self, body_q: np.ndarray) -> np.ndarray:

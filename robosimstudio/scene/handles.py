@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 import newton
 import numpy as np
@@ -257,6 +258,31 @@ class DeformableHandle:
     """For a centerline -- a rope whose particles are its nodes and which owns
     no triangle -- the radius a renderer sweeps a tube of. 0 for anything with a
     surface of its own."""
+    point_radius: float = 0.0
+    """For a particle body -- a heap of rice, a pool, a lump of dough: particles
+    with no triangle and no order -- the radius a renderer draws each particle
+    at, the particles' radius as built. 0 for anything drawn from its
+    triangles or swept as a tube; a renderer that meets a handle with no
+    triangles, no tube and a positive ``point_radius`` draws points."""
+    surface: Any = None
+    """For a particle body, a callable a renderer *may* call to get a surface
+    mesh over the particles in their current positions -- ``surface(positions)
+    -> (vertices, triangles)`` or ``(vertices, triangles, normals)``, with
+    ``positions`` the handle's particles' ``[n, 3]`` world coordinates -- or
+    ``None`` when the body offers no surfacing. The arrays may be warp or numpy
+    and the triangles flat or ``[k, 3]``; ``None`` for the vertices means
+    nothing to draw this frame
+    (:func:`~robosimstudio.core.render.particles.surface_mesh` reads all of
+    those). The mesh's vertex count varies from frame to frame, which is why it
+    is a callable here rather than a fixed ``triangles`` array: the path tracer
+    re-logs the varying mesh, and the studio page re-adds its mesh node when the
+    counts change and rewrites the vertices in place when they do not. Both
+    prefer it to the points when it is set. It must be a function of
+    ``positions`` and nothing else -- never of a solver's own state -- so that
+    an offline replay of a recorded ``particle_q`` regrows the same surface;
+    :class:`~robosimstudio.core.render.particles.ParticleSurfacer` is one, and the
+    particle kinds install one when their spec says ``render="surface"``
+    (``robosimstudio_materials.mpm.EntityParticleBody.surface_mesh``)."""
 
 
 @dataclass

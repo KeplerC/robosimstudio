@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -87,7 +88,7 @@ class CalibrationSpec:
         return low <= self.bending_length_cm <= high
 
 
-MATERIAL_KINDS: Registry[type] = Registry("material kind", ("robosimstudio.domains",))
+MATERIAL_KINDS: Registry[type] = Registry("material kind", DOMAIN_PACKAGES)
 """What kinds of matter a material may be, and the spec type each is.
 
 **Open, and it was closed at one.** This registry is called ``MATERIALS`` and
@@ -170,7 +171,7 @@ class MaterialRecord:
         )
 
 
-MATERIALS: Registry[MaterialRecord] = Registry("material", ("robosimstudio.domains",))
+MATERIALS: Registry[MaterialRecord] = Registry("material", DOMAIN_PACKAGES)
 """Every registered material, found by scanning the domain bundles.
 
 The values used to sit in this module and register themselves on import. They

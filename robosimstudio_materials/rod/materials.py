@@ -2,7 +2,7 @@
 """A rod's matter, in the registry that holds materials.
 
 Registers the rod material kind
-(:class:`~robosimstudio.domains.rod.spec.RodMaterialSpec`) and one record: the
+(:class:`~robosimstudio_materials.rod.spec.RodMaterialSpec`) and one record: the
 reference cable's drive gains as ``RodSpec`` defaults them. The record is a
 read-back of the built model, so a rod has no ``material`` field (see
 ``RodMaterialSpec``).

@@ -310,6 +310,14 @@ GENERIC = ArrangementSpec(
         # steps double the safe approach speed and stay inside the engine's
         # own 10-25 ms comfort band.
         ("soft", backend("superdex", substeps=2)),
+        # The three particle materials share one implicit MPM island: the same
+        # BackendSpec three times is one island by the composer's equality
+        # rule, and the proxy coupler couples at most two Newton islands.
+        # Nothing is stated beyond the alias, so the registered defaults --
+        # the Phase 0 probes' -- are what a heap, a pool and a lump get.
+        ("granular", backend("mpm")),
+        ("liquid", backend("mpm")),
+        ("dough", backend("mpm")),
         ("*", backend("vbd", rigid_body_contact_buffer_size=256)),
     ),
     coupling=coupler("proxy"),
@@ -360,6 +368,16 @@ content, not a hypothetical -- so the default buys margin at the cost of speed.
 A rigid-only scene does not need it and should say so::
 
     scene = rss.Scene(cell="bench_075", physics=replace(GENERIC, substeps=4))
+
+**The particle materials step at their own rate inside the sixteen.** The
+implicit MPM island (``granular``, ``liquid``, ``dough``) is stepped in place
+and takes the substep loop's sixteen calls as one step of 1/60 s
+(``step_hz=60``, the ``mpm`` backend's registered default): a 28,812-particle
+rice bed beside the YAM on ``bench_075`` under this table costs 15.6 ms per
+control step so, 25.9 ms at 120 Hz and 163 ms stepped at every call,
+graph-captured on an RTX PRO 6000 (the robot alone is 4.2 ms). The rate has
+to fit a control step a whole number of times, which the composer checks;
+``step_hz`` of 60, 120, 240, 480 and 960 fit this table.
 
 **``proxy`` coupling pushes a deformable and does not pinch one.** A rod being
 dragged needs two-way coupling and gets it here. **A cloth grasp does not work

@@ -159,9 +159,8 @@ class TestTheOwnImplementations(unittest.TestCase):
     """The two files that register a second implementation of a shipped kind."""
 
     def test_the_sheet_is_built_by_the_files_own_class(self) -> None:
-        from robosimstudio.domains.cloth import EntityCloth
-
         import robosimstudio as rss
+        from robosimstudio_materials.cloth import EntityCloth
 
         module, sim, _, text = _one_scene(self, "01_cloth/04_your_own_cloth.py")
         sheet = sim["sheet"]
@@ -180,9 +179,8 @@ class TestTheOwnImplementations(unittest.TestCase):
         sim.close()
 
     def test_the_block_is_built_by_the_files_own_class(self) -> None:
-        from robosimstudio.domains.soft import EntitySoft
-
         import robosimstudio as rss
+        from robosimstudio_materials.soft import EntitySoft
 
         module, sim, _, text = _one_scene(self, "02_soft/02_your_own_soft.py")
         block = sim["block"]

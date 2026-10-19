@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 
 __all__ = [
     "ATOMS",
@@ -389,7 +390,7 @@ def _calibration_problems(where: str, block: AtomCalibration, *, strict: bool) -
     return out
 
 
-ATOMS: Registry[AtomSpec] = Registry("atom", ("robosimstudio.domains",))
+ATOMS: Registry[AtomSpec] = Registry("atom", DOMAIN_PACKAGES)
 """Every registered atom. Loads no packages -- atoms register from the modules
 that implement them, which the asset and semantics layers import."""
 

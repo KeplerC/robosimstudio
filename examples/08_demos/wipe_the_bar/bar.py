@@ -15,7 +15,6 @@ from dataclasses import dataclass, replace
 import newton
 import numpy as np
 import warp as wp
-from robosimstudio.domains.soft import FIRM_FOAM
 
 import robosimstudio as rss
 from robosimstudio.core.math import quat_to_mat
@@ -25,6 +24,7 @@ from robosimstudio.domains.capabilities import host_bridge
 from robosimstudio.domains.rigid import EntityRigid
 from robosimstudio.scene.entity import label_index
 from robosimstudio.specs import ActuationSpec
+from robosimstudio_materials.soft import FIRM_FOAM
 
 # =============================================================================
 # 1. The layout

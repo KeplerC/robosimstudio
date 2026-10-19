@@ -3,7 +3,7 @@
 
 A rod is one entity and many bodies, and the two facts are carried by one
 handle: ``body`` is the first segment, for the pose readout and the ``Attach
-handle`` dropdown, and ``bodies`` is the whole run. ``examples/03_rope/rod/entity.py``'s
+handle`` dropdown, and ``bodies`` is the whole run. ``robosimstudio_materials/rod/entity.py``'s
 ``handle()`` says so in as many words -- *"``bodies`` is the run, which is what
 lets a click land on any segment"*.
 

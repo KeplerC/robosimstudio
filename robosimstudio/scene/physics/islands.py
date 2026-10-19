@@ -9,13 +9,14 @@ mechanism by which a towel and a rope end up in one VBD: the arrangement names
 ``backend("vbd", ...)`` for ``"cloth"`` and ``"rod"`` with the same parameters,
 and nothing else has to be said.
 
-Statics own no dynamics. Their **shapes** are given to the deformable island
-when there is one, so a rod can rest on the table it was laid on (an entry that
-lists shapes sees only those; one that lists none sees its bodies' shapes plus
-every world-fixed shape -- Newton's rule, and what lets the robot keep seeing
-the table through the coupled solver's filter). A welded static's bodies and
-joints go to the first island that can carry bodies, so no joint is left
-unowned -- an unowned joint is disabled in every view.
+Statics own no dynamics. Their **shapes** are given to every deformable island
+there is, so a rod can rest on the table it was laid on and a heap beside it
+on the same table (an entry that lists shapes sees only those; one that lists
+none sees its bodies' shapes plus every world-fixed shape -- Newton's rule, and
+what lets the robot keep seeing the table through the coupled solver's
+filter). A welded static's bodies and joints go to the first island that can
+carry bodies, so no joint is left unowned -- an unowned joint is disabled in
+every view.
 """
 
 from __future__ import annotations
@@ -234,11 +235,14 @@ def partition(
             np.concatenate([n.particles for n in island.nodes] or [np.zeros(0, np.int32)])
         ).astype(np.int32)
 
-    # Statics: shapes to the first deformable island; bodies/joints to the first
+    # Statics: shapes to every deformable island; bodies/joints to the first
     # body-carrying island. A host-engine island is skipped for the shapes even
     # though it is deformable -- its statics are mirrored into the foreign scene
     # from its own recipe, and a VBD island beside it still needs the table.
-    deformable = next((i for i in islands if i.is_deformable and not i.is_host_engine), None)
+    # *Every* deformable island rather than the first: an entry that lists
+    # shapes sees only those, so a second deformable island (a heap on its own
+    # solver beside a towel on VBD) given none would rest on nothing.
+    deformables = [i for i in islands if i.is_deformable and not i.is_host_engine]
     body_carrier = next((i for i in islands if i.is_robot), None) or next(
         (i for i in islands if "bodies" in (get_backend(i.backend.solver).supports or ("bodies",))), islands[0]
     )
@@ -248,10 +252,11 @@ def partition(
     if statics:
         body_carrier.bodies = np.unique(np.concatenate([body_carrier.bodies, *static_bodies])).astype(np.int32)
         body_carrier.joints = np.unique(np.concatenate([body_carrier.joints, *static_joints])).astype(np.int32)
-    if deformable is not None and len(islands) > 1:
-        own = [n.shapes for n in deformable.nodes] or [np.zeros(0, np.int32)]
-        deformable.extra_shapes = np.unique(np.concatenate(static_shapes)).astype(np.int32)
-        deformable.shapes = np.unique(np.concatenate([*own, deformable.extra_shapes])).astype(np.int32)
+    if len(islands) > 1:
+        for deformable in deformables:
+            own = [n.shapes for n in deformable.nodes] or [np.zeros(0, np.int32)]
+            deformable.extra_shapes = np.unique(np.concatenate(static_shapes)).astype(np.int32)
+            deformable.shapes = np.unique(np.concatenate([*own, deformable.extra_shapes])).astype(np.int32)
 
     if worlds is not None and worlds.num_worlds > 1:
         for island in islands:
@@ -266,7 +271,7 @@ def partition(
                 island.extra_shapes = expand_shapes(
                     island.extra_shapes, worlds.shapes_per_world, worlds.num_worlds, model.shape_count
                 )
-    elif deformable is not None and len(islands) > 1:
+    elif deformables and len(islands) > 1:
         # World-fixed shapes the compiler adds after every entity -- the ground
         # plane -- sit past every entity's range and must be visible to the rod.
         on_world = (
@@ -274,6 +279,7 @@ def partition(
             if model.shape_count
             else np.zeros(0, np.int32)
         )
-        deformable.shapes = np.unique(np.concatenate([deformable.shapes, on_world])).astype(np.int32)
-        deformable.extra_shapes = np.unique(np.concatenate([deformable.extra_shapes, on_world])).astype(np.int32)
+        for deformable in deformables:
+            deformable.shapes = np.unique(np.concatenate([deformable.shapes, on_world])).astype(np.int32)
+            deformable.extra_shapes = np.unique(np.concatenate([deformable.extra_shapes, on_world])).astype(np.int32)
     return islands

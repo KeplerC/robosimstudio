@@ -36,7 +36,6 @@ from typing import Any
 import newton
 import numpy as np
 import warp as wp
-from robosimstudio.domains.cloth import ClothSpec
 
 from robosimstudio.scene import BuildRequest, compile_scene
 from robosimstudio.scene.entity import Entity
@@ -44,6 +43,7 @@ from robosimstudio.scene.physics.couplers import CouplerBuild, build_proxy, regi
 from robosimstudio.scene.registry import register_entity
 from robosimstudio.specs import CollisionSpec, SimRequirements, backend, contacts_with, coupler
 from robosimstudio.specs.physics import ArrangementSpec, register_coupler, register_domain
+from robosimstudio_materials.cloth import ClothSpec
 
 TIER = "medium"
 """Builds and steps a real scene on a GPU."""

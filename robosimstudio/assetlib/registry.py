@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 
 from .record import AssetRecord
 
@@ -152,7 +153,7 @@ def _discover() -> None:
             getattr(importlib.import_module(module), function)()
 
 
-ASSETS: Registry[AssetRecord] = Registry("asset", ("robosimstudio.domains",), same=_same_record)
+ASSETS: Registry[AssetRecord] = Registry("asset", DOMAIN_PACKAGES, same=_same_record)
 ASSETS.add_discover(_discover)
 """Every registered asset.
 

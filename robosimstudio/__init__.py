@@ -127,14 +127,10 @@ _EXPORTS: dict[str, str] = {
     "AssetSpec": "robosimstudio.specs",
     "CameraSpec": "robosimstudio.specs",
     "CellSpec": "robosimstudio.specs",
-    "ClothMaterialSpec": "robosimstudio.domains.cloth",
-    "ClothSpec": "robosimstudio.domains.cloth",
     "EmbodimentSpec": "robosimstudio.specs",
     "ObjectSpec": "robosimstudio.specs",
     "RegionSpec": "robosimstudio.specs",
     "ShapeSpec": "robosimstudio.specs.asset",
-    "SoftMaterialSpec": "robosimstudio.domains.soft",
-    "SoftSpec": "robosimstudio.domains.soft",
     "StaticSpec": "robosimstudio.specs",
     # Constructors, each beside the domain it describes.
     "body": "robosimstudio.domains.rigid",
@@ -144,9 +140,6 @@ _EXPORTS: dict[str, str] = {
     "sphere": "robosimstudio.domains.rigid",
     "post": "robosimstudio.domains.static",
     "slab": "robosimstudio.domains.static",
-    "sheet": "robosimstudio.domains.cloth",
-    "sponge": "robosimstudio.domains.soft",
-    "materials": "robosimstudio.domains.cloth",
 }
 """Flat name -> the module that defines it. A table rather than a wildcard.
 
@@ -154,7 +147,10 @@ Wildcards were the alternative and they are worse in the two ways that matter
 here: the set of flat names becomes whatever four packages happen to export
 today, and a typo resolves to something plausible from the wrong layer instead of
 raising. This is also the list a reader scans to answer "what is the core tier",
-which is a question the tier split exists to have an answer to.
+which is a question the tier split exists to have an answer to. The deformable
+kinds' names -- ``sheet``, ``sponge``, ``rod``, ``heap``, ``liquid``, ``dough``
+and their specs -- are not here but in :data:`_PACKS`: they come from
+``robosimstudio_materials``, which a tree may leave out.
 
 There are no aliases: a physics arrangement is ``rss.ArrangementSpec(control_hz=60,
 substeps=16)``, under the one name its module gives it (see :data:`_ALIASES`).
@@ -167,29 +163,53 @@ library before the snippet runs is a reader the snippet failed.
 """
 
 _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "robosimstudio.domains.rod": (
+    "robosimstudio_materials.cloth": (
+        "cloth (the `cloth` kind: sheets, towels, garments)",
+        ("ClothMaterialSpec", "ClothSpec", "materials", "sheet"),
+    ),
+    "robosimstudio_materials.soft": (
+        "soft bodies (the `soft` kind: sponges, tetrahedral meshes)",
+        ("SoftMaterialSpec", "SoftSpec", "sponge"),
+    ),
+    "robosimstudio_materials.rod": (
         "the rope (the `rod` kind: cables, ropes, cords)",
         ("RodMaterialSpec", "RodSpec", "rod"),
     ),
+    "robosimstudio_materials.granular": (
+        "grains (the `granular` kind: rice, sand, beans, flour on the implicit MPM)",
+        ("GRANULAR_60HZ", "ParticleBodySpec", "ParticleMaterialSpec", "heap"),
+    ),
+    "robosimstudio_materials.liquid": (
+        "liquids (the `liquid` kind: water, honey, ketchup on the implicit MPM)",
+        ("LIQUID_120HZ", "liquid"),
+    ),
+    "robosimstudio_materials.dough": (
+        "plastic solids (the `dough` kind: dough, plasticine, clay, butter on the implicit MPM)",
+        ("DOUGH_60HZ", "dough"),
+    ),
+    "robosimstudio_materials.paper": (
+        "paper (the `paper` kind: sheets and card whose folds stay)",
+        ("PaperMaterialSpec", "PaperSpec", "paper", "papers"),
+    ),
 }
-"""Domain pack -> what it is, in words, and the flat names it provides.
+"""Kind -> what it is, in words, and the flat names it provides.
 
-A kind of thing whose pack is **a folder a tree may leave out**. Its pack is a
-directory on a domain root (:mod:`robosimstudio.roots`), reached as
-``robosimstudio.domains.<name>`` when it is there; a tree may leave the directory
-out, and then the pack's names are not part of the flat namespace at all --
-``hasattr(rss, "rod")`` is false, ``dir(rss)`` does not list it, and asking for
-one raises an ``AttributeError`` that says the kind is not installed rather than
-a ``ModuleNotFoundError`` from three layers down.
+The kinds of thing in **a package a tree may leave out**: each is one module of
+``robosimstudio_materials``, the sibling package the library never imports. Where
+it is installed these names resolve like any in :data:`_EXPORTS`; where it is
+not, they are not part of the flat namespace at all -- ``hasattr(rss, "rod")``
+is false, ``dir(rss)`` does not list it, and asking for one raises an
+``AttributeError`` that says the kind is not installed rather than a
+``ModuleNotFoundError`` from three layers down.
 
 Kept apart from :data:`_EXPORTS` for that reason: that table is the names every
 tree has, and every test that walks it expects each to resolve. The words are
-here, in the library, because a tree without the pack is exactly the one that
-has to be able to say what is missing.
+here, in the library, because a tree without the package is exactly the one
+that has to be able to say what is missing.
 """
 
 _PACK_EXPORTS: dict[str, str] = {name: pack for pack, (_, names) in _PACKS.items() for name in names}
-"""Flat name -> the domain pack that provides it, when the pack is installed."""
+"""Flat name -> the ``robosimstudio_materials`` module that provides it, when that package is installed."""
 
 _ALIASES: dict[str, str] = {}
 """Flat name -> the name it resolves to in its module, where the two differ.
@@ -213,8 +233,8 @@ def __getattr__(name: str):
             # Built from the table alone, and that is load-bearing: the import system asks for
             # ``robosimstudio.<submodule>`` as an *attribute* before it imports one (``from
             # robosimstudio import roots``), so this branch runs on ordinary imports and must
-            # not touch the import system itself -- asking which packs are installed here
-            # would import ``robosimstudio.domains`` from inside every such probe.
+            # not touch the import system itself -- asking which kinds are installed here
+            # would probe ``robosimstudio_materials`` from inside every such import.
             raise AttributeError(
                 f"module 'robosimstudio' has no attribute {name!r}. The flat namespace is the core tier: "
                 f"{sorted(_EXPORTS)}. A benchmark name (Env, get_task) is one layer up: "
@@ -227,7 +247,8 @@ def __getattr__(name: str):
                 raise  # the pack is there and something *it* needs is not: that is a real error
             raise AttributeError(
                 f"module 'robosimstudio' has no attribute {name!r}: {_PACKS[pack][0]} is not installed here. "
-                f"Its pack ({pack}) is on no domain root, so neither is rss.{name}."
+                f"Its module ({pack}) is not importable: the robosimstudio_materials package is not in this tree, "
+                f"or ships without that kind. So neither is rss.{name}."
             ) from None
     else:
         value = getattr(importlib.import_module(module), _ALIASES.get(name, name))
@@ -236,13 +257,13 @@ def __getattr__(name: str):
 
 
 def _is_absent(pack: str, error: ModuleNotFoundError) -> bool:
-    """Whether ``error`` says the pack itself is missing, rather than something it imports."""
+    """Whether ``error`` says the kind's module (or its package) is missing, rather than something it imports."""
     missing = error.name or ""
     return missing == pack or pack.startswith(f"{missing}.")
 
 
 def _installed(pack: str) -> bool:
-    """Whether a domain pack is on a root here. Asked of the import system, without importing the pack."""
+    """Whether a kind's module is importable here. Asked of the import system, without importing it."""
     import importlib.util
 
     try:
@@ -252,7 +273,7 @@ def _installed(pack: str) -> bool:
 
 
 def _flat_names() -> list[str]:
-    """The flat namespace as it stands in this checkout: the core names, and each installed pack's."""
+    """The flat namespace as it stands in this checkout: the core names, and each installed kind's."""
     packs = [name for name, pack in _PACK_EXPORTS.items() if _installed(pack)]
     return sorted([*_EXPORTS, *packs])
 

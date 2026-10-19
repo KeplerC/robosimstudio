@@ -12,9 +12,9 @@ contact lets the pads hold the edge by friction.
 import math
 
 import numpy as np
-from robosimstudio.domains.cloth import selector_beyond, selector_extreme
 
 import robosimstudio as rss
+from robosimstudio_materials.cloth import selector_beyond, selector_extreme
 from robosimstudio_studio.routine import RoutineError, grip, hand, reach, wait
 
 # -- the towel: the cloth_fold suite's, in the bench's work-surface frame ----------------------
@@ -156,9 +156,8 @@ def routine(sim, session):
 
 def fold_measures(sim) -> dict:
     """The cloth_fold suite's verdict on this towel now: extent, score and settle speed."""
-    from robosimstudio.domains.cloth import contact_thickness
-
     from robosimstudio.assetlib.vocabulary.measures import cloth_fold, cloth_fold_error, mirror_pairs
+    from robosimstudio_materials.cloth import contact_thickness
 
     entity = sim["towel"].entity
     probe = entity.probe

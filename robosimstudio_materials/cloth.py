@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Cloth in one file: a deformable sheet, from its spec to its registration.
 
-This file is what ``rss.sheet`` builds, imported as ``robosimstudio.domains.cloth``.
-Run ``00_towel.py`` beside it first. Copy this file to write a kind of your own.
+This file is what ``rss.sheet`` builds, imported as ``robosimstudio_materials.cloth``.
+Run ``examples/01_cloth/00_towel.py`` first. Copy this file to write a kind of your own.
 """
 
 from __future__ import annotations
@@ -88,9 +88,10 @@ __all__ = [
 # =============================================================================
 # 1. What this file is, and how it is found
 # =============================================================================
-# Importing this file registers cloth. The library finds it on the search path of
-# ``robosimstudio.domains``: import it under that name, never by file path, or it registers twice.
-# A folder of your own named in ``ROBOSIMSTUDIO_DOMAIN_ROOTS`` is found the same way.
+# Importing this file registers cloth. The library finds it by scanning this package,
+# ``robosimstudio_materials``: import it under that name, never by file path, or it registers twice.
+# A folder of your own named in ``ROBOSIMSTUDIO_DOMAIN_ROOTS`` is found the same way, under
+# ``robosimstudio.domains``.
 
 
 # =============================================================================
@@ -978,10 +979,10 @@ def sheet(
         cells: Quads along each axis. Cost is quadratic: 30x30 is 961 particles, 100x100 is 10,201.
         at: Where the sheet's origin **corner** goes, in the cell's work-surface frame: ``z = 0.25``
             is 250 mm above the bench. The grid spans ``0`` to ``size``, so subtract half to centre it.
-        material: A :class:`~robosimstudio.domains.cloth.ClothMaterialSpec` such as one of
+        material: A :class:`~robosimstudio_materials.cloth.ClothMaterialSpec` such as one of
             ``rss.materials``. ``None`` is the spec's default, a plain cloth that was not measured.
-        **kwargs: Any other :class:`~robosimstudio.domains.cloth.ClothSpec` field. ``held_by``
-            makes it a :class:`~robosimstudio.domains.cloth.HeldClothSpec`: a sheet whose ``held``
+        **kwargs: Any other :class:`~robosimstudio_materials.cloth.ClothSpec` field. ``held_by``
+            makes it a :class:`~robosimstudio_materials.cloth.HeldClothSpec`: a sheet whose ``held``
             particle set rides that body from the start.
     """
     extra = {} if material is None else {"material": material}
@@ -1380,6 +1381,7 @@ REFERENCE_FABRICS = (
     ReferenceFabric("cotton poplin", 0.3, 120.0, (1.7, 2.2)),
     ReferenceFabric("terry bath towel", 5.0, 500.0, (2.0, 3.0)),
     ReferenceFabric("denim", 1.0, 380.0, (2.5, 3.5)),
+    ReferenceFabric("copy paper (80 gsm)", 0.1, 80.0, (5.0, 7.0)),
 )
 """Real fabrics to calibrate against. Bending length does not follow thickness: a jersey tee is
 seven times thicker than tissue and droops the same, and a bath towel is ten times thicker than

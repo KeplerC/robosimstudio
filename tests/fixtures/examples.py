@@ -55,6 +55,16 @@ NUMBERED = (
     "04_extending/01_new_kind.py",
     "03_rope/00_cable.py",
     "03_rope/01_between_posts.py",
+    "03_rope/03_cable_memory.py",
+    "03_rope/04_twist.py",
+    "10_granular/00_sweep_rice.py",
+    "10_granular/01_sweep_rice_scored.py",
+    "11_liquid/00_pour_honey.py",
+    "11_liquid/01_wipe_spill.py",
+    "12_dough/00_roll_dough.py",
+    "12_dough/01_press_dough.py",
+    "13_paper/00_fold_paper.py",
+    "13_paper/01_box_flap.py",
 )
 """The numbered scripts that run on a base checkout: no flags, every parameter a
 local, two arms, one call to the studio. ``02_engines`` is here because its one

@@ -46,6 +46,7 @@ from robosimstudio.core.lifecycle import TaskSchedule, steps_of
 from robosimstudio.core.pipeline import ScenePipeline
 from robosimstudio.core.render.finish import Finish
 from robosimstudio.core.render.palette import FLOOR
+from robosimstudio.core.streams import quiet_gc
 from robosimstudio.core.worlds import WorldMap
 from robosimstudio.scene.physics.world import REPLICATED_HOSTS
 from robosimstudio.specs import IDENTITY, Binding, CellSpec, EmbodimentSpec, Episode, Xform, replace
@@ -64,7 +65,7 @@ from .request import SceneRequest
 Composer = Callable[..., PhysicsProgram]
 """Builds the physics for a finalized model. See :func:`compile_scene`."""
 
-__all__ = ["CannotReplicate", "CompiledScene", "compile_scene", "resolve_regions"]
+__all__ = ["CannotReplicate", "CompiledScene", "compile_scene", "declared_domains", "resolve_regions"]
 
 
 class CannotReplicate(NotImplementedError):
@@ -225,6 +226,37 @@ def _make_entity(spec, arrangement=None, *, gripper_span: float = 0.08) -> Entit
     return cls(spec, **({"gripper_span": gripper_span} if takes_span else {}))
 
 
+def declared_domains(request: SceneRequest) -> set[str]:
+    """The domains the request's specs declare, by the rule ``resolve_entity_class`` reads them.
+
+    The spec's ``sim.domain`` when it carries one, else the registered entity
+    class's; a name nothing has registered is left to ``_make_entity``, whose
+    message names the kind. The robot is ``articulated`` whatever its spec
+    says, and ``"*"`` stands for whatever a domain falls through to.
+    """
+    from robosimstudio.specs.physics import SimRequirements
+
+    from .registry import ENTITIES
+
+    out: set[str] = {"*"}
+    if request.embodiment:
+        out.add("articulated")
+    for spec in request.build_order():
+        declared = getattr(spec, "sim", None)
+        if isinstance(declared, SimRequirements):
+            out.add(declared.domain)
+            continue
+        name = getattr(spec, "entity", "")
+        try:
+            cls = ENTITIES.get(name) if name else None
+        except KeyError:
+            cls = None
+        domain = getattr(cls, "domain", "")
+        if domain:
+            out.add(domain)
+    return out
+
+
 def compile_scene(
     request: SceneRequest,
     episode: Episode | None = None,
@@ -284,7 +316,7 @@ def compile_scene(
         # varies nothing and should not have to say so.
         episode = Episode(episode_id=0, seed=0)
 
-    with wp.ScopedDevice(device) if device else _null_scope():
+    with quiet_gc(), wp.ScopedDevice(device) if device else _null_scope():
         if num_worlds == 1:
             return _compile(
                 request,
@@ -487,7 +519,7 @@ def _build_base(
     # before any entity builds -- MuJoCo's gravcomp, VBD's per-joint flags. Done
     # here, from the arrangement, so no entity has to import a solver to know
     # which attributes its builder calls will be allowed to keep.
-    register_custom_attributes(builder, arrangement)
+    register_custom_attributes(builder, arrangement, domains=declared_domains(request))
 
     entities: list[Entity] = []
     embodiment: Entity | None = None

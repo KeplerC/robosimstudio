@@ -139,7 +139,7 @@ class TestATetMeshFromAFile(unittest.TestCase):
         self.assertEqual((particles, tets), (8, 5))
 
     def test_a_file_with_no_tetrahedra_is_refused_by_name(self) -> None:
-        from robosimstudio.domains.soft import read_tets
+        from robosimstudio_materials.soft import read_tets
 
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "flat.npz"

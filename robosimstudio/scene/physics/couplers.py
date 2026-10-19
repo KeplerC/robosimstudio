@@ -23,7 +23,7 @@ import numpy as np
 import warp as wp
 
 from robosimstudio.registry import Registry, same_source
-from robosimstudio.specs.physics import ArrangementSpec, CollisionSpec, CouplerSpec
+from robosimstudio.specs.physics import ArrangementSpec, CollisionSpec, CouplerSpec, get_backend
 
 from .backends import build_solver
 from .errors import CompositionError
@@ -77,7 +77,14 @@ class CouplerBuild:
     collision: CollisionSpec
 
     def entries(self, entry_cls) -> list:
-        """One ``SolverCoupled.Entry`` per island."""
+        """One ``SolverCoupled.Entry`` per island.
+
+        ``in_place`` is the backend's registered
+        :attr:`~robosimstudio.specs.registries.BackendInfo.steps_in_place`: an
+        entry stepped in place keeps one state and no scratch copy, which is
+        the contract Newton's implicit MPM is written to -- its particle
+        history lives on the state and is carried forward rather than copied.
+        """
         out = []
         for island in self.islands:
             out.append(
@@ -93,6 +100,7 @@ class CouplerBuild:
                     particles=[int(p) for p in island.particles],
                     shapes=[int(s) for s in island.shapes],
                     substeps=int(island.backend.substeps),
+                    in_place=bool(get_backend(island.backend.solver).steps_in_place),
                 )
             )
         return out
@@ -154,6 +162,12 @@ def _pipeline_factory(ctx: CouplerBuild, pairs: np.ndarray | None, *, particles:
     return make
 
 
+def _null_pipeline(view) -> None:
+    """No channel pipeline: the destination detects its own contacts."""
+    del view
+    return None
+
+
 def build_proxy(ctx: CouplerBuild) -> Any:
     from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy
 
@@ -177,6 +191,16 @@ def build_proxy(ctx: CouplerBuild) -> Any:
         scale = mass_scale if channel.coupling == "two_way" else one_way_scale
         destination = by_name.get(channel.destination)
         particles = bool(destination is not None and destination.particles.size)
+        # A destination that detects its own contacts -- the MPM, whose
+        # colliders are its view's shapes rasterised onto its grid -- gets no
+        # pipeline of its own: ``None`` from the factory keeps Newton's default
+        # path, and the proxy poses still reach it through the view. Built one
+        # anyway, Newton's pipeline enumerates a soft pair for every particle
+        # against every proxied shape and detects contacts nothing reads.
+        if destination is not None and destination.uses_native_contacts():
+            pipeline = _null_pipeline
+        else:
+            pipeline = _pipeline_factory(ctx, channel.pairs, particles=particles)
         proxies.append(
             SolverCoupledProxy.Proxy(
                 source=channel.source,
@@ -187,7 +211,7 @@ def build_proxy(ctx: CouplerBuild) -> Any:
                 mode=mode,
                 proxy_relaxation=relaxation,
                 proxy_relaxation_mode=relaxation_mode,
-                collision_pipeline=_pipeline_factory(ctx, channel.pairs, particles=particles),
+                collision_pipeline=pipeline,
                 collide_interval=interval,
             )
         )

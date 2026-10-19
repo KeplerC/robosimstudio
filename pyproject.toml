@@ -125,35 +125,32 @@ allow-direct-references = true
 [tool.hatch.version]
 path = "robosimstudio/_version.py"
 
-# Five packages, one distribution: the library, the browser page over it, the
-# real-to-sim page a coding agent drives, the benchmark (tasks, goals, the run
-# harness) and the policy agent (a graph as the policy). Imports go one way: the
-# library names neither the studio nor the agents.
+# Six packages, one distribution: the library, the kinds of deformable thing it
+# ships (cloth, soft bodies, the rope), the browser page over it, the real-to-sim
+# page a coding agent drives, the benchmark (tasks, goals, the run harness) and
+# the policy agent (a graph as the policy). Imports go one way: the library names
+# neither the materials, the studio nor the agents, and the materials name only
+# the library.
 [tool.hatch.build.targets.wheel]
 packages = [
     "robosimstudio",
     "robosimstudio_bench",
+    "robosimstudio_materials",
     "robosimstudio_policy_agent",
     "robosimstudio_real2sim_agent",
     "robosimstudio_studio",
 ]
 
-# Robot assets sit beside the packages in a checkout, and so do the cloth and
-# soft implementations: one module each, in the example folder that runs it. A
-# wheel has no repository root to climb to, so it carries a copy where
-# robosimstudio/paths.py and robosimstudio/roots.py look last. The two modules
-# are mapped file by file, so the numbered example scripts beside them stay out
-# of the wheel.
+# Robot assets sit beside the packages in a checkout. A wheel has no repository
+# root to climb to, so it carries a copy where robosimstudio/paths.py looks last.
 [tool.hatch.build.targets.wheel.force-include]
 "assets" = "robosimstudio/assets"
-"examples/01_cloth/cloth.py" = "robosimstudio/_domain_packs/cloth.py"
-"examples/02_soft/soft.py" = "robosimstudio/_domain_packs/soft.py"
-"examples/03_rope/rod" = "robosimstudio/_domain_packs/rod"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "/robosimstudio",
     "/robosimstudio_bench",
+    "/robosimstudio_materials",
     "/robosimstudio_policy_agent",
     "/robosimstudio_real2sim_agent",
     "/robosimstudio_studio",
@@ -245,6 +242,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Examples set env vars and pick GL platforms before importing, as Newton's do.
 "examples/**/*" = ["E402", "TID253"]
+# A kind is read top to bottom in numbered sections, and a section's imports sit
+# at the section that uses them, as they did when the files were examples.
+"robosimstudio_materials/**/*" = ["E402"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 # Everything optional is imported inside the function that needs it, so a base

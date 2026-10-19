@@ -79,7 +79,16 @@ class TestGenericStepsEveryShippedDomain(unittest.TestCase):
         self.assertTrue(
             get_backend(GENERIC.backend_for("soft").solver).host_engine, "soft is the other: a foreign engine"
         )
-        self.assertEqual(("articulated", "soft", "*"), GENERIC.domains(), "and everything else falls through")
+        self.assertEqual(
+            ("articulated", "soft", "granular", "liquid", "dough", "*"),
+            GENERIC.domains(),
+            "the robot, the host-engine kind, the three particle materials; everything else falls through",
+        )
+        particle = {GENERIC.backend_for(name) for name in ("granular", "liquid", "dough")}
+        self.assertEqual(
+            1, len(particle), "the three particle materials state one BackendSpec, so they share one island"
+        )
+        self.assertEqual("mpm", next(iter(particle)).solver)
 
     def test_the_substep_count_survives_the_even_rule(self) -> None:
         """``ArrangementSpec`` refuses an odd substep count, and GENERIC is

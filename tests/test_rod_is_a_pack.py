@@ -2,10 +2,10 @@
 """The rope is a pack: installed, it is whole; left out, the library is whole without it.
 
 The ``rod`` kind -- cables, ropes, cords: the capsule chain, the Cosserat
-centerline, their latch, their measures -- is one package on a domain root,
-``examples/03_rope/rod/``, reached as ``robosimstudio.domains.rod``. A tree may
-leave that directory out. This file is the three claims that make leaving it out
-a *deletion* rather than a port:
+centerline, their latch, their measures -- is one package of the sibling
+``robosimstudio_materials``, reached as ``robosimstudio_materials.rod``. A tree
+may leave that package out. This file is the three claims that make leaving it
+out a *deletion* rather than a port:
 
 1. **The library holds no rod code.** Everything that is the rod's lives in the
    pack and arrives by registering -- its entities, its measures, its material
@@ -20,10 +20,10 @@ a *deletion* rather than a port:
 3. **With the pack, nothing moved for a caller.** The same names resolve to the
    same objects, whichever registry is asked first.
 
-Claim 2 is measured in a subprocess whose domain roots are rebuilt without the
-pack -- the real mechanism (``ROBOSIMSTUDIO_DOMAIN_ROOTS_ONLY``), not an import
-hook: a registry *scan* lists directories, so a hook that refused the import of
-a directory still on the path would test a state no release is ever in.
+Claim 2 is measured in a subprocess whose ``robosimstudio_materials`` is a copy
+of the package with the rod left out (:func:`tests.fixtures.packs.env_without`),
+not an import hook: a registry *scan* lists a directory, so a hook that refused
+the import of a package still on disk would test a state no release is ever in.
 
 No GPU and no scene; the scenes that build and step without the pack are
 ``tests/test_scenes_without_the_rod.py``.
@@ -39,15 +39,15 @@ import sys
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
-from tempfile import TemporaryDirectory
+
+from tests.fixtures.packs import MATERIALS, PYTHON_FLAGS, env_without
 
 TIER = "fast"
 """Text, AST and registries. No GPU, no scene."""
 
 REPO = Path(__file__).resolve().parents[1]
 LIBRARY = REPO / "robosimstudio"
-PACK_ROOT = REPO / "examples" / "03_rope"
-PACK = PACK_ROOT / "rod"
+PACK = MATERIALS / "rod"
 HAS_PACK = (PACK / "__init__.py").is_file()
 """Whether this checkout carries the pack. A release without it runs claims 1 and 2 only."""
 
@@ -82,7 +82,12 @@ ROD_NAMES = frozenset(
 )
 """Identifiers that are the pack's. None may be defined, imported or referenced in the library."""
 
-PACK_PATHS = ("robosimstudio.domains.rod", "03_rope/rod", "solvers.grasp.latch", "solvers/grasp/latch")
+PACK_PATHS = (
+    "robosimstudio_materials.rod",
+    "robosimstudio_materials/rod",
+    "solvers.grasp.latch",
+    "solvers/grasp/latch",
+)
 """Spellings of a path into the pack (and of where its latch used to be). Searched as text,
 docstrings included: a cross-reference to a module a release leaves out is a broken reference."""
 
@@ -90,7 +95,7 @@ ALLOWED_STRINGS: dict[tuple[str, str], str] = {
     ("__init__.py", "rod"): "the flat-name table: rss.rod is the pack's, and the table is how its absence is said",
     ("__init__.py", "RodSpec"): "the flat-name table",
     ("__init__.py", "RodMaterialSpec"): "the flat-name table",
-    ("__init__.py", "robosimstudio.domains.rod"): "the flat-name table's key: which pack provides the three names",
+    ("__init__.py", "robosimstudio_materials.rod"): "the flat-name table's key: which pack provides the three names",
     ("assetlib/semantics/library.py", "rod"): (
         "the geometric FEATURE kind -- a rigid span something hangs on or winds round (a peg, a hanger rail) -- "
         "which is not the rope and is read by threaded/encloses"
@@ -135,7 +140,11 @@ class TestTheLibraryHoldsNoRodCode(unittest.TestCase):
                 elif isinstance(node, (ast.Import, ast.ImportFrom)):
                     names = [part for alias in node.names for part in (alias.name.split(".")[-1], alias.asname or "")]
                     module = getattr(node, "module", "") or ""
-                    names += [f"<import {m}>" for m in (module, *(a.name for a in node.names)) if "domains.rod" in m]
+                    names += [
+                        f"<import {m}>"
+                        for m in (module, *(a.name for a in node.names))
+                        if "robosimstudio_materials.rod" in m
+                    ]
                 elif isinstance(node, ast.arg):
                     names = [node.arg]
                 for name in names:
@@ -144,7 +153,7 @@ class TestTheLibraryHoldsNoRodCode(unittest.TestCase):
         self.assertEqual(
             [],
             offenders,
-            "the library names something that is the rod pack's. It belongs in examples/03_rope/rod/ and arrives by "
+            "the library names something that is the rod pack's. It belongs in robosimstudio_materials/rod/ and arrives by "
             "registering -- see the module docstring for the seams.",
         )
 
@@ -179,7 +188,7 @@ class TestTheLibraryHoldsNoRodCode(unittest.TestCase):
             where = path.relative_to(LIBRARY).as_posix()
             for number, line in enumerate(path.read_text().splitlines(), start=1):
                 for spelling in PACK_PATHS:
-                    if spelling in line and (where, "robosimstudio.domains.rod") != ("__init__.py", spelling):
+                    if spelling in line and (where, "robosimstudio_materials.rod") != ("__init__.py", spelling):
                         offenders.append(f"{where}:{number}: {spelling}")
         self.assertEqual([], offenders, "library text naming a path inside the rod pack")
 
@@ -204,7 +213,7 @@ REPORT = """
 import importlib, importlib.util, json
 import robosimstudio as rss
 
-out = {"pack_spec": importlib.util.find_spec("robosimstudio.domains.rod") is not None, "errors": {}}
+out = {"pack_spec": importlib.util.find_spec("robosimstudio_materials.rod") is not None, "errors": {}}
 for name in ("rod", "RodSpec", "RodMaterialSpec"):
     try:
         getattr(rss, name)
@@ -256,7 +265,7 @@ print(json.dumps(out))
 
 def _run(script: str, env: dict[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-c", script],
+        [sys.executable, *PYTHON_FLAGS, "-c", script],
         cwd=REPO,
         env={**os.environ, "CUDA_VISIBLE_DEVICES": "", **env},
         capture_output=True,
@@ -266,61 +275,19 @@ def _run(script: str, env: dict[str, str]) -> subprocess.CompletedProcess:
     )
 
 
-def _is_pack(child: Path) -> bool:
-    """Whether ``child`` is a pack, as :func:`robosimstudio.roots.extend_path` reads a root.
-
-    A package or one module, under a name that is an identifier. What a moved
-    pack leaves behind -- a directory still holding its ``__pycache__`` and no
-    ``__init__.py`` -- is neither, and a link to it would import as an empty
-    namespace package under the name the pack used to have.
-    """
-    if child.name.startswith(("_", ".")):
-        return False
-    if child.is_dir():
-        return child.name.isidentifier() and (child / "__init__.py").is_file()
-    return child.suffix == ".py" and child.stem.isidentifier()
-
-
-def roots_without_the_pack(stack: ExitStack) -> dict[str, str]:
-    """An environment whose domain roots are this checkout's, less the rod.
-
-    The checkout's own roots are switched off and named again one by one, in
-    the library's order (:data:`robosimstudio.roots.DEFAULT_DOMAIN_ROOT_NAMES`,
-    each only if it is there). A root the rod is not on is used as it stands:
-    the example folders, which hold ``cloth.py`` and ``soft.py``. The rod's own
-    root is replaced by a scratch directory holding a link to every *other*
-    pack on it -- so ``robosimstudio.domains.rod`` is as absent as it is in a
-    release that never shipped the directory: not on any ``__path__``, not
-    listed by a scan, not found by the import system.
-    """
-    from robosimstudio import roots
-
-    kept: list[Path] = []
-    for name in roots.DEFAULT_DOMAIN_ROOT_NAMES:
-        root = REPO / name
-        if not root.is_dir():
-            continue
-        if root != PACK_ROOT:
-            kept.append(root)
-            continue
-        scratch = Path(stack.enter_context(TemporaryDirectory()))
-        for child in sorted(root.iterdir()):
-            if child.stem != PACK.name and _is_pack(child):
-                (scratch / child.name).symlink_to(child, target_is_directory=child.is_dir())
-        kept.append(scratch)
-    return {
-        roots.DOMAIN_ROOTS_ENV: os.pathsep.join(str(root) for root in kept),
-        f"{roots.DOMAIN_ROOTS_ENV}_ONLY": "1",
-    }
-
-
 class TestWithoutThePack(unittest.TestCase):
-    """Claim 2: a process that has never had the rod directory."""
+    """Claim 2: a process whose ``robosimstudio_materials`` never had the rod directory.
+
+    The copy holds every other module of the package (``cloth.py``, ``soft.py``),
+    so ``robosimstudio_materials.rod`` is as absent as it is in a release that
+    never shipped the directory: not listed by a scan, not found by the import
+    system -- and the other two kinds are still there.
+    """
 
     @classmethod
     def setUpClass(cls) -> None:
         with ExitStack() as stack:
-            proc = _run(REPORT, roots_without_the_pack(stack))
+            proc = _run(REPORT, env_without(stack, "rod"))
         if proc.returncode != 0:
             raise AssertionError(f"the library did not come up without the rod pack:\n{proc.stderr[-4000:]}")
         cls.got = json.loads([line for line in proc.stdout.splitlines() if line.startswith("{")][-1])
@@ -397,7 +364,7 @@ class TestWithThePack(unittest.TestCase):
 
     def test_the_names_are_the_packs_own_objects(self) -> None:
         import robosimstudio as rss
-        from robosimstudio.domains import rod as pack
+        from robosimstudio_materials import rod as pack
 
         self.assertIs(rss.rod, pack.rod)
         self.assertIs(rss.RodSpec, pack.RodSpec)
@@ -405,9 +372,9 @@ class TestWithThePack(unittest.TestCase):
         self.assertLessEqual({"rod", "RodSpec", "RodMaterialSpec"}, set(dir(rss)))
 
     def test_the_pack_reuses_the_static_post_rather_than_owning_it(self) -> None:
-        from robosimstudio.domains import rod as pack
         from robosimstudio.domains.static import EntityPost, EntityStatic, fixture_shape_cfg
         from robosimstudio.scene.registry import get_entity
+        from robosimstudio_materials import rod as pack
 
         self.assertIs(pack.EntityPeg, EntityPost, "the name the cable suites import is the static domain's class")
         self.assertIs(pack.fixture_shape_cfg, fixture_shape_cfg)
@@ -417,10 +384,9 @@ class TestWithThePack(unittest.TestCase):
         )
 
     def test_the_engine_seams_hold_the_packs_functions(self) -> None:
-        from robosimstudio.domains.rod import actor
-
         from robosimstudio.engines.geometry import ACTOR_KINDS, actor_builder
         from robosimstudio.specs.physics import actor_consumes, get_backend
+        from robosimstudio_materials.rod import actor
 
         get_backend("superdex")
         self.assertIs(ACTOR_KINDS.get("rod"), actor.read_rod)
@@ -442,7 +408,7 @@ class TestWithThePack(unittest.TestCase):
     def test_the_latch_answers_to_the_name_content_declares(self) -> None:
         import importlib
 
-        from robosimstudio.domains.rod import latch
+        from robosimstudio_materials.rod import latch
 
         self.assertIs(importlib.import_module("robosimstudio.solvers.grasp.latch"), latch)
         self.assertEqual(PACK / "latch.py", Path(latch.__file__))
@@ -450,7 +416,7 @@ class TestWithThePack(unittest.TestCase):
     def test_the_layout_and_its_kind_are_the_packs(self) -> None:
         from robosimstudio.assetlib.semantics import KIND_NAMES, get_kind
         from robosimstudio.assetlib.semantics.substrates import is_substrate
-        from robosimstudio.domains import rod as pack
+        from robosimstudio_materials import rod as pack
 
         self.assertTrue(is_substrate("rod"))
         self.assertEqual(("point",), pack.KIND_NAMES)

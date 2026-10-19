@@ -9,7 +9,7 @@ actually characterised by.
 
 Readings are deliberately allowed to be unavailable. A cantilever whose droop
 has run off the end of the well-conditioned band has *not* told you what the
-fabric is, and :func:`~robosimstudio.domains.cloth.bending_length_from_droop`
+fabric is, and :func:`~robosimstudio_materials.cloth.bending_length_from_droop`
 returns NaN rather than a clamped number for exactly that reason. A hole that
 says "out of band" is worth more than a plausible figure that is wrong.
 """
@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from robosimstudio.domains.cloth import DROOP_BAND, bending_length_from_droop, resembles
+
+from robosimstudio_materials.cloth import DROOP_BAND, bending_length_from_droop, resembles
 
 __all__ = ["Reading", "measure_cantilever", "measure_sheet", "relax", "settle_speed"]
 

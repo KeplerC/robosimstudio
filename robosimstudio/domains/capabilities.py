@@ -47,11 +47,12 @@ import numpy as np
 
 from robosimstudio.core.probes.particle import ParticleProbe
 from robosimstudio.registry import Registry
+from robosimstudio.roots import DOMAIN_PACKAGES
 
 __all__ = ["CAPABILITIES", "ParticleMixin", "host_bridge", "register_capability"]
 
 
-CAPABILITIES: Registry[type] = Registry("capability", ("robosimstudio.domains",), same=operator.is_)
+CAPABILITIES: Registry[type] = Registry("capability", DOMAIN_PACKAGES, same=operator.is_)
 """Capability mixins published by the domain packs that ship them, by class name.
 
 Filled by :func:`register_capability` while a pack is imported, and read by this

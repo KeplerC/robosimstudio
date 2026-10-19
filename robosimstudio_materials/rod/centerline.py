@@ -7,8 +7,8 @@ simulated as a rolled shell is ``domain="cloth"``; either declares
 :class:`Centerline` so ``winding_turns``, ``straightness`` and the grasp latch
 still reach it. Implement :meth:`Centerline.centerline`; length, sag, hold and
 the rod measures derive from it. The two implementations are
-:class:`~robosimstudio.domains.rod.entity.EntityRod` (capsule poses from
-``body_q``) and :class:`~robosimstudio.domains.rod.superdex.EntityRodSuperdex`
+:class:`~robosimstudio_materials.rod.entity.EntityRod` (capsule poses from
+``body_q``) and :class:`~robosimstudio_materials.rod.superdex.EntityRodSuperdex`
 (nodes from ``particle_q``).
 
 :func:`~robosimstudio.domains.capabilities.register_capability` publishes it as

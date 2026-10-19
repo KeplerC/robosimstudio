@@ -28,10 +28,10 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-from robosimstudio.domains.rod import Centerline, EntityRod, EntityRodSuperdex
 
 from robosimstudio.domains.capabilities import ParticleMixin
 from robosimstudio.scene.entity import Entity
+from robosimstudio_materials.rod import Centerline, EntityRod, EntityRodSuperdex
 
 TIER = "fast"
 
@@ -178,7 +178,7 @@ class TestTheCapabilityIsPublishedByItsPack(unittest.TestCase):
         from robosimstudio.domains import capabilities
 
         self.assertIs(capabilities.Centerline, Centerline)
-        self.assertEqual("robosimstudio.domains.rod.centerline", Centerline.__module__)
+        self.assertEqual("robosimstudio_materials.rod.centerline", Centerline.__module__)
         self.assertIs(capabilities.CAPABILITIES.get("Centerline"), Centerline)
 
     def test_the_library_module_defines_none_itself(self):
@@ -236,7 +236,7 @@ class TestOneSpecCarriesBothImplementationsMatter(unittest.TestCase):
     def test_the_shared_spec_declares_both_vocabularies(self) -> None:
         import dataclasses
 
-        from robosimstudio.domains.rod import RodSpec
+        from robosimstudio_materials.rod import RodSpec
 
         fields = {f.name for f in dataclasses.fields(RodSpec)}
         self.assertLessEqual({"stretch_ke", "bend_ke"}, fields, "the penalty half")
@@ -244,8 +244,8 @@ class TestOneSpecCarriesBothImplementationsMatter(unittest.TestCase):
 
     def test_stating_a_modulus_reaches_the_foreign_actor(self) -> None:
         """The whole point: saying it on the spec changes what the engine is handed."""
-        from robosimstudio.domains.rod import RodSpec
-        from robosimstudio.domains.rod.superdex import EntityRodSuperdex
+        from robosimstudio_materials.rod import RodSpec
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
 
         soft = EntityRodSuperdex(RodSpec(young_modulus=1.0e6)).host_actor().params
         stiff = EntityRodSuperdex(RodSpec(young_modulus=9.0e6)).host_actor().params
@@ -256,8 +256,8 @@ class TestOneSpecCarriesBothImplementationsMatter(unittest.TestCase):
         """Declaring it must not have changed what a bare ``rss.rod`` is made of."""
         import math
 
-        from robosimstudio.domains.rod import RodSpec
-        from robosimstudio.domains.rod.superdex import EntityRodSuperdex
+        from robosimstudio_materials.rod import RodSpec
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
 
         spec = RodSpec()
         params = EntityRodSuperdex(spec).host_actor().params

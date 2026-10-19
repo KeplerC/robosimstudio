@@ -28,7 +28,7 @@ TIER = "medium"
 
 def _laid_l(name: str, x: float, **kw):
     """A 3 mm cable laid out as an L from 400 mm over ``x``: 100 mm down, then 100 mm across."""
-    from robosimstudio.domains.rod.spec import RodSpec
+    from robosimstudio_materials.rod.spec import RodSpec
 
     top = np.array([x, 0.0, 0.40])
     down = [top + np.array([0.0, 0.0, -0.005 * i]) for i in range(21)]
@@ -46,7 +46,7 @@ def _laid_l(name: str, x: float, **kw):
 
 def _coil(name: str, pitch: float, **kw):
     """A 3 mm cable wound three turns round a 15 mm radius from 100 mm up, ``pitch`` [m] a turn, anchored at its foot."""
-    from robosimstudio.domains.rod.spec import RodSpec
+    from robosimstudio_materials.rod.spec import RodSpec
 
     t = np.linspace(0.0, 3 * 2 * np.pi, 120)
     nodes = np.stack([0.015 * np.cos(t), 0.015 * np.sin(t), 0.10 + pitch * t / (2 * np.pi)], axis=1)
@@ -165,10 +165,9 @@ def _built_still(scenario: str) -> None:
     import tempfile
     from pathlib import Path
 
-    from robosimstudio.domains.soft import SoftMaterialSpec, SoftSpec
-
     import robosimstudio as rss
     from robosimstudio.engines.superdex.bridge import SuperdexBridge
+    from robosimstudio_materials.soft import SoftMaterialSpec, SoftSpec
 
     scene = rss.Scene(cell="bench_075", physics=_arrangement(), name=f"teleport_{scenario}")
     if scenario in ("join", "core"):

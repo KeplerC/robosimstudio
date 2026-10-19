@@ -1,7 +1,8 @@
 # Rope
 
 Cables and ropes: a capsule chain on Newton by default, or a Cosserat rod on
-SuperDex. [`rod/`](rod/) is the implementation behind `rss.rod`; the
+SuperDex. [`robosimstudio_materials/rod/`](../../robosimstudio_materials/rod/) is
+the implementation behind `rss.rod`; the
 [route the cable](../08_demos/route_the_cable/README.md) demo uses it with two
 YAM hands.
 
@@ -58,5 +59,45 @@ uv run --extra superdex examples/03_rope/02_superdex.py
 ```
 
 Source: [`02_superdex.py`](02_superdex.py)
+
+## A cable keeps its bend
+
+The between-posts cable, clamped at one end only and given plastic memory: drag its free end round the far post and let go, and it stays wrapped.
+
+`dahl_eps_max` turns on Newton's Dahl bending hysteresis for the capsule
+chain: each cable joint carries a friction moment of `bend_ke * dahl_eps_max`
+that builds up over `dahl_tau` radians of bending, so a bend put in past that
+is held rather than sprung back. The same cable at 0 is elastic and springs
+straight. The solver decides at construction whether to run the friction at
+all, so the two plastic sliders in the cable's Parameters are live here and
+inert on a cable built at 0. The page reads the cable's straightness: 1.0 is a
+straight line, and what it reads after the hand lets go is what the cable kept.
+
+```bash
+uv run examples/03_rope/03_cable_memory.py
+```
+
+Source: [`03_cable_memory.py`](03_cable_memory.py)
+
+## A cable carries a twist
+
+Two cables hanging from a clamp, one twisting ten times more easily than it bends and one ten times less: drag **tip roll** to a turn, untick **hold the tips**, and the stiff one springs the roll back out while the soft one keeps it.
+
+`twist_ke` splits Newton's rod joint from its bend: left at `None` a cable
+twists as stiffly as it bends; a data cable's jacket rolls far more easily
+than it bends, a steel cable the other way round. Each free end is held in a
+hard latch, as a hand holds it (`cable.entity.roll`), and the slider rolls
+it about its own axis at 0.1 rad a step (a click's handle cannot: its wrench
+is bounded by the capsule's own inertia). The page reads each cable's
+`twist_turns` over its middle third, the roll between consecutive frames
+with the bend taken out. A clamped cable twists uniformly: one turn at the tip
+puts 0.348 turns (8 of 23 joints) in the middle of both; let go, the stiff one
+reads 0.000 within 60 steps, the soft one 0.33 then and 0.27 after four seconds.
+
+```bash
+uv run examples/03_rope/04_twist.py
+```
+
+Source: [`04_twist.py`](04_twist.py)
 
 <!-- examples:end -->

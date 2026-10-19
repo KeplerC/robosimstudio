@@ -19,7 +19,7 @@ TIER = "fast"
 
 
 def _rod(n_nodes: int):
-    from robosimstudio.domains.rod.superdex import EntityRodSuperdex
+    from robosimstudio_materials.rod.superdex import EntityRodSuperdex
 
     rod = EntityRodSuperdex.__new__(EntityRodSuperdex)
     rod.particles = np.arange(n_nodes, dtype=np.int32)
@@ -57,7 +57,7 @@ class TestSceneReadyJoinsTheSharedRecord(unittest.TestCase):
     def test_the_rod_snapshots_every_thing_and_is_snapshotted_after_a_later_settle(self) -> None:
         from unittest import mock
 
-        from robosimstudio.domains.rod import superdex
+        from robosimstudio_materials.rod import superdex
 
         sheet = _Thing()
         pipeline = SimpleNamespace(particle_settles={"runs": {(10, 4)}, "things": [sheet]})
@@ -79,7 +79,7 @@ class TestSceneReadyJoinsTheSharedRecord(unittest.TestCase):
     def test_a_rod_alone_opens_the_record(self) -> None:
         from unittest import mock
 
-        from robosimstudio.domains.rod import superdex
+        from robosimstudio_materials.rod import superdex
 
         pipeline = SimpleNamespace()
         rod = _rod(3)
@@ -95,7 +95,8 @@ class TestSceneReadyJoinsTheSharedRecord(unittest.TestCase):
 class TestInactiveFlags(unittest.TestCase):
     def test_inactive_is_the_default_without_active(self) -> None:
         import newton
-        from robosimstudio.domains.rod.superdex import INACTIVE
+
+        from robosimstudio_materials.rod.superdex import INACTIVE
 
         default = int(inspect.signature(newton.ModelBuilder.add_particle).parameters["flags"].default)
         self.assertEqual(INACTIVE, default & ~int(newton.ParticleFlags.ACTIVE))

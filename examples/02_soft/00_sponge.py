@@ -9,9 +9,8 @@ a volumetric FEM body stepped by SuperDex. Needs the ``[superdex]`` extra
 (Python 3.12).
 """
 
-from robosimstudio.domains.soft import FIRM_FOAM
-
 import robosimstudio as rss
+from robosimstudio_materials.soft import FIRM_FOAM
 
 
 def main():

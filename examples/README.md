@@ -24,6 +24,9 @@
 |---|---|---|
 | <img src="03_rope/media/00_cable.webp" width="240"> | <img src="03_rope/media/01_between_posts.webp" width="240"> | <img src="03_rope/media/02_superdex.webp" width="240"> |
 
+| [A cable keeps its bend](03_rope/03_cable_memory.py) | [A cable carries a twist](03_rope/04_twist.py) |
+|---|---|
+
 ## [04 Robots and Kinds of Your Own](04_extending/README.md)
 
 | [Add a robot](04_extending/00_add_a_robot.py) | [A new kind](04_extending/01_new_kind.py) |
@@ -59,6 +62,26 @@
 | [Leader arm](09_teleop/00_leader_arm.py) | [Force feedback](09_teleop/01_force_feedback.py) |
 |---|---|
 | <img src="09_teleop/media/00_leader_arm.webp" width="240"> | <img src="09_teleop/media/01_force_feedback.webp" width="240"> |
+
+## [10 Granular](10_granular/README.md)
+
+| [Sweep rice into the tray](10_granular/00_sweep_rice.py) | [Sweep rice, scored](10_granular/01_sweep_rice_scored.py) |
+|---|---|
+
+## [11 Liquid](11_liquid/README.md)
+
+| [Pour honey into a bowl](11_liquid/00_pour_honey.py) | [Wipe a spill](11_liquid/01_wipe_spill.py) |
+|---|---|
+
+## [12 Dough](12_dough/README.md)
+
+| [Roll the dough flat](12_dough/00_roll_dough.py) | [Press a dough ball](12_dough/01_press_dough.py) |
+|---|---|
+
+## [13 Paper](13_paper/README.md)
+
+| [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
+|---|---|
 
 ## [Live Scene Editing](live/README.md)
 
