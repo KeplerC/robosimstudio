@@ -37,11 +37,11 @@ class _Arr:
         return self._a
 
 
-def _model(particles, *, tris=(), shapes=()):
-    """A finalized model as both bridges read it before ``gs.init``: its particles, triangles and shapes.
+def _model(particles, *, tris=(), shapes=(), mass=0.0):
+    """A finalized model as both bridges read it before ``gs.init``: its particles and their masses, triangles, shapes.
 
     ``shapes`` are world-fixed ``(GeoType, half extents, transform)``; a mirror record ``{"shape": i, "body": -1}``
-    names the i-th.
+    names the i-th. ``mass`` [kg] is every particle's.
     """
     from types import SimpleNamespace
 
@@ -49,6 +49,7 @@ def _model(particles, *, tris=(), shapes=()):
     tris = np.asarray(tris, dtype=np.int64).reshape(-1, 3)
     return SimpleNamespace(
         particle_q=_Arr(np.asarray(particles, dtype=np.float32)),
+        particle_mass=_Arr(np.full(len(particles), mass, dtype=np.float32)),
         tri_count=len(tris),
         tri_indices=_Arr(tris.reshape(-1)),
         shape_type=_Arr([int(kind) for kind, _, _ in shapes]),
@@ -274,13 +275,18 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
 class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
     """``gs.init`` runs once a process: an IPC island refused after it still set float64 for every later island, and a
     water island built next stepped at 64 where it asked for 32, warned 8x slower (``g1_order.py``). Each refusal the
-    model and the recipe can make comes first; the mass check alone reads Genesis's own entity, and follows the build."""
+    model and the recipe can make comes first, the mass check among them: it reads what a sheet is handed, which
+    Genesis's built entity does not say (``g1_mass.py``)."""
 
     BENCH = (0.3, 0.65, 0.375), (0.6, 0.0, 0.375, 0.0, 0.0, 0.0, 1.0)
     """bench_075's top as a world-fixed box: half extents, and its pose, its top face at 0.75 m."""
 
-    def _open(self, kind: str = "shell", *, at: float = 0.76) -> None:
-        """A 100 mm sheet of four particles standing ``at`` over the bench's middle, its mirror the bench."""
+    WEIGHS = 0.003
+    """[kg]: the 100 mm sheet at the 0.3 kg/m^2 a shell record stating none is handed."""
+
+    def _open(self, kind: str = "shell", *, at: float = 0.76, weighs: float = WEIGHS, **params) -> None:
+        """A 100 mm sheet of four particles weighing ``weighs`` standing ``at`` over the bench's middle, its mirror the
+        bench, its record stating ``params``."""
         from unittest import mock
 
         from newton import GeoType
@@ -289,12 +295,9 @@ class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
         from robosimstudio.engines.genesis.solver import SolverGenesis
 
         sheet = [[0.55 + x, y, at] for y in (-0.05, 0.05) for x in (0.0, 0.1)]
-        model = _model(sheet, tris=[[0, 1, 2], [1, 3, 2]], shapes=[(GeoType.BOX, *self.BENCH)])
-        recipe = {
-            "island": "cloth",
-            "actors": [{"kind": kind, "name": "towel", "particle_start": 0, "particle_count": 4}],
-            "mirrors": [{"shape": 0, "body": -1}],
-        }
+        model = _model(sheet, tris=[[0, 1, 2], [1, 3, 2]], shapes=[(GeoType.BOX, *self.BENCH)], mass=weighs / 4)
+        actor = {"kind": kind, "name": "towel", "particle_start": 0, "particle_count": 4, "params": params}
+        recipe = {"island": "cloth", "actors": [actor], "mirrors": [{"shape": 0, "body": -1}]}
         with mock.patch.object(bridge, "ensure_initialized", side_effect=LookupError("asked for the engine")):
             SolverGenesis(model, recipe=recipe, substeps=2)
 
@@ -311,6 +314,29 @@ class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
             self.assertIn(word, str(caught.exception))
         with self.assertRaisesRegex(LookupError, "asked for the engine"):
             self._open(at=0.76)
+
+    def test_a_sheet_genesis_would_weigh_twice_is_refused(self):
+        """A record stating 0.6 kg/m^2 over a sheet Newton built at 0.3: 6.0 g on Genesis to Newton's 3.0. Read off
+        the entity, the check found no mass on genesis-world 1.3.3 and the sheet reached the engine with a warning."""
+        with self.assertRaises(ValueError) as caught:
+            self._open(areal_density=0.6)
+        for word in ("'towel'", "6.0 g", "3.0 g", "ratio 2.000", "areal_density"):
+            self.assertIn(word, str(caught.exception))
+        with self.assertRaises(ValueError) as caught:
+            self._open(weighs=2.0 * self.WEIGHS)  # and a sheet stating none, which is handed 0.3
+        self.assertIn("ratio 0.500", str(caught.exception))
+
+    def test_a_sheet_inside_the_band_reaches_the_engine(self):
+        """The band is 10 % either way, for a factor rather than a figure: a sheet built as stated weighs the same."""
+        for weighs, params in ((self.WEIGHS, {}), (self.WEIGHS, {"areal_density": 0.3, "thickness": 0.004})):
+            with self.subTest(**params), self.assertRaisesRegex(LookupError, "asked for the engine"):
+                self._open(weighs=weighs, **params)
+        for weighs in (0.91 * self.WEIGHS, 1.09 * self.WEIGHS):
+            with self.subTest(weighs=weighs), self.assertRaisesRegex(LookupError, "asked for the engine"):
+                self._open(weighs=weighs)
+        for weighs in (0.89 * self.WEIGHS, 1.12 * self.WEIGHS):
+            with self.subTest(weighs=weighs), self.assertRaisesRegex(ValueError, "would weigh"):
+                self._open(weighs=weighs)
 
 
 class TestTheLongestSubstepIsTheMaterials(unittest.TestCase):

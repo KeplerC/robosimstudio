@@ -87,9 +87,13 @@ surfaces the full ``rho * thickness``) rather than an artefact.
 It has to be divided out, and that is a correctness matter rather than a tuning
 one: the Newton model and the Genesis model must agree on what the cloth weighs,
 or the wrench fed back to the arm is twice what it should be and the cloth's own
-dynamics are not the scene's. The division is checked at build --- see
-:meth:`GenesisBridge._verify_mass` --- because a factor that changes upstream
-would otherwise read as "the cloth feels heavy" for a week.
+dynamics are not the scene's. What a sheet is handed is checked against the
+Newton model before the engine is asked for (:meth:`GenesisBridge._check_mass`);
+that Genesis still masses it this way is checked by weighing
+(``tests/test_genesis.py``, 1.000 of the sheet's weight, 2.0 without the
+division), because genesis-world 1.3.3's ``FEMEntity`` carries no mass to read
+at build (``g1_mass.py``), and a factor that changes upstream would otherwise
+read as "the cloth feels heavy" for a week.
 """
 
 
@@ -216,8 +220,8 @@ class GenesisBridge:
         # Every refusal the model and the recipe can make, before the engine is asked for: gs.init runs once a
         # process, so an island refused after it still set the precision every later island gets. Refused after it,
         # a sheet started inside the bench left a water island built next in the process at float64, which the
-        # runtime warns is 8x slower a substep (g1_order.py). Only the mass check follows the build: it reads
-        # Genesis's own entity.
+        # runtime warns is 8x slower a substep (g1_order.py). The mass check is one of them: it reads what each
+        # sheet is handed, which Genesis's own entity does not say.
         records = list(recipe.get("actors", ()))
         builds = []
         for record in records:
@@ -233,6 +237,7 @@ class GenesisBridge:
         geoms = [actor_geometry(model, record) for record in records]
         shapes = iter_mirrors(model, recipe.get("mirrors", ()))
         self._check_initial_clearance(geoms, shapes)
+        self._check_mass(geoms)
         gs = ensure_initialized(precision)
         self.gs = gs
 
@@ -265,7 +270,6 @@ class GenesisBridge:
                 self.mirrors.append(entry)
 
         self.scene.build()
-        self._verify_mass()
         self._link_of = {int(m["entity"].base_link.idx): m for m in self.mirrors}
         self._entity_by_shape = {m["geom"].shape: m["entity"] for m in self.mirrors}
         self._rest_frame: int | None = None
@@ -432,44 +436,51 @@ class GenesisBridge:
                         "intersection-free initial state; move one clear of the other."
                     )
 
-    def _verify_mass(self) -> None:
-        """Genesis's simulated cloth mass against Newton's, at build.
+    def _check_mass(self, geoms: list) -> None:
+        """Refuse a sheet Genesis would weigh other than the Newton model does, more than 10 % either way.
 
-        :data:`CLOTH_MASS_FACTOR` is divided out on the way in; this checks it
-        landed. A silent factor here is the difference between an arm feeling a
-        towel and an arm feeling two towels, and neither reads as an error.
+        A silent factor here is the difference between an arm feeling a towel
+        and an arm feeling two towels, and neither reads as an error: the band
+        is for a factor, not for a figure, since a sheet built as stated weighs
+        the same on both to float32 (12.0 g on both for the 200 mm towel of
+        ``tests/test_genesis.py``) and a dropped or doubled
+        :data:`CLOTH_MASS_FACTOR` is 2.0 or 0.5.
+
+        It reads what :func:`_build_shell` hands Genesis, ``rho`` and the
+        thickness over the sheet's triangles, times the factor ``FEM.Cloth``
+        masses by, off the recipe and the model, so it runs before ``gs.init``.
+        It once read the mass off Genesis's built entity, and never fired:
+        genesis-world 1.3.3's ``FEMEntity`` has no mass attribute
+        (``g1_mass.py``), so a sheet whose record stated twice the areal density
+        Newton built it at reached the engine with a warning. What this cannot
+        see, Genesis changing the factor, the weighing in ``tests/test_genesis.py``
+        does.
+
+        A volume is not compared. ``FEM.Elastic`` masses it at ``rho * volume``
+        of the lattice it is handed: a 100 x 70 x 35 mm sponge at 110 kg/m^3
+        pressed 0.26438 N on a plate, its ``rho * V * g`` to five figures
+        (``g2_tet_weigh.py``). Newton's ``add_soft_grid`` gives each node a
+        whole cell's mass, so the same sponge's 90 nodes over 40 cells hold
+        60.6 g to its 26.95, and a comparison would refuse every lattice sponge
+        for Newton's lumping.
         """
         newton_mass = self.model.particle_mass.numpy()
-        for entry in self.actors:
-            geom = entry["geom"]
-            want = float(newton_mass[geom.start : geom.start + geom.count].sum())
-            got = _entity_mass(entry["entity"])
-            if got is None:
-                # Say so rather than pass quietly. This Genesis build exposes no
-                # simulated mass on an FEM entity -- the FEM solver's own
-                # ``elements_v_info.mass`` is a placeholder (1.0 per vertex) and
-                # the real figure lives inside libuipc, unreachable from here.
-                # So CLOTH_MASS_FACTOR is applied and *not* confirmed against
-                # this scene, and a silent pass would read exactly like a
-                # confirmed one. The factor itself is measured and pinned by
-                # tests/test_genesis_absent.py; what is unverified is whether
-                # this version still agrees with the measurement.
-                log.warning(
-                    "genesis actor %r: this build exposes no simulated mass, so the x%.1f cloth-mass "
-                    "convention is applied unverified. Newton says %.1f g. If the arm feels a cloth "
-                    "of the wrong weight, re-measure CLOTH_MASS_FACTOR against this Genesis version.",
-                    geom.name,
-                    CLOTH_MASS_FACTOR,
-                    want * 1e3,
-                )
+        for geom in geoms:
+            if geom.kind != "shell":
                 continue
+            want = float(newton_mass[geom.start : geom.start + geom.count].sum())
             if want <= 0.0:
                 continue
+            cloth = _cloth_args(self.recipe, geom.params)
+            a, b, c = (geom.rest[geom.tris[:, i]] for i in range(3))
+            area = 0.5 * float(np.linalg.norm(np.cross(b - a, c - a), axis=1).sum())
+            got = CLOTH_MASS_FACTOR * cloth["rho"] * cloth["thickness"] * area
             if abs(got - want) > 0.1 * want:
                 raise ValueError(
-                    f"genesis actor {geom.name!r} simulates {got * 1e3:.1f} g where the Newton model "
-                    f"says {want * 1e3:.1f} g (ratio {got / want:.3f}). CLOTH_MASS_FACTOR is "
-                    f"{CLOTH_MASS_FACTOR}; re-measure it against this Genesis version."
+                    f"genesis actor {geom.name!r} would weigh {got * 1e3:.1f} g on Genesis where the Newton model "
+                    f"says {want * 1e3:.1f} g (ratio {got / want:.3f}): its record's areal density, "
+                    f"{got / area:.4g} kg/m^2 over its {area:.4g} m^2, is not the {want / area:.4g} Newton built "
+                    "it at. State the areal_density and thickness the sheet was built with in its actor params."
                 )
 
     # ------------------------------------------------------------------ tick
@@ -575,38 +586,33 @@ def _surface_of(tets: np.ndarray) -> np.ndarray:
     return faces[index[counts == 1]]
 
 
-def _entity_mass(entity) -> float | None:
-    """An FEM entity's simulated mass, if this Genesis version exposes one."""
-    for attr in ("mass", "total_mass", "_mass"):
-        value = getattr(entity, attr, None)
-        if value is not None:
-            try:
-                return float(np.asarray(value).sum())
-            except (TypeError, ValueError):
-                continue
-    return None
+def _cloth_args(recipe: dict, params: dict) -> dict[str, float]:
+    """What ``FEM.Cloth`` is handed for one sheet: its record's params over the island's, then the defaults.
 
-
-def _build_shell(bridge: GenesisBridge, geom: Any) -> tuple[Any, Any]:
-    """A membrane: a triangle mesh and Genesis's cloth material."""
-    import trimesh
-
-    gs, params = bridge.gs, geom.params
-    mesh = trimesh.Trimesh(vertices=geom.rest, faces=geom.tris, process=False)
+    One reading for :func:`_build_shell` and :meth:`GenesisBridge._check_mass`, so the mass checked
+    before the engine is the mass the engine is given.
+    """
     thickness = float(params.get("thickness", 0.002))
     # This sheet's own moduli first, the island's only as the fallback -- the
     # same order ``SuperdexBridge`` reads them in. It was the recipe alone
     # here, so a fabric that stated ``shell_young`` got it on one engine and
     # silently did not on the other, and two sheets of different cloth in one
     # Genesis island were identically stiff.
-    material = gs.materials.FEM.Cloth(
-        E=float(params.get("young", bridge.recipe.get("shell_young", 1.0e5))),
-        nu=float(params.get("poisson", bridge.recipe.get("shell_poisson", 0.3))),
-        rho=cloth_density(float(params.get("areal_density", 0.3)), thickness),
-        thickness=thickness,
-        bending_stiffness=float(bridge.recipe.get("bending_stiffness", 10.0)),
-    )
-    return mesh, material
+    return {
+        "E": float(params.get("young", recipe.get("shell_young", 1.0e5))),
+        "nu": float(params.get("poisson", recipe.get("shell_poisson", 0.3))),
+        "rho": cloth_density(float(params.get("areal_density", 0.3)), thickness),
+        "thickness": thickness,
+        "bending_stiffness": float(recipe.get("bending_stiffness", 10.0)),
+    }
+
+
+def _build_shell(bridge: GenesisBridge, geom: Any) -> tuple[Any, Any]:
+    """A membrane: a triangle mesh and Genesis's cloth material."""
+    import trimesh
+
+    mesh = trimesh.Trimesh(vertices=geom.rest, faces=geom.tris, process=False)
+    return mesh, bridge.gs.materials.FEM.Cloth(**_cloth_args(bridge.recipe, geom.params))
 
 
 def _build_tet(bridge: GenesisBridge, geom: Any) -> tuple[Any, Any]:
