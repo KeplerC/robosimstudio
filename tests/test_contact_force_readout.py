@@ -76,6 +76,27 @@ class TestTheCouplerSumsTheLiveRecordsByShape(unittest.TestCase):
         np.testing.assert_array_equal(shape, [1, 2])
         np.testing.assert_allclose(force, [[0, 0, 2], [1, 0, -5]], atol=1e-6)
 
+    def test_only_the_live_records_come_off_the_device(self) -> None:
+        # The buffers hold soft_contact_max rows, about a million under the scrub example's towel: copied
+        # whole, a read took 1.7 ms, sliced to the 11,522 live ones 0.13 ms (p8_cost.py, GPU 1).
+        from unittest import mock
+
+        import warp as wp
+
+        solver = _coupler([((0,), 1, (0.0, 0.0, 2.0))], capacity=64)
+        copied, numpy = [], wp.array.numpy
+
+        def counting(array):
+            copied.append(int(array.shape[0]))
+            return numpy(array)
+
+        with mock.patch.object(wp.array, "numpy", counting):
+            corners, shape, force = solver.soft_contact_records()
+        self.assertEqual(1, max(copied), f"rows copied, per array: {copied}")
+        np.testing.assert_allclose(force, [[0, 0, 2]], atol=1e-6)
+        corners, shape, force = _coupler([], capacity=64).soft_contact_records()
+        self.assertEqual(((0, 3), (0,), (0, 3)), (corners.shape, shape.shape, force.shape), "none live")
+
     def test_a_coupler_staged_without_forces_says_how_to_stage_them(self) -> None:
         solver = _coupler([])
         solver.observables = None
