@@ -38,6 +38,9 @@ class _Dragger:
     def release(self) -> None:
         self.active = False
 
+    def set_target(self, position, quat) -> None:
+        pass
+
     def apply(self, state, dt) -> None:
         pass
 
@@ -46,7 +49,8 @@ def _panel():
     from robosimstudio_studio.panels import PanelCloth
     from tests.fixtures.viser_stubs import _StubGui, _StubSession
 
-    iks = {"left": object(), "right": object()}
+    hand = types.SimpleNamespace(ee_pose=lambda state: ((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0)))
+    iks = {"left": hand, "right": hand}
     q = np.zeros((4, 3))
     env = types.SimpleNamespace(
         scene=types.SimpleNamespace(
@@ -89,6 +93,35 @@ class TestAResetDropsTheRequestsItEnded(unittest.TestCase):
         panel.request_set("towel", "edge", "right")
         panel.drain()
         self.assertEqual(1, len(served), "and one asked after it is served")
+
+
+class TestAPinChosenMidStepIsTakenOnItsOwnHand(unittest.TestCase):
+    """The dropdown runs on viser's threads: a step can read a slot's old hand after the mark for the new one."""
+
+    def _held(self):
+        panel = _panel()
+        taken: list[tuple[int, str]] = []
+        panel._retake_on_hand = lambda index, arm: taken.append((index, arm))
+        panel.draggers[0].active = True
+        panel.follow_arm[0] = "left"
+        return panel, taken
+
+    def test_a_mark_ahead_of_its_pin_waits_for_the_step_that_reads_the_pin(self) -> None:
+        panel, taken = self._held()
+        panel._retake[0] = "right"  # the dropdown marked the slot and has not yet written its pin
+        panel.drain()
+        self.assertEqual([], taken, "taken again on the hand the slot is leaving")
+        self.assertEqual({0: "right"}, panel._retake, "and the mark for the new hand was lost")
+        panel.follow_arm[0] = "right"
+        panel.drain()
+        self.assertEqual([(0, "right")], taken)
+        self.assertEqual({}, panel._retake)
+
+    def test_a_mark_for_the_pin_it_reads_is_taken_at_once(self) -> None:
+        panel, taken = self._held()
+        panel._pick_arm(0, "right")
+        panel.drain()
+        self.assertEqual([(0, "right")], taken)
 
 
 if __name__ == "__main__":

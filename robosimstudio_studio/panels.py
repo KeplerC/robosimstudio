@@ -915,8 +915,9 @@ class PanelCloth(Panel):
         """Slots a set grab pinned to a hand, each with the pin it had before: the grab's to put back when it lets go."""
         self._requested: dict[int, tuple[str, str, str]] = {}
         """Slots :meth:`request_set` took, by the ``(cloth, set, arm)`` it was asked for."""
-        self._retake: set[int] = set()
-        """Slots pinned in the dropdown while holding a grip, for :meth:`drain` to take again on the hand."""
+        self._retake: dict[int, str] = {}
+        """Slots pinned in the dropdown while holding a grip, each with the hand it was pinned to, for :meth:`drain`
+        to take again on that hand once :attr:`follow_arm` reads it."""
         self.selected = self.names[0] if self.names else ""
         self.pending: tuple[str, np.ndarray] | None = None
         """A click waiting to be serviced on the main thread."""
@@ -1101,11 +1102,12 @@ class PanelCloth(Panel):
         """
         if arm == self.follow_arm[index]:
             return  # :meth:`_pin` showing a pin it made, not the user choosing one
-        # Marked before the pin is written, so a drain that reads the pin reads this too.
+        # Marked with the hand, before the pin is written: a drain that reads the
+        # old pin keeps the mark for the step that reads the new one.
         if arm:
-            self._retake.add(index)
+            self._retake[index] = arm
         else:
-            self._retake.discard(index)
+            self._retake.pop(index, None)
         self.follow_arm[index] = arm
         self._grab_pins.pop(index, None)
 
@@ -1123,7 +1125,7 @@ class PanelCloth(Panel):
     def _forget(self, index: int) -> None:
         """What a slot's grab brought with it goes with the grab: the pin a set grab made, and its request."""
         self._requested.pop(index, None)
-        self._retake.discard(index)
+        self._retake.pop(index, None)
         if index in self._grab_pins:
             self._pin(index, self._grab_pins.pop(index))
 
@@ -1207,9 +1209,13 @@ class PanelCloth(Panel):
                 continue
             arm = self.follow_arm[handle.index]
             if arm:
-                if handle.index in self._retake:
-                    self._retake.discard(handle.index)
+                marked = self._retake.pop(handle.index, None)
+                if marked == arm:
                     self._retake_on_hand(handle.index, arm)
+                elif marked is not None:
+                    # The dropdown moved on between reading the pin and the mark: the
+                    # step that reads the new pin takes the grip on that hand.
+                    self._retake.setdefault(handle.index, marked)
                 # The hand is driving, so the handle follows it rather than the
                 # other way round: a gizmo left behind on the bench while the
                 # cloth rode away on the gripper is a gizmo that lies.
