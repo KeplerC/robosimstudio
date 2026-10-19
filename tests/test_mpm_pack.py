@@ -273,6 +273,34 @@ class TestTheSpecs(unittest.TestCase):
         self.assertEqual(REBUILD, body["particle_spacing"])
 
 
+class TestTheContainerMargins(unittest.TestCase):
+    def test_a_container_is_matched_by_its_whole_name(self) -> None:
+        """``cup`` takes its body's shapes and its world-fixed collision parts, never ``cup_holder``'s or ``cup_2``'s."""
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm.entity import DEFAULT_CONTAINER_MARGIN, EntityParticleBody
+
+        builder = newton.ModelBuilder()
+        cup, holder = builder.add_body(label="cup"), builder.add_body(label="cup_holder")
+        shapes = {
+            label: builder.add_shape_box(body=body, hx=0.01, hy=0.01, hz=0.01, label=label)
+            for body, label in (
+                (cup, "cup"),
+                (cup, "cup_floor"),
+                (-1, "cup_collision_00"),
+                (holder, "cup_holder"),
+                (-1, "cup_2"),
+                (-1, "cup_2_collision_00"),
+            )
+        }
+        pool = EntityParticleBody(rss.liquid(name="h", material="honey", containers=("cup",)))
+        pool._apply_container_margins(builder)
+        given = {label for label, s in shapes.items() if builder.shape_margin[s] == DEFAULT_CONTAINER_MARGIN}
+        self.assertEqual({"cup", "cup_floor", "cup_collision_00"}, given)
+        self.assertEqual(3, sum(builder.shape_margin[s] == 0.0 for s in shapes.values()))
+
+
 class TestTheRecords(unittest.TestCase):
     def test_a_record_carries_the_specs_domain_and_builds_the_spec(self) -> None:
         import robosimstudio as rss
