@@ -53,6 +53,26 @@ class TestADeclarationFromASpecIsAValue(unittest.TestCase):
                 self.assertTrue(_same_record(first, again))
                 self.assertFalse(_same_record(first, other))
 
+    def test_a_rod_laid_from_an_array_is_a_value_too(self) -> None:
+        """``overhand()`` returns an array: the spec holds tuples, so it compares, hashes and registers twice."""
+        from unittest import mock
+
+        import robosimstudio as rss
+        from robosimstudio.assetlib.registry import ASSETS, register_asset
+        from robosimstudio_materials.rod import Rod
+        from robosimstudio_materials.rod.knot import overhand
+
+        nodes = overhand(radius=0.006, size=0.10)
+        first, again = (rss.RodSpec(name="rope", nodes=n, stress_free=n, radius=0.006) for n in (nodes, nodes.copy()))
+        self.assertEqual(first, again)
+        self.assertEqual(hash(first), hash(again))
+        self.assertIsInstance(first.nodes[0][0], float)
+        self.assertIsInstance(first.stress_free, tuple)
+        self.assertEqual(Rod.from_spec(first, name="rope").build, Rod.from_spec(again, name="rope").build)
+        with mock.patch.dict(ASSETS._items), mock.patch.dict(ASSETS._origins):
+            for spec in (first, again):
+                register_asset(Rod.from_spec(spec, name="knotted_rope"))
+
     def test_a_rod_from_its_spec_states_its_length_radius_and_self_contact(self) -> None:
         from robosimstudio_materials.rod import Rod
         from robosimstudio_materials.rod.band import band

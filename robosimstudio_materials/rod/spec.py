@@ -269,11 +269,18 @@ class RodSpec:
     """The asset's physics declaration, or ``None`` for the rod default."""
 
     def __post_init__(self) -> None:
+        # The polylines are held as plain tuples whatever was given (``overhand()`` returns an
+        # array), so the spec compares and hashes as the value a ``SpecFactory`` takes it for.
+        if self.stress_free is not None and not isinstance(self.stress_free, str):
+            free = np.asarray(self.stress_free, dtype=np.float64)
+            if free.ndim == 2:
+                object.__setattr__(self, "stress_free", tuple(map(tuple, free.tolist())))
         if self.nodes is None:
             if self.closed:
                 raise ValueError(f"rod {self.name!r}: a closed rod needs nodes, the loop it goes round")
             return
         pts = np.asarray(self.nodes, dtype=np.float64).reshape(-1, 3)
+        object.__setattr__(self, "nodes", tuple(map(tuple, pts.tolist())))
         if len(pts) < (3 if self.closed else 2):
             raise ValueError(
                 f"rod {self.name!r}: nodes needs at least {3 if self.closed else 2} points, got {len(pts)}"
