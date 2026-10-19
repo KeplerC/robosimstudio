@@ -178,8 +178,8 @@ VBD = register_backend(
     schema=VBD_SCHEMA,
     summary="Vertex Block Descent: cloth, soft bodies, and chains of capsules on cable joints.",
     # ``rigid_compliant_alm=False`` is stated rather than left to Newton: 1.6
-    # resolves an omitted value to False behind a DeprecationWarning and says
-    # the default will flip to True, and the rod tests (the Dahl memory, the
+    # and 1.7 resolve an omitted value to False behind a DeprecationWarning and
+    # say the default will flip to True, and the rod tests (the Dahl memory, the
     # twist, the latch) measure the legacy AVBD path -- its penalty ramp on the
     # cable joints and its Dahl stiffness read off that ramp. Pinning it keeps
     # a Newton bump from changing what those tests measure without a diff here

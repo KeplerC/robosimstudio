@@ -60,6 +60,7 @@ __all__ = [
     "ShapeWriter",
     "Tunable",
     "notify",
+    "reach_island_copies",
     "set_kinematic",
 ]
 
@@ -86,12 +87,15 @@ class Tunable:
             with no edges, a joint gain on a body with no joints -- which is
             information a panel can show rather than an error.
         summary: One line, for the section.
+        inert: Fields of ``spec`` with nothing in this entity to write to, which a panel shows
+            read-only rather than as a slider that moves nothing.
     """
 
     name: str
     spec: Any
     write: Any
     summary: str = ""
+    inert: tuple[str, ...] = ()
 
 
 def notify(pipeline: Any, flags: int) -> None:
@@ -126,6 +130,52 @@ def notify(pipeline: Any, flags: int) -> None:
                 solver.notify_model_changed(int(flags))
     if getattr(pipeline, "captured", False):
         pipeline.invalidate_graph()
+
+
+def reach_island_copies(pipeline: Any, *attrs: str) -> int:
+    """Copy model arrays into every island view that holds its own copy of them. Returns how many moved.
+
+    Newton 1.7's coupled solver gives an island a ``ModelView`` that may keep its own, compacted copy
+    of a model array, and the island's solver reads that copy. Measured with ``views.py`` (fix round
+    3, GPU 1): the VBD island of ``examples/19_tape/00_peel_a_label`` and of
+    ``examples/01_cloth/02_engines`` holds its own ``tri_materials``, ``edge_bending_properties`` and
+    ``particle_radius``, and the one of ``examples/03_rope/03_cable_memory`` its own
+    ``vbd.dahl_eps_max`` and ``vbd.dahl_tau``, 18 rows of the model's 34. A write into the model alone
+    then moves a slider and nothing else. ``notify`` refreshes the copies of what its flags name;
+    nothing names particle, triangle or edge arrays, so a live write calls this instead. The copy is
+    refreshed in place, through the solver's own projection, so a captured graph's pointers stay
+    valid. An island that reads the model's array is left alone.
+
+    Args:
+        pipeline: The scene's pipeline; ``None`` or a one-solver scene does nothing.
+        attrs: Model attribute names; a dotted name is a namespace's (``"vbd.dahl_tau"``).
+    """
+    solver = getattr(pipeline, "solver", None)
+    entries = getattr(solver, "_entries", None)
+    project = getattr(solver, "_project_compact_attributes", None)
+    if not entries or project is None:
+        return 0
+    names = {a.replace(".", ":") for a in attrs}
+    moved = 0
+    for entry in entries.values():
+        overrides = object.__getattribute__(entry.view, "_overrides")
+        own = set()
+        for name in names:
+            space, _, leaf = name.rpartition(":")
+            held = overrides.get(name) if not space else getattr(overrides.get(space), "__dict__", {}).get(leaf)
+            if held is not None:
+                own.add(name)
+        if own:
+            project(
+                entry.view,
+                entry.attribute_projections,
+                exclude=set(),
+                include=lambda attribute, own=own: attribute.name in own,
+                source_model=True,
+                update_existing=True,
+            )
+            moved += len(own)
+    return moved
 
 
 def set_kinematic(
@@ -250,6 +300,7 @@ class ArrayWriter:
 
     def _flush(self, attr: str, values: np.ndarray) -> None:
         self._array(attr).assign(values)
+        reach_island_copies(self.pipeline, attr)
 
     def _write(self, attr: str, rows: Sequence[int], value: Any, *, column: int | None = None) -> bool:
         """Write one value into ``rows`` of one array. ``False`` if there is nowhere to."""
@@ -315,10 +366,12 @@ class ShapeWriter(ArrayWriter):
         "kd": "shape_material_kd",
         "kf": "shape_material_kf",
         "ka": "shape_material_ka",
-        "thickness": "shape_thickness",
+        "thickness": "shape_margin",
     }
     """Spec field to model array. The same set ``_MATERIAL_FIELDS`` (``scene/build/colliders.py``)
-    copies between shapes, which is the list that already had to be right."""
+    copies between shapes, which is the list that already had to be right. ``thickness`` is Newton's
+    ``shape_margin``, the surface offset a shape's ``ShapeConfig.margin`` sets: Newton 1.6 and 1.7 have
+    no ``shape_thickness``, so a write there found no array and the slider wrote nothing."""
 
     def __init__(self, model: Any, shapes: Iterable[int], pipeline: Any = None) -> None:
         super().__init__(model, pipeline)

@@ -72,6 +72,7 @@ KINDS = {
     "liquid": ("liquid", "ParticleBodySpec", "robosimstudio_materials.liquid", "liquid"),
     "dough": ("dough", "ParticleBodySpec", "robosimstudio_materials.dough", "dough"),
     "brush": ("brush", "BrushSpec", "robosimstudio_materials.brush", "brush"),
+    "tape": ("tape", "TapeSpec", "robosimstudio_materials.tape", "tape"),
 }
 """Kind -> its constructor, its spec, the module its entity is defined in, and the entity's registered name.
 
@@ -95,6 +96,8 @@ FLAT = {
     "ParticleBodySpec": "robosimstudio_materials.mpm.spec",
     "brush": "robosimstudio_materials.brush",
     "BrushSpec": "robosimstudio_materials.brush",
+    "tape": "robosimstudio_materials.tape",
+    "TapeSpec": "robosimstudio_materials.tape",
 }
 """Flat name -> the module the thing behind it is defined in: each kind's constructor and spec, and the dough's roller.
 
@@ -116,6 +119,8 @@ LISTED = [
     "roller",
     "sheet",
     "sponge",
+    "tape",
+    "tapes",
 ]
 """The lower-case flat names, as ``dir(rss)`` lists them when the package is installed."""
 
@@ -263,7 +268,7 @@ class TestEachKindStandsAlone(unittest.TestCase):
     """
 
     def test_no_kind_imports_another_at_any_scope(self) -> None:
-        """Beyond what :data:`NEEDS` declares: paper and the bag may import cloth and the brush the rope, and that is the whole list."""
+        """Beyond what :data:`NEEDS` declares: paper, the bag and the tape may import cloth and the brush the rope, and that is the whole list."""
         for kind in KINDS:
             with self.subTest(kind=kind):
                 module = MATERIALS / f"{kind}.py"
@@ -396,6 +401,7 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
                 "robosimstudio_materials.paper",
                 "robosimstudio_materials.rod",
                 "robosimstudio_materials.soft",
+                "robosimstudio_materials.tape",
             ],
             sorted(rss._PACKS),
         )

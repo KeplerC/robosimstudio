@@ -14,8 +14,11 @@ in the pour example's first scene, its cup on the page's drag handle (``pour_pro
   4 mm voxels is 34% of its volume after 2 s at rest (69% with the ``P1d``
   strain basis at 1.6x the cost; 250 iterations give 41%; 240 Hz gives 52%).
   So the measures of a liquid are **counts** -- ``fill_fraction`` of a bowl --
-  and a height or a volume is not a measurement of it. Honey (viscosity 50)
-  holds its shape plausibly and is what the first example pours.
+  and a height or a volume is not a measurement of it. Newton 1.7 keeps the
+  loss: a 57 mm column in a 60 mm tank stands at 23% of its height after 2 s on
+  1.6.0 and 24% on 1.7.0, 99% of its particles still in the tank (the
+  ``water_column`` probe, GPUs 3 and 5). Honey (viscosity 50) holds its shape
+  plausibly and is what the first example pours.
 * **Thin walls leak under graph capture.** The capturable ``S2`` collider basis
   lets a liquid through a wall thinner than about two voxels (3 mm walls lost
   60% in 2 s at rest); a signed-distance ``margin`` of half a voxel on every

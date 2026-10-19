@@ -29,6 +29,8 @@ class _StubWidget:
         self.value = value
         self.disabled = False
         self.removed = False
+        self.parent = None
+        """The folder it was built in, which is how a test asks whether a hidden folder hides it."""
         self.callbacks: list = []
 
     def on_update(self, fn):
@@ -72,18 +74,20 @@ class _StubMarkdown:
 
 
 class _StubFolder:
-    """A container, and where it was opened.
+    """A container, where it was opened, and whether it is shown.
 
     ``parent`` is what makes nesting checkable: a page that unrolls twice to
     reach one control is a folder whose parent is a folder, and that is a claim
     a test can make without a browser. Entering pushes onto the gui's open
     stack, which is how the *next* folder learns who its parent is -- so the
     bookkeeping is on the type, where ``with`` will actually find it.
+    ``visible`` is kept as viser keeps it, and a panel may reassign it.
     """
 
-    def __init__(self, label=None, parent=None, gui=None) -> None:
+    def __init__(self, label=None, parent=None, gui=None, visible=True) -> None:
         self.label = label
         self.parent = parent
+        self.visible = bool(visible)
         self.removed = False
         self._gui = gui
 
@@ -119,6 +123,7 @@ class _StubGui:
         widget whatever the panel had said."""
         handle = _StubWidget(value)
         handle.disabled = bool(disabled)
+        handle.parent = self._open[-1] if self._open else None
         self.widgets.append((str(label), handle))
         return handle
 
@@ -126,8 +131,8 @@ class _StubGui:
         """The widget a panel built under this label, for a test to drive."""
         return next(w for name, w in self.widgets if name == label)
 
-    def add_folder(self, label=None, **kwargs):
-        folder = _StubFolder(label, self._open[-1] if self._open else None, gui=self)
+    def add_folder(self, label=None, *, visible=True, **kwargs):
+        folder = _StubFolder(label, self._open[-1] if self._open else None, gui=self, visible=visible)
         self.folders.append(folder)
         return folder
 
@@ -140,7 +145,10 @@ class _StubGui:
         return self._widget(label, bool(initial_value), **kwargs)
 
     def add_dropdown(self, label, options=(), initial_value=None, **kwargs):
-        return self._widget(label, initial_value if initial_value is not None else options[0], **kwargs)
+        """A choice. Its ``options`` are kept, as viser keeps them, and a panel may reassign them."""
+        handle = self._widget(label, initial_value if initial_value is not None else options[0], **kwargs)
+        handle.options = tuple(options)
+        return handle
 
     def add_button_group(self, label, options=(), **kwargs):
         """A row of buttons. ``fire("Close")`` is what pressing one of them does.

@@ -27,7 +27,7 @@ dependencies = [
     # [sim] carries mujoco and mujoco-warp, which the default rigid solver needs
     # at runtime; newton imports them lazily, so a bare "newton" resolves and
     # then cannot step an arm.
-    "newton[sim]>=1.6,<1.7",
+    "newton[sim]>=1.7,<1.8",
     "numpy",
     # ModelBuilder.approximate_meshes(method="convex_hull") imports scipy.spatial
     # at call time, and every scene with a hand in it calls it.
@@ -69,10 +69,14 @@ genesis = [
 ]
 # The OVRTX path-traced renderer. Pinned: its render-var names and readback API
 # are private surface. pyglet is here because Newton's viewer camera imports
-# pyglet.math at call time. A checkout run through uv installs it without being
-# asked -- the `rtx` group below -- and a GPU without RT cores renders with
-# `tiled` either way (robosimstudio.solvers.render.choose_renderer).
-rtx = ["ovrtx==0.4.0.*", "usd-core", "pyglet"]
+# pyglet.math at call time. Newton 1.7's ViewerRTX drives OVRTX 0.4 and newer
+# through OVStage's scene interface and refuses to start without it. OVStage
+# 0.1.1 is the oldest Newton accepts; ovrtx 0.4.0 cannot populate a stage
+# through it ("Stage reader/writer legacy interface is unavailable"), and 0.4.1
+# can. A checkout run through uv installs these without being asked -- the
+# `rtx` group below -- and a GPU without RT cores renders with `tiled` either
+# way (robosimstudio.solvers.render.choose_renderer).
+rtx = ["ovrtx==0.4.1.*", "ovstage==0.1.1.*", "usd-core", "pyglet"]
 # USD scene import.
 usd = ["newton[importers]"]
 # The Feetech motor bus behind leader-arm teleoperation.
@@ -189,7 +193,7 @@ override-dependencies = [
     "robosuite; sys_platform == 'never'",
     "gym; sys_platform == 'never'",
     "bddl; sys_platform == 'never'",
-    "mujoco~=3.12.0",
+    "mujoco~=3.15.0",
 ]
 
 # Skill registries a graph's subgraphs may name, in gap's own convention: a

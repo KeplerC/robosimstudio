@@ -654,7 +654,7 @@ def compose(
         routing.main_pairs = None
     if routing.main_pairs is not None:
         kwargs: dict[str, Any] = {
-            "soft_contact_margin": float(spec.soft_contact_margin),
+            "soft_contact_gap": float(spec.soft_contact_margin),
             "enable_rigid_soft_full_surface_contact": bool(spec.full_surface_contact),
             "contact_matching": spec.contact_matching,
         }

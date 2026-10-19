@@ -240,8 +240,15 @@ def add_capsule_chain(
     :meth:`EntityRod.centerline` reads back. A module function rather than a
     method so a kind built *out of* capsule chains -- a brush's bristles --
     builds them the way a cable is built without being a cable.
+
+    The chain's joints are wrapped here, not by ``add_rod``: Newton 1.7's own
+    wrapping also gives the first capsule a free joint to the world, which
+    adds seven coordinates ahead of every cable's and reorders its joint span,
+    and VBD solves a free joint as no constraint at all. Wrapped by hand the
+    articulation is the one Newton 1.6 built -- the cable joints alone, under
+    ``{label}_articulation`` -- so the model a cable is solved on is unchanged.
     """
-    builder.add_rod(
+    _, joints = builder.add_rod(
         rod=rod,
         body_frame_origin="com",
         cfg=cfg,
@@ -255,8 +262,10 @@ def add_capsule_chain(
         twist_stiffness=float(gains["twist_ke"]),
         twist_damping=float(gains["twist_kd"]),
         label=label,
-        wrap_in_articulation=wrap_in_articulation,
+        wrap_in_articulation=False,
     )
+    if wrap_in_articulation and joints:
+        builder.add_articulation(list(joints), label=f"{label}_articulation" if label else None)
 
 
 def rod_slot_dofs(model: newton.Model, joints) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

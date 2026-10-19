@@ -199,6 +199,10 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
         "brushes (the `brush` kind: a handle with a field of short capsule-chain bristles)",
         ("BRUSH_60HZ", "BrushMaterialSpec", "BrushSpec", "brush"),
     ),
+    "robosimstudio_materials.tape": (
+        "tape and labels (the `tape` kind: a sheet stuck to a body by bonds that let go, with a pull tab)",
+        ("TAPE_60HZ", "TapeMaterialSpec", "TapeSpec", "tape", "tapes"),
+    ),
 }
 """Kind -> what it is, in words, and the flat names it provides.
 

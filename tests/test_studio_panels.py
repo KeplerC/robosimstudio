@@ -578,6 +578,33 @@ class TestAPagesSetGrabIsItsOwn(unittest.TestCase):
         finally:
             session.teardown()
 
+    def test_a_grip_on_the_mouse_stays_on_the_mouse(self) -> None:
+        """The fold page's box pinned slot 0 to the hand: a click already there rode it, and the edge rode none."""
+        import numpy as np
+
+        sim = _sim_with_an_edge()
+        session = _session(sim, 8982)
+        try:
+            grips, arm = session.deformables, next(iter(session.arms))
+            inputs = session.server.gui._gui_input_handle_from_uuid.values()
+            pins = sorted((h for h in inputs if str(getattr(h, "label", "")).startswith("Pin ")), key=lambda h: h.label)
+            q = np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)
+            grips.click_at("towel", q[int(sim["towel"].particles[-1])])  # the far corner, nowhere near the edge
+            grips.drain()
+            (click,) = [h.index for h in grips.handles.live]
+            grips.request_set("towel", "edge", arm)
+            grips.drain()
+            (edge,) = [h.index for h in grips.handles.live if h.index != click]
+            self.assertEqual(arm, grips.follow_arm[edge], "the edge rides the hand")
+            self.assertEqual("", grips.follow_arm[click], "and the click stays on the mouse")
+            grips.request_set("towel", "edge", arm, hold=False)
+            grips.drain()
+            self.assertEqual([click], [h.index for h in grips.handles.live], "only the request's grab is let go")
+            self.assertEqual("", grips.follow_arm[edge], "and its slot is off the hand")
+            self.assertEqual("", pins[edge].value, "on its dropdown too")
+        finally:
+            session.teardown()
+
 
 class TestTheInspectorWaitsToBeAsked(unittest.TestCase):
     def test_nothing_is_selected_on_a_scene_with_no_goal(self) -> None:

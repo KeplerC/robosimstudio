@@ -228,6 +228,16 @@ class SpecBinder:
             if readout is not None:
                 readout.value = _fmt(value, ui)
 
+    def set_disabled(self, names: Iterable[str]) -> None:
+        """Show ``names`` read-only and every other control editable.
+
+        For a field with nothing in the entity to write to -- a slab's core on a membrane -- which a
+        slider would otherwise offer and then move nothing.
+        """
+        off = frozenset(names)
+        for name, widget in self._widgets.items():
+            widget.disabled = name in off
+
     @property
     def unset(self) -> tuple[str, ...]:
         """Fields shown read-only because their value is ``None``."""

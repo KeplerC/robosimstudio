@@ -351,6 +351,11 @@ class EntityEmbodiment(Entity):
                     # honour the file only because its default happens to.
                     # Stated, so a change of default is not a change of dynamics.
                     ignore_inertial_definitions=False,
+                    # A URDF's <dynamics damping> as the drive damping, Newton 1.6's
+                    # reading; 1.7 warns when this is left unsaid and 1.8 switches
+                    # the default to passive joint damping, which neither VBD nor
+                    # XPBD reads. Stated for the same reason as the line above.
+                    joint_damping_mode="drive",
                     **({} if mount is None else {"xform": mount}),
                 )
             else:

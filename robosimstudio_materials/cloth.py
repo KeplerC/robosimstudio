@@ -7,6 +7,7 @@ Run ``examples/01_cloth/00_towel.py`` first. Copy this file to write a kind of y
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
@@ -65,10 +66,13 @@ __all__ = [
     "ClothSpec",
     "EntityCloth",
     "EntityHeldCloth",
+    "ForceGatedWipe",
     "HeldClothSpec",
     "ReferenceFabric",
     "Selector",
     "bending_length_from_droop",
+    "contact_force",
+    "contact_shapes",
     "crease_of",
     "droop_curve",
     "elastica_droop",
@@ -720,21 +724,24 @@ class EntityCloth(ParticleMixin, Entity):
         """This sheet's material, as something a panel may tune while the scene runs.
 
         ``LiveMaterial`` writes a field into the model's material arrays, which VBD reads every
-        substep, so a write needs no notification. The spec is the one the sheet was built with.
+        substep, and into an island's own copy of them, so a write needs no notification; the contact
+        trio goes into the model's scalars. The spec is the one the sheet was built with. None on a
+        host engine: SuperDex copies a shell's material when it builds it, so nothing here would reach it.
         """
         from robosimstudio.core.tuning import Tunable
+        from robosimstudio.domains.capabilities import host_bridge
         from robosimstudio.scene.tuning import LiveMaterial, locate_cloth
 
-        del pipeline
-        if self.model is None:
+        if self.model is None or (pipeline is not None and host_bridge(pipeline, self.name) is not None):
             return ()
-        live = LiveMaterial(self.model, locate_cloth(self.model, self))
+        live = LiveMaterial(self.model, locate_cloth(self.model, self), pipeline)
         return (
             Tunable(
                 name="material",
                 spec=self.spec.material,
                 write=live.write_field,
                 summary=f"What {self.name} is made of.",
+                inert=live.inert(),
             ),
         )
 
@@ -1031,6 +1038,204 @@ def contact_thickness(material) -> float:
         return 0.0
     standoff = 2.0 * float(material.particle_radius)
     return float(material.thickness) + standoff if material.is_slab else standoff
+
+
+def contact_shapes(sim, name: str) -> np.ndarray:
+    """The shapes a contact readout sums for ``name``: an arm's hand, or a thing's own shapes.
+
+    An arm name (``"right"``) is its tool link and fingers, the bodies a hand touches a sheet
+    with; anything else is matched on the shape labels, ``"table"`` being the bench's top.
+
+    Raises:
+        KeyError: When ``name`` is neither an arm nor a shape label.
+    """
+    shape_body = np.asarray(sim.model.shape_body.numpy())
+    robot = getattr(sim.scene, "embodiment", None)
+    if robot is not None and name in getattr(robot, "arms", {}):
+        return np.flatnonzero(np.isin(shape_body, np.asarray(robot.gripper_bodies(name), dtype=np.int64)))
+    labels = [str(label) for label in sim.model.shape_label]
+    found = [i for i, label in enumerate(labels) if label == name or label.startswith(f"{name}/")]
+    if not found:
+        raise KeyError(f"no arm and no shape called {name!r}")
+    return np.asarray(found, dtype=np.int64)
+
+
+def contact_force(sim, name: str) -> np.ndarray:
+    """What a sheet pushes on ``name`` with over the last substep [N, world ``(3,)``].
+
+    The rigid-soft contact forces Newton 1.7's VBD reports (``CONTACT_F``), summed over
+    :func:`contact_shapes`. A hand pressing a sheet down reads ``+z``. The scene must stage
+    ``rss.coupler("one_way", contact_forces=True)``.
+
+    What it is good for, measured with the closed YAM hand pressing the terry towel
+    (``force_towel.py``, GPU 5, Newton 1.7): zero until the hand touches, then rising with the
+    press, and the bench's reading moving by what the hand puts in to within a newton: 17.5 N for
+    the hand's 18.4, 201.4 for its 201.3, over the last 4 mm of a press. What it is not good for is a sheet's
+    resting weight (``force_rest.py``): the towel lying still reads 100 to 140 times its weight on
+    the bench and an 80 gsm sheet 0.27 of it, with or without full-surface contact and at any
+    contact damping. A few grams per particle is a penetration near float32's resolution at bench
+    height, which VBD's few iterations do not balance. Read changes in it, and forces of a newton
+    or more.
+    """
+    forces = sim.pipeline.program.solver.shape_contact_forces()
+    return forces[contact_shapes(sim, name)].sum(axis=0)
+
+
+class ForceGatedWipe:
+    """A stain on a sheet that a hand scrubs off only while it presses inside a force band.
+
+    Each :meth:`update` reads the hand's push into the sheet (:func:`contact_force`, its ``z``)
+    and the particles the hand is touching; a stain particle the hand slides over while the push
+    is inside ``band`` is wiped, one it slides over while the push is above is marked pressed too
+    hard. A hand that brushes the stain, or one that crushes it, wipes nothing, and neither does
+    one that only presses or lifts: what it touches counts only on a control step in which the
+    hand moved at least ``rub`` along the sheet. Gated on the push alone, lifting straight up off
+    the end of a light stroke took the push up into the band as the heaped towel sprang back and
+    marked one of the stain's 9 particles wiped (the scrub take's light stroke, ``film_scrub.log``).
+
+    The push gated on is the median of the last ``window`` control steps, so that no one step's
+    reading decides what a stroke did: along a light stroke the readings went 7.5, 3.6 and 4.7 N
+    twenty steps apart (``tests/test_scrub_a_stain.py``).
+
+    A press that went past the band stays too hard until the push falls back under the band's
+    floor, which is the hand coming off. Lifting a hard press takes the push back down through the
+    band while the fingers still touch, and the towel springing back slides under them: gated on
+    the band alone, lifting off a 132 N stroke that read wiped 0 marked 3 of the stain's 9 particles
+    wiped in one drive of two; latched, none in either (``scrub_lift.py``, the strokes of
+    ``tests/test_scrub_a_stain.py``, GPU 3).
+
+    A reset of the scene puts the towel back clean, so the stain comes back with it: an update that
+    finds the sim's step count gone back calls :meth:`reset`, as the page's **Clean stain** does. The
+    hand's jump home is not a rub, since a reset also forgets where the hand was.
+
+    Args:
+        sim: A scene that stages ``coupler("one_way", contact_forces=True)``.
+        cloth: The sheet's name.
+        stain: The particle set on it that is the stain, from :attr:`ClothSpec.particle_sets`.
+        arm: The hand that scrubs.
+        band: ``(least, most)`` push [N] that wipes.
+        window: Control steps the push is the median of.
+        rub: How far the hand must move along the sheet in a control step for what it touches to
+            count [m]. 0.2 mm is 12 mm/s at 60 Hz. Along the test's strokes the hand moves 0.75 mm
+            a step; pressing down, 0.02 mm at most; lifting straight up, 0.05 mm (median), more only
+            in the first steps while it finishes the stroke (``scrub_lift.py``). 0 counts every touch.
+    """
+
+    KEEP = 600
+    """How many of the last updates' unfiltered pushes :attr:`raw` keeps: 10 s at 60 Hz."""
+
+    def __init__(
+        self,
+        sim,
+        cloth: str,
+        stain: str,
+        arm: str,
+        band: tuple[float, float],
+        window: int = 7,
+        rub: float = 0.0002,
+    ) -> None:
+        self.sim = sim
+        self.band = (float(band[0]), float(band[1]))
+        self.stain = np.asarray(sim[cloth].entity.sets[f"{cloth}/{stain}"], dtype=np.int64)
+        self.hand = contact_shapes(sim, arm)
+        self.wiped = np.zeros(len(self.stain), dtype=bool)
+        self.crushed = np.zeros(len(self.stain), dtype=bool)
+        self.window = max(1, int(window))
+        self.recent: list[float] = []
+        self.raw: deque[float] = deque(maxlen=self.KEEP)
+        """The push each update read, before the median [N]; bounded, since a page updates it every step."""
+        self.push = 0.0
+        self.hard = False
+        """Whether the press the hand is in went past the band; cleared once the push is under it."""
+        self.rub = float(rub)
+        self.bodies = np.unique(np.asarray(sim.model.shape_body.numpy())[self.hand])
+        self.bodies = self.bodies[self.bodies >= 0]
+        self.where: np.ndarray | None = None
+        """The hand's bodies' mean position in the sheet's plane at the last update [m]."""
+        self.step = -1
+        """The sim's step count at the last update; one that went back is the scene reset."""
+
+    def slid(self) -> bool:
+        """Whether the hand moved at least :attr:`rub` along the sheet since the last update."""
+        if self.rub <= 0.0:
+            return True
+        where = self.sim.state.body_q.numpy()[self.bodies, :2].mean(axis=0)
+        moved = None if self.where is None else float(np.linalg.norm(where - self.where))
+        self.where = where
+        return moved is not None and moved >= self.rub
+
+    def touched(self) -> np.ndarray:
+        """The stain particles the hand is touching: a corner of a record against it that carries force."""
+        corners, shape, force = self.sim.pipeline.program.solver.soft_contact_records()
+        live = np.isin(shape, self.hand) & (np.linalg.norm(force, axis=1) > 1.0e-6)
+        hit = corners[live].ravel()
+        return np.isin(self.stain, hit[hit >= 0])
+
+    def update(self) -> dict[str, float]:
+        """Read the push, mark what the hand touched, and return the readout."""
+        step = int(getattr(self.sim, "step_count", 0))
+        if step < self.step:
+            self.reset()
+        self.step = step
+        forces = self.sim.pipeline.program.solver.shape_contact_forces()
+        now = float(forces[self.hand, 2].sum())
+        self.raw.append(now)
+        self.recent = [*self.recent, now][-self.window :]
+        self.push = float(np.median(self.recent))
+        least, most = self.band
+        self.hard = self.push >= least and (self.hard or self.push > most)
+        if self.slid() and self.push >= least:
+            touched = self.touched()
+            if self.hard:
+                self.crushed |= touched
+            else:
+                self.wiped |= touched
+        return self.readout()
+
+    def readout(self) -> dict[str, float]:
+        return {"push": self.push, "wiped": float(self.wiped.mean()), "crushed": float(self.crushed.mean())}
+
+    STAIN_RGB = (105, 62, 24)
+    TOO_HARD_RGB = (200, 32, 26)
+
+    def draw(self, scene, name: str = "/scrub/stain", lift: float = 0.004) -> None:
+        """Paint the stain on a page: brown where it is, red where it was pressed too hard, gone where wiped.
+
+        ``scene`` is the page's ``studio.scene``. The sheet is drawn as fabric with one colour, so
+        the stain is a disc on each of its particles, as wide as they are apart and lifted ``lift``
+        [m] off them so the drawn pile does not cover it. The discs are re-sent only when what is
+        wiped changes; otherwise they follow the sheet.
+        """
+        points = self.sim.state.particle_q.numpy()[self.stain].astype(np.float32)
+        points[:, 2] += lift
+        show = self.crushed | ~self.wiped
+        key = (show.tobytes(), self.crushed.tobytes())
+        handle = getattr(self, "_drawn", None)
+        if handle is not None and getattr(self, "_drawn_key", None) == key:
+            handle.points = points[show]
+            return
+        if handle is not None:
+            handle.remove()
+            self._drawn = None
+        self._drawn_key = key
+        if not show.any():
+            return
+        if not hasattr(self, "_disc"):
+            gaps = np.linalg.norm(points[:, None, :] - points[None, :, :], axis=-1) + np.eye(len(points))
+            self._disc = 1.4 * float(np.median(gaps.min(axis=1))) if len(points) > 1 else 0.012
+        colors = np.where(self.crushed[:, None], self.TOO_HARD_RGB, self.STAIN_RGB).astype(np.uint8)[show]
+        self._drawn = scene.add_point_cloud(
+            name, points=points[show], colors=colors, point_size=self._disc, point_shape="circle", point_shading="flat"
+        )
+
+    def reset(self) -> None:
+        """The stain back whole, and the push and the hand's last position forgotten."""
+        self.wiped[:] = False
+        self.crushed[:] = False
+        self.recent.clear()
+        self.raw.clear()
+        self.push, self.hard = 0.0, False
+        self.where = None
 
 
 def _pairs(snapshot, cloth: str, panel: dict[str, Any]) -> np.ndarray:

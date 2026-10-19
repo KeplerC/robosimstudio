@@ -28,11 +28,12 @@ module's.
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 from newton import ModelFlags
 
-from robosimstudio.core.tuning import ArrayWriter, BodyWriter, JointWriter, ShapeWriter, notify
+from robosimstudio.core.tuning import ArrayWriter, BodyWriter, JointWriter, ShapeWriter, notify, reach_island_copies
 from robosimstudio.specs import BodySpec, ContactMaterialSpec, JointDriveSpec
 from robosimstudio.specs.params import RECAPTURE, iter_params, undescribed
 
@@ -299,6 +300,85 @@ class TestTheSpecsAreFullyDescribed(unittest.TestCase):
             for f, _ in iter_params(spec):
                 with self.subTest(f"{spec.__name__}.{f.name}"):
                     self.assertIn(f.name, writer.FIELDS)
+
+    def test_every_array_a_writer_names_is_one_newton_has(self) -> None:
+        """A mapped name Newton does not have finds no array, and the write reports nothing landed.
+
+        ``thickness`` was mapped to ``shape_thickness``, which neither Newton 1.6 nor 1.7 has, so
+        the contact folder's thickness slider wrote nothing on every rigid thing."""
+        import newton
+
+        model = newton.Model(device="cpu")
+        for writer in (ShapeWriter, JointWriter):
+            for field_name, attr in writer.FIELDS.items():
+                with self.subTest(f"{writer.__name__}.{field_name}"):
+                    self.assertTrue(hasattr(model, attr), f"newton.Model has no {attr!r}")
+
+
+class _View:
+    """A ``ModelView``'s override table: what an island holds its own copy of."""
+
+    def __init__(self, **overrides) -> None:
+        object.__setattr__(self, "_overrides", overrides)
+
+
+class _Entry:
+    def __init__(self, view) -> None:
+        self.view = view
+        self.attribute_projections = {"per-element": "map"}
+
+
+class _Coupled:
+    """Newton's coupled solver, as far as an island's copy is concerned: entries and a projection."""
+
+    def __init__(self, **views) -> None:
+        self._entries = {name: _Entry(view) for name, view in views.items()}
+        self.projected: list[tuple[str, tuple[str, ...]]] = []
+
+    def _project_compact_attributes(self, view, projections, *, exclude, include, source_model, update_existing):
+        assert projections == {"per-element": "map"} and source_model and update_existing and not exclude
+        names = ("tri_materials", "particle_radius", "vbd:dahl_tau", "joint_target_ke")
+        name = next(n for n, e in self._entries.items() if e.view is view)
+        self.projected.append((name, tuple(n for n in names if include(SimpleNamespace(name=n)))))
+
+
+class TestAnIslandThatHoldsItsOwnCopy(unittest.TestCase):
+    """Newton 1.7's coupled solver may give an island its own copy of a model array; a write must reach it."""
+
+    def _pipeline(self):
+        namespace = SimpleNamespace(dahl_tau=object())
+        return SimpleNamespace(
+            solver=_Coupled(
+                vbd=_View(tri_materials=object(), vbd=namespace),
+                mujoco=_View(joint_target_ke=object()),
+            )
+        )
+
+    def test_the_copy_is_refreshed_and_only_on_the_island_that_holds_one(self) -> None:
+        pipeline = self._pipeline()
+        self.assertEqual(1, reach_island_copies(pipeline, "tri_materials"))
+        self.assertEqual([("vbd", ("tri_materials",))], pipeline.solver.projected)
+
+    def test_a_namespaced_array_is_named_the_way_the_solver_spells_it(self) -> None:
+        pipeline = self._pipeline()
+        self.assertEqual(1, reach_island_copies(pipeline, "vbd.dahl_tau"))
+        self.assertEqual([("vbd", ("vbd:dahl_tau",))], pipeline.solver.projected)
+
+    def test_an_array_every_island_reads_from_the_model_moves_nothing(self) -> None:
+        pipeline = self._pipeline()
+        self.assertEqual(0, reach_island_copies(pipeline, "particle_radius"))
+        self.assertEqual([], pipeline.solver.projected)
+
+    def test_a_one_solver_scene_or_no_pipeline_is_a_no_op(self) -> None:
+        self.assertEqual(0, reach_island_copies(None, "tri_materials"))
+        self.assertEqual(0, reach_island_copies(SimpleNamespace(solver=_Solver()), "tri_materials"))
+
+    def test_an_array_writer_refreshes_the_copy_it_wrote(self) -> None:
+        pipeline = self._pipeline()
+        pipeline.program = _Program()
+        model = _Model(tri_materials=np.zeros(4))
+        self.assertTrue(ArrayWriter(model, pipeline)._write("tri_materials", [1, 2], 3.0))
+        self.assertEqual([("vbd", ("tri_materials",))], pipeline.solver.projected)
 
 
 if __name__ == "__main__":

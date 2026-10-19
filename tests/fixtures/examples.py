@@ -51,6 +51,7 @@ EXAMPLES = ROOT / "examples"
 NUMBERED = (
     "01_cloth/00_towel.py",
     "01_cloth/02_engines.py",
+    "01_cloth/03_scrub_a_stain.py",
     "02_soft/01_tet_mesh.py",
     "04_extending/01_new_kind.py",
     "03_rope/00_cable.py",
@@ -69,6 +70,8 @@ NUMBERED = (
     "14_brush/01_scrub_scored.py",
     "15_suction/00_pick_a_plate.py",
     "15_suction/01_pick_scored.py",
+    "19_tape/00_peel_a_label.py",
+    "19_tape/01_peel_a_label_scored.py",
 )
 """The numbered scripts that run on a base checkout: no flags, every parameter a
 local, two arms, one call to the studio. ``02_engines`` is here because its one

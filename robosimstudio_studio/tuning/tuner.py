@@ -17,12 +17,13 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from robosimstudio.assetlib.materials import get_material
+from robosimstudio.assetlib.materials import get_material, list_materials
+from robosimstudio.scene.tuning import write_live
 from robosimstudio.specs import restage
 from robosimstudio.specs.params import LIVE, RECAPTURE, param_ui
 from robosimstudio_materials.cloth import ClothMaterialSpec
 
-from .apply import LiveMaterial, apply_contact, contact_differs, locate_cloth, rebuild_fields
+from .apply import apply_contact, contact_differs, rebuild_fields
 
 __all__ = ["MaterialTuner"]
 
@@ -51,20 +52,29 @@ class MaterialTuner:
         # meant to tolerate it -- the crash the comment above promised to avoid,
         # for exactly the unanticipated kind it was written for. Both shipped
         # deformables declare one, so it waited for the third.
-        deformables = {
-            n: e
-            for n, e in env.scene.by_name.items()
-            if e.carries_particles
-            if hasattr(getattr(e.spec, "material", None), "tri_ke")
-        }
-        self.names: tuple[str, ...] = tuple(deformables)
-        self.entities: dict[str, Any] = deformables
-        self.working: dict[str, ClothMaterialSpec] = {n: e.spec.material for n, e in deformables.items()}
+        #
+        # Every write goes through the entity's own ``material`` tunable, which the inspector binds
+        # too. A kind that adds fields routes them there -- paper's plastic trio into its crease
+        # kernel's array, tape's adhesive into the bonds -- and a writer of this panel's own reached
+        # none of them: ``yield_angle`` moved on the page and the crease kernel never saw it. A kind
+        # whose engine copied the material at build offers no tunable (a bag on SuperDex) and is not
+        # on this panel, since none of its sliders could move anything.
+        pipeline = getattr(env, "pipeline", None)
+        materials = {}
+        for n, e in env.scene.by_name.items():
+            if not e.carries_particles or not hasattr(getattr(e.spec, "material", None), "tri_ke"):
+                continue
+            tunable = next((t for t in e.tunables(pipeline) if t.name == "material"), None)
+            if tunable is not None:
+                materials[n] = tunable
+        self.names: tuple[str, ...] = tuple(materials)
+        self.entities: dict[str, Any] = {n: env.scene.by_name[n] for n in materials}
+        self.working: dict[str, ClothMaterialSpec] = {n: t.spec for n, t in materials.items()}
         self.built: dict[str, ClothMaterialSpec] = dict(self.working)
-        self.live: dict[str, LiveMaterial] = {
-            n: LiveMaterial(env.model, locate_cloth(env.model, e)) for n, e in deformables.items()
-        }
-        self.origin: dict[str, str] = dict.fromkeys(deformables, "")
+        self.live: dict[str, _Writer] = {n: _Writer(t.write) for n, t in materials.items()}
+        self.inert: dict[str, tuple[str, ...]] = {n: tuple(t.inert) for n, t in materials.items()}
+        """Per cloth, the fields with nothing to write to, which the panel shows read-only."""
+        self.origin: dict[str, str] = dict.fromkeys(materials, "")
         """Which named preset each cloth was last loaded from, if any."""
         self.selected: str = self.names[0] if self.names else ""
 
@@ -105,9 +115,26 @@ class MaterialTuner:
             self.apply_contact()
         return tier
 
+    def presets(self) -> tuple[str, ...]:
+        """The named presets the selected cloth can wear: those of exactly its built material's class.
+
+        A tape's spec refuses a material with no adhesive and a paper's one with no plastic trio, so a
+        towel preset adopted onto a label moved its sliders and then failed the rebuild; and no sheet
+        can be made of rice. Exactly, not a subclass: a towel offered a label's material would wear
+        fields its folder does not show, which a rebuild then puts onto a cloth.
+        """
+        kind = type(self.built[self.selected])
+        return tuple(name for name in list_materials() if type(get_material(name).spec) is kind)
+
     def adopt(self, preset: str) -> None:
-        """Load a named preset onto the selected cloth."""
+        """Load a named preset onto the selected cloth.
+
+        Raises:
+            ValueError: For a preset that is not one of :meth:`presets`.
+        """
         name = self.selected
+        if preset not in self.presets():
+            raise ValueError(f"{name!r} is a {type(self.built[name]).__name__}; {preset!r} is not one")
         self.working[name] = get_material(preset).spec
         self.origin[name] = preset
         self.live[name].write(self.working[name])
@@ -171,3 +198,14 @@ class MaterialTuner:
         if not preset:
             return None
         return get_material(preset).calibration
+
+
+class _Writer:
+    """One cloth's live fields, written through its entity's ``material`` tunable."""
+
+    def __init__(self, write_field: Any) -> None:
+        self.write_field = write_field
+
+    def write(self, spec: Any, *, only: str = "") -> tuple[str, ...]:
+        """Every live field of ``spec``, or just ``only``. Returns the names that landed."""
+        return write_live(spec, self.write_field, only=only)

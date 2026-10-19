@@ -494,7 +494,9 @@ def _build_base(
     collision = arrangement.collision
     builder = newton.ModelBuilder()
     if arrangement.gravity != -9.81:
-        builder.gravity = float(arrangement.gravity)
+        # A vector along the builder's up axis: Newton 1.7 refuses a scalar
+        # (1.6 took one as a magnitude along up_vector, which this reproduces).
+        builder.gravity = tuple(float(arrangement.gravity) * float(c) for c in builder.up_vector)
     if collision.rigid_gap is not None:
         # Before anything imports: this is the default gap for every shape that
         # states none, and a tight-clearance task needs it at the scale of its

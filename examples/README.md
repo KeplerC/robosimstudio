@@ -12,6 +12,10 @@
 |---|---|---|
 | <img src="01_cloth/media/00_towel.webp" width="240"> | <img src="01_cloth/media/01_fabrics.webp" width="240"> | <img src="01_cloth/media/02_engines.webp" width="240"> |
 
+| [Scrub a stain](01_cloth/03_scrub_a_stain.py) |
+|---|
+| <img src="01_cloth/media/03_scrub_a_stain.webp" width="240"> |
+
 ## [02 Soft-Body Simulation](02_soft/README.md)
 
 | [Sponge](02_soft/00_sponge.py) | [Tet mesh](02_soft/01_tet_mesh.py) | [Your own](02_soft/02_your_own_soft.py) |
@@ -110,6 +114,12 @@
 | [Hook a band on pegs](18_bands/00_band_on_pegs.py) | [Hook a band, scored](18_bands/01_band_on_pegs_scored.py) |
 |---|---|
 | <img src="18_bands/media/00_band_on_pegs.webp" width="240"> | |
+
+## [19 Tape](19_tape/README.md)
+
+| [Peel a label](19_tape/00_peel_a_label.py) | [Peel a label, scored](19_tape/01_peel_a_label_scored.py) |
+|---|---|
+| <img src="19_tape/media/00_peel_a_label.webp" width="240"> | |
 
 ## [Live Scene Editing](live/README.md)
 

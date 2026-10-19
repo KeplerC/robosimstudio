@@ -135,7 +135,7 @@ class TestTheRollByHand(unittest.TestCase):
 
     def test_the_scene_steps_captured_inside_its_budget(self) -> None:
         self.assertTrue(self.sim.pipeline.captured, self.sim.pipeline.capture_error)
-        self.assertLess(self.ms_per_step, 40.0, f"{self.ms_per_step:.1f} ms per control step; the docstring says 24.6")
+        self.assertLess(self.ms_per_step, 40.0, f"{self.ms_per_step:.1f} ms per control step; the docstring says 21.8")
 
     def test_the_fingers_closed_on_the_handle_and_lifted_it(self) -> None:
         self.assertLess(self.result["miss_grip"], 0.006, "the hand did not get down to the handle")

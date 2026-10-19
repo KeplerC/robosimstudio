@@ -49,7 +49,7 @@ from robosimstudio.domains.capabilities import ParticleMixin
 from robosimstudio.domains.selection import resolve_selector
 from robosimstudio.scene.entity import Entity
 
-from .spec import MPM_KEYS, NEWTON_MPM_STRESS_SCALE, ParticleBodySpec, ParticleMaterialSpec
+from .spec import _STRESS_KEYS, MPM_KEYS, NEWTON_MPM_STRESS_SCALE, ParticleBodySpec, ParticleMaterialSpec
 
 if TYPE_CHECKING:
     from robosimstudio.core.pipeline import ScenePipeline
@@ -350,7 +350,7 @@ class EntityParticleBody(ParticleMixin, Entity):
                 values[key] = float(getattr(self.material, key))
                 continue
             value = float(array.numpy()[first])
-            if key in ("young_modulus", "yield_pressure", "yield_stress"):
+            if key in _STRESS_KEYS:
                 value /= NEWTON_MPM_STRESS_SCALE
             values[key] = value
         values["density"] = float(model.particle_mass.numpy()[first]) / self._particle_volume
@@ -374,9 +374,7 @@ class EntityParticleBody(ParticleMixin, Entity):
         array = getattr(namespace, field, None)
         if array is None:
             return False
-        scaled = float(value) * (
-            NEWTON_MPM_STRESS_SCALE if field in ("young_modulus", "yield_pressure", "yield_stress") else 1.0
-        )
+        scaled = float(value) * (NEWTON_MPM_STRESS_SCALE if field in _STRESS_KEYS else 1.0)
         rows = self._all_world_indices()
         targets = [array]
         # The island's solver holds a view of the model; where the view copied
