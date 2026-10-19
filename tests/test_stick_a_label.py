@@ -45,12 +45,12 @@ FAR = WORK + np.array([0.0, -0.125, 0.146])
 NEAR = WORK + np.array([0.0, -0.040, TOP + 0.019])
 """Where the tab is set down: on the box's near end, the shut-jaw tips 2.5 mm clear of the top [m]."""
 HOVER = 0.05
-"""How high the shut fingertips move between strokes [m]: over the 24 mm tab, whose top the fingers'
-flare, 20 mm across 25 mm up, knocked over when a stroke came in lower (``p14_drive.py``)."""
+"""How high the shut fingertips move between strokes [m]: clear of the 24 mm tab with the fingers'
+flare, 40 mm across 30 mm up them (``p7_fingers.py``)."""
 CLEAR = 0.011
 """Where a stroke starts, past the tab's furthest corner along the label [m]: the shut fingers' 7.2 mm
 half-width 25 mm up, and 3.8 mm for the tab to creep in while the hand comes down. The label's pull
-leans the tab over the strokes; started 9 mm past its middle, the fingers pushed it over
+leans the tab over the strokes; started 8 mm past its middle, the fingers pushed it over
 (``p15_descend.py``), and 19 mm past its middle, on the third stroke (``p18_film.py``)."""
 COLUMNS = (1, 3, 5, 7)
 """The label's grid columns the four strokes run along: 5, 15, 25 and 35 mm across its 40."""
@@ -117,8 +117,9 @@ def rub(session, label) -> list[float]:
 
     The label lies 9 degrees off the bench's axes after the lay (``p12_lay.py``, three lays), so each
     stroke runs along one of its columns, from :data:`CLEAR` past the tab's middle to 3 mm past the
-    label's end. The jaws stay square to the bench: turned 9 degrees to the label, the shut fingertips
-    dragged the whole loose label 35 mm along with them and made 7% of its bonds (``p17_stroke.py``).
+    label's end. The jaws stay square to the bench: turned 9 degrees to the label, pressing 5 mm under
+    it, the shut fingertips dragged the whole loose label 35 mm along and made 7% of its bonds, where
+    square they made 25% in the same stroke (``p17_stroke.py``, one drive each).
     """
     arm = session.arms["right"]
     state = session.env.state
@@ -140,7 +141,7 @@ def rub(session, label) -> list[float]:
         start, end = ends(c)
         go(session, "right", start + np.array([0.0, 0.0, HOVER + PUSH]), speed=0.08, steps=60)
         start, end = ends(c)  # the loose label and its tab creep on the box, up to 1.9 mm/s (p16_drift.py)
-        go(session, "right", start, speed=0.05, steps=0)  # held a second longer, the press drags the label
+        go(session, "right", start, speed=0.05, steps=0)  # held a second at 5 mm, it dragged the label (p14_drive.py)
         tick(session, 10)
         go(session, "right", end, speed=0.03, steps=30)
         tick(session, 10)

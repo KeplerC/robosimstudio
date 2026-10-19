@@ -334,7 +334,8 @@ LABEL = replace(
     peak_opening=5.0e-4,
     reach=1.0e-3,
     # A bond's hold along the face, 0.4 N on a 5 mm cell. At 1, with stiction_speed 0.01 m/s, the shut
-    # fingertips rubbing at 30 mm/s dragged the loose label along with them (``p18_film.py``).
+    # fingertips rubbing at 30 mm/s, 5 mm under the label, dragged it along with them (``p18_film.py``,
+    # one drive); at these two, four strokes 3 mm under it made 88-92% of the bonds in five.
     stiction=4.0,
     stiction_speed=0.1,
     # 0.2 N on a 5 mm cell: a label laid by the hand makes 1-6 of 126 bonds, the shut fingertips
