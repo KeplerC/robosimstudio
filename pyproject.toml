@@ -64,9 +64,15 @@ dependencies = [
 # beside the Newton arm. It ships wheels for Python 3.12 only; on any other
 # interpreter the extra resolves to nothing and a sponge scene says so.
 superdex = ["superdex-physics==1.0.*; python_version == '3.12'"]
-# Genesis's IPC coupler as a second foreign engine. Install it in a virtual
-# environment of its own: it moves twenty packages, and trimesh is pinned below
-# 5 here because genesis-world otherwise drags it across a major version.
+# Genesis as a second foreign engine: its IPC coupler for cloth and soft bodies,
+# its SPH for water. Install it in a virtual environment of its own: it moves
+# twenty packages, and trimesh is pinned below 5 here because genesis-world
+# otherwise drags it across a major version. From the checkout, with the
+# checkout itself on the path rather than installed:
+#   uv export --frozen --extra genesis --extra dev --no-group rtx --no-emit-project --no-hashes > /tmp/greq.txt
+#   uv venv --python 3.12 /tmp/gvenv && uv pip install --python /tmp/gvenv/bin/python -r /tmp/greq.txt
+#   PYTHONPATH=$PWD CUDA_VISIBLE_DEVICES=0 QD_VISIBLE_DEVICE=0 /tmp/gvenv/bin/python -m unittest tests.test_genesis
+# genesis-world 1.3.3 resolves beside newton 1.7 and mujoco 3.15 in this lock.
 genesis = [
     "genesis-world==1.3.*",
     "torch",

@@ -235,6 +235,17 @@ class CosimRig:
             here = lerp_poses(prev, goal, t)
             yield sub, list(zip(plan.kept, compose_many(here[plan.rows], plan.local), strict=True))
 
+    def start_poses(self, targets: dict[int, np.ndarray]) -> dict[int, np.ndarray]:
+        """Each body's pose at the start of this control step: the last commit, or ``targets`` on a teleport.
+
+        For an engine that drives a mirror by velocity rather than by a sweep of
+        aims: it places the mirror here and gives it the velocity that carries it
+        to ``targets`` by the end of the step (``engines/genesis/sph.py``).
+        """
+        if self._teleport:
+            return {b: np.asarray(p, dtype=np.float64).copy() for b, p in targets.items()}
+        return {b: self._prev.get(b, np.asarray(p, dtype=np.float64)).copy() for b, p in targets.items()}
+
     def commit(self, targets: dict[int, np.ndarray]) -> None:
         """Close the tick: this step's poses become the next one's previous."""
         self._teleport = False

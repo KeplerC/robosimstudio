@@ -207,6 +207,10 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
         "cutting (the `cutting` kind: a block a knife parts, on the walk-on-spheres cage cutter)",
         ("CUTTING_50HZ", "CuttableMaterialSpec", "CuttableSpec", "KnifeSpec", "cuttable", "cuttables", "knife"),
     ),
+    "robosimstudio_materials.water": (
+        "water (the `water` kind: a liquid that keeps its volume, on Genesis's SPH)",
+        ("WATER_60HZ", "WaterMaterialSpec", "WaterSpec", "water"),
+    ),
 }
 """Kind -> what it is, in words, and the flat names it provides.
 

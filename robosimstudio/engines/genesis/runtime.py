@@ -4,7 +4,8 @@
 Three things about ``gs.init`` are worth a module of their own.
 
 **It is process-global and first-caller-wins**, like SuperDex's ``initialize``.
-A second island in the same process gets whatever the first asked for.
+A second island in the same process gets whatever the first asked for, except
+an IPC island after a liquid island's float32, which is refused (below).
 
 **It requires float64 for the two-way harvest, and this is not a preference.**
 The IPC coupler's reaction is ``(k/dt^2) * m_link * (pos_ipc - pos_aim)``. At
@@ -41,8 +42,8 @@ __all__ = ["ensure_initialized", "require_genesis"]
 
 log = logging.getLogger(__name__)
 
-_ENGINE: dict[str, Any] = {"precision": None}
-"""Process-global engine state: the precision ``init`` actually ran with."""
+_ENGINE: dict[str, Any] = {"precision": None, "coupler": None}
+"""Process-global engine state: the precision ``init`` actually ran with, and whose island asked for it."""
 
 
 def require_genesis():
@@ -51,37 +52,78 @@ def require_genesis():
         import genesis as gs
     except ImportError as error:
         raise ImportError(
-            "the 'genesis' backend needs the genesis-world wheel and libuipc: install the "
-            "[genesis] extra (uv sync --extra genesis). It ships for Linux/Windows x86 with "
-            "an NVIDIA GPU only."
+            "the 'genesis' backend needs the genesis-world wheel (and libuipc for cloth and soft "
+            "bodies): install the [genesis] extra in a virtual environment of its own, with this "
+            "checkout on PYTHONPATH (the commands are in pyproject.toml's [genesis] comment). It "
+            "ships for Linux/Windows x86 with an NVIDIA GPU only."
         ) from error
     return gs
 
 
-def ensure_initialized(precision: str = "64") -> Any:
+def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
     """Initialise Genesis once per process. Returns the module.
 
     Args:
         precision: ``"64"`` -- see the module docstring. ``"32"`` is accepted so
             a caller can measure the difference, and warned about loudly,
             because a scene that harvests wrenches at 32 reads zero rather than
-            reading wrong, which is much harder to notice.
+            reading wrong, which is much harder to notice. An IPC island asking
+            for 64 in a process a liquid island initialised at 32 is refused.
+        coupler: ``"ipc"`` or ``"legacy"``: whose harvest the precision serves. The
+            legacy coupler's reaction is a momentum change, which float32 reads
+            (:mod:`robosimstudio.engines.genesis.sph`), so it asks for 32 without
+            the warning.
     """
     gs = require_genesis()
     if _ENGINE["precision"] is not None:
-        if str(precision) != _ENGINE["precision"]:
+        if str(precision) == "64" and _ENGINE["precision"] == "32" and coupler == "ipc":
+            # An island built first in this process set float32 (a liquid's by choice, or an IPC
+            # island measuring the difference), and an IPC island now wants 64: its harvest would read zero.
+            earlier = (
+                "a liquid island's, as rss.WATER_60HZ states"
+                if _ENGINE.get("coupler") == "legacy"
+                else "an IPC island that asked for 32"
+            )
+            raise RuntimeError(
+                f"genesis was initialised at precision=32 by an earlier island in this process ({earlier}), and "
+                "gs.init runs once a process: this IPC island, which asks for 64, would run its two-way harvest at "
+                "float32, where it reads ZERO for a stiff constraint. Build the IPC scene in a process of its own."
+            )
+        elif str(precision) == "64" and _ENGINE["precision"] == "32":
+            # A liquid island that asked for 64 gets 32: its harvest still reads, as a momentum change.
+            log.warning(
+                "genesis was initialised at precision=32 by an earlier island in this process, so this liquid "
+                "island, which asks for 64, steps its SPH at float32: its reaction still reads (a momentum "
+                "change), but not at the precision it asked for. Build it in a process of its own for float64."
+            )
+        elif str(precision) == "32" and coupler == "legacy" and _ENGINE["precision"] == "64":
+            # An IPC island initialised the process at 64 first: the liquid is right, and slow.
+            log.warning(
+                "genesis was initialised at precision=64 by an earlier island in this process, so this liquid "
+                "island steps its SPH at float64 too: right, and about 8x slower per substep (1.93 ms against "
+                "0.25 ms for 1,728 particles, p2_cost.py). Build it in a process of its own for its own budget."
+            )
+        elif str(precision) != _ENGINE["precision"]:
             log.debug(
                 "genesis already initialised at precision %s; ignoring %s",
                 _ENGINE["precision"],
                 precision,
             )
         return gs
-    if str(precision) != "64":
+    if str(precision) != "64" and coupler == "ipc":
         log.warning(
             "genesis initialised at precision=%s: the two-way wrench harvest is a difference of "
             "two nearly-equal world coordinates and reads ZERO at float32 for a stiff constraint "
             "or a heavy mirror. Use precision='64' unless you are deliberately measuring this.",
             precision,
+        )
+    elif str(precision) == "64" and coupler == "legacy":
+        # backend("genesis") states no precision, and SolverGenesis's default is the IPC coupler's.
+        log.warning(
+            "genesis initialised at precision=64 for a liquid island: its SPH is right and about 8x slower per "
+            "substep than at 32 (1.93 ms against 0.25 ms for 1,728 particles, p2_cost.py), and its reaction reads "
+            "at 32. State backend('genesis', substeps=20, precision='32'), as rss.WATER_60HZ does, unless an IPC "
+            "island shares the process."
         )
     if not os.environ.get("CUDA_VISIBLE_DEVICES"):
         log.debug(
@@ -101,6 +143,7 @@ def ensure_initialized(precision: str = "64") -> Any:
     try:
         gs.init(backend=backend, precision=str(precision), logging_level="warning")
         _ENGINE["precision"] = str(precision)
+        _ENGINE["coupler"] = str(coupler)
     finally:
         # Also when gs.init raises part-way: the defaults may already be changed.
         if torch is not None and before is not None:

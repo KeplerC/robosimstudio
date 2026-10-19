@@ -251,16 +251,17 @@ class TestTheActorKindSetIsOpen(unittest.TestCase):
         """Three where there were two, and the third is the evidence: ``rod``
         was added without touching ``actor_geometry`` at all.
 
-        It is added from *outside* now: the library registers the shell and the
-        tet, and the rod pack registers its own reader when it is installed --
-        which the registry finds by scanning the packs, not by anyone having
-        imported one first. A checkout without the pack has the library's two.
+        It is added from *outside* now: the library registers the shell, the tet
+        and the ``sph`` liquid (built by Genesis's legacy coupler), and the rod
+        pack registers its own reader when it is installed -- which the registry
+        finds by scanning the packs, not by anyone having imported one first. A
+        checkout without the pack has the library's three.
         """
         from robosimstudio.engines.geometry import ACTOR_KINDS
         from tests.fixtures.packs import HAS_ROD_PACK, has_pack
 
         packs = [*(["rod"] if HAS_ROD_PACK else []), *(["bag"] if has_pack("bag") else [])]
-        self.assertEqual(sorted(["shell", "tet", *packs]), ACTOR_KINDS.names())
+        self.assertEqual(sorted(["shell", "sph", "tet", *packs]), ACTOR_KINDS.names())
 
     def test_a_shell_is_read_as_its_triangles_reindexed_to_zero(self):
         from robosimstudio.engines.geometry import actor_geometry

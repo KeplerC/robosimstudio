@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The kinds of deformable thing the library ships: cloth, soft bodies, the rope, paper, bags, the brush, tape, cutting and the particle materials.
+"""The kinds of deformable thing the library ships: cloth, soft bodies, the rope, paper, bags, the brush, tape, cutting, the particle materials and water.
 
 A **kind** is one physical kind of thing, carried as one bundle: the spec that
 says what one is, the entity that builds it, the measures that read it, its
 materials and, where a foreign engine serves it, the variant that runs there.
 Each kind here is one module or one package -- ``cloth.py``, ``soft.py``,
-``paper.py``, ``bag.py``, ``brush.py``, ``tape.py``, ``granular.py``, ``liquid.py`` and
-``dough.py`` are read top to bottom, ``rod/`` and ``cutting/`` are packages -- and the base kinds stand alone:
+``paper.py``, ``bag.py``, ``brush.py``, ``tape.py``, ``granular.py``, ``liquid.py``,
+``dough.py`` and ``water.py`` are read top to bottom, ``rod/`` and ``cutting/`` are packages -- and the base kinds stand alone:
 none of ``cloth``, ``soft`` and ``rod`` imports another. ``paper``, ``bag``, ``tape``
 and ``brush`` are built on another kind and say so: a sheet of paper is a cloth whose
 bending hinges yield, a bag is a cloth sewn into a pocket and a tape is a cloth stuck
@@ -23,7 +23,7 @@ that collides with itself), ``brush`` (``rss.brush``), ``tape`` (``rss.tape``, a
 body by bonds that let go), ``cutting`` (``rss.cuttable`` and ``rss.knife``, a block a knife parts),
 and the three particle kinds on
 Newton's implicit MPM -- ``granular`` (``rss.heap``), ``liquid`` (``rss.liquid``)
-and ``dough`` (``rss.dough``). The kinds the library itself is made of --
+and ``dough`` (``rss.dough``) -- and ``water`` (``rss.water``), on Genesis's SPH. The kinds the library itself is made of --
 ``rigid``, ``static``, ``articulated`` -- stay in :mod:`robosimstudio.domains`,
 because the composer, the robots and the cells are built from them.
 

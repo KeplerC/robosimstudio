@@ -380,6 +380,22 @@ def _poured(film) -> tuple[bool, str]:
     return share >= 0.9, f"{share:.3f} of the honey in the bowl (need 0.9)"
 
 
+def _water_in_glass(film) -> tuple[bool, str]:
+    """The water example's readout at the end: 90% of the water or more in the glass, standing past its 25 mm line."""
+    import numpy as np
+
+    from robosimstudio_materials.water import fill_level
+
+    # The glass's inside as the example states it: 60 mm square about bench (0.12, -0.13), 55 mm tall.
+    lo, hi = np.array(film.bench((0.09, -0.16, 0.0))), np.array(film.bench((0.15, -0.10, 0.055)))
+    filled = fill_level(np.asarray(film.sim["water"].particle_q, dtype=np.float64), lo, hi, 0.004)
+    ok = filled["fraction"] >= 0.9 and filled["height"] >= 0.025
+    return (
+        ok,
+        f"{filled['fraction']:.3f} of the water in the glass, {1e3 * filled['height']:.1f} mm deep (need 0.9, 25 mm)",
+    )
+
+
 def _bag_open(film) -> tuple[bool, str]:
     """The bag's mouth stands 30 mm open in the right hand, and its layers stayed apart."""
     import numpy as np
@@ -2007,6 +2023,51 @@ ROBOT_CONTACT = (
     ),
 )
 
+# =============================================================================
+# Water, poured by the hand
+# =============================================================================
+#
+# The pour tests/test_pour_water drives through the right arm's panel, at its speeds: down onto the
+# cup, Close, up to 170 mm, 125 mm across, the gizmo turned 120 degrees about x, held, turned back.
+
+ROBOT_WATER = (
+    Take(
+        "examples/21_water/00_pour_water.py",
+        # From the front, a little to the glass's side: the cup tips across the view, toward the lens, and the
+        # stream falls over the glass's near wall. 1.1 m keeps the raised wrist under a third of the frame.
+        camera=Orbit(Bench(0.12, -0.20, 0.13), distance=1.1, azimuth=15.0, elevation=32.0, fov=38.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the hand, open, over the cup of water"),
+            Drag(
+                "right",
+                "z",
+                to=At("cup", dz=0.055),
+                seconds=1.4,
+                label="drag the gizmo down: the jaws straddle the cup",
+            ),
+            Wait(seconds=0.3),
+            Press(text="Close", within=RIGHT, label="Close"),
+            Rest(seconds=0.4),  # off the button, so Close does not sit lit as hovered while the jaws shut
+            Wait(seconds=0.6, mark="closed", label="the pads on its walls"),
+            Drag("right", "z", 0.115, seconds=1.6, label="drag it up to 170 mm"),
+            Drag("right", "y", 0.125, seconds=1.6, label="and 125 mm across, over the glass"),
+            Wait(seconds=0.5, mark="carried"),
+            Turn("right", "x", -120.0, seconds=2.0, label="turn the gizmo 120 degrees about x: the wrist tips the cup"),
+            Wait(seconds=2.5, mark="poured", label="the water runs into the glass, past the red line"),
+            Turn("right", "x", 120.0, seconds=2.0, label="back upright"),
+            Wait(seconds=1.0, label="the glass filled past its line"),
+        ),
+        expect=(
+            Rose("cup", 0.05, since="closed", at="carried"),
+            Held("cup", since="closed", at="carried"),
+            Check(_water_in_glass),
+        ),
+        budget=1_300_000,  # 19 s of a moving arm, as the honey pour's
+    ),
+)
+
 # The cutting kind: the right hand takes the knife off its rest by its handle, by contact, and pushes
 # it down through the tofu until the edge meets the board, the drive tests/test_cut_tofu runs through
 # the same arm panel.
@@ -2232,6 +2293,7 @@ TAKES: tuple[Take, ...] = (
     *ROBOT_SUCTION,
     *ROBOT_TAPE,
     *ROBOT_CONTACT,
+    *ROBOT_WATER,
     *ROBOT_CUTTING,
 )
 
@@ -2242,6 +2304,7 @@ KEPT: dict[str, str] = {
     "14_brush/01_scrub_scored": "the same brush, handle and square as 00_scrub_the_bench with a goal beside them; its clip is that one's",
     "15_suction/01_pick_scored": "the same plate, cup and square as 00_pick_a_plate with a goal beside them; its clip is that one's",
     "19_tape/01_peel_a_label_scored": "the same box, label and peel as 00_peel_a_label with a goal beside them; its clip is that one's",
+    "21_water/01_pour_water_scored": "the same cup, water and glass as 00_pour_water with a goal beside them; its clip is that one's",
     "20_cutting/01_cut_tofu_scored": "the same knife, board, tofu and cut as 00_cut_tofu with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
