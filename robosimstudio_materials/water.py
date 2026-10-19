@@ -74,6 +74,7 @@ __all__ = [
     "WATER",
     "WATER_60HZ",
     "EntityWater",
+    "EntityWaterGenesis",
     "Water",
     "WaterMaterialSpec",
     "WaterSpec",
@@ -237,6 +238,10 @@ class EntityWater(ParticleMixin, Entity):
 
     spec: WaterSpec
     domain: ClassVar[str] = "water"
+    hosted: ClassVar[bool] = False
+    """Whether Genesis integrates this water, as :class:`EntityWaterGenesis` says. Only it builds one: on a Newton
+    solver the inactive particles would never move, and under GENERIC the kind falls to VBD, whose settle died in an
+    illegal memory access. Decided by the class the compiler picks for the arrangement, as for a bag."""
 
     def __init__(self, spec: WaterSpec, *, world: int = 0) -> None:
         super().__init__(spec, world=world)
@@ -252,6 +257,12 @@ class EntityWater(ParticleMixin, Entity):
         """The lattice as Newton particles, flagged inactive: no Newton solver integrates them."""
         del episode
         spec = self.spec
+        if not self.hosted:
+            # Refused rather than built: no Newton solver moves the inactive particles.
+            raise NotImplementedError(
+                f"water {spec.name!r}: water is Genesis's SPH liquid; route the 'water' kind to backend('genesis'), "
+                "as rss.WATER_60HZ does"
+            )
         placed = self.placed((*spec.at, *spec.quat))
         rotation = quat_to_mat(np.asarray(placed[3:7], dtype=np.float64))
         world = lattice(spec) @ rotation.T + np.asarray(placed[:3], dtype=np.float64)
@@ -508,3 +519,12 @@ DOMAIN = register_domain(
 )
 
 register_entity("water")(EntityWater)
+
+
+class EntityWaterGenesis(EntityWater):
+    """:class:`EntityWater` for Genesis, which integrates the water itself: Newton must leave it alone."""
+
+    hosted = True
+
+
+register_entity("water", engine="genesis")(EntityWaterGenesis)

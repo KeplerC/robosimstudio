@@ -100,6 +100,24 @@ class TestTheArrangement(unittest.TestCase):
         self.assertEqual("mujoco", table.backend_for("rigid").solver)
         self.assertEqual("mujoco", table.backend_for("articulated").solver)
 
+    def test_only_genesis_builds_water_and_any_other_engine_refuses_it_by_name(self) -> None:
+        """On GENERIC the kind falls to VBD, whose settle died in an illegal memory access: refused at build."""
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio.scene.registry import resolve_entity_class
+        from robosimstudio_materials.water import EntityWaterGenesis
+
+        spec = rss.water(name="spill", size=(0.008, 0.008, 0.008))
+        with self.assertRaisesRegex(NotImplementedError, r"spill.*backend\('genesis'\).*rss\.WATER_60HZ"):
+            resolve_entity_class(spec, rss.GENERIC)(spec).build(newton.ModelBuilder(), None)
+        cls = resolve_entity_class(spec, rss.WATER_60HZ)
+        self.assertIs(EntityWaterGenesis, cls)
+        builder = newton.ModelBuilder()
+        cls(spec).build(builder, None)
+        active = [int(f) & int(newton.ParticleFlags.ACTIVE) for f in builder.particle_flags]
+        self.assertTrue(builder.particle_count == 8 and not any(active), "Genesis's water is left to Genesis")
+
     def test_the_flat_names_resolve(self) -> None:
         import robosimstudio as rss
         from robosimstudio_materials import water
