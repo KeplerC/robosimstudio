@@ -126,6 +126,21 @@ class TestTheLoopMeasures(unittest.TestCase):
         self.assertTrue(encircles(hung, *peg), "with no length, the line is enough")
         self.assertFalse(encircles(hung + np.array([0.0, 0.2, 0.0]), *peg, 0.08), "beside the peg")
 
+    def test_x_y_names_a_vertical_line_but_a_peg_with_a_length_needs_its_root_height(self) -> None:
+        """Round the peg or beside it, a 2-D origin with a length is refused the same way, the axis feature too."""
+        from robosimstudio_materials.rod.band import _encircles_axis, encircles
+
+        loop = _circle(32, 0.015, (0.1, 0.0, 0.02))  # snug on the peg, within the default reach
+        self.assertTrue(encircles(loop, (0.1, 0.0), (0.0, 0.0, 1.0)), "(x, y) names a vertical line")
+        self.assertTrue(_encircles_axis(loop, {"origin": (0.1, 0.0)})["encircles"])
+        self.assertTrue(encircles(loop, (0.1, 0.0, 0.0), (0.0, 0.0, 1.0), 0.05), "a 50 mm peg rooted at z = 0")
+        for shift in ((0.0, 0.0, 0.0), (0.3, 0.0, 0.0)):
+            with self.subTest(shift=shift):
+                with self.assertRaisesRegex(ValueError, "height"):
+                    encircles(loop + shift, (0.1, 0.0), (0.0, 0.0, 1.0), 0.05)
+                with self.assertRaisesRegex(ValueError, "height"):
+                    _encircles_axis(loop + shift, {"origin": (0.1, 0.0), "length": 0.05})
+
     def test_a_peg_declared_as_a_rod_feature_is_held_to_its_two_ends(self) -> None:
         """The goal's form: a ``rod`` feature's two ends in world, as the task's posts declare them."""
         from robosimstudio_materials.rod.band import _encircles_rod

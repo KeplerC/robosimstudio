@@ -167,12 +167,19 @@ def encircles(positions: np.ndarray, origin, direction, length: float | None = N
 
     Args:
         positions: ``[n, 3]`` points in loop order [m].
-        origin: The peg's root on its axis [m].
+        origin: The peg's root on its axis [m]. ``(x, y)`` is enough for a
+            vertical axis with no ``length``, as for :func:`loop_winding`; a
+            length is counted from the root, so it needs ``(x, y, z)``.
         direction: Along the peg, root to tip.
         length: The peg's length [m], or ``None``.
         reach: How near the axis a point must be to count as on it [m]: the
             peg's radius plus the cord's, and some.
     """
+    root = np.asarray(origin, dtype=np.float64).reshape(-1)
+    if length is not None and root.shape != (3,):
+        raise ValueError(
+            f"encircles: a peg's length is counted from its root, so origin needs its height, got {origin}"
+        )
     if abs(loop_winding(positions, origin, direction)) < 0.5:
         return False
     if length is None:
@@ -180,7 +187,7 @@ def encircles(positions: np.ndarray, origin, direction, length: float | None = N
     points = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
     d = np.asarray(direction, dtype=np.float64)
     d /= float(np.linalg.norm(d))
-    rel = points - np.asarray(origin, dtype=np.float64)
+    rel = points - root
     along = rel @ d
     near = np.linalg.norm(rel - along[:, None] * d, axis=1) <= float(reach)
     return bool(near.any() and np.all((along[near] >= 0.0) & (along[near] <= float(length))))
