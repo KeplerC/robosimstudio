@@ -126,6 +126,8 @@ class SpecBinder:
         self.skip = frozenset(skip)
         self.pending: dict[str, Any] = {}
         """Edits made since the last :meth:`drain`, field name -> new value."""
+        self.refused = ""
+        """Why the last :meth:`drain` took nothing, when the spec refused its edits; empty otherwise."""
         self._widgets: dict[str, Any] = {}
         self._readouts: dict[str, Any] = {}
         self._ui: dict[str, ParamUI] = {}
@@ -182,11 +184,23 @@ class SpecBinder:
 
     # ------------------------------------------------------------------ drain
     def drain(self) -> dict[str, Any]:
-        """Take the pending edits, main thread. Empty when nothing moved."""
+        """Take the pending edits, main thread. Empty when nothing moved.
+
+        Edits the spec's own ``__post_init__`` refuses (a tape's ``reach`` dragged under its
+        ``peak_opening``) are not taken: the spec stays, the controls go back to it, :attr:`refused`
+        says why and nothing is returned, so a panel's drain carries on rather than ending the loop.
+        """
+        self.refused = ""
         if not self.pending:
             return {}
         taken, self.pending = self.pending, {}
-        self.spec = replace(self.spec, **taken)
+        try:
+            spec = replace(self.spec, **taken)
+        except ValueError as exc:
+            self.refused = f"{', '.join(taken)} not changed: {exc}"
+            self.set_spec(self.spec)
+            return {}
+        self.spec = spec
         self._refresh_readouts(taken)
         return taken
 

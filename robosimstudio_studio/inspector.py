@@ -270,6 +270,8 @@ class PanelInspector(Panel):
                 # `False` means the field has nothing in this entity to write to.
                 # Shown rather than raised: it is information about the entity.
                 tunable.write(field, value)
+            if binder.refused:
+                self.session.status = binder.refused
 
     def refresh(self) -> None:
         for widget, source in self._live:

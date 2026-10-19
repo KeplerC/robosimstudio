@@ -157,6 +157,37 @@ class TestAPresetIsOneTheSheetCanWear(unittest.TestCase):
         self.assertIs(PAPER_LABEL, panel.tuner.material)
 
 
+class TestAnEditTheSpecRefusesIsNotTaken(unittest.TestCase):
+    """A tape's reach dragged under its peak_opening: ``replace`` reruns ``TapeMaterialSpec.__post_init__``,
+    which raised out of ``SpecBinder.drain`` and the panel's drain, and ended the page's loop."""
+
+    def test_the_folder_keeps_the_spec_and_says_why(self) -> None:
+        from robosimstudio_materials.tape import LABEL
+
+        panel, gui, _ = _page(_sheet("label", LABEL))
+        _slider(gui, "reach").fire(4.0e-4)
+        panel.drain()
+        self.assertEqual(LABEL.reach, panel.binder.spec.reach)
+        self.assertEqual(LABEL.reach, panel.tuner.material.reach, "nothing reached the working spec")
+        self.assertAlmostEqual(LABEL.reach, _slider(gui, "reach").value, msg="the slider goes back")
+        self.assertIn("reach not changed", panel.session.status)
+        _slider(gui, "reach").fire(2.0e-3)
+        panel.drain()
+        self.assertEqual(2.0e-3, panel.tuner.material.reach, "the next edit the spec takes lands")
+        self.assertEqual("", panel.binder.refused)
+
+    def test_the_inspector_keeps_its_loop_too(self) -> None:
+        from robosimstudio_materials.tape import LABEL
+        from robosimstudio_studio.tuning.binder import SpecBinder
+
+        binder, gui = SpecBinder(LABEL), _StubGui()
+        binder.build(gui)
+        _slider(gui, "peak_opening").fire(2.0e-3)
+        self.assertEqual({}, binder.drain())
+        self.assertIs(LABEL, binder.spec)
+        self.assertIn("peak_opening < reach", binder.refused)
+
+
 class TestWhatCannotMoveIsNotOffered(unittest.TestCase):
     def test_a_kind_whose_engine_copied_its_material_is_not_on_the_folder(self) -> None:
         panel, gui, _ = _page(_sheet("bag", ClothMaterialSpec(), offers=False))
