@@ -152,6 +152,9 @@ class EntityCuttable(Entity):
         self._surface: tuple[np.ndarray, np.ndarray] = (np.zeros((0, 3), np.float32), np.zeros((0, 3), np.int32))
         self._drawn: OrderedDict[bytes, tuple[np.ndarray, np.ndarray]] = OrderedDict()
         """The last :data:`DRAWN` drawings of the block, each under the corners its step wrote."""
+        self._faces: tuple[Any, np.ndarray, np.ndarray] | None = None
+        """The block's triangles as last triangulated: the cutter's snapshot they were read off, the cage
+        vertices the cut faces gather and every triangle, which hold while the cutter keeps that snapshot."""
         self._pieces_version = -1
         self._pieces = 1
         self._dt = 0.02
@@ -391,42 +394,54 @@ class EntityCuttable(Entity):
 
     # ---------------------------------------------------------------- drawing
     def _refresh_surface(self) -> None:
-        """The skin and the cut faces, deformed, in world, as one mesh."""
+        """The skin and the cut faces, deformed, in world, as one mesh.
+
+        The cut faces are triangulated off the cutter's snapshot, which the cutter replaces whenever the
+        cut moves or the topology changes; while it holds, a step only gathers the deformed cage.
+        """
         body, frame = self.body, self.block
         x = body.sim.x
         skin = body.corrected_mesh_weights() @ x
-        tris = [np.asarray(body.mesh_tris, dtype=np.int64)]
-        points = [skin]
-        offset = len(skin)
         snap = body.cutter.snapshot
-        from .solver import triangulate_polygon_with_holes
-
-        for f in sorted(body.cut_face_ids):
-            if f >= snap.num_faces or not snap.face_alive[f]:
-                continue
-            loops = snap.face_loops(f)
-            flat = np.concatenate(loops).astype(np.int64)
-            if flat.max() >= len(x):
-                continue
-            u, v = snap.face_u[f], snap.face_v[f]
-            loops2d = [np.stack([snap.verts[lp] @ u, snap.verts[lp] @ v], axis=1) for lp in loops]
-            faces = triangulate_polygon_with_holes(loops2d)
-            if not len(faces):
-                continue
-            points.append(x[flat])
-            tris.append(faces + offset)
-            offset += len(flat)
-        world = frame.from_cutter(np.concatenate(points)).astype(np.float32)
-        faces = np.concatenate(tris).astype(np.int32)
-        last = self._surface[1]
-        if last.shape == faces.shape and np.array_equal(last, faces):
-            faces = last  # shared by the drawings kept while the topology holds
+        if self._faces is None or self._faces[0] is not snap:
+            self._faces = (snap, *self._triangulate(snap, len(skin), len(x)))
+        _, gather, faces = self._faces
+        world = frame.from_cutter(np.concatenate([skin, x[gather]])).astype(np.float32)
         self._surface = (world, faces)
         key = _corner_key(self._corners())
         self._drawn[key] = self._surface
         self._drawn.move_to_end(key)
         while len(self._drawn) > DRAWN:
             self._drawn.popitem(last=False)
+
+    def _triangulate(self, snap: Any, offset: int, count: int) -> tuple[np.ndarray, np.ndarray]:
+        """The cage vertices the cut faces of ``snap`` gather, after the ``offset`` skin points, and the
+        skin's and the cut faces' triangles; a face reaching past the ``count`` cage vertices is left out."""
+        from .solver import triangulate_polygon_with_holes
+
+        body = self.body
+        tris = [np.asarray(body.mesh_tris, dtype=np.int64)]
+        gather = [np.zeros(0, dtype=np.int64)]
+        for f in sorted(body.cut_face_ids):
+            if f >= snap.num_faces or not snap.face_alive[f]:
+                continue
+            loops = snap.face_loops(f)
+            flat = np.concatenate(loops).astype(np.int64)
+            if flat.max() >= count:
+                continue
+            u, v = snap.face_u[f], snap.face_v[f]
+            loops2d = [np.stack([snap.verts[lp] @ u, snap.verts[lp] @ v], axis=1) for lp in loops]
+            faces = triangulate_polygon_with_holes(loops2d)
+            if not len(faces):
+                continue
+            gather.append(flat)
+            tris.append(faces + offset)
+            offset += len(flat)
+        faces = np.concatenate(tris).astype(np.int32)
+        last = self._surface[1]
+        if last.shape == faces.shape and np.array_equal(last, faces):
+            faces = last  # shared by the drawings kept while the topology holds
+        return np.concatenate(gather), faces
 
     def surface_mesh(self, positions: Any) -> tuple[np.ndarray | None, np.ndarray | None]:
         """The block as drawn with its corners at ``positions``: ``(vertices, triangles)`` in world.

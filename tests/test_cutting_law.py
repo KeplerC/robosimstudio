@@ -168,6 +168,48 @@ class TestTheKnifeAndTheBlockAsBuilt(unittest.TestCase):
                 (visual,) = garment_visuals(scene)
                 self.assertEqual(want, visual.color, "studio")
 
+    def test_a_cut_face_is_triangulated_once_a_snapshot_and_drawn_where_the_cage_is(self) -> None:
+        """The cutter replaces its snapshot when the cut moves; while one holds, a step regathers the cage."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import robosimstudio as rss
+        from robosimstudio_materials.cutting import solver
+        from robosimstudio_materials.cutting.entity import EntityCuttable
+        from robosimstudio_materials.cutting.law import BlockFrame, box_cage
+
+        spec = rss.cuttable(name="tofu", knife=rss.knife(name="knife"))
+        block = EntityCuttable(spec)
+        block.block = BlockFrame.from_base((0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0), spec.size)
+        cage, _ = box_cage(np.asarray(spec.size) * block.block.scale)
+
+        def snapshot():
+            """One live cut face, the cage's base square."""
+            plane = {"face_u": [np.array([1.0, 0.0, 0.0])], "face_v": [np.array([0.0, 1.0, 0.0])]}
+            return SimpleNamespace(
+                num_faces=1, face_alive=[True], face_loops=lambda f: [np.arange(4)], verts=cage, **plane
+            )
+
+        x = cage.copy()
+        block.body = SimpleNamespace(
+            sim=SimpleNamespace(x=x),
+            corrected_mesh_weights=lambda: np.eye(8),
+            mesh_tris=np.array([[4, 5, 6]]),
+            cutter=SimpleNamespace(snapshot=snapshot()),
+            cut_face_ids={0},
+        )
+        triangulate = solver.triangulate_polygon_with_holes
+        with mock.patch.object(solver, "triangulate_polygon_with_holes", wraps=triangulate) as tri:
+            block._refresh_surface()
+            x[:4] += 0.01
+            block._refresh_surface()
+            self.assertEqual(1, tri.call_count, "the snapshot held: its triangles are kept")
+            np.testing.assert_allclose(block.block.from_cutter(x[:4]), block._surface[0][8:], atol=1e-6)
+            self.assertEqual((3, 3), block._surface[1].shape, "the skin's triangle and the face's two")
+            block.body.cutter.snapshot = snapshot()
+            block._refresh_surface()
+            self.assertEqual(2, tri.call_count, "a new snapshot is triangulated again")
+
     def test_every_live_field_of_the_block_has_a_writer(self) -> None:
         """A LIVE field promises a write lands on the next step, which needs a tunable to carry it."""
         from dataclasses import fields
