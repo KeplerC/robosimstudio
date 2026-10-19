@@ -52,8 +52,8 @@ def main():
             pull = studio.gui.add_number("pull on the tab (N)", 0.0, step=0.01, disabled=True)
 
         def each_step() -> None:
-            bonded.value = round(label.bonded(), 3)
-            held.value = label.held()
+            held.value = label.held()  # read once: each read copies the bonds' flags off the device
+            bonded.value = round(held.value / len(label.bonds), 3)
             pull.value = round(label.pull(sim.state), 2)
 
         strength = label.spec.material.strength  # [Pa]; 0 makes no bond and lets every bond go
