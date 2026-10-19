@@ -29,8 +29,9 @@ class SolverGenesis(SolverHost):
         model: The finalized Newton model.
         recipe: The manifest's host-island record.
         substeps: Genesis steps per control step. A liquid island taking SPH
-            substeps longer than it was measured to hold its walls at is refused
-            (:data:`~robosimstudio.engines.genesis.sph.LONGEST_SUBSTEP`): 20 at 60 Hz.
+            substeps longer than one of its liquids holds is refused, naming the
+            substeps it needs (:func:`~robosimstudio.engines.genesis.sph.longest_substep`):
+            20 at 60 Hz for the ``water`` preset at 4 mm.
         precision: ``"64"``, and changing it is a correctness decision rather
             than a performance one for the IPC coupler --- see
             :mod:`robosimstudio.engines.genesis.runtime`. A liquid island reads

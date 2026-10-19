@@ -95,8 +95,10 @@ __all__ = [
     "LONGEST_SUBSTEP",
     "MIRROR_DENSITY",
     "SPH_CONSUMES",
+    "SPH_DEFAULTS",
     "SphBridge",
     "liquid_args",
+    "longest_substep",
 ]
 
 log = logging.getLogger(__name__)
@@ -110,10 +112,22 @@ GENESIS_MASS_VOLUME = 0.8
 """Genesis's particle mass over ``size**3 * rho`` (``SPHSolver._particle_volume``)."""
 
 LONGEST_SUBSTEP = 1.0 / 1200.0
-"""The longest SPH substep [s] a liquid held in its walls in the pour probes: 1e4 Pa water at 4 mm stood in the
-glass at 20 substeps a 60 Hz control step, and 5e3 Pa lost 618 of 1,728 through it at 16 (``p3_pour.py``). Stiffer
-water needs shorter ones: 5e4 Pa fell through the cup at 30 and held at 40 (``p1_rest.py``). A liquid island asking
-for longer is refused (:class:`SphBridge`), because ``backend("genesis")`` with no ``substeps`` asks for one."""
+"""The longest SPH substep [s] a liquid held in its walls in the pour probes, and what :func:`longest_substep` scales
+the limits Genesis does not state from: water of :data:`SPH_DEFAULTS` stood in the glass at 20 substeps a 60 Hz
+control step (1,723 of 1,728), and 5e3 Pa lost 618 of 1,728 through it at 16 (``p3_pour.py``). A liquid island asking
+for longer than its liquids hold is refused (:class:`SphBridge`), because ``backend("genesis")`` with no
+``substeps`` asks for one."""
+
+SPH_DEFAULTS = {
+    "spacing": 0.004,
+    "density": 1000.0,
+    "stiffness": 1.0e4,
+    "exponent": 7.0,
+    "viscosity": 5.0e-4,
+    "surface_tension": 0.01,
+}
+"""An ``sph`` actor's params where it states none: the ``water`` preset at 4 mm, the liquid :data:`LONGEST_SUBSTEP`
+was measured on."""
 
 SPH_CONSUMES = ("density", "exponent", "spacing", "stiffness", "surface_tension", "viscosity")
 """What an ``sph`` actor's params may state, and the builder reads."""
@@ -127,12 +141,55 @@ def liquid_args(params: dict) -> dict[str, float]:
     ``gamma``, passed as they stand.
     """
     return {
-        "rho": float(params.get("density", 1000.0)) / GENESIS_MASS_VOLUME,
-        "stiffness": float(params.get("stiffness", 1.0e4)) / GENESIS_MASS_VOLUME,
-        "exponent": float(params.get("exponent", 7.0)),
-        "mu": float(params.get("viscosity", 5.0e-4)),
-        "gamma": float(params.get("surface_tension", 0.01)),
+        "rho": float(params.get("density", SPH_DEFAULTS["density"])) / GENESIS_MASS_VOLUME,
+        "stiffness": float(params.get("stiffness", SPH_DEFAULTS["stiffness"])) / GENESIS_MASS_VOLUME,
+        "exponent": float(params.get("exponent", SPH_DEFAULTS["exponent"])),
+        "mu": float(params.get("viscosity", SPH_DEFAULTS["viscosity"])),
+        "gamma": float(params.get("surface_tension", SPH_DEFAULTS["surface_tension"])),
     }
+
+
+def longest_substep(params: dict) -> tuple[float, str]:
+    """The longest SPH substep [s] an ``sph`` actor's params hold, and which of three limits that is.
+
+    * ``"viscosity"``: Genesis's own rule, ``0.01 * (2 * spacing)**2 / mu``
+      (``SPHSolver.build``), which Genesis only logs: a scene past it steps on.
+      Water at 1e-3 held at rest in the cup at 20 substeps past it (0.83 ms against
+      its 0.64, ``oil_rest.py``), so it errs toward safe there.
+    * ``"stiffness"``: a pressure wave may cross about a particle a substep, and
+      Genesis states no rule for it, so :data:`LONGEST_SUBSTEP` is scaled by the
+      spacing over the wave's speed, the Tait ``sqrt(exponent * stiffness /
+      density)``. 5e4 Pa water at 4 mm fell through the cup at 30 substeps and held
+      at 40 (``p1_rest.py``), where this asks 45.
+    * ``"surface_tension"``: Genesis's cohesion pulls each neighbour by ``gamma`` over
+      its kernel's volume, a spring, so the substep goes as ``sqrt(spacing**3 /
+      gamma)``, scaled from water's 0.01. At rest in the pour example's cup at 4 mm
+      (``oil_rest.py``): 0.03 kept none of 1,728 particles at 20 substeps, lost 353 at
+      27 and held them all at 35, where this asks 35; 0.02 lost 1,499 at 20 and held
+      at 27, where it asks 29; 0.015 lost 1,311 at 20 and held at 25, where it asks 25.
+
+    The two Genesis does not state are never longer than :data:`LONGEST_SUBSTEP`:
+    softer or less cohesive water was not measured holding longer substeps (5e3 Pa
+    lost 618 at 16). Off 4 mm they are scaled, not measured.
+
+    Returns:
+        ``(seconds, limit)``, ``limit`` one of ``"viscosity"``, ``"stiffness"``, ``"surface_tension"``.
+    """
+    p = {**SPH_DEFAULTS, **{key: float(params[key]) for key in SPH_DEFAULTS if key in params}}
+    ref = SPH_DEFAULTS
+    size = p["spacing"] / ref["spacing"]
+    # The Tait sound speed over the reference liquid's.
+    speed = math.sqrt(
+        p["exponent"] * p["stiffness"] / p["density"] * ref["density"] / ref["stiffness"] / ref["exponent"]
+    )
+    limits = {"stiffness": LONGEST_SUBSTEP * min(1.0, size / speed)}
+    if p["viscosity"] > 0.0:
+        limits["viscosity"] = 0.01 * (2.0 * p["spacing"]) ** 2 / p["viscosity"]
+    if p["surface_tension"] > 0.0:
+        cohesion = size**1.5 * math.sqrt(ref["surface_tension"] / p["surface_tension"])
+        limits["surface_tension"] = LONGEST_SUBSTEP * min(1.0, cohesion)
+    limit = min(limits, key=limits.__getitem__)
+    return limits[limit], limit
 
 
 def _angular_velocity(start: np.ndarray, end: np.ndarray, dt: float) -> np.ndarray:
@@ -163,8 +220,9 @@ class SphBridge:
         substeps: Genesis substeps per control step. One ``scene.step()`` runs them
             all (``SimOptions.substeps``): the legacy coupler takes its ``dt`` per
             substep, which is the IPC bridge's reason for stepping one at a time
-            and is not this one's. Substeps longer than :data:`LONGEST_SUBSTEP` are
-            refused before the engine is asked for: 20 a 60 Hz control step is the fewest.
+            and is not this one's. Substeps longer than one of its liquids holds
+            (:func:`longest_substep`) are refused before the engine is asked for: 20 a
+            60 Hz control step for the ``water`` preset at 4 mm.
         precision: ``"32"`` (see the module docstring); ``"64"`` runs, 8x slower.
         feedback: ``"auto"`` or ``"off"``.
         pose_source: ``"fresh"`` or ``"snapshot"``.
@@ -182,15 +240,9 @@ class SphBridge:
     ) -> None:
         self.control_dt = 1.0 / float(recipe.get("control_hz", 60.0))
         self.substeps = max(1, int(substeps))
-        need = math.ceil(self.control_dt / LONGEST_SUBSTEP - 1.0e-9)
-        if self.substeps < need:
-            raise ValueError(
-                f"genesis island {recipe.get('island')!r}: its liquid takes {self.substeps} SPH substep(s) a "
-                f"{1e3 * self.control_dt:.1f} ms control step, {1e3 * self.control_dt / self.substeps:.2f} ms each, "
-                f"where the pour probes held water in its walls at {1e3 * LONGEST_SUBSTEP:.2f} ms and lost it through "
-                f"them at 1.04 ms; state backend('genesis', substeps={need}, precision='32') for the liquid's kind, as "
-                "rss.WATER_60HZ does (more for water stiffer than 1e4 Pa)"
-            )
+        for record in recipe.get("actors", ()):
+            # Before the engine is asked for: Genesis logs a substep past its own limit and steps on.
+            self._refuse_long_substeps(recipe.get("island"), record)
         gs = ensure_initialized(precision, coupler="legacy")
         self.gs = gs
         self.model = model
@@ -278,6 +330,26 @@ class SphBridge:
         """The last control step's reaction per Newton body [N], before shaping. For a reader."""
 
     # ----------------------------------------------------------------- build
+    def _refuse_long_substeps(self, island: Any, record: dict) -> None:
+        """Refuse substeps longer than a liquid's material holds (:func:`longest_substep`), naming the ones it needs."""
+        params = {**SPH_DEFAULTS, **record.get("params", {})}
+        longest, limit = longest_substep(params)
+        need = math.ceil(self.control_dt / longest - 1.0e-9)
+        if self.substeps >= need:
+            return
+        what = {
+            "viscosity": f"viscosity, mu {params['viscosity']:g} (Genesis's own limit),",
+            "stiffness": f"stiffness, {params['stiffness']:g} Pa at {params['density']:g} kg/m^3,",
+            "surface_tension": f"surface tension, gamma {params['surface_tension']:g},",
+        }[limit]
+        raise ValueError(
+            f"genesis island {island!r}: its liquid {record.get('name')!r} takes {self.substeps} SPH substep(s) a "
+            f"{1e3 * self.control_dt:.1f} ms control step, {1e3 * self.control_dt / self.substeps:.2f} ms each, where "
+            f"its {what} holds {1e3 * longest:.2f} ms at {1e3 * float(params['spacing']):g} mm spacing "
+            f"(robosimstudio.engines.genesis.sph.longest_substep); state backend('genesis', substeps={need}, "
+            "precision='32') for the liquid's kind (rss.WATER_60HZ states 20, which hold the water preset at 4 mm)"
+        )
+
     def _domain(self, geoms, ground: list[float]) -> tuple[np.ndarray, np.ndarray]:
         """The SPH solver's box: the liquids' rest bounds grown by the island's reach, its floor the ground's.
 

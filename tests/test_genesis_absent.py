@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import gc
 import importlib.util
+import math
 import os
 import subprocess
 import sys
@@ -144,13 +145,13 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
     """A liquid island that states no substeps takes one SPH substep a control step, and its water falls through the
     cup and the bench: it is refused before the engine is asked for, by the arrangement that states them."""
 
-    def _open(self, substeps: int, hz: float = 60.0) -> None:
+    def _open(self, substeps: int, hz: float = 60.0, *, actors: list | None = None) -> None:
         from unittest import mock
 
         from robosimstudio.engines.genesis import sph
         from robosimstudio.engines.genesis.solver import SolverGenesis
 
-        recipe = {"island": "water", "control_hz": hz, "actors": [{"kind": "sph", "name": "water"}]}
+        recipe = {"island": "water", "control_hz": hz, "actors": actors or [{"kind": "sph", "name": "water"}]}
         with mock.patch.object(sph, "ensure_initialized", side_effect=LookupError("asked for the engine")):
             SolverGenesis(None, recipe=recipe, substeps=substeps)
 
@@ -166,6 +167,64 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
         for substeps, hz in ((20, 60.0), (10, 120.0), (40, 30.0)):
             with self.subTest(substeps=substeps, hz=hz), self.assertRaisesRegex(LookupError, "asked for the engine"):
                 self._open(substeps, hz)
+
+    def test_each_liquid_is_refused_by_what_its_own_material_holds(self):
+        """The oil preset's cohesion asks 35 substeps where the water beside it asks 20: the island steps both."""
+        water = {"kind": "sph", "name": "water", "params": {"density": 1000.0}}
+        oil = {"kind": "sph", "name": "oil", "params": {"density": 900.0, "viscosity": 1.0e-3, "surface_tension": 0.03}}
+        with self.assertRaises(ValueError) as caught:
+            self._open(20, actors=[water, oil])
+        for word in ("'oil'", "surface tension, gamma 0.03", "0.48 ms", "substeps=35"):
+            self.assertIn(word, str(caught.exception))
+        with self.assertRaisesRegex(LookupError, "asked for the engine"):
+            self._open(35, actors=[water, oil])
+
+
+class TestTheLongestSubstepIsTheMaterials(unittest.TestCase):
+    """Genesis's viscosity limit, and the pressure wave's and the cohesion's, scaled from the water the probes held."""
+
+    def _need(self, **params) -> tuple[int, str]:
+        """Substeps a 60 Hz control step, and the limit that sets them."""
+        from robosimstudio.engines.genesis.sph import longest_substep
+
+        longest, limit = longest_substep(params)
+        return math.ceil(1.0 / 60.0 / longest - 1.0e-9), limit
+
+    def test_the_water_measured_holds_at_the_measured_substep(self):
+        from robosimstudio.engines.genesis.sph import LONGEST_SUBSTEP, SPH_DEFAULTS, longest_substep
+
+        self.assertEqual((LONGEST_SUBSTEP, "stiffness"), longest_substep({}))
+        self.assertEqual((LONGEST_SUBSTEP, "stiffness"), longest_substep(SPH_DEFAULTS))
+
+    def test_the_viscosity_limit_is_genesiss_own(self):
+        """``0.01 * (2 * spacing)**2 / mu``: 0.64 ms at 1e-3 and 4 mm, which a 20-substep step (0.83 ms) breaks."""
+        from robosimstudio.engines.genesis.sph import longest_substep
+
+        longest, limit = longest_substep({"viscosity": 1.0e-3})
+        self.assertEqual("viscosity", limit)
+        self.assertAlmostEqual(0.64e-3, longest, places=12)
+        self.assertEqual((27, "viscosity"), self._need(viscosity=1.0e-3))
+
+    def test_a_faster_pressure_wave_takes_more(self):
+        """5e4 Pa fell through the cup at 30 and held at 40; a lighter liquid at the same stiffness is stiffer."""
+        self.assertEqual((45, "stiffness"), self._need(stiffness=5.0e4))
+        self.assertEqual((22, "stiffness"), self._need(density=900.0))
+
+    def test_a_more_cohesive_liquid_takes_more(self):
+        """At rest in the cup: 0.03 lost 353 at 27 and held at 35, 0.02 held at 27, 0.015 held at 25."""
+        for gamma, need in ((0.03, 35), (0.02, 29), (0.015, 25)):
+            with self.subTest(gamma=gamma):
+                self.assertEqual((need, "surface_tension"), self._need(surface_tension=gamma))
+
+    def test_nothing_is_given_longer_substeps_than_were_measured(self):
+        """5e3 Pa lost 618 at 16: softer, coarser or less cohesive water still takes 20."""
+        for params in ({"stiffness": 5.0e3}, {"spacing": 0.008}, {"surface_tension": 0.0}, {"viscosity": 0.0}):
+            with self.subTest(**params):
+                self.assertEqual(20, self._need(**params)[0])
+
+    def test_finer_particles_take_more(self):
+        """At 2 mm the cohesion binds before Genesis's viscosity limit (53) and the pressure wave (40)."""
+        self.assertEqual((57, "surface_tension"), self._need(spacing=0.002))
 
 
 class TestTheCouplingArithmetic(unittest.TestCase):
