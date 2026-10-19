@@ -258,7 +258,10 @@ class PhysicsProgram:
 
 
 def _channels(graph: InteractionGraph, islands: list[Island], worlds, model: newton.Model) -> list[Channel]:
-    """Proxy channels: for every cross-island edge, the rigid side's bodies into the deformable side."""
+    """Proxy channels: for every cross-island edge, the rigid side's bodies into the deformable side.
+
+    Into a host engine's island, the other side's bodies from whichever island holds them.
+    """
     by_entity = {node.name: next((i for i in islands if i.owns(node.name)), None) for node in graph.nodes.values()}
     gathered: dict[tuple[str, str, str], dict[str, Any]] = {}
     for edge in graph.edges:
@@ -267,7 +270,16 @@ def _channels(graph: InteractionGraph, islands: list[Island], worlds, model: new
         if ia is None or ib is None or ia is ib:
             continue
         # The deformable island is the destination; the other island's bodies are proxied.
-        if ia.is_deformable and not ib.is_deformable:
+        if ia.is_host_engine != ib.is_host_engine:
+            # A host engine mirrors the other side's bodies whichever Newton island integrates
+            # them. A cube on GENERIC's VBD beside a towel on SuperDex is two particle islands,
+            # and skipped as such the cube had no mirror: the towel dropped over a static 10 cm
+            # cube lay through it on the bench, its node over the cube at 0.751 m, and lies on it
+            # now at 0.855 m, the top at 0.849 m (``c5a_drape.py``, a free cube the same). A node
+            # with no bodies -- a VBD towel beside a SuperDex sponge -- still has none to mirror.
+            dest, src, src_node = (ia, ib, b) if ia.is_host_engine else (ib, ia, a)
+            hands_only = edge.hands_only
+        elif ia.is_deformable and not ib.is_deformable:
             dest, src, src_node, hands_only = ia, ib, b, edge.hands_only
         elif ib.is_deformable and not ia.is_deformable:
             dest, src, src_node, hands_only = ib, ia, a, edge.hands_only and False
