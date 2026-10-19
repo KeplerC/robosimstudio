@@ -3,26 +3,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.sim import SimRequirements, contacts_with
 
 from .measures import TOUCHES
 from .spec import CuttableSpec, KnifeSpec
 
 __all__ = ["Cuttable"]
-
-
-@dataclass(frozen=True)
-class _Spec:
-    """A build factory returning one spec, as a value, so two declarations of one type compare equal."""
-
-    spec: Any
-
-    def __call__(self) -> Any:
-        return self.spec
 
 
 class Cuttable:
@@ -45,7 +32,7 @@ class Cuttable:
             summary=summary or f"a {x:.0f} x {y:.0f} x {z:.0f} mm block a knife can cut",
             tags=tuple(tags),
             sim=SimRequirements(domain="cutting", contacts=contacts_with(*TOUCHES)),
-            build=_Spec(spec),
+            build=SpecFactory(spec),
         )
 
     @staticmethod
