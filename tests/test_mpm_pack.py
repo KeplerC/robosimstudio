@@ -288,6 +288,21 @@ class TestTheSpecs(unittest.TestCase):
         np.testing.assert_allclose(mass / (8.0 * radius**3), density, rtol=1e-9)
         self.assertAlmostEqual(float(mass[0]), entity.particle_mass, places=12)
 
+    def test_a_mesh_is_not_counted_before_it_is_filled(self) -> None:
+        """``size`` is ignored for a mesh, so a count, a mass or a summary off it would be the default box's."""
+        import robosimstudio as rss
+        from robosimstudio.specs.asset import AssetSpec
+        from robosimstudio_materials.mpm import Heap
+
+        spec = rss.heap(name="filled", shape="mesh", asset=AssetSpec(path="meshes/never_loaded.obj"))
+        self.assertIsNone(spec.particle_count)
+        self.assertIsNone(spec.mass)
+        summary = Heap.from_spec(spec, name="filled_heap").summary
+        self.assertEqual("a granular body of mesh shape", summary)
+        self.assertEqual(
+            "a granular body of box shape, 27648 particles", Heap.from_spec(rss.heap(), name="box_heap").summary
+        )
+
     def test_the_material_fields_are_described_with_their_tiers(self) -> None:
         from robosimstudio.specs.params import REBUILD, RECAPTURE, iter_params, undescribed
         from robosimstudio_materials.mpm import MPM_KEYS, ParticleBodySpec, ParticleMaterialSpec

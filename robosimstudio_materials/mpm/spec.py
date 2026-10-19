@@ -318,8 +318,15 @@ class ParticleBodySpec:
             raise ValueError(f"{where}: container_margin must be > 0 m, got {self.container_margin}")
 
     @property
-    def particle_count(self) -> int:
-        """How many particles a box or cylinder allocates; a mesh is counted when it is filled."""
+    def particle_count(self) -> int | None:
+        """How many particles a box or cylinder allocates, or ``None`` for a mesh.
+
+        A mesh keeps the lattice points ``trimesh.contains`` puts inside it,
+        which only the fill knows: the built entity's ``len(particles)``.
+        :attr:`size` is ignored for a mesh, so a count off it would be a guess.
+        """
+        if self.shape == "mesh":
+            return None
         h = float(self.particle_spacing)
         nx, ny, nz = (max(1, int(round(float(s) / h))) for s in self.size)
         if self.shape == "cylinder":
@@ -349,6 +356,9 @@ class ParticleBodySpec:
         return volume
 
     @property
-    def mass(self) -> float:
-        """Total mass [kg]: the particle count times the particle mass."""
-        return float(self.particle_count) * self.particle_volume * float(self.material.density)
+    def mass(self) -> float | None:
+        """Total mass [kg]: the particle count times the particle mass, or ``None`` for a mesh, as its count is."""
+        count = self.particle_count
+        if count is None:
+            return None
+        return float(count) * self.particle_volume * float(self.material.density)
