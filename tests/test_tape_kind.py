@@ -798,6 +798,32 @@ class TestNothingUnderItMakesNoBond(unittest.TestCase):
                 self.assertEqual(0, label.held())
                 self.assertEqual((0.0, 1.0), (label.bonded(), label.peeled()))
 
+    def test_a_stuck_labels_overhang_pressed_onto_the_side_is_counted_once_made(self) -> None:
+        """Contact adhesion leaves the 80 vertices past the +x edge unmade at the build, and makes them where they
+        are pressed onto the box's side: wrapped down it 0.1 mm into the contact, all 180 hold and it reads 1.0 and
+        0.0; the build's 100 then lifted 2 mm, past the reach, 80/180 and 100/180, one less the other. Counted over
+        the build's bonds alone, the wrap read nothing: 0.0 bonded with all 80 holding."""
+        from robosimstudio_materials.tape import LABEL
+
+        label, model = self._label(LABEL, stuck=True, at=(0.03, -0.05, 0.0505))
+        past, p = ~label.made, label.bond_particles
+        self.assertEqual(80, int(past.sum()))
+        state = model.state()
+        q = state.particle_q.numpy().copy()
+        beyond = q[p[past], 0] - self.HALF[0]  # how far past the edge each lies along the top [m]
+        q[p[past], 0] = self.HALF[0] + LABEL.particle_radius - 1.0e-4
+        q[p[past], 2] = 2.0 * self.HALF[2] - beyond
+        state.particle_q.assign(q)
+        label._stick(state, 1.0 / 960.0)
+        self.assertEqual(180, label.held())
+        self.assertEqual((1.0, 0.0), (label.bonded(), label.peeled()))
+        q[p[label.made], 2] += 0.002
+        state.particle_q.assign(q)
+        label._stick(state, 1.0 / 960.0)
+        self.assertEqual(80, label.held())
+        self.assertAlmostEqual(80 / 180, label.bonded(), places=6)
+        self.assertAlmostEqual(100 / 180, label.peeled(), places=6)
+
     def test_a_label_laid_flush_with_the_edges_bonds_on_them(self) -> None:
         """Covering the box's top exactly: its edge vertices lie on the edges, up to float32's rounding past them,
         and every one bonds, as on the example's box and on one off the origin. Tested past the extent with no
