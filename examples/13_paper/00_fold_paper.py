@@ -49,9 +49,7 @@ def main():
             extent = studio.gui.add_number("fold_extent", 1.0, step=0.01, disabled=True)
 
         def attach(_) -> None:  # the page's set grab, pinned to the right hand's frame: an attachment grasp
-            grips = studio.deformables
-            grips.selected, grips.selected_set, grips.follow_arm[0] = "paper", "edge", "right" if hold.value else ""
-            grips.grab_set_requested, grips.release_all_requested = hold.value, not hold.value
+            studio.deformables.request_set("paper", "edge", "right", hold=hold.value)
 
         def each_step() -> None:
             sheet.update_probe(sim.state, sim.step_count)

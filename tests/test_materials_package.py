@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """The shipped kinds are a sibling package, found by scan, and the library is whole without it.
 
-``cloth``, ``soft``, the rope, ``paper`` and the three particle kinds are the modules
-of ``robosimstudio_materials``: ``cloth.py``, ``soft.py``, ``paper.py``, ``granular.py``,
-``liquid.py`` and ``dough.py`` one file each, ``rod/`` a package, and ``mpm/`` the
+``cloth``, ``soft``, the rope, ``paper``, the brush and the three particle kinds are the
+modules of ``robosimstudio_materials``: ``cloth.py``, ``soft.py``, ``paper.py``, ``brush.py``,
+``granular.py``, ``liquid.py`` and ``dough.py`` one file each, ``rod/`` a package, and ``mpm/`` the
 implementation the particle kinds share. The library never imports that package. It names it as a string in two places -- the registries'
 scan list (:data:`robosimstudio.roots.DOMAIN_PACKAGES`) and the flat-name table
 (``robosimstudio._PACKS``) -- and everything else follows from the scan: a kind
@@ -18,9 +18,11 @@ have to hold, and each fails silently when it does not:
   ``granular``, ``liquid`` and ``dough`` imports another at any scope, and the
   package imports nothing from the studio, the benchmark or the agents. With
   the other kinds left out of the package, one still registers and hands out
-  its spec and its entity. ``paper`` and ``bag`` are the declared exceptions: a
-  sheet of paper is a cloth whose hinges yield and a bag is a cloth sewn into a
-  pocket, so each imports ``cloth`` and nothing else, and stands with cloth alone. The particle kinds share ``mpm/``, which
+  its spec and its entity. ``paper``, ``bag`` and ``brush`` are the declared
+  exceptions: a sheet of paper is a cloth whose hinges yield and a bag is a cloth
+  sewn into a pocket, so each imports ``cloth`` and nothing else, and a brush's
+  bristles are the rope's capsule chains, so it imports ``rod``; each stands with its
+  base kind alone. The particle kinds share ``mpm/``, which
   is not a kind and stays when any of them is left out.
 * **The library names the sibling only as a string.** An ``import
   robosimstudio_materials`` anywhere under ``robosimstudio/`` is the sibling
@@ -69,6 +71,7 @@ KINDS = {
     "granular": ("heap", "ParticleBodySpec", "robosimstudio_materials.granular", "heap"),
     "liquid": ("liquid", "ParticleBodySpec", "robosimstudio_materials.liquid", "liquid"),
     "dough": ("dough", "ParticleBodySpec", "robosimstudio_materials.dough", "dough"),
+    "brush": ("brush", "BrushSpec", "robosimstudio_materials.brush", "brush"),
 }
 """Kind -> its constructor, its spec, the module its entity is defined in, and the entity's registered name.
 
@@ -90,6 +93,8 @@ FLAT = {
     "dough": "robosimstudio_materials.dough",
     "roller": "robosimstudio_materials.dough",
     "ParticleBodySpec": "robosimstudio_materials.mpm.spec",
+    "brush": "robosimstudio_materials.brush",
+    "BrushSpec": "robosimstudio_materials.brush",
 }
 """Flat name -> the module the thing behind it is defined in: each kind's constructor and spec, and the dough's roller.
 
@@ -97,7 +102,21 @@ The arrangement tables (``GRANULAR_60HZ`` and the like) are instances and carry
 no module of their own, so they are checked by absence only, with every other
 name ``robosimstudio._PACKS`` provides."""
 
-LISTED = ["bag", "bags", "dough", "heap", "liquid", "materials", "paper", "papers", "rod", "roller", "sheet", "sponge"]
+LISTED = [
+    "bag",
+    "bags",
+    "brush",
+    "dough",
+    "heap",
+    "liquid",
+    "materials",
+    "paper",
+    "papers",
+    "rod",
+    "roller",
+    "sheet",
+    "sponge",
+]
 """The lower-case flat names, as ``dir(rss)`` lists them when the package is installed."""
 
 
@@ -244,7 +263,7 @@ class TestEachKindStandsAlone(unittest.TestCase):
     """
 
     def test_no_kind_imports_another_at_any_scope(self) -> None:
-        """Beyond what :data:`NEEDS` declares: paper and the bag may import cloth, and that is the whole list."""
+        """Beyond what :data:`NEEDS` declares: paper and the bag may import cloth and the brush the rope, and that is the whole list."""
         for kind in KINDS:
             with self.subTest(kind=kind):
                 module = MATERIALS / f"{kind}.py"
@@ -369,6 +388,7 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
         self.assertEqual(
             [
                 "robosimstudio_materials.bag",
+                "robosimstudio_materials.brush",
                 "robosimstudio_materials.cloth",
                 "robosimstudio_materials.dough",
                 "robosimstudio_materials.granular",
@@ -396,6 +416,8 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
             "bag",
             "bags",
             "BagSpec",
+            "brush",
+            "BrushSpec",
         ):
             self.assertNotIn(name, rss._EXPORTS, f"{name} is a kind's and belongs in _PACKS")
             self.assertIn(name, rss._PACK_EXPORTS)

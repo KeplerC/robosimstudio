@@ -83,6 +83,16 @@
 | [Fold a sheet of paper](13_paper/00_fold_paper.py) | [Close a cardboard flap](13_paper/01_box_flap.py) |
 |---|---|
 
+## [14 Brush](14_brush/README.md)
+
+| [Scrub a patch clean](14_brush/00_scrub_the_bench.py) | [Scrub a patch, scored](14_brush/01_scrub_scored.py) |
+|---|---|
+
+## [15 Suction](15_suction/README.md)
+
+| [Pick up a plate](15_suction/00_pick_a_plate.py) | [Pick up a plate, scored](15_suction/01_pick_scored.py) |
+|---|---|
+
 ## [16 Bags](16_bags/README.md)
 
 | [Open a bag](16_bags/00_open_a_bag.py) | [Open a bag, scored](16_bags/01_open_a_bag_scored.py) |

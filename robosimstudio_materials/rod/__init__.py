@@ -51,7 +51,9 @@ from .entity import (
     EntityPegRound,
     EntityRod,
     SpecCable,
+    add_capsule_chain,
     fixture_shape_cfg,
+    rod_slot_dofs,
 )
 from .features import KIND_NAMES, RodParam  # registers the arc-length ``point`` feature kind
 from .make import rod
@@ -72,8 +74,10 @@ __all__ = [
     "RodParam",
     "RodSpec",
     "SpecCable",
+    "add_capsule_chain",
     "fixture_shape_cfg",
     "rod",
+    "rod_slot_dofs",
 ]
 
 # Old path, still named as a string by cable_route's

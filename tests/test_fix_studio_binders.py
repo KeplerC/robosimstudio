@@ -128,5 +128,96 @@ class PendingRebuildForgetsWhatWasSetBack(unittest.TestCase):
         self.assertEqual(binder.pending_rebuild(), ("rates:edge_ke",))
 
 
+class _HeadedGui(_Gui):
+    """The fake gui, also keeping the section headers it was handed."""
+
+    def __init__(self):
+        super().__init__()
+        self.headers = []
+
+    def add_markdown(self, text="", *_a, **_k):
+        self.headers.append(text)
+        return _Widget()
+
+
+class OneSectionPerBackendTheSceneUses(unittest.TestCase):
+    """GENERIC names an mpm backend for three particle domains and a superdex one for soft."""
+
+    def _sections(self, domains):
+        from robosimstudio.specs import GENERIC
+
+        gui = _HeadedGui()
+        binder = ArrangementBinder(GENERIC, domains=domains)
+        binder.build(gui)
+        backends = [
+            h for h in gui.headers if h.startswith("**") and h.endswith(("mujoco**", "vbd**", "mpm**", "superdex**"))
+        ]
+        return binder, backends
+
+    def test_a_scene_with_no_particles_lists_no_mpm(self):
+        _, backends = self._sections({"*", "articulated", "rigid"})
+        self.assertEqual(["**articulated: mujoco**", "***: vbd**"], backends)
+
+    def test_the_particle_domains_it_declares_share_one_section(self):
+        _, backends = self._sections({"*", "articulated", "granular", "liquid"})
+        self.assertEqual(["**articulated: mujoco**", "**granular, liquid: mpm**", "***: vbd**"], backends)
+
+    def test_no_domains_given_lists_every_backend(self):
+        binder, _ = self._sections(None)
+        self.assertEqual(
+            [("articulated",), ("soft",), ("granular", "liquid", "dough"), ("*",)], [d for d, _ in binder.sections()]
+        )
+
+    def test_an_edit_to_a_shared_backend_keeps_it_one_island(self):
+        """Folded into ``granular`` alone it split the spec, and a heap and a pool would build two mpm islands."""
+        from robosimstudio.specs import GENERIC
+
+        binder, _ = self._sections({"*", "articulated", "granular", "liquid"})
+        binder.pending["backend:granular:voxel_size"] = 0.005
+        binder.drain()
+        spec = binder.spec
+        shared = {spec.backend_for(d) for d in ("granular", "liquid", "dough")}
+        self.assertEqual(1, len(shared), "the particle domains no longer share one backend")
+        self.assertEqual(0.005, spec.backend_for("liquid").get("voxel_size"))
+        self.assertEqual(GENERIC.backend_for("*"), spec.backend_for("*"))
+        self.assertEqual(GENERIC.backend_for("soft"), spec.backend_for("soft"))
+
+    def _live(self, island_domains, path):
+        """Drain one edit into a program of one island per backend, recording what it is asked."""
+        from robosimstudio.specs import GENERIC
+        from robosimstudio.specs.params import RECAPTURE
+
+        islands = [SimpleNamespace(name=n, backend=GENERIC.backend_for(d), domains=ds) for n, d, ds in island_domains]
+        asked = []
+
+        def apply(target, value):
+            asked.append(target)
+            if target.split(":")[1] not in {i.name for i in islands}:
+                raise KeyError(f"no island or domain {target.split(':')[1]!r}")
+            return RECAPTURE
+
+        binder, _ = self._sections(None)
+        binder.program = SimpleNamespace(apply=apply, islands=islands)
+        binder.pending[path] = 40
+        binder.drain()
+        return binder.applied[path], asked
+
+    def test_a_shared_section_applies_live_on_its_backends_island(self):
+        """Its path names ``granular``; a liquid-only program has an mpm island, and the edit lands live there."""
+        from robosimstudio.specs.params import RECAPTURE
+
+        tier, asked = self._live([("mpm", "liquid", ("liquid",))], "backend:granular:max_iterations")
+        self.assertEqual(RECAPTURE, tier)
+        self.assertEqual(["backend:mpm:max_iterations"], asked)
+
+    def test_the_fallback_section_applies_live_too(self):
+        """No node's domain is ``*``; the vbd island runs the fallback backend, so ``backend:*:`` reaches it."""
+        from robosimstudio.specs.params import RECAPTURE
+
+        tier, asked = self._live([("vbd", "*", ("cloth",))], "backend:*:iterations")
+        self.assertEqual(RECAPTURE, tier)
+        self.assertEqual(["backend:vbd:iterations"], asked)
+
+
 if __name__ == "__main__":
     unittest.main()

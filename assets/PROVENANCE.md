@@ -220,3 +220,19 @@ pad centres 0.09793 m apart at full open and 0.01252 m at full closed, i.e.
 **0.0854 m of travel against the published 0.085 m stroke**. Closing axis
 tool-local ±x, a right angle from the `GripperSpec` default. `housing_half`
 measures 0.0424 here against the Isaac stage export's 0.0425.
+
+---
+
+## `embodiments/suction/` — a single-cup vacuum hand, authored here
+
+**Source:** none; `suction_cup.xml` was written for this repository and is
+Apache-2.0 like the code. Four cylinders: an 18 mm flange and a 6 mm stem on
+`suction_mount`, an 11 mm bellows and a 15 mm face on `suction_pad`, whose
+origin is the face, 60 mm from the mount along +z. Masses are stated per geom,
+70 g in all.
+
+**At build**, `EntityEmbodiment._attach_hands` imports it with `parent_body`
+set to the arm's wrist at the arm's `ArmSpec.gripper_mount`, and
+`after_scene_built` adds one disabled MuJoCo weld row from `suction_pad` to
+each part with a flat face; `robosimstudio.core.suction` switches them.
+Nothing on disk changes.

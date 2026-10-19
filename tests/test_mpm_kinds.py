@@ -283,12 +283,23 @@ class TestTheDoughPress(unittest.TestCase):
         return float(np.quantile(near[:, 2], 0.95)) - self.lump.entity.floor_z
 
     def test_the_surface_is_offered_and_meshes_the_lump(self) -> None:
+        """A closed surface round the lump, where it is: the particles sit at negative y on this bench."""
+        from robosimstudio.core.render.particles import surface_mesh
+
         handle = self.lump.handle
         self.assertIsNotNone(handle.surface)
-        vertices, triangles, normals = handle.surface(self.lump.particle_q)
+        q = np.asarray(self.lump.particle_q, dtype=np.float64)
+        self.assertLess(float(q[:, 1].max()), 0.0)
+        vertices, triangles, normals = handle.surface(q)
         self.assertGreater(len(triangles), 100)
         self.assertEqual((len(triangles), 3), tuple(triangles.shape))
         self.assertEqual(len(vertices), len(normals))
+        vertices, triangles, _ = surface_mesh(handle.surface, q)
+        edges = np.sort(np.concatenate([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]]), axis=1)
+        _, shared = np.unique(edges, axis=0, return_counts=True)
+        self.assertTrue((shared == 2).all(), f"{int((shared != 2).sum())} of {len(shared)} edges border one triangle")
+        np.testing.assert_array_less(q.min(axis=0) - 0.01, vertices.min(axis=0))
+        np.testing.assert_array_less(vertices.max(axis=0), q.max(axis=0) + 0.01)
 
     def test_the_puck_holds_its_height_at_rest(self) -> None:
         from robosimstudio_materials.mpm.measures import heap_height
