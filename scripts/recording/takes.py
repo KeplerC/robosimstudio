@@ -235,7 +235,7 @@ def _flap_shut(film) -> tuple[bool, str]:
     angle = float(crease_angle(Snapshot(sim.make_context()), "flap", line)["angle"])
     rest = np.asarray(flap.entity.rest["particle_q"], dtype=np.float64)[flap.particles]
     edge = np.asarray(flap.particle_q, dtype=np.float64)[rest[:, 2] > rest[:, 2].max() - 0.003].mean(axis=0)
-    above = float(edge[2]) - (0.728 + 0.10)
+    above = float(edge[2]) - film.bench((0.0, 0.0, 0.10))[2]  # the box's rim, 100 mm over whatever bench
     return angle >= 1.8 and above < 0.015, (
         f"the hinge kept {angle:.2f} rad (need 1.8) and the free edge is {above * 1000:+.0f} mm off the rim (need under 15)"
     )
