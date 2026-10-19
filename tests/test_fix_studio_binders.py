@@ -182,24 +182,41 @@ class OneSectionPerBackendTheSceneUses(unittest.TestCase):
         self.assertEqual(GENERIC.backend_for("*"), spec.backend_for("*"))
         self.assertEqual(GENERIC.backend_for("soft"), spec.backend_for("soft"))
 
-    def test_a_shared_section_applies_live_under_the_domain_the_scene_has(self):
-        """Its path names ``granular``; a liquid-only program knows ``liquid``, and the edit still lands live."""
+    def _live(self, island_domains, path):
+        """Drain one edit into a program of one island per backend, recording what it is asked."""
+        from robosimstudio.specs import GENERIC
         from robosimstudio.specs.params import RECAPTURE
 
+        islands = [SimpleNamespace(name=n, backend=GENERIC.backend_for(d), domains=ds) for n, d, ds in island_domains]
         asked = []
 
-        def apply(path, value):
-            asked.append(path)
-            if not path.startswith("backend:liquid:"):
-                raise KeyError(f"no island or domain {path.split(':')[1]!r}")
+        def apply(target, value):
+            asked.append(target)
+            if target.split(":")[1] not in {i.name for i in islands}:
+                raise KeyError(f"no island or domain {target.split(':')[1]!r}")
             return RECAPTURE
 
         binder, _ = self._sections(None)
-        binder.program = SimpleNamespace(apply=apply)
-        binder.pending["backend:granular:max_iterations"] = 40
+        binder.program = SimpleNamespace(apply=apply, islands=islands)
+        binder.pending[path] = 40
         binder.drain()
-        self.assertEqual(RECAPTURE, binder.applied["backend:granular:max_iterations"])
-        self.assertEqual(["backend:granular:max_iterations", "backend:liquid:max_iterations"], asked)
+        return binder.applied[path], asked
+
+    def test_a_shared_section_applies_live_on_its_backends_island(self):
+        """Its path names ``granular``; a liquid-only program has an mpm island, and the edit lands live there."""
+        from robosimstudio.specs.params import RECAPTURE
+
+        tier, asked = self._live([("mpm", "liquid", ("liquid",))], "backend:granular:max_iterations")
+        self.assertEqual(RECAPTURE, tier)
+        self.assertEqual(["backend:mpm:max_iterations"], asked)
+
+    def test_the_fallback_section_applies_live_too(self):
+        """No node's domain is ``*``; the vbd island runs the fallback backend, so ``backend:*:`` reaches it."""
+        from robosimstudio.specs.params import RECAPTURE
+
+        tier, asked = self._live([("vbd", "*", ("cloth",))], "backend:*:iterations")
+        self.assertEqual(RECAPTURE, tier)
+        self.assertEqual(["backend:vbd:iterations"], asked)
 
 
 if __name__ == "__main__":

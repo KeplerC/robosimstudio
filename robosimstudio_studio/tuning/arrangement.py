@@ -96,8 +96,8 @@ class ArrangementBinder:
         """Path -> the value its control was built with, i.e. what the scene runs."""
         self._ui: dict[str, ParamUI] = {}
         """Path -> how its control was built, for telling a slider set back."""
-        self._serves: dict[str, tuple[str, ...]] = {}
-        """Backend path -> every domain its section serves; the path names only the first."""
+        self._backend_of: dict[str, BackendSpec] = {}
+        """Backend path -> the backend its section shows; the path names only the section's first domain."""
 
     # ------------------------------------------------------------------ build
     def build(self, gui: Any) -> None:
@@ -116,7 +116,7 @@ class ArrangementBinder:
                 if isinstance(value, (tuple, list, dict)) or value is None:
                     continue
                 self._add(gui, f"backend:{domains[0]}:{name}", name, value, rule.ui)
-                self._serves[f"backend:{domains[0]}:{name}"] = domains
+                self._backend_of[f"backend:{domains[0]}:{name}"] = backend
         try:
             coupler_info = get_coupler(self.spec.coupling.method)
             schema = dict(coupler_info.schema or {})
@@ -190,23 +190,21 @@ class ArrangementBinder:
         return taken
 
     def _apply_live(self, path: str, value: Any) -> str:
-        """Apply one edit to the running program, under whichever of its section's domains has an island.
+        """Apply one edit to the running program, on the island that runs its section's backend.
 
-        A section shared by several domains names only the first in its path,
-        and that one need not be in the scene: a liquid scene shown every
-        backend has an mpm section headed ``granular``.
+        A section's path names only its first domain, and that domain need not
+        be on any island: the ``*`` fallback is no node's domain, and a liquid
+        scene shown every backend has an mpm section headed ``granular``.
+        Islands are grouped by backend, so the island with the section's
+        backend is the one the edit is for.
         """
         kind, _, rest = path.partition(":")
-        domains = self._serves.get(path, ())
-        if kind != "backend" or len(domains) < 2:
-            return self.program.apply(path, value)
-        param = rest.partition(":")[2]
-        for domain in domains[:-1]:
-            try:
-                return self.program.apply(f"backend:{domain}:{param}", value)
-            except KeyError:
-                continue
-        return self.program.apply(f"backend:{domains[-1]}:{param}", value)
+        backend = self._backend_of.get(path)
+        if kind == "backend" and backend is not None:
+            island = next((i for i in getattr(self.program, "islands", ()) if i.backend == backend), None)
+            if island is not None:
+                return self.program.apply(f"backend:{island.name}:{rest.partition(':')[2]}", value)
+        return self.program.apply(path, value)
 
     def _fold(self, path: str, value: Any) -> None:
         kind, _, rest = path.partition(":")
