@@ -270,6 +270,17 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual("mujoco", table["articulated"].solver)
         self.assertIs(rss.bag, __import__("robosimstudio_materials.bag", fromlist=["bag"]).bag)
 
+    def test_the_arrangement_keeps_every_other_route_generic_has(self) -> None:
+        """Rebuilt from scratch, it sent a heap, a pool and a lump beside the bag to VBD rather than the MPM."""
+        import robosimstudio as rss
+        from robosimstudio.specs import GENERIC
+
+        for domain, spec in GENERIC.backends:
+            if domain != "soft":
+                with self.subTest(domain=domain):
+                    self.assertEqual(spec, rss.BAG_60HZ.backend_for(domain))
+        self.assertEqual((rss.BAG_60HZ.control_hz, rss.BAG_60HZ.substeps), (GENERIC.control_hz, GENERIC.substeps))
+
     def test_the_kind_and_its_atom_are_registered(self) -> None:
         from robosimstudio.assetlib.semantics.atoms import ATOMS
         from robosimstudio.specs.physics import get_domain

@@ -8,7 +8,7 @@ Run ``examples/16_bags/00_open_a_bag.py`` first.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
@@ -568,18 +568,14 @@ def _read_bag(model: Any, base: Any) -> Any:
 # =============================================================================
 
 
-BAG_60HZ = replace(
-    GENERIC,
-    backends=(
-        ("articulated", backend("mujoco")),
-        # Two engine steps per control step, GENERIC's for the soft kind, and the same backend so a
-        # sponge and a bag share the one host island.
-        ("soft", backend("superdex", substeps=2, feedback_dv_max=20.0)),
-        ("bag", backend("superdex", substeps=2, feedback_dv_max=20.0)),
-        ("*", backend("vbd", rigid_body_contact_buffer_size=256)),
-    ),
-)
-"""GENERIC with ``bag`` on SuperDex beside the soft kind: the arm on MuJoCo, 60 Hz control."""
+_BAG_HOST = backend("superdex", substeps=2, feedback_dv_max=20.0)
+"""Two engine steps per control step, GENERIC's for the soft kind; the soft kind takes the same backend, so a
+sponge and a bag share the one host island."""
+
+BAG_60HZ = GENERIC.with_backend("soft", _BAG_HOST).with_backend("bag", _BAG_HOST)
+"""GENERIC with ``bag`` on SuperDex beside the soft kind: the arm on MuJoCo, 60 Hz control, the particle
+materials on GENERIC's implicit MPM and everything else on its VBD. A sponge here takes the bag's
+``feedback_dv_max`` of 20, not GENERIC's default, since one host island serves both."""
 
 register_actor_kind("bag", _read_bag, summary="A bag: a shell's triangles.")
 register_actor_builder(
