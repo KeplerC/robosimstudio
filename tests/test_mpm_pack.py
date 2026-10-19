@@ -260,6 +260,34 @@ class TestTheSpecs(unittest.TestCase):
         np.testing.assert_array_equal(jittered, again, "the jitter is seeded from the name")
         self.assertFalse(np.array_equal(jittered, box))
 
+    def test_a_body_weighs_its_material_over_the_region_it_fills(self) -> None:
+        """The wipe's puddle: 6 mm deep at 2.5 mm is two layers of 3 mm, so a particle stands for 18.75 mm^3, not 15.6.
+
+        Its mass and its radius both follow the cell: Newton's implicit MPM
+        reads a particle's volume as ``8 r^3`` and its density as the mass over
+        that, so the two together keep the solver's density the material's.
+        """
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm.entity import EntityParticleBody
+
+        spec = rss.liquid(name="ketchup", size=(0.10, 0.10, 0.006), material="ketchup")
+        density = float(spec.material.density)
+        self.assertEqual(3200, spec.particle_count)
+        self.assertAlmostEqual(0.0025 * 0.0025 * 0.003, spec.particle_volume, places=15)
+        self.assertAlmostEqual(density * 0.10 * 0.10 * 0.006, spec.mass, places=9)
+        builder = newton.ModelBuilder()
+        entity = EntityParticleBody(spec)
+        entity.build(builder, None)
+        mass = np.asarray(builder.particle_mass, dtype=np.float64)
+        radius = np.asarray(builder.particle_radius, dtype=np.float64)
+        self.assertEqual(3200, len(mass))
+        self.assertAlmostEqual(density * 0.10 * 0.10 * 0.006, float(mass.sum()), places=9)
+        np.testing.assert_allclose(8.0 * radius**3, spec.particle_volume, rtol=1e-9)
+        np.testing.assert_allclose(mass / (8.0 * radius**3), density, rtol=1e-9)
+        self.assertAlmostEqual(float(mass[0]), entity.particle_mass, places=12)
+
     def test_the_material_fields_are_described_with_their_tiers(self) -> None:
         from robosimstudio.specs.params import REBUILD, RECAPTURE, iter_params, undescribed
         from robosimstudio_materials.mpm import MPM_KEYS, ParticleBodySpec, ParticleMaterialSpec

@@ -328,6 +328,27 @@ class ParticleBodySpec:
         return nx * ny * nz
 
     @property
+    def particle_volume(self) -> float:
+        """The volume one particle of a box or cylinder stands for [m^3]: its lattice cell's.
+
+        The lattice puts one sample per cell of ``size / round(size / spacing)``
+        so that it ends on the faces, and a cell is a spacing cubed only where
+        the spacing divides the size: a 6 mm puddle at 2.5 mm is two layers of
+        3 mm. A particle's mass is this volume times the density, and its
+        radius is half its cube root, which is what Newton's implicit MPM
+        reads back as the particle's volume (``8 r^3``), so the body weighs
+        what its material does over the region it fills. A mesh's cell is its
+        bound's, known once it is filled; this is the spacing cubed for one.
+        """
+        h = float(self.particle_spacing)
+        if self.shape == "mesh":
+            return h**3
+        volume = 1.0
+        for extent in self.size:
+            volume *= float(extent) / max(1, int(round(float(extent) / h)))
+        return volume
+
+    @property
     def mass(self) -> float:
         """Total mass [kg]: the particle count times the particle mass."""
-        return float(self.particle_count) * float(self.particle_spacing) ** 3 * float(self.material.density)
+        return float(self.particle_count) * self.particle_volume * float(self.material.density)

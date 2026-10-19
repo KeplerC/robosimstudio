@@ -124,6 +124,11 @@ def sample_positions(spec: ParticleBodySpec) -> np.ndarray:
     inside, over the mesh's own bound. The jitter is drawn once per spec name,
     so two builds of one spec sample the same positions.
     """
+    return _sample(spec)[0]
+
+
+def _sample(spec: ParticleBodySpec) -> tuple[np.ndarray, np.ndarray]:
+    """:func:`sample_positions`, and the lattice cell each particle stands in ``[3]``."""
     spacing = float(spec.particle_spacing)
     if spec.shape == "mesh":
         points, cell = _mesh_points(spec, spacing)
@@ -136,7 +141,7 @@ def sample_positions(spec: ParticleBodySpec) -> np.ndarray:
     if spec.jitter > 0.0 and len(points):
         rng = np.random.default_rng(zlib.crc32(spec.name.encode("utf-8")))
         points = points + (rng.random(points.shape) - 0.5) * (2.0 * float(spec.jitter)) * cell
-    return np.ascontiguousarray(points, dtype=np.float64)
+    return np.ascontiguousarray(points, dtype=np.float64), cell
 
 
 def _mesh_points(spec: ParticleBodySpec, spacing: float) -> tuple[np.ndarray, np.ndarray]:
@@ -236,6 +241,7 @@ class EntityParticleBody(ParticleMixin, Entity):
         self._handle: Any = None
         self._radii: Any = None
         self._count = 0
+        self._particle_volume = float(spec.particle_volume)
 
     # -------------------------------------------------------------- phase 1
     def build(self, builder: newton.ModelBuilder, episode) -> None:
@@ -244,19 +250,22 @@ class EntityParticleBody(ParticleMixin, Entity):
 
         SolverImplicitMPM.register_custom_attributes(builder)
         spec = self.spec
-        local = sample_positions(spec)
+        local, cell = _sample(spec)
         placed = self.placed((*spec.at, *spec.quat))
         rotation = quat_to_mat(np.asarray(placed[3:7], dtype=np.float64))
         world = local @ rotation.T + np.asarray(placed[:3], dtype=np.float64)
         n = len(world)
-        spacing = float(spec.particle_spacing)
-        mass = spacing**3 * float(self.material.density)
+        # One cell's volume per particle, as mass and as radius: Newton's
+        # implicit MPM takes a particle's volume to be ``8 r^3``, so the radius
+        # is half the cell's cube root and the density it derives is the material's.
+        self._particle_volume = float(np.prod(cell))
+        mass = self._particle_volume * float(self.material.density)
         attributes = {key: [value] * n for key, value in self.material.custom_attributes().items()}
         builder.add_particles(
             pos=[tuple(float(c) for c in row) for row in world],
             vel=[(0.0, 0.0, 0.0)] * n,
             mass=[mass] * n,
-            radius=[0.5 * spacing] * n,
+            radius=[0.5 * self._particle_volume ** (1.0 / 3.0)] * n,
             flags=[int(newton.ParticleFlags.ACTIVE)] * n,
             custom_attributes=attributes,
         )
@@ -351,8 +360,7 @@ class EntityParticleBody(ParticleMixin, Entity):
             if key in ("young_modulus", "yield_pressure", "yield_stress"):
                 value /= NEWTON_MPM_STRESS_SCALE
             values[key] = value
-        spacing = float(self.spec.particle_spacing)
-        values["density"] = float(model.particle_mass.numpy()[first]) / spacing**3
+        values["density"] = float(model.particle_mass.numpy()[first]) / self._particle_volume
         return ParticleMaterialSpec(color=self.material.color, **values)
 
     def _all_world_indices(self) -> np.ndarray:
@@ -504,8 +512,8 @@ class EntityParticleBody(ParticleMixin, Entity):
 
     @property
     def particle_mass(self) -> float:
-        """Mass of one particle [kg]."""
-        return float(self.spec.particle_spacing) ** 3 * float(self.material.density)
+        """Mass of one particle [kg]: its lattice cell's volume times the density."""
+        return self._particle_volume * float(self.material.density)
 
     @property
     def floor_z(self) -> float:
