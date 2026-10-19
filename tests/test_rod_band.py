@@ -60,6 +60,14 @@ class TestTheBandConstructor(unittest.TestCase):
         np.testing.assert_allclose(nodes[:, 2], RUBBER.cord_radius, atol=1e-12)
         self.assertEqual(RUBBER.cord_radius, spec.radius)
 
+    def test_a_flat_band_is_lifted_by_the_radius_it_is_given(self) -> None:
+        """A ``radius`` passed through is the rod's, so it is the lift too: the cord lies on the bench."""
+        from robosimstudio_materials.rod.band import RUBBER, band
+
+        spec = band(diameter=0.06, radius=0.004)
+        self.assertNotEqual(RUBBER.cord_radius, spec.radius)
+        np.testing.assert_allclose(np.asarray(spec.nodes)[:, 2], spec.radius, atol=1e-12)
+
     def test_a_standing_band_stands_in_the_plane_normal_to_its_axis(self) -> None:
         from robosimstudio_materials.rod.band import band
 

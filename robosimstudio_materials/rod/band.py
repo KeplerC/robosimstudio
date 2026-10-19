@@ -85,7 +85,8 @@ def band(
         diameter: Of the cord's centreline at rest [m]; the circumference, pi
             times it, is the length the band does not stretch at.
         at: The circle's centre, in the work-surface frame. Lying flat (the
-            default ``normal``), ``z`` is raised by the cord's radius, so
+            default ``normal``), ``z`` is raised by the rod's radius (a
+            ``radius`` passed in ``kwargs``, else the material's cord), so
             ``z = 0`` lies on the bench.
         material: :data:`RUBBER`, :data:`O_RING` or one of your own.
         segments: Nodes round the loop, one element each. Keep the element (pi
@@ -109,9 +110,8 @@ def band(
     u = np.cross(axis, [0.0, 0.0, 1.0] if abs(axis[2]) < 0.9 else [0.0, 1.0, 0.0])
     u /= float(np.linalg.norm(u))
     v = np.cross(axis, u)
-    centre = np.asarray(at, dtype=np.float64) + (
-        np.array([0.0, 0.0, material.cord_radius]) if abs(axis[2]) >= 0.9 else 0.0
-    )
+    cord = float(kwargs.get("radius", material.cord_radius))  # the radius the rod will have
+    centre = np.asarray(at, dtype=np.float64) + (np.array([0.0, 0.0, cord]) if abs(axis[2]) >= 0.9 else 0.0)
     angles = np.linspace(0.0, 2.0 * math.pi, int(segments), endpoint=False)
     radius = 0.5 * float(diameter)
     nodes = tuple(tuple(float(c) for c in centre + radius * (math.cos(a) * u + math.sin(a) * v)) for a in angles)
