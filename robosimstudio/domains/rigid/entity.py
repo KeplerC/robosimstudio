@@ -22,6 +22,7 @@ import newton
 import numpy as np
 import warp as wp
 
+from robosimstudio.domains.static.welded import weld_to_world
 from robosimstudio.paths import resolve_asset, resolve_path
 from robosimstudio.scene.build.bodies import preserve_body_inertia, set_body_mass
 from robosimstudio.scene.build.colliders import (
@@ -77,6 +78,8 @@ class EntityRigid(Entity):
         self.body: int = -1
         self.coord_start: int = -1
         self.dof_start: int = -1
+        self.weld_joint: int = -1
+        """The fixed joint from the world that holds a static object, ``-1`` for a free one."""
         self.shapes: np.ndarray = np.zeros(0, dtype=np.int32)
         self.obb: ObbGrasp | None = None
         self.init_pose = np.asarray(spec.pose, dtype=np.float64)
@@ -437,38 +440,16 @@ class EntityRigid(Entity):
         return self._declared.copy()
 
     def _add_welded_link(self, builder: newton.ModelBuilder, xform) -> int:
-        """A static object's body: a link welded to the world where it stands, and kinematic.
+        """A static object's body: welded to the world where it stands, and kinematic.
 
         :attr:`~robosimstudio.specs.ObjectSpec.static` says *welded to the world
-        rather than free*. A bare ``add_link`` is neither: it is a body with no
-        joint, flagged DYNAMIC, and each solver reads that its own way. VBD
-        integrates it like a free body. Under ``GENERIC``, beside the YAM, a static
-        10 cm cube fell 148 mm from 0.2 m to the bench in a second, and a static
-        block resting on the bench sank 3.1 mm. Under the right hand, shut and
-        driven 20 mm below the block's top, the block slid (+10.0, -5.9, -4.4) mm,
-        as a free block did. With no robot, a towel on VBD pressed a static cube
-        14 mm into the bench in two seconds. MuJoCo refuses to convert it: "cannot
-        convert bodies that are outside articulations and have no standalone joint
-        to world". Newton 1.6 did the same on both solvers (``s2_newton.py``), so
-        this is not the 1.7 bump.
-
-        So it is held the way
-        :meth:`~robosimstudio.domains.static.welded.WeldedFixture.weld_in_place`
-        holds a replicated static. A fixed joint from the world at the body's
-        pose, outside any articulation, which MuJoCo converts as a standalone
-        world root (a mocap body, the body being kinematic), saying so once in a
-        ``UserWarning``. And :attr:`newton.BodyFlags.KINEMATIC`, which gives the
-        body an inverse mass of zero in VBD. The joint alone let the block move
-        0.05 mm under the press and the cube 0.01 mm under the towel. With the
-        flag every one of these reads 0.00 mm, and the hand stops 16.7 mm over the
-        block's top, as it does over an ``rss.slab`` (``s1_repro.py``,
-        ``s3_press.py``, ``s4_weld_only.py``). The joint has no coordinates, so a
-        reset has none to write, and no articulation, so forward kinematics leaves
-        the body where its build put it.
+        rather than free*, and :func:`~robosimstudio.domains.static.welded.weld_to_world`
+        is that weld, the one :class:`~robosimstudio.domains.static.welded.WeldedFixture`
+        puts a replicated static on. A bare ``add_link`` was neither: VBD integrated
+        it like a free body and MuJoCo refused to convert it, as
+        ``tests/test_a_static_box_stays_put.py`` measures.
         """
-        body = builder.add_link(xform=xform, label=self.spec.name)
-        builder.add_joint_fixed(-1, body, parent_xform=builder.body_q[body], label=f"{self.spec.name}_weld")
-        builder.body_flags[body] = int(newton.BodyFlags.KINEMATIC)
+        body, self.weld_joint = weld_to_world(builder, xform, label=self.spec.name)
         return body
 
     def _add_primitive(self, builder: newton.ModelBuilder, pose) -> None:

@@ -13,7 +13,8 @@ its model had no joint, and VBD's first reset refused the empty
 ``joint_dof_dim``. With that alone mended, the cube sank 14 mm under the towel in
 two seconds, the towel 12 mm under where the cube's top had been. And on MuJoCo
 the cube did not convert at all: "cannot convert bodies that are outside
-articulations and have no standalone joint to world".
+articulations and have no standalone joint to world". Newton 1.6 did the same
+on both solvers (``s2_newton.py``), so none of it is the 1.7 bump.
 
 A static object is welded now (``EntityRigid._add_welded_link``), so each of
 these scenes has a joint and builds. In all of them the static body moved

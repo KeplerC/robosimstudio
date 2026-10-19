@@ -16,6 +16,7 @@ on ``EntityRigid`` welds a static body a second time.
 
 from __future__ import annotations
 
+import ast
 import sys
 import tempfile
 import unittest
@@ -35,7 +36,9 @@ TIER = "fast"
 
 POSE = (0.1, -0.2, 0.3)
 
-WIPE_THE_BAR = Path(__file__).resolve().parents[1] / "examples" / "08_demos" / "wipe_the_bar"
+ROOT = Path(__file__).resolve().parents[1]
+
+WIPE_THE_BAR = ROOT / "examples" / "08_demos" / "wipe_the_bar"
 """The demo whose ``GrabBar`` extends ``EntityRigid``'s build of a static object with elbows and legs."""
 
 _USD_CUBE = """#usda 1.0
@@ -148,6 +151,72 @@ class TestNoStaticBodyIsWeldedTwice(unittest.TestCase):
                 kinematic = np.flatnonzero(model.body_flags.numpy() == int(newton.BodyFlags.KINEMATIC))
                 self.assertEqual([entity.body], [int(b) for b in kinematic], "the one static body")
                 self.assertEqual(1, len(_world_joints(model, entity.body)), "one weld")
+
+
+WELDS_ELSEWHERE = {
+    "robosimstudio/domains/static/welded.py": "weld_to_world, the recipe itself",
+    "robosimstudio_materials/rod/entity.py": (
+        "a cable's anchored end: a capsule inside the rod's own articulation, tied to the world by a weld "
+        "VBD solves, not a static body of its own"
+    ),
+}
+"""The files that may add a fixed joint from the world themselves, and why."""
+
+
+def _world_welds(path: Path) -> list[int]:
+    """The lines of ``path`` that call ``add_joint_fixed`` with the world as the parent."""
+
+    def is_world(node) -> bool:
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return isinstance(node.operand, ast.Constant) and node.operand.value == 1
+        return isinstance(node, ast.Constant) and node.value == -1
+
+    lines = []
+    for node in ast.walk(ast.parse(path.read_text())):
+        if not (isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "add_joint_fixed"):
+            continue
+        parent = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "parent"), None)
+        if parent is not None and is_world(parent):
+            lines.append(node.lineno)
+    return lines
+
+
+class TestOneRecipeWeldsABodyToTheWorld(unittest.TestCase):
+    """Every fixed joint from the world in the shipped code is ``weld_to_world``'s.
+
+    The recipe, a kinematic link and a fixed joint from the world at its pose, was
+    written out in ``EntityRigid``, in ``WeldedFixture.weld_in_place`` and in the
+    wipe-the-bar demo, and the demo's copy welded a body ``EntityRigid`` had
+    already welded. Read by AST, so it stays in the fast tier.
+    """
+
+    PACKAGES = (
+        "robosimstudio",
+        "robosimstudio_bench",
+        "robosimstudio_materials",
+        "robosimstudio_policy_agent",
+        "robosimstudio_real2sim_agent",
+        "robosimstudio_studio",
+        "examples",
+        "scripts",
+    )
+
+    def test_nothing_else_adds_a_fixed_joint_from_the_world(self) -> None:
+        found = {}
+        for package in self.PACKAGES:
+            for path in sorted((ROOT / package).rglob("*.py")):
+                relative = path.relative_to(ROOT).as_posix()
+                if "__pycache__" in path.parts or relative.startswith("examples/live/run/"):
+                    continue
+                if (lines := _world_welds(path)) and relative not in WELDS_ELSEWHERE:
+                    found[relative] = lines
+        self.assertEqual({}, found, "weld a body to the world through weld_to_world")
+
+    def test_the_allowed_files_still_weld_to_the_world(self) -> None:
+        """An entry nothing needs any more is one that would let the next copy through."""
+        for relative in WELDS_ELSEWHERE:
+            with self.subTest(relative):
+                self.assertTrue(_world_welds(ROOT / relative))
 
 
 if __name__ == "__main__":
