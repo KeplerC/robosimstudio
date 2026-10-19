@@ -40,6 +40,15 @@ from typing import Any
 STAMP = "/rss_record/stamp"
 """The node whose x is the index of the frame the server last presented."""
 
+VEIL_GREY = 90.0
+"""The grey [0-255] a take's 3D view is veiled over: its median frame's darkest 1% of the left half.
+
+A page drawn under a white veil keeps every check that reads the scene and shows it washed out: one
+run in three of ``04_extending/02_suction`` did, mean brightness 197 against 161. Its darkest 1% read
+113 to 116 grey on every frame, its clean runs' 27 to 31, and the median frame of every clip under
+``examples/`` 2 to 49 (68 for the 640-px render; 82 the most in any one frame). Over the left half,
+because the sidebar is on the right and the veil leaves it alone."""
+
 
 def install(film: Callable[[Any], None], *, port: int, out: str, overrides: dict[str, Any]) -> None:
     """Make every ``StudioSession`` this process opens a filmed one.
@@ -160,6 +169,28 @@ def wait_for(check: Callable[[], bool], timeout: float, poll: float = 0.002) -> 
 # =============================================================================
 # A take, filmed
 # =============================================================================
+
+
+def veil(frames) -> tuple[bool, str]:
+    """Whether a take was filmed bare, not under a veil: ``(passed, reading)``, as an expectation judges.
+
+    Read off each frame's left half, the 3D view, as the darkest 1% of its grey: a veil lifts the
+    darkest thing in view, the bench's shadow and the robot's black links, toward white.
+    """
+    import numpy as np
+
+    if not frames:
+        return True, "no frames to read"
+    luma = np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    darkest = []
+    for frame in frames:
+        rgb = np.asarray(frame, dtype=np.float32)[..., :3]
+        darkest.append(float(np.percentile(rgb[:, : rgb.shape[1] // 2] @ luma, 1.0)))
+    grey = float(np.median(darkest))
+    return grey <= VEIL_GREY, (
+        f"the 3D view's darkest 1% at grey {grey:.0f} in the median frame "
+        f"(need {VEIL_GREY:.0f} or under; a veiled page read 113 to 116)"
+    )
 
 
 def _shape_reach(shape, d) -> float:
@@ -596,4 +627,6 @@ class Film:
             except KeyError as exc:
                 passed, reading = False, f"no mark {exc} to judge {type(expectation).__name__} at"
             out.append({"expect": type(expectation).__name__, "passed": bool(passed), "reading": reading})
+        passed, reading = veil(self.frames)
+        out.append({"expect": "Unveiled", "passed": passed, "reading": reading})
         return out

@@ -151,6 +151,43 @@ class TestTheTopOfAPrimitiveIsItsTop(unittest.TestCase):
         self.assertAlmostEqual(tilted, takes._plate_half(self._film(plate, _about_x(2.0))), 12)
 
 
+def _page(white: float = 0.0, count: int = 5) -> list:
+    """Frames of a page whose 3D view's darkest 5% is 28 grey and the rest 162, the clean suction run's,
+    under a white veil of opacity ``white``: 0.37 lifts them to 112 and 196, as the veiled run read."""
+    frame = np.full((54, 96, 3), 162.0)
+    frame[::4, :48:5] = 28.0  # one pixel in twenty of the left half
+    frame[:, 70:] = 245.0  # the sidebar, which the veil leaves alone
+    frame[:, :70] = white * 255.0 + (1.0 - white) * frame[:, :70]
+    return [np.rint(frame).astype(np.uint8)] * count
+
+
+class TestAVeiledPageFailsItsTake(unittest.TestCase):
+    """One suction take in three was filmed under a white veil, every frame, and its checks passed."""
+
+    def test_a_clean_page_passes(self) -> None:
+        from recording.lockstep import veil
+
+        ok, said = veil(_page())
+        self.assertTrue(ok, said)
+        self.assertIn("grey 28 ", said)
+
+    def test_a_veiled_page_fails(self) -> None:
+        from recording.lockstep import veil
+
+        ok, said = veil(_page(white=0.37))
+        self.assertFalse(ok, said)
+        self.assertIn("grey 112 ", said)
+
+    def test_the_film_judges_every_take_for_a_veil(self) -> None:
+        """No take has to ask: :meth:`Film.judge` adds the verdict after the take's own expectations."""
+        from recording.lockstep import Film
+
+        film = Film(SimpleNamespace(expect=()), port=0, scratch=None, software=False, probe=False, log=print)
+        film.frames = _page(white=0.37)
+        (verdict,) = film.judge()
+        self.assertEqual(("Unveiled", False), (verdict["expect"], verdict["passed"]))
+
+
 # =============================================================================
 # The layout a take aims at is the one its example builds
 # =============================================================================
