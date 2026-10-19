@@ -75,7 +75,7 @@ from typing import Any
 
 import numpy as np
 
-from robosimstudio.core.math import quat_inverse, quat_multiply, quat_to_mat, quat_wxyz_to_xyzw
+from robosimstudio.core.math import quat_inverse, quat_multiply, quat_to_axis_angle, quat_to_mat, quat_wxyz_to_xyzw
 from robosimstudio.engines.cosim import CosimRig
 from robosimstudio.engines.feedback import WrenchAccumulator
 from robosimstudio.engines.geometry import (
@@ -145,13 +145,7 @@ def _angular_velocity(start: np.ndarray, end: np.ndarray, dt: float) -> np.ndarr
     about a skew axis in one control step ends 0.02 degrees off its target with this
     rate and 1.23 degrees off with the world-frame one (``p11_track.py``).
     """
-    rel = quat_multiply(quat_inverse(start), end)
-    if rel[3] < 0.0:
-        rel = -rel
-    s = float(np.linalg.norm(rel[:3]))
-    if s < 1.0e-12:
-        return np.zeros(3)
-    return (2.0 * np.arctan2(s, float(rel[3])) / s) * rel[:3] / float(dt)
+    return quat_to_axis_angle(quat_multiply(quat_inverse(start), end)) / float(dt)
 
 
 def _spin(q_wxyz: np.ndarray, w_body: np.ndarray, com: np.ndarray) -> np.ndarray:
