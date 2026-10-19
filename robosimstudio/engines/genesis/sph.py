@@ -257,6 +257,9 @@ class SphBridge:
     ) -> None:
         self.control_dt = 1.0 / float(recipe.get("control_hz", 60.0))
         self.substeps = max(1, int(substeps))
+        self.model = model
+        self.recipe = dict(recipe)
+        self.feedback = str(feedback)
         # Every refusal before the engine is asked for: gs.init runs once a process, so an
         # island refused after it would still have set the precision every later island gets.
         actors = list(recipe.get("actors", ()))
@@ -274,16 +277,12 @@ class SphBridge:
                 )
         # Genesis logs a substep past its own limit and steps on.
         self._refuse_long_substeps(recipe.get("island"), actors)
-        gs = ensure_initialized(precision, coupler="legacy")
-        self.gs = gs
-        self.model = model
-        self.recipe = dict(recipe)
-        self.feedback = str(feedback)
-
-        geoms = [actor_geometry(model, record) for record in actors]
         self.spacing = spacing[0]
+        geoms = [actor_geometry(model, record) for record in actors]
         shapes = iter_mirrors(model, recipe.get("mirrors", ()))
         lo, hi = self._domain(geoms, _ground(shapes))
+        gs = ensure_initialized(precision, coupler="legacy")
+        self.gs = gs
         self._box = (lo, hi)
         self._at_wall = False
         """Whether water has reached the box's sides or top, which is said once (:meth:`_check_walls`)."""
@@ -395,6 +394,15 @@ class SphBridge:
         a particle's centre rests on a surface: under ``sph_reach_down`` alone, water
         poured on a void cell's ground fell through it to the box's floor, 218 mm under
         (``w4_probe.py``).
+
+        Raises:
+            ValueError: when the box is empty: the ground stands over the liquids'
+                top plus ``sph_reach``, or a reach stated negative closes it.
+                Genesis refuses one too, after ``gs.init`` and naming neither the
+                liquid nor the ground ("Invalid pair of upper_bound and
+                lower_bound"): water started 0.6 m under a void cell's ground was
+                refused there at float32, and a cloth island built next in the
+                process was refused for that precision (``g1_box.py``).
         """
         rest = np.concatenate([g.rest for g in geoms]) if geoms else np.zeros((1, 3))
         side = float(self.recipe.get("sph_reach", 0.5))
@@ -403,6 +411,15 @@ class SphBridge:
         hi = rest.max(axis=0) + np.array([side, side, side])
         if ground:
             lo[2] = max(ground) + 0.5 * self.spacing
+        if np.any(lo >= hi):
+            floor = f"the ground at {max(ground):g} m" if ground else f"sph_reach_down={down:g} m under them"
+            raise ValueError(
+                f"genesis island {self.recipe.get('island')!r}: the SPH solver's box "
+                f"{np.round(lo, 4).tolist()}..{np.round(hi, 4).tolist()} is empty. It reaches sph_reach={side:g} m "
+                f"past the liquids' rest bounds {np.round(rest.min(axis=0), 4).tolist()}.."
+                f"{np.round(rest.max(axis=0), 4).tolist()} sideways and up, and its floor is {floor}. Start the "
+                "liquid over the ground, or state a larger sph_reach on backend('genesis', ...)"
+            )
         return lo, hi
 
     def _add_mirror(self, geom: ShapeGeometry) -> dict | None:
