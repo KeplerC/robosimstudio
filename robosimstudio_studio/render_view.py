@@ -46,12 +46,12 @@ Two things that are easy to get wrong, and were:
   browser attached, the pass now hides 50 scenery nodes, the stage and 45 model
   nodes, and keeps 8 gizmo nodes and 2 cursors.
 
-The frame comes from whichever renderer
-:func:`~robosimstudio.solvers.render.choose_renderer` picks for the scene's GPU:
-the path tracer where ovrtx is installed and the GPU has RT cores, Newton's tiled
-tracer (colliders only, and no passes to converge) where not, or whatever
-``ROBOSIMSTUDIO_RENDERER`` names. The switch's hint says which and why, and the
-readout says which is live.
+The frame comes from whichever renderer the scene's platform picks
+(:meth:`robosimstudio.machine.Platform.renderer_for`): the path tracer where
+ovrtx is installed and the GPU has RT cores, Newton's tiled tracer (colliders
+only, and no passes to converge) where not -- a CPU included -- or whatever
+``ROBOSIMSTUDIO_RENDERER`` names. The switch's hint says which and why, with the
+whole platform line under it, and the readout says which is live.
 """
 
 from __future__ import annotations
@@ -63,7 +63,8 @@ from typing import Any
 import numpy as np
 
 from robosimstudio.core.render.live import RenderBudget
-from robosimstudio.solvers.render import ENV, FALLBACK, PUBLIC, choose_renderer
+from robosimstudio.machine import platform_of
+from robosimstudio.solvers.render import ENV, FALLBACK, PUBLIC
 
 from .panels import Panel
 
@@ -101,13 +102,13 @@ it", and measured 49 nodes of floor, walls and slat wall across the whole frame.
 
 
 def _choose(env) -> tuple[str, str]:
-    """The renderer for this scene's GPU, and why; ``("", reason)`` if none can be named.
+    """The renderer for this scene's platform, and why; ``("", reason)`` if none can be named.
 
     Never imports ovrtx: the rule reads ``find_spec`` and Warp's device table, so
     a page opened in raster mode costs nothing a page without the extra would not.
     """
     try:
-        return choose_renderer(device=getattr(getattr(env, "model", None), "device", None))
+        return platform_of(env).renderer_for("")
     except (ValueError, ImportError) as exc:  # a bad ROBOSIMSTUDIO_RENDERER
         return "", str(exc)
 
@@ -183,7 +184,8 @@ class PanelRenderView(Panel):
                 "World model",
                 initial_value=self.mode == RTX,
                 disabled=not self.backend,
-                hint=f"Renders with {self.backend}: {self._why}" if self.backend else self._why,
+                hint=(f"Renders with {self.backend}: {self._why}" if self.backend else self._why)
+                + f". Platform: {platform_of(self.env)}",
             )
             self._state.on_update(lambda _: setattr(self, "_mode_request", RTX if self._state.value else RASTER))
             slider = gui.add_slider("Scale", min=0.15, max=1.0, step=0.05, initial_value=self.scale)

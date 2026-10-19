@@ -308,6 +308,7 @@ class StudioConfig:
     show_worlds: int = 64
     """Draw at most this many of them, whatever the world count."""
     obs_renderer: str = "tiled"
+    """A name rather than ``auto``, so the rig is ``tiled`` on every device; it runs on a CPU as well."""
     obs_render_every: int = 4
     # the page
     panels: str | tuple[str, ...] = "all"

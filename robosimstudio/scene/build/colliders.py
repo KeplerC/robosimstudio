@@ -318,6 +318,15 @@ def build_hydroelastic_sdf(
     import tempfile
     from pathlib import Path
 
+    import warp as wp
+
+    if not wp.get_device().is_cuda:
+        # Newton bakes the field with CUDA kernels and raises from inside them
+        # otherwise; this says so where the shape is named.
+        raise RuntimeError(
+            "hydroelastic contact samples a signed-distance field, which Newton bakes on CUDA only, and this "
+            "scene is building on a CPU: drop hydroelastic=True from the object, or build on a GPU"
+        )
     directory = Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / "robosimstudio_sdf_cache"
     directory.mkdir(parents=True, exist_ok=True)
     mesh.build_sdf(

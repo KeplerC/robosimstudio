@@ -472,6 +472,8 @@ class FleetEnv:
         """
         from robosimstudio.solvers.render import backend_class, create_renderer, supported_channels
 
+        # ``auto`` resolves on this fleet's platform, as a serial rig's does.
+        backend = self.platform.renderer_for(backend)[0]
         self.cameras = self._resolve_cameras(supported_channels(backend))
         if not self.cameras:
             return
@@ -630,6 +632,13 @@ class FleetEnv:
             return self._frames
         with reading():
             return self.renderer.render_worlds(self.pipeline.state_0, worlds)
+
+    @property
+    def platform(self):
+        """Where the fleet runs and what draws it: the compiled scene's, as on a serial ``Sim``."""
+        from robosimstudio.machine import platform_of
+
+        return platform_of(self.scene)
 
     @property
     def places_per_world(self) -> bool:

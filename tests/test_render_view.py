@@ -51,14 +51,14 @@ def _rtx_panel(why: str = "NVIDIA RTX PRO 6000 (sm_120)", **kwargs) -> PanelRend
     the reason the rule gave -- a GPU for the machine's pick, ``asked for`` or
     ``ROBOSIMSTUDIO_RENDERER=rtx`` for a name somebody chose.
     """
-    with unittest.mock.patch("robosimstudio_studio.render_view.choose_renderer", return_value=("rtx", why)):
+    with unittest.mock.patch("robosimstudio_studio.render_view._choose", return_value=("rtx", why)):
         return _panel(world_model=True, **kwargs)
 
 
 def _tiled_panel(**kwargs) -> PanelRenderView:
     """A page on a machine where the rule picks ``tiled``: no ovrtx, or no RT cores."""
     with unittest.mock.patch(
-        "robosimstudio_studio.render_view.choose_renderer",
+        "robosimstudio_studio.render_view._choose",
         return_value=("tiled", "NVIDIA A100 (sm_80) has no RT cores"),
     ):
         return _panel(**kwargs)

@@ -2120,7 +2120,13 @@ class MotionBackendCuRobo:
         constant, and a plan resampled
         here is a densification. Zero when there is no cell to ask, which leaves
         the plan at cuRobo's own rate rather than at a guessed one.
+
+        The pipeline's rate first -- the scene as built, which on a CPU steps a
+        GENERIC task at CPU's rate -- and the document's only without one.
         """
+        built = getattr(getattr(self.env, "pipeline", None), "control_hz", None)
+        if built:
+            return float(built)
         physics = getattr(getattr(self.env, "task", None), "physics", None)
         return float(getattr(physics, "control_hz", 0.0) or 0.0)
 

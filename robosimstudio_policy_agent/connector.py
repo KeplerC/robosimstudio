@@ -255,7 +255,7 @@ class NewtonEnvConfig:
         return cls(
             arm_dof=len(first.arm_coords) if first else 7,
             num_arms=max(1, len(arms)),
-            control_freq=env.task.physics.control_hz,
+            control_freq=float(env.pipeline.control_hz),  # as built: on a CPU GENERIC runs as CPU
             home_joints=home or None,
             tcp_offset=first.ee_offset if first else (0.0, 0.0, 0.0),
             default_cameras=tuple(c.name for c in env.cameras),

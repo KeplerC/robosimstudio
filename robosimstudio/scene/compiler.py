@@ -48,6 +48,9 @@ from robosimstudio.core.render.finish import Finish
 from robosimstudio.core.render.palette import FLOOR
 from robosimstudio.core.streams import quiet_gc
 from robosimstudio.core.worlds import WorldMap
+from robosimstudio.machine import Platform, announce, platform
+from robosimstudio.machine import apply as apply_platform
+from robosimstudio.scene.physics.devices import arrangement_for
 from robosimstudio.scene.physics.world import REPLICATED_HOSTS
 from robosimstudio.specs import IDENTITY, Binding, CellSpec, EmbodimentSpec, Episode, Xform, replace
 from robosimstudio.specs.asset import build_stage
@@ -125,6 +128,12 @@ class CompiledScene:
     worlds: WorldMap | None = None
     program: PhysicsProgram | None = None
     """What the composer built: islands, channels, routing, the manifest."""
+    platform: Platform | None = None
+    """Where it runs and what it renders with, and what the build adapted to that.
+
+    See :mod:`robosimstudio.machine`. ``request.physics`` is the arrangement as
+    built -- on a CPU possibly :data:`~robosimstudio.specs.physics.CPU` where the
+    caller wrote ``GENERIC`` -- and :attr:`Platform.notes` says what changed."""
 
     @cached_property
     def views(self) -> dict[str, dict[str, Entity]]:
@@ -262,7 +271,7 @@ def compile_scene(
     episode: Episode | None = None,
     *,
     num_worlds: int = 1,
-    device: str | None = None,
+    device: Any = "auto",
     use_cuda_graph: bool | None = None,
     verbose: bool = False,
     compose: Composer | None = None,
@@ -289,8 +298,15 @@ def compile_scene(
             solvers and any host engine are built, so a world's foreign-engine
             actors are *created* where that world's episode put them rather than
             created at one layout and moved to another.
-        device: Warp device. ``None`` uses the current one.
-        use_cuda_graph: Overrides the physics spec's own setting.
+        device: ``"auto"`` (or ``None``), ``"cpu"``, ``"cuda"``, ``"cuda:N"``
+            or a ``warp.Device``. ``auto`` is ``ROBOSIMSTUDIO_DEVICE`` where it
+            names one, else CUDA where there is a GPU and the CPU where there
+            is not -- see :mod:`robosimstudio.machine`. On a CPU the physics
+            follows: MuJoCo runs its C library, nothing is captured into a
+            CUDA graph, ``GENERIC`` becomes ``CPU`` and a backend with no CPU
+            path is replaced, every change printed.
+        use_cuda_graph: Overrides the physics spec's own setting. Ignored on a
+            CPU, where there is no graph to capture.
         verbose: Print what was built.
         compose: What builds the physics from the built entities and the
             arrangement, returning a
@@ -316,9 +332,15 @@ def compile_scene(
         # varies nothing and should not have to say so.
         episode = Episode(episode_id=0, seed=0)
 
-    with quiet_gc(), wp.ScopedDevice(device) if device else _null_scope():
+    plat = platform(device)
+    request, notes = _for_platform(request, plat, num_worlds)
+    apply_platform(plat)
+    if not plat.cuda_graphs:
+        use_cuda_graph = False
+
+    with quiet_gc(), wp.ScopedDevice(plat.device):
         if num_worlds == 1:
-            return _compile(
+            scene = _compile(
                 request,
                 episode,
                 use_cuda_graph=use_cuda_graph,
@@ -326,24 +348,92 @@ def compile_scene(
                 compose=compose,
                 pipeline_cls=pipeline_cls,
             )
-        return _compile_multi(
-            request,
-            episode,
-            num_worlds=num_worlds,
-            use_cuda_graph=use_cuda_graph,
-            verbose=verbose,
-            compose=compose,
-            pipeline_cls=pipeline_cls,
-            episodes=episodes,
+        else:
+            scene = _compile_multi(
+                request,
+                episode,
+                num_worlds=num_worlds,
+                use_cuda_graph=use_cuda_graph,
+                verbose=verbose,
+                compose=compose,
+                pipeline_cls=pipeline_cls,
+                episodes=episodes,
+            )
+    graphs = bool(getattr(scene.pipeline, "use_cuda_graph", plat.cuda_graphs)) and plat.cuda_graphs
+    plat = replace(plat.with_notes((*notes, *_on_the_host(scene.program, plat))), graphs=graphs)
+    scene.platform = plat
+    announce(plat, verbose=verbose)
+    return scene
+
+
+def _on_the_host(program: PhysicsProgram | None, plat: Platform) -> tuple[str, ...]:
+    """One note per host-engine island of a GPU scene: what steps on the CPU beside it.
+
+    Nothing on a CPU, where everything does.
+    """
+    if program is None or plat.is_cpu:
+        return ()
+    return tuple(
+        f"{', '.join(island.entities)} on {island.backend.solver}, stepped on the CPU each control step"
+        for island in program.islands
+        if island.is_host_engine
+    )
+
+
+def _for_platform(request: SceneRequest, plat: Platform, num_worlds: int) -> tuple[SceneRequest, tuple[str, ...]]:
+    """The request as it builds on ``plat``, and what changed -- or a refusal naming what cannot.
+
+    The identity on a GPU. On a CPU: the arrangement is adapted by
+    :func:`~robosimstudio.scene.physics.devices.arrangement_for` *before* any
+    entity is built, because the arrangement picks entity classes as well as
+    solvers; a scene asking for what a CPU cannot do -- several worlds of a
+    one-world solver, signed-distance fields -- is refused here, by name,
+    rather than inside the solver's importer.
+    """
+    if not plat.is_cpu:
+        return request, ()
+    import dataclasses
+    import importlib.util
+
+    from .physics import CompositionError
+    from .physics.devices import device_facts
+
+    physics = request.physics
+    adapted, notes = arrangement_for(physics, is_cpu=True)
+    if num_worlds > 1:
+        for _, spec in adapted.backends:
+            info = device_facts(spec)
+            if info is None:
+                continue
+            if info.cpu_max_worlds and num_worlds > info.cpu_max_worlds:
+                raise CannotReplicate(
+                    f"{spec.solver!r} steps {info.cpu_max_worlds} world on a CPU ({info.cpu_note}), and "
+                    f"num_worlds={num_worlds} was asked for: build num_worlds=1 on a CPU, or build on a GPU"
+                )
+    if adapted.collision.force_sdf:
+        raise CompositionError(
+            "CollisionSpec(force_sdf=True) bakes signed-distance fields, which Newton does on CUDA only, and this "
+            "scene is on a CPU. Drop force_sdf (full-surface contact against a mesh needs it), stage rss.CPU, or "
+            "build on a GPU."
         )
-
-
-class _null_scope:
-    def __enter__(self):
-        return None
-
-    def __exit__(self, *exc):
-        return False
+    if adapted is not physics:
+        if not dataclasses.is_dataclass(request):
+            raise CompositionError(
+                f"this scene's arrangement needs adapting to run on a CPU ({'; '.join(notes)}), and its request, a "
+                f"{type(request).__name__}, is not a dataclass the compiler can amend. Stage rss.CPU on it yourself."
+            )
+        request = dataclasses.replace(request, physics=adapted)
+    hosted = any(spec.solver == "superdex" for _, spec in adapted.backends)
+    try:
+        missing = importlib.util.find_spec("superdex") is None
+    except (ImportError, ValueError):  # a finder that refuses the name outright
+        missing = True
+    if hosted and missing:
+        notes = (
+            *notes,
+            "SuperDex is not installed, so a cloth, rope or soft body will not build: pip install 'robosimstudio[cpu]'",
+        )
+    return request, tuple(notes)
 
 
 def _mount(request: SceneRequest, binding: Binding, scene: CellSpec | None, spec: EmbodimentSpec) -> Xform:

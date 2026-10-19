@@ -157,6 +157,17 @@ class WeldedFixture:
             bodies[body] = row
             state.body_q.assign(bodies)
 
-        solver = getattr(pipeline, "solver", None)
-        if solver is not None:
-            solver.notify_model_changed(int(newton.ModelFlags.JOINT_PROPERTIES))
+        # Through the program, which on a CPU also carries the mocap rows into
+        # the C data MuJoCo's C library steps (core.mjdata.after_notify). Not
+        # core.tuning.notify: that drops a captured graph, and a reset that moves
+        # a fixture must not cost a re-capture -- the mocap rows are device
+        # memory the graph already reads.
+        flags = int(newton.ModelFlags.JOINT_PROPERTIES)
+        program = getattr(pipeline, "program", None)
+        if program is not None:
+            program.notify(flags)
+        elif getattr(pipeline, "solver", None) is not None:
+            from robosimstudio.core.mjdata import after_notify
+
+            pipeline.solver.notify_model_changed(flags)
+            after_notify(pipeline.solver, flags)

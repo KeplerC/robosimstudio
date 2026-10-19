@@ -14,6 +14,11 @@ sets of shapes. What the probe adds over the raw arrays is the *sign*
 convention, which is the part that is easy to get backwards and impossible to
 notice: MuJoCo applies its constraint force to the pair's **second** geom along
 a normal pointing from the first to the second.
+
+On a CPU the solver steps MuJoCo's C library, and the probe reads that data
+instead (:func:`robosimstudio.core.mjdata.contacts`), in the same convention:
+the Warp copy is never stepped there, and reading it would answer every frame
+with the first one's contacts.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ import newton
 import numpy as np
 import warp as wp
 
+from .. import mjdata
 from ..math import compute_angle_between, quat_to_mat
 from ..streams import reading
 
@@ -225,7 +231,8 @@ class ContactProbe(ContactQueries):
                 "MuJoCo backend running its own collision pipeline (use_mujoco_contacts=True)."
             )
         self.geom_to_shape = solver.mjc_geom_to_newton_shape.numpy()[self.world]
-        n = int(solver.mjw_data.contact.geom.shape[0])
+        self._host = mjdata.host_side(solver)
+        n = 0 if self._host else int(solver.mjw_data.contact.geom.shape[0])
         self._ids = wp.array(np.arange(n, dtype=np.int32), dtype=wp.int32, device=model.device)
         self._force = wp.zeros(n, dtype=wp.spatial_vector, device=model.device)
         self.shape_body = model.shape_body.numpy()
@@ -260,6 +267,10 @@ class ContactProbe(ContactQueries):
         if step is not None and step == self.step:
             return
         self.step = step
+        if self._host:
+            geoms, forces, depths = mjdata.contacts(self.solver)
+            self.geoms, self.impulses, self.depths = geoms, forces * self.dt, depths
+            return
         data = self.solver.mjw_data
         # Scoped, because mujoco-warp's helper launches on the *default* device
         # rather than the arrays'. On a scene built anywhere but ``cuda:0`` that
@@ -312,6 +323,11 @@ class FleetContactProbe:
     def __init__(self, solver, model: newton.Model, dt: float, *, worlds) -> None:
         import mujoco_warp as mjw
 
+        if mjdata.host_side(solver):
+            raise RuntimeError(
+                "a fleet's contacts are read from MuJoCo-Warp, and this solver steps MuJoCo's C library, "
+                "which holds one world: build a fleet on a GPU"
+            )
         self._mjw = mjw
         self.solver = solver
         self.model = model

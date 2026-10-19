@@ -5,8 +5,8 @@ A document stages physics by a versioned **name** and never by a number, and
 what the name stands for is an :class:`ArrangementSpec`: rates, a
 :class:`BackendSpec` per domain, a :class:`CouplerSpec`, a :class:`CollisionSpec`.
 Built with :func:`backend` and :func:`coupler`; :data:`GENERIC` is what a scene
-gets when nobody has staged one, and :data:`MUJOCO_500HZ` is the one a hand can
-lift a rigid body in.
+gets when nobody has staged one, :data:`MUJOCO_500HZ` is the one a hand can
+lift a rigid body in, and :data:`CPU` is what a scene runs on without a GPU.
 
 One of the four modules :mod:`~robosimstudio.specs.physics` was split into. It
 reads the registries for one helper -- the parameter freezing a registered
@@ -24,6 +24,7 @@ from .params import REBUILD, RECAPTURE, ui
 from .registries import _frozen_params
 
 __all__ = [
+    "CPU",
     "GENERIC",
     "MUJOCO_500HZ",
     "ArrangementSpec",
@@ -392,6 +393,11 @@ cloth example::
 
     physics=replace(GENERIC, coupling=coupler("one_way"),
                     collision=CollisionSpec(full_surface_contact=True))
+
+**Without a GPU it is :data:`CPU`.** VBD has no CPU path worth waiting for, so a
+scene built on a CPU device that was left on this arrangement builds on
+``CPU`` instead -- MuJoCo for the arm and every rigid body, SuperDex for every
+deformable -- and the build prints that it did.
 """
 
 
@@ -415,4 +421,63 @@ It is for rigid bodies. A sheet or a capsule-chain rope has no MuJoCo solver and
 belongs on :data:`GENERIC`'s VBD island. A sponge joins it on its own engine::
 
     physics=MUJOCO_500HZ.with_backend("soft", backend("superdex", substeps=2))
+
+Without a GPU, :data:`CPU` is this with cloth and rope on SuperDex as well.
+"""
+
+
+CPU = replace(
+    MUJOCO_500HZ,
+    backends=(
+        ("soft", backend("superdex", substeps=2)),
+        ("cloth", backend("superdex", substeps=2)),
+        ("rod", backend("superdex", substeps=2, feedback="off")),
+        *MUJOCO_500HZ.backends,
+    ),
+)
+"""What a scene runs on without a GPU: MuJoCo for the arm and every rigid body, SuperDex for the rest.
+
+**Chosen for you.** A scene built on a CPU device -- a machine with no CUDA,
+``ROBOSIMSTUDIO_DEVICE=cpu``, or ``build(device="cpu")`` -- that was left on
+:data:`GENERIC` builds on this instead, and says so in one printed line. A
+scene that staged its own arrangement keeps it, except that a backend which
+cannot run on a CPU is replaced by this arrangement's backend for the same
+domain, each replacement printed. Nothing is replaced on a GPU: stated there,
+this is :data:`MUJOCO_500HZ` with deformables on SuperDex, at the same rates.
+
+**MuJoCo is its C library on a CPU**, not MuJoCo-Warp: the backend's registered
+``cpu_params`` add ``use_mujoco_cpu=True`` to every MuJoCo island the device
+puts on a CPU, so this arrangement does not state it and means the same physics
+on either device. One world, because the C library steps one ``MjData``.
+
+**Every deformable is on SuperDex**, the CPU FEM engine, co-simulated beside
+the MuJoCo island as it is on a GPU -- soft bodies and cloth on one island, rope
+on another. Newton's own deformable solver is not an
+option on a CPU: VBD's Warp kernels run one thread at a time there, and a
+1922-particle towel took 96 s for 20 control steps. Two engine steps per
+control step, 10 ms each, inside SuperDex's comfort band. Without the
+``[cpu]`` extra the arm and rigid bodies still run, and a cloth, rope or soft
+body refuses to build, naming it.
+
+**A rope is one-way: it does not push back on what touches it.** The rod's
+SuperDex island harvests no contact wrench (``feedback="off"``), so the pads,
+the bench and every rigid body drive the cable and none of them feels it. That
+is what lets a hand hold one. Two-way, the cable's contact force reaches the
+10 g finger pads one control step late, and on the cable example's own grasp
+-- down, close, lift 120 mm, hold 2 s, friction alone -- that either kicked the
+hand 100 mm off the cable or let the jaws close through it. Over 95 two-way runs
+(contact penalty 8e7 to 1e11, feedback cap 0.5 to 20 m/s, 2 to 8 engine steps,
+friction falloff 10 and 1 mm/s, the jaws closed fully or to 14-20 mm), no
+setting held it in more than two of four slightly different approaches, and
+repeats of one setting disagreed. One-way, it came up in all 35 runs, CPU and
+GPU alike, rising 118-121 mm and slipping 0.5-2.6 mm in the fingers, on Close
+or closed to 16-20 mm round its 22 mm, and repeats were identical. What it costs: a cable pulled
+taut does not hold the hand back, it does not shove a free block, and on its own
+island it does not touch a sponge or a sheet in the same scene. Stage
+``("rod", backend("superdex", substeps=2))`` for the two-way cable.
+
+**The rates and the contact law are :data:`MUJOCO_500HZ`'s**, 50 Hz control over
+500 Hz physics, so a hand holds a rigid body here as it does there. Measured
+warm on the development machine's CPU: the hello-world arm and cube at 9x realtime with the cube resting at the 0.7750 m it reaches on a GPU,
+the sponge (300 nodes) at 3.4x, the 1922-particle towel at 0.57x.
 """

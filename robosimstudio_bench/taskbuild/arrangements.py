@@ -130,7 +130,7 @@ def list_camera_rigs() -> list[str]:
 def _install_defaults() -> None:
     from dataclasses import replace
 
-    from robosimstudio.specs.physics import GENERIC, MUJOCO_500HZ
+    from robosimstudio.specs.physics import CPU, GENERIC, MUJOCO_500HZ
 
     register_arrangement("rigid_mujoco@v1", replace(GENERIC, substeps=4))
     """A rigid-only scene: ``GENERIC`` at the four substeps its docstring says a rigid scene should state."""
@@ -144,6 +144,8 @@ def _install_defaults() -> None:
     register_arrangement("cloth_vbd@v1", GENERIC)
     register_arrangement("rod_vbd@v1", GENERIC)
     """A sheet or a cable on VBD beside a MuJoCo arm, exactly as ``GENERIC`` composes them."""
+    register_arrangement("cpu@v1", CPU)
+    """No GPU: ``rss.CPU`` -- MuJoCo's C library for the arm and rigid bodies, SuperDex for every deformable."""
 
 
 _install_defaults()

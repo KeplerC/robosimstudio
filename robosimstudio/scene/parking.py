@@ -46,6 +46,7 @@ from typing import Any
 
 import numpy as np
 
+from robosimstudio.core import mjdata
 from robosimstudio.specs import park_lattice, park_poses
 
 __all__ = ["GravcompParking", "active_objects", "parked_objects", "restrict_contacts", "scene_park_poses"]
@@ -110,7 +111,9 @@ class GravcompParking:
     a world parks and :meth:`apply` writes the whole table -- the authored
     ``gravcomp`` everywhere, 1.0 on every parked row -- into both arrays the
     module docstring names, in two assigns. Idempotent: applying the same
-    table twice is one write's worth of state.
+    table twice is one write's worth of state. On a CPU, world 0's row also goes
+    into the C model ``mj_step`` reads (:func:`robosimstudio.core.mjdata.write_gravcomp`),
+    since the Warp table is not stepped there.
 
     Args:
         solver: The :class:`newton.solvers.SolverMuJoCo` stepping the scene.
@@ -169,6 +172,19 @@ class GravcompParking:
 
     def apply(self) -> None:
         """Write the table: authored values everywhere, 1.0 on every parked row, both arrays."""
+        if any(self._parked.values()) and mjdata.host_side(self.solver):
+            if int(getattr(self.solver.mj_model, "ngravcomp", 1)) == 0:
+                # MuJoCo's C library counts gravity-compensated bodies when it
+                # compiles and skips the whole pass when there are none --
+                # MuJoCo-Warp does not -- so a row set to 1.0 would read back 1.0
+                # and hold nothing up. Here, not at construction: reading a row
+                # (Sim.gravcomp) is fine with none.
+                raise RuntimeError(
+                    "parking holds a body up with gravity compensation, and MuJoCo's C library (the CPU path) "
+                    "compiled this scene with no gravity-compensated body, so it skips gravity compensation "
+                    "entirely: a parked body would fall. A robot with gravcomp authored (every shipped one) "
+                    "turns it on; or build on a GPU"
+                )
         tiled = self._base.copy()
         flat = self._attribute_base.copy() if self._attribute_base is not None else None
         for world, bodies in self._parked.items():
@@ -180,15 +196,14 @@ class GravcompParking:
                 tiled[where] = 1.0
                 if flat is not None:
                     flat[newton_body] = 1.0
-        self.solver.mjw_model.body_gravcomp.assign(tiled)
+        mjdata.write_gravcomp(self.solver, tiled)
         if self._attribute is not None and flat is not None:
             self._attribute.assign(flat)
 
     # ---------------------------------------------------------------- reads
     def row(self, world: int, body: int) -> float:
         """What the solver holds for one template body in one world, read back from the device."""
-        where = self._mjc_of[self._newton_body(body, world)]
-        return float(self.solver.mjw_model.body_gravcomp.numpy()[where])
+        return mjdata.read_gravcomp(self.solver, *self._mjc_of[self._newton_body(body, world)])
 
     def attribute_row(self, world: int, body: int) -> float | None:
         """The Newton-side value a notify would regenerate the row from, or ``None`` without the attribute."""

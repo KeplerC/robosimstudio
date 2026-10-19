@@ -498,6 +498,8 @@ def _worker(
     env = policy = recorder = None
     store = None
     episodes = 0
+    # The device the build resolved -- ``job.device`` may be "auto" -- for the rows.
+    built_device = ""
     fleet_worker = _FleetWorker()
     wall0 = time.perf_counter()
     try:
@@ -534,6 +536,7 @@ def _worker(
             if key != _env_key(job):
                 _teardown(env, policy, recorder)
                 env, policy, recorder, build = _build(job, Path(root), index)
+                built_device = str(build["device"])
                 store = EpisodeStore(_shard_root(Path(root), job, index))
                 key = _env_key(job)
                 results.put(("ready", index, job_index, build))
@@ -566,7 +569,12 @@ def _worker(
                 _teardown(env, policy, recorder)
                 env = policy = recorder = None
                 key = None
-            row = {**row, "worker": index, "device": job.device, "wall_s": round(time.perf_counter() - episode0, 3)}
+            row = {
+                **row,
+                "worker": index,
+                "device": built_device or job.device,
+                "wall_s": round(time.perf_counter() - episode0, 3),
+            }
             if store is not None:
                 store.append_result(row)
             results.put(("row", index, job_index, row))
@@ -679,7 +687,7 @@ class _FleetWorker:
             # world of the failing one) produced is a result and is sent.
             self.sent = self.runner.rows[first:]
             for row in self.sent:
-                results.put(("row", index, job_index, {**row, "worker": index, "device": job.device}))
+                results.put(("row", index, job_index, {**row, "worker": index, "device": self._device(job)}))
             # The waves' own wall time, for ``PoolResult.steps_per_s_stepping``:
             # the rows' ``wall_s`` overlap within a wave and cannot be summed.
             walls = [float(wave.get("wall_s", 0.0)) for wave in self.runner.summary.waves[waves0:]]
@@ -716,10 +724,15 @@ class _FleetWorker:
                     "solution": job.solution,
                     "renderer": job.renderer,
                     "worker": worker,
-                    "device": job.device,
+                    "device": self._device(job),
                 }
             )
         return rows
+
+    def _device(self, job: JobSpec) -> str:
+        """The device the fleet was built on, which ``job.device`` -- possibly ``auto`` -- only asked for."""
+        model = getattr(self.fleet, "model", None)
+        return str(model.device) if model is not None else job.device
 
     def _document(self, name: str):
         """The document a unit names, or the job's own task when it names none."""
