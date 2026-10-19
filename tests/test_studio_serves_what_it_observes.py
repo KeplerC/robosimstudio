@@ -10,8 +10,10 @@ for the page to draw the cut by, with no probe to summarise them and nothing a
 pin on them would move. The ``Readings`` folder picked the same first carrier
 and read a footprint and a settle speed off those corners. Both now take
 ``Sim.deformables``, the things carrying a particle probe, as does the gate
-that builds them (the page itself is ``tests.test_cut_tofu``). No device: the
-panels over stand-ins for the scene, its draggers and the browser.
+that builds them (the page itself is ``tests.test_cut_tofu``), and so does the
+``Appearance`` folder's ``Cloth look``, which the cutting page showed with no
+cloth on it. No device: the panels over stand-ins for the scene, its draggers
+and the browser.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ TIER = "fast"
 """Stand-ins only; no model, no viser server."""
 
 
-def _env():
+def _env(*, with_towel: bool = True):
     """A cuttable's eight corners, then a towel that carries a probe, on one particle array."""
     from robosimstudio.sim import Sim
 
@@ -43,7 +45,9 @@ def _env():
     )
     q = np.zeros((12, 3))
     env = types.SimpleNamespace(
-        scene=types.SimpleNamespace(by_name={"tofu": tofu, "towel": towel}, embodiment=None),
+        scene=types.SimpleNamespace(
+            by_name={"tofu": tofu, **({"towel": towel} if with_towel else {})}, embodiment=None
+        ),
         handles=types.SimpleNamespace(deformables={"towel": types.SimpleNamespace(sets={})}),
         pipeline=types.SimpleNamespace(hooks=types.SimpleNamespace(post_solve=[]), invalidate_graph=lambda: None),
         model=None,
@@ -87,6 +91,28 @@ class TestTheReadingsFolderReadsADeformable(unittest.TestCase):
 
         panel = PanelReadings(types.SimpleNamespace(env=_env()))
         self.assertEqual("towel", panel._cloth().name, "the cuttable's corners came first")
+
+
+class TestTheClothLookIsOfferedForACloth(unittest.TestCase):
+    def _labels(self, env) -> list[str]:
+        from robosimstudio_studio.session import StudioSession
+        from tests.fixtures.viser_stubs import _StubGui
+
+        gui = _StubGui()
+        session = types.SimpleNamespace(
+            env=env,
+            show_scenery=True,
+            viewer=types.SimpleNamespace(garment_style="fluffy"),
+            lighting=types.SimpleNamespace(build=lambda gui: None),
+        )
+        StudioSession._build_appearance(session, gui)
+        return [label for label, _ in gui.widgets]
+
+    def test_the_cutting_page_has_no_cloth_look(self) -> None:
+        self.assertNotIn("Cloth look", self._labels(_env(with_towel=False)), "the tofu's corners are no cloth")
+
+    def test_a_page_with_a_towel_has_one(self) -> None:
+        self.assertIn("Cloth look", self._labels(_env()))
 
 
 if __name__ == "__main__":

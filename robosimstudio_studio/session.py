@@ -1165,7 +1165,9 @@ class StudioSession:
                 self.scenery_request = True
 
             scenery.on_update(_scenery)
-            if any(e.carries_particles for e in self.env.scene.by_name.values()):
+            # The things carrying a particle probe, as the deformable panels take: a cuttable's
+            # eight corners are no cloth to draw, and offered it, the cutting page had a cloth look.
+            if self.env.deformables():
                 look = gui.add_dropdown("Cloth look", options=GARMENT_STYLES, initial_value=self.viewer.garment_style)
                 look.on_update(lambda _: setattr(self, "cloth_look_request", str(look.value)))
             # Built here rather than in ``panels``: it writes only to the viser
