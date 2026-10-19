@@ -93,6 +93,48 @@ class TestAMassThatIsNotOne(unittest.TestCase):
         self.assertAlmostEqual(float(model.body_inv_mass.numpy()[0]), 0.25)
 
 
+class TestSetKinematic(unittest.TestCase):
+    """A pin and its release write the two state bits and nothing else, in the model and in an island's copy."""
+
+    def _pipeline(self, model_flags, island_flags):
+        """A model of three bodies and one island whose copy of ``body_flags`` holds bodies 1 and 2 as rows 0 and 1."""
+        view = SimpleNamespace(overrides={"body_flags": _Array(island_flags)})
+        entry = SimpleNamespace(body_global_to_local=_Array([-1, 0, 1]))
+        solver = SimpleNamespace(_entries={"vbd": entry}, view=lambda name: view)
+        pipeline = SimpleNamespace(model=SimpleNamespace(body_flags=_Array(model_flags)), solver=solver)
+        return pipeline, view.overrides["body_flags"]
+
+    def test_an_islands_proxy_mark_outlives_a_pin_and_its_release(self) -> None:
+        import newton
+
+        from robosimstudio.core.tuning import set_kinematic
+
+        flags = newton.BodyFlags
+        dynamic, kinematic, proxy = int(flags.DYNAMIC), int(flags.KINEMATIC), int(flags.PROXY)
+        pipeline, island = self._pipeline([dynamic] * 3, [proxy | dynamic, dynamic])
+        before = set_kinematic(pipeline, [1, 2], True)
+        self.assertEqual({1: dynamic, 2: dynamic}, before)
+        self.assertEqual([dynamic, kinematic, kinematic], [int(f) for f in pipeline.model.body_flags.numpy()])
+        self.assertEqual([proxy | kinematic, kinematic], [int(f) for f in island.numpy()])
+        set_kinematic(pipeline, [1, 2], False, restore=before)
+        self.assertEqual([dynamic] * 3, [int(f) for f in pipeline.model.body_flags.numpy()])
+        self.assertEqual([proxy | dynamic, dynamic], [int(f) for f in island.numpy()])
+
+    def test_a_body_kinematic_before_the_pin_is_kinematic_after_the_release(self) -> None:
+        import newton
+
+        from robosimstudio.core.tuning import set_kinematic
+
+        dynamic, kinematic = int(newton.BodyFlags.DYNAMIC), int(newton.BodyFlags.KINEMATIC)
+        pipeline, island = self._pipeline([dynamic, kinematic, dynamic], [kinematic, dynamic])
+        before = set_kinematic(pipeline, [1, 2], True)
+        set_kinematic(pipeline, [1, 2], False, restore=before)
+        self.assertEqual([dynamic, kinematic, dynamic], [int(f) for f in pipeline.model.body_flags.numpy()])
+        self.assertEqual([kinematic, dynamic], [int(f) for f in island.numpy()])
+        set_kinematic(pipeline, [1], False)
+        self.assertEqual([dynamic] * 3, [int(f) for f in pipeline.model.body_flags.numpy()], "no restore: DYNAMIC")
+
+
 class TestAnEpisodeThatDoesNotNameTheObject(unittest.TestCase):
     def setUp(self) -> None:
         from robosimstudio.domains.rigid.entity import EntityRigid
