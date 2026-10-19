@@ -973,8 +973,7 @@ class EntityTape(EntityCloth):
                 self.write_break_opening(float(value))
                 return True
             if name in CONTACT_FIELDS:
-                self.write_adhesive(name, float(value))
-                return True
+                return self.write_adhesive(name, float(value))
             return inner(name, value)
 
         return (replace(material, write=write, inert=(*material.inert, *idle)),)
@@ -985,9 +984,13 @@ class EntityTape(EntityCloth):
         if self._limit is not None:
             self._limit.assign(np.array([float(opening)], dtype=np.float32))
 
-    def write_adhesive(self, name: str, value: float) -> None:
+    def write_adhesive(self, name: str, value: float) -> bool:
         """Set one of contact adhesion's fields (:data:`CONTACT_FIELDS`). LIVE: the kernels read them every
         substep. ``strength`` 0 lets every bond go and makes none.
+
+        Returns:
+            Whether it landed: ``False`` before the kernels' parameters are bound, which a tape with no
+            bonds never has, and nothing is written.
 
         Raises:
             KeyError: For a name that is not one of :data:`CONTACT_FIELDS`.
@@ -999,15 +1002,17 @@ class EntityTape(EntityCloth):
         if name not in CONTACT_FIELDS:
             raise KeyError(f"{name!r} is not one of contact adhesion's fields {CONTACT_FIELDS}")
         params = self._contact.get("params")
-        if params is not None:
-            # A copy: on the CPU ``numpy()`` is the array itself, and a refused value must not land.
-            values = np.array(params.numpy(), copy=True)
-            values[CONTACT_FIELDS.index(name)] = float(value)
-            try:
-                replace(self.spec.material, **{f: float(v) for f, v in zip(CONTACT_FIELDS, values, strict=True)})
-            except ValueError as exc:
-                raise ValueError(f"tape {self.spec.name!r}: {name} = {value} not written: {exc}") from None
-            params.assign(values)
+        if params is None:
+            return False
+        # A copy: on the CPU ``numpy()`` is the array itself, and a refused value must not land.
+        values = np.array(params.numpy(), copy=True)
+        values[CONTACT_FIELDS.index(name)] = float(value)
+        try:
+            replace(self.spec.material, **{f: float(v) for f, v in zip(CONTACT_FIELDS, values, strict=True)})
+        except ValueError as exc:
+            raise ValueError(f"tape {self.spec.name!r}: {name} = {value} not written: {exc}") from None
+        params.assign(values)
+        return True
 
     def write_tack(self, tack: float) -> None:
         """Set every bond's stiffness from a tack [N/m per m^2], in every array a solver reads. LIVE.

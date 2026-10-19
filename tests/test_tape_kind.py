@@ -174,9 +174,27 @@ class TestTheContactLawsLiveWrites(unittest.TestCase):
         np.testing.assert_array_equal(self.built, self.params())
 
     def test_the_reach_then_the_peak_moves_both_past_where_they_were(self) -> None:
-        self.label.write_adhesive("reach", 2.0e-3)
-        self.label.write_adhesive("peak_opening", 1.5e-3)
+        self.assertTrue(self.label.write_adhesive("reach", 2.0e-3))
+        self.assertTrue(self.label.write_adhesive("peak_opening", 1.5e-3))
         np.testing.assert_allclose([1.5e-3, 2.0e-3], self.params()[1:3], rtol=1e-6)
+
+    def test_a_write_before_the_kernels_are_bound_says_it_did_not_land(self) -> None:
+        """The material tunable passes the write's word on, so a panel does not show a field it never moved."""
+        from unittest import mock
+
+        from robosimstudio.core.tuning import Tunable
+        from robosimstudio_materials.cloth import EntityCloth
+        from robosimstudio_materials.tape import LABEL
+
+        self.label.contact, self.label.bonds = True, np.arange(126, dtype=np.int32)
+        cloth = Tunable(name="material", spec=LABEL, write=lambda name, value: True)
+        with mock.patch.object(EntityCloth, "tunables", return_value=(cloth,)):
+            (material,) = self.label.tunables()
+        self.assertTrue(material.write("strength", 1.0e3))
+        self.assertAlmostEqual(1.0e3, float(self.params()[0]))
+        self.label._contact = {}
+        self.assertFalse(self.label.write_adhesive("strength", 2.0e3))
+        self.assertFalse(material.write("strength", 2.0e3))
 
 
 class TestThePresets(unittest.TestCase):
