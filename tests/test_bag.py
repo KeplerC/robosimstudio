@@ -195,6 +195,16 @@ class TestTheDeclarations(unittest.TestCase):
                     if declared is not None:
                         self.assertEqual(declared, record.sim)
 
+    def test_a_bag_one_cell_across_is_refused(self) -> None:
+        """One cell across, every node up to the mouth is sewn: the two layers would be one surface twice."""
+        from robosimstudio_materials.bag import bag
+
+        for cells in ((4, 1), (0, 4)):
+            with self.subTest(cells=cells), self.assertRaisesRegex(ValueError, r"bag 'pouch': cells needs"):
+                bag(name="pouch", cells=cells)
+        _, _, faces = _bag(cells=(1, 2))
+        self.assertEqual(len(faces), len(np.unique(np.sort(faces, axis=1), axis=0)), "a triangle is repeated")
+
     def test_a_bag_leaves_newtons_soft_contact_to_the_sheet_newton_simulates(self) -> None:
         """A VBD towel and a bag on SuperDex: the bag, applied after the towel, writes nothing over it."""
         from types import SimpleNamespace

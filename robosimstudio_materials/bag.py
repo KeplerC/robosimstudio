@@ -201,6 +201,13 @@ class BagSpec(ClothSpec):
             raise ValueError(f"bag {self.name!r}: a bag is a membrane, not a slab")
         if not self.material.particle_radius > 0.0:
             raise ValueError(f"bag {self.name!r}: the contact radius sets the layer gap and must be positive")
+        if int(self.cells[0]) < 1 or int(self.cells[1]) < 2:
+            # One cell across sews every node up to the mouth: the two layers would be the same
+            # triangles twice, which sent SuperDex's solve to NaN on its first step.
+            raise ValueError(
+                f"bag {self.name!r}: cells needs at least 1 along and 2 across (with 1 across, every node "
+                f"up to the mouth is on a sewn side and the two layers are one), got {tuple(self.cells)}"
+            )
 
     @property
     def cell(self) -> float:
