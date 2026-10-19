@@ -122,6 +122,9 @@ The YAM's finger is a 12 mm blade for its lowest 5 mm only; above that a brace
 leaves it toward the finger's front at 46 degrees, and a wall that reached it
 would stop the jaws closing (``probe_fingers.py``, GPU 6)."""
 
+SHOULDER = FINGER_TIP + 0.0015
+"""How far under the tool centre the handle's shoulder stands [m]: 1.5 mm under the fingertips."""
+
 
 @dataclass(frozen=True, kw_only=True)
 class RollerSpec(ObjectSpec):
@@ -146,6 +149,18 @@ class RollerSpec(ObjectSpec):
     4.5-4.8 rad a pass of the 8 a pure roll turns; at 0.02 N m it turned 0.4-1.5,
     and on a free axle 2.9-9.8, overrunning (``probe_roll2.py``, GPU 6)."""
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # The fingertips land on the shoulder, so a shoulder inside the drum (or under the axle) is a
+        # handle whose boxes turn inside out or one the fingers meet the drum before.
+        radius = float(self.shape.radius) if self.shape is not None else 0.0
+        if self.grip - SHOULDER <= radius:
+            raise ValueError(
+                f"roller {self.name!r}: grip {self.grip:g} m stands the handle's shoulder "
+                f"{(self.grip - SHOULDER) * 1000:.1f} mm over the axle, inside the {radius * 1000:g} mm drum; "
+                f"grip must be over radius + {SHOULDER * 1000:g} mm"
+            )
+
 
 def handle_boxes(grip: float) -> tuple[tuple[Vec3, Vec3], ...]:
     """The handle as ``(centre, half-extents)`` boxes in the roller's frame [m]: a shoulder, a web, two slot walls.
@@ -159,7 +174,7 @@ def handle_boxes(grip: float) -> tuple[tuple[Vec3, Vec3], ...]:
     (``probe_roll.py``, ``probe_roll2.py``, GPU 6).
     """
     half_x, half_y = 0.016, 0.018
-    shoulder = grip - FINGER_TIP - 0.0015
+    shoulder = grip - SHOULDER
     top = grip + 0.025
     wall = half_x - SLOT / 2
     return (
@@ -263,7 +278,8 @@ def roller(
         at: The axle's centre, in the cell's work-surface frame: ``z = radius``
             rests it on the bench.
         grip: The tool centre's height over the axle with the jaws closed on the
-            handle [m]; the handle's shoulder stands under the fingertips there.
+            handle [m]; the handle's shoulder stands under the fingertips there,
+            so it must be over ``radius`` + 18 mm, or the shoulder is inside the drum.
         spins: The handle on a revolute joint about the axle, so the roller
             turns under a held handle; ``False`` welds the two.
         **kwargs: Any other :class:`RollerSpec` field: ``friction``, ``color``,

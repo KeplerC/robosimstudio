@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``rss.roller`` owns the handle the jaws close on.
+"""``rss.roller`` owns the handle the jaws close on, and refuses a handle it cannot build.
 
 The roller is two bodies, the drum and the handle on its axle, and the handle's
 four boxes are what a gripper touches: a contact measure between the hand and the
 roller, the **contact** tunable and the segmentation all go through the shapes
 the entity collects. Collected off the drum's body alone, the handle was in none
-of them. No device: a builder, the entity and a CPU model.
+of them. The handle's shoulder stands ``grip`` minus 18 mm over the axle, so a
+grip too low for the drum puts the shoulder inside it, or under the axle. No
+device: a builder, the entity and a CPU model.
 """
 
 from __future__ import annotations
@@ -46,6 +48,20 @@ class TestTheRollerOwnsItsHandle(unittest.TestCase):
         contact = next(t for t in entity.tunables() if t.name == "contact")
         self.assertIn(f"{builder.shape_count} shape(s)", contact.summary)
         self.assertEqual(entity.body, int(np.asarray(builder.shape_body)[0]), "the pose is still the drum's")
+
+
+class TestAHandleThatCannotBeBuiltIsRefused(unittest.TestCase):
+    def test_the_defaults_build(self) -> None:
+        roller()
+        roller(radius=0.04, grip=0.07)
+
+    def test_a_grip_that_puts_the_shoulder_under_the_axle(self) -> None:
+        with self.assertRaisesRegex(ValueError, "grip"):
+            roller(grip=0.015)
+
+    def test_a_drum_that_buries_the_shoulder(self) -> None:
+        with self.assertRaisesRegex(ValueError, "grip"):
+            roller(radius=0.04)
 
 
 if __name__ == "__main__":
