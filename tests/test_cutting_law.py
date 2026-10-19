@@ -147,6 +147,27 @@ class TestTheKnifeAndTheBlockAsBuilt(unittest.TestCase):
         with self.assertRaisesRegex(KeyError, "its knife 'cleaver'.* before the block"):
             lone.build(builder, None)
 
+    def test_the_block_is_drawn_in_its_material_s_colour_unless_it_states_one(self) -> None:
+        """Where the path tracer and the studio look: the spec's ``color``, else the entity's material's."""
+        from types import SimpleNamespace
+
+        import robosimstudio as rss
+        from robosimstudio.sim.sim import Sim
+        from robosimstudio_materials.cutting.entity import EntityCuttable
+        from robosimstudio_studio.garments import garment_visuals
+
+        cake, knife = rss.cuttables.CAKE, rss.knife(name="knife")
+        for color, want in ((None, cake.color), ((0.2, 0.3, 0.4), (0.2, 0.3, 0.4))):
+            with self.subTest(color=color):
+                block = EntityCuttable(rss.cuttable(name="block", knife=knife, material=cake, color=color))
+                handle = SimpleNamespace(particles=np.arange(8), triangles=np.zeros((0, 3)))
+                scene = SimpleNamespace(
+                    handles=SimpleNamespace(deformables={"block": handle}), by_name={"block": block}
+                )
+                self.assertEqual({"block": want}, Sim._deformable_colors(SimpleNamespace(scene=scene)), "path tracer")
+                (visual,) = garment_visuals(scene)
+                self.assertEqual(want, visual.color, "studio")
+
     def test_every_live_field_of_the_block_has_a_writer(self) -> None:
         """A LIVE field promises a write lands on the next step, which needs a tunable to carry it."""
         from dataclasses import fields

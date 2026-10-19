@@ -218,6 +218,7 @@ class CuttableSpec:
     Attributes:
         knife: The knife that cuts it, the same spec added to the scene before the block.
         material: One of :data:`cuttables` or a :class:`CuttableMaterialSpec`.
+        color: Display RGB; ``None`` draws the block in its material's colour.
         walks: Walk-on-spheres walks per point, the cutter's Monte Carlo budget: 1,024, the paper's.
         quad_points: Interior quadrature points the elastic solve integrates over: 800 asked, 785
             sampled (seeded, so every build) in ``00_cut_tofu``'s 60 x 100 x 40 mm block.
@@ -258,10 +259,6 @@ class CuttableSpec:
             raise ValueError(f"cuttable {self.name!r}: knife must be a KnifeSpec, got {type(self.knife).__name__}")
         if self.walks < 16 or self.quad_points < 8:
             raise ValueError(f"cuttable {self.name!r}: walks >= 16 and quad_points >= 8")
-
-    @property
-    def display_color(self) -> Vec3:
-        return self.material.color if self.color is None else self.color
 
 
 def cuttable(

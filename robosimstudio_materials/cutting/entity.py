@@ -29,7 +29,7 @@ from robosimstudio.scene.build.bodies import set_body_mass
 from robosimstudio.scene.entity import Entity, label_index
 
 from .law import BlockFrame, blade_normal, box_cage, cut_line, edge_contact, edge_push
-from .spec import CuttableSpec, KnifeSpec
+from .spec import CuttableMaterialSpec, CuttableSpec, KnifeSpec
 
 __all__ = ["EntityCuttable", "EntityKnife"]
 
@@ -120,6 +120,8 @@ class EntityCuttable(Entity):
     Attributes:
         body: The cagecut ``Body``: the cage, its walk sets and its elastic solve. ``None`` until
             the scene is ready.
+        material: The block's matter, the spec's: what the studio and the path tracer draw the block
+            in the colour of when the spec states none.
         push: The block's push on the knife's edge at the last step [N].
         timing: Milliseconds the last step spent cutting and solving the cage.
     """
@@ -129,6 +131,7 @@ class EntityCuttable(Entity):
 
     def __init__(self, spec: CuttableSpec, *, world: int = 0) -> None:
         super().__init__(spec, world=world)
+        self.material: CuttableMaterialSpec = spec.material
         self.particles: np.ndarray = np.zeros(0, dtype=np.int32)
         self.knife_body: int = -1
         self.block: BlockFrame | None = None
