@@ -66,7 +66,8 @@ __all__ = [
 # ``ModelBuilder.add_attachment_particle_body`` ties one particle to a point fixed in a body by a
 # spring (stiffness [N/m], no force cap, no break), which ``SolverVBD`` applies to both ends. Every
 # particle of the flat part that lies over a face of the body ``on`` names gets one, at the point it
-# was built over; past the face's edge nothing is under a particle, and it gets none.
+# was built over, the sheet laid where VBD's contact rests it, the box's margin past a particle radius
+# off the face; past the face's edge nothing is under a particle, and it gets none.
 # Newton has no strength: a bond holds at any load. Strength is the model stated here, the cohesive
 # zone of the peel literature in its simplest form: a bond breaks once the sheet has lifted
 # off the body by more than :attr:`TapeMaterialSpec.break_opening` along the face's normal, and a
@@ -1014,6 +1015,14 @@ class EntityTape(EntityCloth):
         self.tab_q0: np.ndarray = np.zeros(0)
         self.built: np.ndarray = np.zeros((0, 3))
         """The sheet's particles where it was built, on the body's spawn pose [m, world]: what a reset restores."""
+        self.up: np.ndarray = np.array([0.0, 0.0, 1.0])
+        """The sheet's ``+z`` in world as it was built: the way off the face."""
+        self.lift: float = 0.0
+        """How far past its particle radius a stuck sheet was laid off the face [m]: the margin of the box
+        under it, where VBD's contact rests it (:meth:`_lay`). 0 for a loose sheet."""
+        self.lift_shapes: np.ndarray = np.zeros(0, dtype=np.int64)
+        """The shapes whose margin :attr:`lift` is: the body's boxes under the sheet's bonds."""
+        self._margins: Any = None
         self._arrays: dict[str, list[Any]] = {}
         self._rows: Any = None
         self._particle: Any = None
@@ -1041,29 +1050,46 @@ class EntityTape(EntityCloth):
             )
         return int(hits[0])
 
-    def _over_faces(self, builder: newton.ModelBuilder, sheet: wp.transform, flat: np.ndarray) -> np.ndarray:
-        """Which of a stuck sheet's bondable vertices, as the sheet is placed, lie over a face of the body's boxes.
+    def _lay(
+        self, builder: newton.ModelBuilder, sheet: wp.transform, flat: np.ndarray
+    ) -> tuple[wp.transform, np.ndarray]:
+        """A stuck sheet laid where the box's contact rests it: the sheet's pose, and which of its bondable
+        vertices lie over a face of the body's boxes.
 
-        Within the face's extent, by :func:`over_a_face`, the test the stick kernel makes a bond by. Past
-        the edge nothing is under a vertex. Bonded there, a contact bond was seated on the edge along its
-        tilted normal and let go on the first substep, read as peeled before anything pulled, and an
-        opening bond held its vertex where it was built, the overhang stuck level in the air
+        Over the face is within its extent, by :func:`over_a_face`, the test the stick kernel makes a bond
+        by. Past the edge nothing is under a vertex. Bonded there, a contact bond was seated on the edge
+        along its tilted normal and let go on the first substep, read as peeled before anything pulled,
+        and an opening bond held its vertex where it was built, the overhang stuck level in the air
         (``t2_overhang.py``). On a body with no box every vertex is over it: the face is the sheet's own.
+
+        The sheet is placed a particle radius off the face, and VBD's contact rests a particle the box's
+        margin further out, so it is laid that much further, as far as the largest margin of the boxes
+        under its bonds (:attr:`lift`; with no box, of the body's shapes). Built a radius off a face
+        with a margin, a stuck label was pushed out through it, overshot, and let its bonds go: of
+        :data:`LABEL`'s 180, 178 held at a 0.8 mm margin and none 2-5 substeps in at 1 mm and up; and
+        :data:`PAPER_LABEL`'s rested 0.47 mm lifted at 0.5 mm, 54 held at 0.8 mm and none past the first
+        substep at 1.2 mm. Laid here, all 180 of either held 60 substeps at every margin from 0.3 to
+        3 mm, none lifted (``z2b.py``, ``z2_opening.py``, VBD on the CPU).
         """
         to_body = wp.transform_inverse(_transform(builder.body_q[self.body]))
         local = [wp.transform_point(to_body, wp.transform_point(sheet, wp.vec3(*[float(c) for c in v]))) for v in flat]
         box = int(newton.GeoType.BOX)
-        boxes = [s for s in range(builder.shape_count) if builder.shape_body[s] == self.body]
-        boxes = [s for s in boxes if int(builder.shape_type[s]) == box]
-        if not boxes:
-            return np.ones(len(flat), dtype=bool)
-        over, _ = over_a_face(
-            np.asarray(local, dtype=np.float64).reshape(-1, 3),
-            [[float(c) for c in builder.shape_transform[s]] for s in boxes],
-            [[float(c) for c in builder.shape_scale[s]] for s in boxes],
-            [float(builder.shape_margin[s]) for s in boxes],
-        )
-        return over
+        mine = [s for s in range(builder.shape_count) if builder.shape_body[s] == self.body]
+        boxes = [s for s in mine if int(builder.shape_type[s]) == box]
+        over, under = np.ones(len(flat), dtype=bool), np.asarray(mine, dtype=np.int64)
+        if boxes:
+            over, nearest = over_a_face(
+                np.asarray(local, dtype=np.float64).reshape(-1, 3),
+                [[float(c) for c in builder.shape_transform[s]] for s in boxes],
+                [[float(c) for c in builder.shape_scale[s]] for s in boxes],
+                [float(builder.shape_margin[s]) for s in boxes],
+            )
+            under = np.asarray(sorted({boxes[int(b)] for b in nearest[over]}), dtype=np.int64)
+        self.lift_shapes = under
+        self.lift = max((float(builder.shape_margin[s]) for s in under), default=0.0)
+        up = wp.transform_vector(sheet, wp.vec3(0.0, 0.0, 1.0))
+        laid = wp.transform(wp.transform_get_translation(sheet) + up * self.lift, wp.transform_get_rotation(sheet))
+        return laid, over
 
     def build(self, builder: newton.ModelBuilder, episode) -> None:
         del episode
@@ -1079,15 +1105,16 @@ class EntityTape(EntityCloth):
             rows = bonded_rows(vertices, spec.tab, along, spec.dry)
             made = np.full(len(rows), bool(spec.stuck))
             if spec.stuck:
-                made = self._over_faces(builder, sheet, vertices[rows])
+                sheet, made = self._lay(builder, sheet, vertices[rows])
                 if not self.contact:
                     # Opening adhesion makes its bonds at the build alone: a row with nothing under it has none.
                     rows, made = rows[made], made[made]
+        self.up = np.array(wp.transform_vector(sheet, wp.vec3(0.0, 0.0, 1.0)), dtype=np.float64)
         start = int(builder.particle_count)
         self.surface_count = len(vertices)
         builder.add_cloth_mesh(
-            pos=wp.vec3(*[float(v) for v in placed[:3]]),
-            rot=wp.quat(*[float(v) for v in placed[3:7]]),
+            pos=wp.transform_get_translation(sheet),
+            rot=wp.transform_get_rotation(sheet),
             scale=1.0,
             vel=wp.vec3(0.0, 0.0, 0.0),
             vertices=[wp.vec3(*[float(c) for c in v]) for v in vertices],
@@ -1397,6 +1424,7 @@ class EntityTape(EntityCloth):
         self._body = wp.array(np.full(len(self.bonds), self.body, dtype=np.int32), dtype=wp.int32, device=device)
         self._anchor = wp.array(self.anchors.astype(np.float32), dtype=wp.vec3, device=device)
         self._limit = wp.array([float(self.spec.material.break_opening)], dtype=wp.float32, device=device)
+        self._margins = model.shape_margin
         self.broken = wp.zeros(len(self.bonds), dtype=wp.int32, device=device)
         if self.contact and len(self.bonds):
             self._bind_contact(pipeline)
@@ -1442,9 +1470,10 @@ class EntityTape(EntityCloth):
 
         From the particle's radius and the margin of the box nearest the bond's built anchor, as the model
         holds them now: a margin moved live since the build is the one the stick kernel makes a bond with.
-        The anchor goes that far off the face, as the stick kernel puts it: a stuck sheet is built a radius
-        off the face, VBD's contact rests it a margin further out, and a bond anchored where it was built
-        would start that margin into its lift, past ``reach`` at a margin of 1 mm.
+        The anchor goes that far off the face, as the stick kernel puts it, where VBD's contact rests the
+        particle and where a stuck sheet is laid at the build and at a reset (:meth:`_lay`,
+        :meth:`margin_moved`). Seated there over a sheet built a radius off the face, every bond started
+        the margin into its lift, and from 1 mm the push out through the margin overshot ``reach``.
         """
         c = self._contact
         model, stiffness, body_point = c["model"], self._arrays["stiffness"], self._arrays["body_point"]
@@ -1473,29 +1502,44 @@ class EntityTape(EntityCloth):
 
         A particle thing's reset restores its whole-array snapshot, taken after the scene's settle, and
         a settle steps the label too. So this sheet's rows are put back where it was built in every
-        such snapshot, the ones later things restore included (``TapeSpec.settle_frames``).
+        such snapshot, the ones later things restore included (``TapeSpec.settle_frames``). A stuck
+        sheet whose box's margin has moved since the build goes back that much further off the face,
+        its tab and its opening bonds' anchors with it (:meth:`margin_moved`).
         """
+        moved = self.margin_moved()
         for thing in getattr(pipeline, "particle_settles", {}).get("things", [self]):
             rest = getattr(thing, "rest", None)
             if rest and len(self.built):
-                rest["particle_q"][self.particles] = self.built
+                rest["particle_q"][self.particles] = self.built + (moved * self.up).astype(np.float32)
                 rest["particle_qd"][self.particles] = 0.0
         super().reset(pipeline, episode, world=world)
         if self.broken is not None:
-            self._reset_bonds()
+            self._reset_bonds(moved)
         if self.coord_start >= 0:
-            c = self.coord_start
+            c, tab = self.coord_start, self.tab_q0.copy()
+            tab[:3] += moved * self.up
             for state in (pipeline.state_0, pipeline.state_1):
-                state.joint_q[c : c + 7].assign(self.tab_q0.astype(np.float32))
+                state.joint_q[c : c + 7].assign(tab.astype(np.float32))
 
-    def _reset_bonds(self) -> None:
+    def margin_moved(self) -> float:
+        """How far the margin a stuck sheet was laid at has moved since the build [m]: what a reset lays it
+        further off the face by. The box's contact ``thickness`` writes the margin live; 0 for a loose sheet."""
+        if not len(self.lift_shapes) or self._margins is None:
+            return 0.0
+        return float(self._margins.numpy()[self.lift_shapes].max()) - self.lift
+
+    def _reset_bonds(self, moved: float | None = None) -> None:
         """Every bond as built, in every array a solver reads: made or not (:attr:`made`), at its anchor, and
         under contact adhesion seated as a bond starts (:meth:`_seat_bonds`), not with the secant, the anchor
-        and the face the last episode left. The seat writes a contact bond's anchor into every copy itself."""
+        and the face the last episode left. The seat writes a contact bond's anchor into every copy itself;
+        an opening bond's goes ``moved`` further off the face (:meth:`margin_moved`, read when not given)."""
         self.broken.zero_()
         rows = {"enabled": self.made}
         if not self._contact:
-            rows["body_point"] = self.anchors.astype(np.float32)
+            moved = self.margin_moved() if moved is None else moved
+            anchors = (self.anchors + moved * self.normal).astype(np.float32)
+            rows["body_point"] = anchors
+            self._anchor.assign(anchors)
         for key, value in rows.items():
             for array in self._arrays.get(key, ()):
                 values = array.numpy()
@@ -1571,7 +1615,8 @@ def tape(
         cells: Quads along each axis. The default is a 5 mm cell, which every number here was
             measured at; a bond's stiffness follows the cell's area, but the peel was driven at 5 mm.
         at: Where the sheet's origin corner goes, at the tab end, in the cell's work-surface frame:
-            on the face, a particle radius off it.
+            on the face, a particle radius off it. Built stuck, the sheet is laid the box's contact
+            margin further out, where VBD's contact rests it (the box's ``thickness``, 0 by default).
         material: A :class:`TapeMaterialSpec` such as one of ``rss.tapes``; ``None`` is :data:`PAPER_LABEL`.
         **kwargs: Any other :class:`TapeSpec` field: ``quat`` turns the sheet, ``tab=0`` builds no tab.
     """
