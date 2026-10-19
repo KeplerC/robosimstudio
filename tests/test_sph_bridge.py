@@ -19,7 +19,7 @@ import unittest
 import numpy as np
 
 TIER = "medium"
-"""One GPU, the [genesis] extra: a 64-particle scene, and a bridge built by hand."""
+"""One GPU, the [genesis] extra: a 64-particle scene, and two bridges built by hand."""
 
 
 def _importable(module: str) -> bool:
@@ -95,6 +95,61 @@ class TestAnEmptyMirrorTurnedOffItsCentreFeelsNothing(unittest.TestCase):
             bridge.tick(state, dt)
             forces.append(float(np.linalg.norm(bridge.last_force[body])))
         self.assertLess(max(forces[1:]), 0.05, f"an empty mirror turning reads {max(forces[1:]):.3f} N")
+
+
+def _water(builder, centre: np.ndarray, n: int = 4, spacing: float = 0.004) -> int:
+    """An ``n``-cubed block of particles at one spacing about ``centre``; its count."""
+    lattice = np.stack(np.meshgrid(*[(np.arange(n) - 0.5 * (n - 1)) * spacing] * 3, indexing="ij"), -1).reshape(-1, 3)
+    count = len(lattice)
+    builder.add_particles(
+        pos=[tuple(p) for p in lattice + centre],
+        vel=[(0.0, 0.0, 0.0)] * count,
+        mass=[1000.0 * spacing**3] * count,
+        radius=[0.5 * spacing] * count,
+    )
+    return count
+
+
+@unittest.skipUnless(HAS_GENESIS, "the [genesis] extra is not installed")
+class TestWaterOnAMirrorOffItsCentre(unittest.TestCase):
+    """Water resting on a 40 mm mesh block whose centre is 50 mm off its body's origin. Genesis's midpoint rule for a
+    lone free body left the water's push out of its motion, so it read 0.0000 N."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import newton
+        import trimesh
+        import warp as wp
+
+        from robosimstudio.engines.genesis.sph import SphBridge
+
+        block = trimesh.creation.box(extents=(0.06, 0.06, 0.04))
+        block.apply_translation((0.05, 0.0, 0.0))
+        cls.origin = origin = np.array([0.0, 0.0, 0.5])
+        builder = newton.ModelBuilder()
+        count = _water(builder, origin + np.array([0.05, 0.0, 0.02 + 0.008]))
+        body = builder.add_body(xform=wp.transform(wp.vec3(*origin), wp.quat_identity()), mass=1.0)
+        builder.add_shape_mesh(body, mesh=newton.Mesh(block.vertices.astype(np.float32), block.faces.astype(np.int32)))
+        cls.model = model = builder.finalize()
+        recipe = {
+            "island": "block",
+            "control_hz": 60.0,
+            "actors": [{"particle_start": 0, "particle_count": count, "kind": "sph", "name": "water", "params": {}}],
+            "mirrors": [{"shape": 0, "body": body, "two_way": True}],
+        }
+        bridge = SphBridge(model, recipe, substeps=20, precision="32")
+        wrenches: list[np.ndarray] = []
+        bridge.apply_wrenches = lambda wrench: wrenches.append(np.array(wrench[body], dtype=np.float64))
+        state, cls.carried = model.state(), []
+        for _ in range(40):
+            bridge.tick(state, 1.0 / 60.0)
+            cls.carried.append(-float(bridge.last_force[body][2]))
+        cls.body, cls.wrench = body, wrenches[-1]
+        cls.weight = count * 1000.0 * 0.004**3 * 9.81
+
+    def test_it_carries_the_water(self) -> None:
+        carried = float(np.mean(self.carried[10:]))
+        self.assertGreater(carried, 0.6 * self.weight, f"the block carries {carried:.4f} N of {self.weight:.4f} N")
 
 
 if __name__ == "__main__":

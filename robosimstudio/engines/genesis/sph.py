@@ -33,7 +33,13 @@ genesis-world 1.3.3), and each one decides something below:
   the water at rest in the cup reads 1.003 to 1.009 of its weight at float32 in five
   runs. It stays honest while the hand moves: a cup tipped 60 degrees and turned back
   upright still full reads 1.09 N through the turn, the water's weight, and a cup
-  turned back empty reads 0.0000 N (``p12_harvest.py``). Only the force is read: a
+  turned back empty reads 0.0000 N (``p12_harvest.py``). A two-way mirror whose centre
+  of mass is not exactly its origin (a mesh) is put on a zero-gain velocity servo:
+  Genesis advances a lone free body by an implicit midpoint rule that leaves the
+  coupling force out of such a body's motion: a 40 mm mesh block with its centre 1 or
+  50 mm off its origin read 0.0000 N under resting water, where centred it read 0.030
+  to 0.037 N of the water's 0.040 N, and servoed it takes the standard update and reads
+  0.039 N (``w6_probe.py``). Only the force is read: a
   heavy wall turned 3 degrees in one step ends 0.02 degrees off its aim with no water
   at all, from its own gyroscopic term (``p11_track.py``), so a mirror's couple is
   left out and the torque on the Newton body is each mirror's force about the body's
@@ -357,6 +363,10 @@ class SphBridge:
             d_idx.append(np.arange(entity.dof_start, entity.dof_start + 6))
             entry["mass"] = float(entity.get_mass())
             com = np.asarray(entity.links[0].inertial_pos, dtype=np.float64).reshape(3)
+            if com.any() and entry["geom"].two_way and entry["geom"].moving:
+                # Off the midpoint rule, which drops the water's push on a centre not exactly at the origin.
+                entity.set_dofs_kv(np.zeros(6))
+                entity.control_dofs_velocity(np.zeros(6))
             # A tessellated capsule's centre comes back 1e-18 m off its origin: that is its origin.
             entry["com"] = com if float(np.linalg.norm(com)) > 1.0e-9 else np.zeros(3)
         self._q_idx = np.concatenate(q_idx) if q_idx else np.zeros(0, np.int64)
