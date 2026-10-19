@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import inspect
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import newton
 import numpy as np
@@ -66,6 +66,23 @@ class EntityRodSuperdex(ParticleMixin, Centerline, Entity):
 
     spec: RodSpec
     domain = "rod"
+    unread_fields: ClassVar[tuple[str, ...]] = (
+        *("stretch_ke", "stretch_kd", "shear_ke", "shear_kd", "bend_ke", "bend_kd", "twist_ke", "twist_kd"),
+        *("dahl_eps_max", "dahl_tau"),
+        *("contact_ke", "contact_kd", "mu_base", "mu_gripper", "mu_surface", "surface_labels", "scene_friction"),
+        *("allow_grasp_latch", "filter_fingertip_scenery", "anchor_grasp", "anchor_arm", "anchor_grip"),
+        *("bow_range", "shift_range", "wave_range", "yaw_range"),
+    )
+    """:class:`RodSpec` fields only the capsule chain reads, which the composer names in a
+    ``MaterialLossWarning`` when one is stated away from its default and the rope lands here.
+
+    By line: the eight joint gains (``EA``, ``EI`` and ``GJ`` come from ``young_modulus``,
+    ``poisson_ratio`` and the radius instead), the Dahl memory, the capsules' contact and the
+    scene friction it rewrites (this rod's is ``contact_penalty``, ``contact_gap`` and
+    ``mu_cable``), the latch, fingertip filter and anchor pre-grip (a hold here is
+    :meth:`hold`'s engine pin, asked for), and the four spawn ranges (this rod is laid at
+    :meth:`RodSpec.rest_polyline`). A rope stating ``dahl_eps_max=0.5``, ``twist_ke``,
+    ``shear_ke``, ``bend_ke`` and ``stretch_ke`` built and stepped here with no message."""
 
     def __init__(self, spec: RodSpec, *, world: int = 0) -> None:
         super().__init__(spec, world=world)
