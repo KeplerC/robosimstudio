@@ -505,7 +505,7 @@ class TestTheRegisteredFacts(unittest.TestCase):
         self.assertIs(get_arrangement("cpu@v1"), CPU)
         self.assertTrue(callable(rss.platform))
         self.assertEqual(
-            {domain for domain, spec in CPU.backends if spec.solver == "superdex"}, {"soft", "cloth", "rod"}
+            {domain for domain, spec in CPU.backends if spec.solver == "superdex"}, {"soft", "cloth", "bag", "rod"}
         )
         self.assertEqual(CPU.backend_for("rod").get("feedback"), "off", "a two-way cable slips out of a hand")
 

@@ -431,6 +431,9 @@ CPU = replace(
     backends=(
         ("soft", backend("superdex", substeps=2)),
         ("cloth", backend("superdex", substeps=2)),
+        # A bag is SuperDex's self-colliding shell on a GPU as well (rss.BAG_60HZ);
+        # the cloth's spec, so a bag, a towel and a sponge share one island.
+        ("bag", backend("superdex", substeps=2)),
         ("rod", backend("superdex", substeps=2, feedback="off")),
         *MUJOCO_500HZ.backends,
     ),
@@ -450,14 +453,23 @@ this is :data:`MUJOCO_500HZ` with deformables on SuperDex, at the same rates.
 puts on a CPU, so this arrangement does not state it and means the same physics
 on either device. One world, because the C library steps one ``MjData``.
 
-**Every deformable is on SuperDex**, the CPU FEM engine, co-simulated beside
-the MuJoCo island as it is on a GPU -- soft bodies and cloth on one island, rope
-on another. Newton's own deformable solver is not an
+**Every deformable SuperDex can carry is on it**, the CPU FEM engine,
+co-simulated beside the MuJoCo island as it is on a GPU -- soft bodies, cloth and
+bags on one island, rope on another. Newton's own deformable solver is not an
 option on a CPU: VBD's Warp kernels run one thread at a time there, and a
 1922-particle towel took 96 s for 20 control steps. Two engine steps per
 control step, 10 ms each, inside SuperDex's comfort band. Without the
-``[cpu]`` extra the arm and rigid bodies still run, and a cloth, rope or soft
-body refuses to build, naming it.
+``[cpu]`` extra the arm and rigid bodies still run, and a cloth, bag, rope or
+soft body refuses to build, naming it.
+
+**The kinds SuperDex cannot carry need a GPU.** Paper's yielding hinges, a
+tape's bonds and a brush's bristles are VBD's; a heap, a liquid and a dough are
+Newton's implicit MPM, captured into a CUDA graph; water is Genesis's SPH. None
+has an entry here, and a scene holding one is refused before anything is built,
+naming each and why (:func:`robosimstudio.scene.physics.devices.unserved`),
+rather than falling to the ``"*"`` MuJoCo island and failing inside it. The
+cutting kind's cage steps on Warp's CPU device beside the knife's MuJoCo body,
+so a cut runs here, at 1 to 2 s a control step while the edge advances.
 
 **A rope is one-way: it does not push back on what touches it.** The rod's
 SuperDex island harvests no contact wrench (``feedback="off"``), so the pads,

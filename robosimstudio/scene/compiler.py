@@ -243,26 +243,41 @@ def declared_domains(request: SceneRequest) -> set[str]:
     message names the kind. The robot is ``articulated`` whatever its spec
     says, and ``"*"`` stands for whatever a domain falls through to.
     """
+    out: set[str] = {"*"}
+    if request.embodiment:
+        out.add("articulated")
+    out.update(domain for spec in request.build_order() if (domain := _spec_domain(spec)[0]))
+    return out
+
+
+def _spec_domain(spec: Any) -> tuple[str, bool]:
+    """One spec's domain by :func:`declared_domains`' rule, and whether its own ``sim`` names a backend."""
     from robosimstudio.specs.physics import SimRequirements
 
     from .registry import ENTITIES
 
-    out: set[str] = {"*"}
-    if request.embodiment:
-        out.add("articulated")
-    for spec in request.build_order():
-        declared = getattr(spec, "sim", None)
-        if isinstance(declared, SimRequirements):
-            out.add(declared.domain)
-            continue
-        name = getattr(spec, "entity", "")
-        try:
-            cls = ENTITIES.get(name) if name else None
-        except KeyError:
-            cls = None
-        domain = getattr(cls, "domain", "")
-        if domain:
-            out.add(domain)
+    declared = getattr(spec, "sim", None)
+    if isinstance(declared, SimRequirements):
+        return declared.domain, declared.backend is not None
+    name = getattr(spec, "entity", "")
+    try:
+        cls = ENTITIES.get(name) if name else None
+    except KeyError:
+        cls = None
+    return str(getattr(cls, "domain", "") or ""), False
+
+
+def _owners(request: SceneRequest) -> dict[str, list[str]]:
+    """Kind -> the names of the request's entities of that kind whose own spec names no backend.
+
+    Empty for a request that cannot list its specs, which then has nothing to refuse here.
+    """
+    out: dict[str, list[str]] = {}
+    build_order = getattr(request, "build_order", None)
+    for spec in build_order() if callable(build_order) else ():
+        domain, named = _spec_domain(spec)
+        if domain and not named:
+            out.setdefault(domain, []).append(str(getattr(spec, "name", "") or ""))
     return out
 
 
@@ -386,9 +401,10 @@ def _for_platform(request: SceneRequest, plat: Platform, num_worlds: int) -> tup
     The identity on a GPU. On a CPU: the arrangement is adapted by
     :func:`~robosimstudio.scene.physics.devices.arrangement_for` *before* any
     entity is built, because the arrangement picks entity classes as well as
-    solvers; a scene asking for what a CPU cannot do -- several worlds of a
-    one-world solver, signed-distance fields -- is refused here, by name,
-    rather than inside the solver's importer.
+    solvers; a scene asking for what a CPU cannot do -- a kind nothing on a CPU
+    steps (:func:`~robosimstudio.scene.physics.devices.unserved`), several
+    worlds of a one-world solver, signed-distance fields -- is refused here, by
+    name, rather than inside the composer or the solver's importer.
     """
     if not plat.is_cpu:
         return request, ()
@@ -396,9 +412,12 @@ def _for_platform(request: SceneRequest, plat: Platform, num_worlds: int) -> tup
     import importlib.util
 
     from .physics import CompositionError
-    from .physics.devices import device_facts
+    from .physics.devices import device_facts, unserved
 
     physics = request.physics
+    refused = unserved(physics, _owners(request))
+    if refused:
+        raise CompositionError(f"this scene is on a CPU. {' '.join(refused)} Build it on a GPU.")
     adapted, notes = arrangement_for(physics, is_cpu=True)
     if num_worlds > 1:
         for _, spec in adapted.backends:
@@ -431,7 +450,7 @@ def _for_platform(request: SceneRequest, plat: Platform, num_worlds: int) -> tup
     if hosted and missing:
         notes = (
             *notes,
-            "SuperDex is not installed, so a cloth, rope or soft body will not build: pip install 'robosimstudio[cpu]'",
+            "SuperDex is not installed, so a cloth, bag, rope or soft body will not build: pip install 'robosimstudio[cpu]'",
         )
     return request, tuple(notes)
 

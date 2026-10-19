@@ -18,6 +18,13 @@ a list of names here:
   ``use_mujoco_cpu=True`` for MuJoCo -- and refuses one that states otherwise or
   that an entity names itself and cannot run there.
 
+Between the two, :func:`unserved` names the kinds nothing on a CPU can step: a
+deformable whose backend has no CPU path and for which ``CPU`` names no backend
+of its own -- paper, tape and the brush on VBD, the particle materials on the
+implicit MPM, water on Genesis -- would otherwise fall to ``CPU``'s ``"*"``,
+MuJoCo, and fail inside the composer or MuJoCo's importer. The compiler refuses
+the scene with those sentences before anything is built.
+
 Every change is returned as a sentence, and the build prints them on its
 platform line: the physics a scene runs is never different from what was
 written without the page saying how.
@@ -26,6 +33,7 @@ written without the page saying how.
 from __future__ import annotations
 
 import functools
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -38,11 +46,12 @@ from robosimstudio.specs.physics import (
     BackendInfo,
     BackendSpec,
     get_backend,
+    get_domain,
 )
 
 from .errors import CompositionError
 
-__all__ = ["arrangement_for", "device_facts", "on_device", "runs_on_cpu"]
+__all__ = ["arrangement_for", "device_facts", "needs_a_gpu", "on_device", "runs_on_cpu", "unserved"]
 
 
 def _is_cpu(device: Any) -> bool:
@@ -135,7 +144,7 @@ def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[Arra
     swapped out. Any other arrangement keeps its rates, coupling and collision
     law, and each backend that cannot run on a CPU is replaced by what ``CPU``
     uses for the same domain -- and when that falls to the ``"*"`` entry, the
-    domains ``CPU`` routes specially (cloth, rope, soft) get their own entries,
+    domains ``CPU`` routes specially (cloth, bag, rope, soft) get their own entries,
     so a towel that fell to VBD lands on SuperDex rather than on MuJoCo.
 
     The ``"*"`` entry's replacement reuses the arrangement's own spec for the
@@ -144,11 +153,19 @@ def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[Arra
     domain takes ``CPU``'s own spec for it: a rope that fell to VBD lands on
     ``CPU``'s one-way rope island, not on whatever SuperDex island the
     arrangement had for its sponge.
+
+    An entry for a kind nothing on a CPU steps (:func:`needs_a_gpu`) -- the
+    particle materials' ``mpm`` that every arrangement built from ``GENERIC``
+    carries -- is kept as stated and not noted: MuJoCo is no replacement for it,
+    no island forms for it in a scene without one of its entities, and a scene
+    with one is refused by :func:`unserved` before this runs.
     """
     if not is_cpu:
         return arrangement, ()
     if arrangement == GENERIC:
-        return CPU, ("GENERIC → CPU: MuJoCo for the arm and rigid bodies, SuperDex for cloth, rope and soft bodies",)
+        return CPU, (
+            "GENERIC → CPU: MuJoCo for the arm and rigid bodies, SuperDex for cloth, bags, rope and soft bodies",
+        )
 
     table = list(arrangement.backends)
     stated = dict(table)
@@ -163,7 +180,7 @@ def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[Arra
     moved: dict[str, list[tuple[str, str]]] = {}
     out: list[tuple[str, BackendSpec]] = []
     for domain, spec in table:
-        if runs_on_cpu(spec):
+        if runs_on_cpu(spec) or needs_a_gpu(domain):
             out.append((domain, spec))
             continue
         sub = replacement(domain)
@@ -186,6 +203,63 @@ def arrangement_for(arrangement: ArrangementSpec, *, is_cpu: bool) -> tuple[Arra
         where = "; ".join(f"{_domain_words(domains)} → {target}" for target, domains in by_target.items())
         notes.append(f"{solver} has no CPU path: {where}")
     return replace(arrangement, backends=tuple(out)), tuple(notes)
+
+
+def needs_a_gpu(domain: str) -> bool:
+    """Whether a kind is one :data:`CPU` has nothing for unless its own backend runs on a CPU.
+
+    A deformable that owns state of its own and that ``CPU`` names no backend
+    for: its ``"*"``, MuJoCo, holds the arm and the rigid bodies and none of
+    particles, cable joints or a foreign engine's bodies. Paper, tape, the
+    brush, the particle materials and water, today; never ``"*"``, a kind
+    ``CPU`` routes (cloth, bags, rope and soft bodies, to SuperDex), a rigid or
+    world-fixed one, a stateless one (the cutting kind's block, whose cage
+    steps beside Newton) or a name nothing registered.
+    """
+    if domain == "*" or domain in {name for name, _ in CPU.backends}:
+        return False
+    try:
+        kind = get_domain(domain)
+    except KeyError:
+        return False  # an unknown kind fails in the composer, by name
+    return kind.role == "deformables" and not kind.world_fixed and bool(kind.state)
+
+
+def unserved(arrangement: ArrangementSpec, owners: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
+    """On a CPU: one sentence per kind in ``owners`` that nothing a CPU runs can step, saying why.
+
+    A kind is unserved when :data:`CPU` has nothing for it (:func:`needs_a_gpu`)
+    and the backend ``arrangement`` gives it has no CPU path either -- so
+    :func:`arrangement_for` could only hand it ``CPU``'s ``"*"``, MuJoCo, and it
+    would fail inside the composer or MuJoCo's importer. A kind whose backend
+    runs on a CPU is served, a dotted path among them, which states no devices.
+
+    Args:
+        arrangement: The arrangement as staged, before :func:`arrangement_for`.
+        owners: Kind -> the names of the entities of that kind whose own spec
+            names no backend (one that does is :func:`on_device`'s to refuse).
+
+    Returns:
+        A sentence per unserved kind, naming its entities, the backend, the
+        devices it runs on and its ``cpu_note``; empty when a CPU serves them all.
+    """
+    out: list[str] = []
+    for domain, names in owners.items():
+        if not needs_a_gpu(domain):
+            continue
+        spec = arrangement.backend_for(domain)
+        if spec is None or runs_on_cpu(spec):
+            continue
+        info = device_facts(spec)
+        devices = " and ".join(info.devices) if info is not None else "a GPU"
+        why = f" ({info.cpu_note})" if info is not None and info.cpu_note else ""
+        who = ", ".join(repr(name) for name in names) or f"a {domain}"
+        out.append(
+            f"{who} ({domain}) needs a GPU: {domain} is on {spec.solver!r}, which runs on {devices} only{why}, and "
+            f"nothing a CPU runs steps {domain} -- rss.CPU puts cloth, bags, rope and soft bodies on SuperDex and "
+            "the arm and rigid bodies on MuJoCo's C library."
+        )
+    return tuple(out)
 
 
 def on_device(

@@ -68,7 +68,7 @@ superdex = ["superdex-physics==1.0.*; python_version == '3.12' and (sys_platform
 # No GPU. Nothing to switch on: a scene built where there is no CUDA runs on the
 # CPU by itself (robosimstudio/machine.py), MuJoCo's C library stepping the arm
 # and rigid bodies -- it comes with newton[sim] -- and Newton's tiled tracer
-# rendering. This adds what serves cloth, rope and soft bodies there: SuperDex.
+# rendering. This adds what serves cloth, bags, rope and soft bodies there: SuperDex.
 # From a checkout, leave out the 1.8 GB rtx group nothing on a CPU uses:
 # uv sync --extra cpu --no-group rtx (or UV_NO_GROUP=rtx).
 cpu = ["robosimstudio[superdex]"]

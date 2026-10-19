@@ -18,8 +18,8 @@ BACKEND = register_backend(
     supports=("particles",),
     summary="Meta's SuperDex FEM engine, co-simulated on the host; Newton islands lead, wrenches feed back.",
     host_engine=True,
-    # A CPU engine wherever the scene is: on a CPU it is what serves cloth, rope
-    # and soft bodies (``rss.CPU``).
+    # A CPU engine wherever the scene is: on a CPU it is what serves cloth, bags,
+    # rope and soft bodies (``rss.CPU``).
     devices=("cuda", "cpu"),
     # What each builder reads is declared beside it, per kind, in ``bridge.py``
     # (``register_actor_builder(..., consumes=...)``); nothing engine-wide.
