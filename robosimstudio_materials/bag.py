@@ -502,7 +502,7 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
     The bridge's ``shell`` builder, with three differences: the rest coordinates are about the
     centroid and the offset is the root transform (section 1), the contact (friction, falloff) is
     the bag's own rather than the engine's defaults, and so is the material's damping. Read back,
-    the nodes are put into the world frame by adding the centroid back: the root never turns.
+    the nodes are put into the world frame through the root, as ``place_actor`` writes them.
     """
     del particle_q, tet_indices, tet_materials
     physics = bridge.physics
@@ -535,15 +535,11 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
     shell.contact = bridge.contact_params(params, penalty=1.0e9, friction=float(CANVAS.friction), padding=0.0)
     actor = physics.experimental.create_shell_actor(bridge.scene_of(record.get("world", 0)), shell)
     actor.register_query(physics.QueryType.NODE_POSITIONS)
-
-    def read() -> np.ndarray:
-        return np.asarray(actor.get_node_positions_local(), dtype=np.float64).reshape(-1, 3) + centre
-
     real = np.float64 if physics.uses_double_precision() else np.float32
     return {
         "name": str(record.get("name", "")),
         "actor": actor,
-        "read": read,
+        "read": bridge.root_reader(actor),
         "start": geom.start,
         "count": geom.count,
         "prev": geom.rest.astype(real).copy(),

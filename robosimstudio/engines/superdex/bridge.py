@@ -262,7 +262,7 @@ class SuperdexBridge:
     ``count`` and ``prev`` (the rest positions, in the engine's precision) --
     and may use what the bridge offers every builder: :attr:`physics`,
     :attr:`model`, :attr:`recipe`, :meth:`scene_of`, :meth:`actor_root`,
-    :meth:`contact_params`, and :attr:`actors`, the entries built before it
+    :meth:`root_reader`, :meth:`contact_params`, and :attr:`actors`, the entries built before it
     (each stamped with its ``entity`` and ``world``).
 
     **One scene per world.** A replicated model superimposes its worlds at the
@@ -713,6 +713,15 @@ class SuperdexBridge:
         """
         del record
         return self.physics.TransformRT()
+
+    def root_reader(self, actor: Any) -> Any:
+        """A ``read`` for an actor's entry: its nodes in the world, through its root as it stands.
+
+        The method form of the module's own reader, the rule :meth:`place_actor`
+        writes by, so a builder outside this bundle that sets another root (a
+        bag's is its centroid) reads back the way a placement is written.
+        """
+        return _root_reader(actor)
 
     def contact_params(self, params: dict, *, penalty: float, friction: float, padding: float) -> Any:
         """One actor's engine ``ContactParams`` from its host params; see :func:`_contact_params`.
@@ -1412,7 +1421,7 @@ class SuperdexBridge:
         root transform: identity for every actor this bridge's builders make
         (recentering is off), so local **is** world there, and the centroid for
         a bag, whose builder (``robosimstudio_materials.bag``) solves about its
-        own middle in float32 and whose ``read`` adds the centroid back.
+        own middle in float32 and reads back through the root (:meth:`root_reader`).
 
         Velocities go to zero and ``prev`` is refreshed from what the engine
         reports back, because a teleport is not motion: the first speed reading

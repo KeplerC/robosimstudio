@@ -251,5 +251,46 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertIn("mouth_opening", ATOMS)
 
 
+class TestTheEngineActor(unittest.TestCase):
+    """The bag's SuperDex actor, against a stand-in engine: no wheel, no scene."""
+
+    def test_its_nodes_read_back_through_its_root_as_a_placement_writes_them(self) -> None:
+        """One rule for both ways: a root turned a quarter about z turns what the bag reads."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from robosimstudio.engines.superdex.bridge import SuperdexBridge
+        from robosimstudio_materials.bag import build_bag_actor
+
+        class Arr:
+            def __init__(self, a) -> None:
+                self.a = np.asarray(a)
+
+            def numpy(self):
+                return self.a
+
+        entity, vertices, faces = _bag(cells=(4, 4))
+        local = np.array([[0.01, 0.0, 0.0]] * len(vertices))
+        actor = mock.Mock()
+        actor.get_node_positions_local.return_value = local.ravel()
+        half = math.sqrt(0.5)
+        actor.get_root_transform.return_value = SimpleNamespace(
+            rotation=np.array([0.0, 0.0, half, half]), translation=[0.6, 0.0, 0.75]
+        )
+        physics = mock.MagicMock()
+        physics.uses_double_precision.return_value = False
+        physics.experimental.create_shell_actor.return_value = actor
+        bridge = SimpleNamespace(
+            physics=physics,
+            model=SimpleNamespace(particle_q=Arr(vertices), tri_indices=Arr(faces), tri_count=len(faces)),
+            contact_params=lambda *args, **kwargs: None,
+            scene_of=lambda world: None,
+            root_reader=lambda a: SuperdexBridge.root_reader(bridge, a),
+        )
+        record = {"name": "bag", "particle_start": 0, "particle_count": len(vertices)}
+        entry = build_bag_actor(bridge, {**record, "params": entity.host_actor().params})
+        np.testing.assert_allclose(entry["read"](), np.tile([0.6, 0.01, 0.75], (len(vertices), 1)), atol=1e-12)
+
+
 if __name__ == "__main__":
     unittest.main()
