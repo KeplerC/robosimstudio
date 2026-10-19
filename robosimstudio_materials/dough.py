@@ -20,11 +20,12 @@ keeps 66% -- the clay. The ``Q1`` strain basis blew up on this material (a
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar
 
 import numpy as np
 
+from robosimstudio.core.tuning import BodyWriter
 from robosimstudio.domains.rigid.entity import EntityRigid
 from robosimstudio.scene.registry import register_entity
 from robosimstudio.specs import ObjectSpec
@@ -134,7 +135,8 @@ class RollerSpec(ObjectSpec):
     frame's y; the handle stands on the axle along the frame's z. ``grip`` is
     the tool centre's height over the axle when the jaws close on the handle.
     ``spins`` puts the handle on a revolute joint about the axle; ``False``
-    makes the two one body.
+    makes the two one body. ``mass`` is the whole tool's, drum and handle
+    together. A roller is a tool, so it cannot be ``static``.
     """
 
     entity: str = "roller"
@@ -151,6 +153,8 @@ class RollerSpec(ObjectSpec):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if self.static:
+            raise ValueError(f"roller {self.name!r}: a roller is a tool the hand moves, so it cannot be static")
         # The fingertips land on the shoulder, so a shoulder inside the drum (or under the axle) is a
         # handle whose boxes turn inside out or one the fingers meet the drum before.
         radius = float(self.shape.radius) if self.shape is not None else 0.0
@@ -185,6 +189,31 @@ def handle_boxes(grip: float) -> tuple[tuple[Vec3, Vec3], ...]:
     )
 
 
+class _ToolMass(BodyWriter):
+    """The mass of several bodies as one tool's: read as their sum, written by scaling each by the same factor.
+
+    :class:`~robosimstudio.core.tuning.BodyWriter` sets every body it covers to
+    the value written, which over a drum and its handle would make each weigh
+    what the tool was asked to.
+    """
+
+    def read(self) -> dict[str, float]:
+        current = self._fetched("body_mass")
+        return {"mass": float(current[self.bodies].sum()) if current is not None else 0.0}
+
+    def _scale_mass(self, mass: float) -> bool:
+        current = self._fetched("body_mass")
+        if current is None or not np.isfinite(mass) or mass <= 0.0:
+            return False
+        total = float(current[self.bodies].sum())
+        if total <= 0.0:
+            return False
+        wrote = False
+        for body in self.bodies:
+            wrote |= BodyWriter(self.model, [int(body)])._scale_mass(mass * float(current[body]) / total)
+        return wrote
+
+
 class EntityRoller(EntityRigid):
     """A :class:`RollerSpec`: the roller on a free joint, the handle on a revolute joint about its axle."""
 
@@ -193,6 +222,8 @@ class EntityRoller(EntityRigid):
     """The axle's ``joint_q`` index once built; -1 for a welded roller."""
     handle_body: int = -1
     """The handle's body once built; the roller's own for a welded one."""
+    web_shape: int = -1
+    """The handle's web once built, the box the jaws close across."""
 
     def collect_shapes(self, builder) -> None:
         """The drum's shapes and the handle's: the handle's boxes are what the jaws touch.
@@ -206,6 +237,50 @@ class EntityRoller(EntityRigid):
         self.shapes = np.asarray(
             [s for s in range(builder.shape_count) if builder.shape_body[s] in bodies], dtype=np.int32
         )
+
+    def compute_grasp_box(self, builder) -> None:
+        """Box the handle's web, the box the jaws close across, on the handle's body; the bounding box is the tool's.
+
+        The inherited box is the drum's, which put the grasp point on the axle,
+        inside the handle's shoulder. On the handle's body, not the drum's, so the
+        box stays on the web while the drum rolls under it; ``ObbGrasp.body`` says
+        which body places it. The heuristic's long axis is the web's height
+        here, so its yaw and width are not the grip's: the jaws close across the
+        web's 20 mm along the drum.
+        """
+        from robosimstudio.solvers.grasp.obb import ObbGrasp, _shape_corners_local
+
+        if not self.spec.obb_grasp or self.web_shape < 0:
+            return
+        web = _shape_corners_local(builder, self.web_shape)
+        lo, hi = web.min(axis=0), web.max(axis=0)
+        centre, half = (lo + hi) / 2.0, (hi - lo) / 2.0
+        long_axis = int(np.argmax(half))
+        heavy = np.sign(float(builder.body_com[self.handle_body][long_axis]) - centre[long_axis])
+        self.obb = ObbGrasp(
+            body=self.handle_body,
+            center_local=centre,
+            half=half,
+            long_axis=long_axis,
+            handle_sign=-(float(heavy) or 1.0),
+            gripper_span=self.gripper_span,
+        )
+        if self.bbox is None:
+            # Both bodies' shapes, which share a frame as built: the drum's and the handle's links start together.
+            tool = np.concatenate([_shape_corners_local(builder, int(s)) for s in self.shapes])
+            self.bbox = tool.max(axis=0) - tool.min(axis=0)
+
+    def tunables(self, pipeline=None):
+        """The inherited contact and mass, the mass the whole tool's: drum and handle scaled together."""
+        out = []
+        for inherited in super().tunables(pipeline):
+            if inherited.name != "mass":
+                out.append(inherited)
+                continue
+            writer = _ToolMass(self.model, sorted({self.body, self.handle_body}), pipeline)
+            summary = "The whole tool's mass, drum and handle, with inertia scaled to match."
+            out.append(replace(inherited, spec=replace(inherited.spec, **writer.read()), write=writer, summary=summary))
+        return tuple(out)
 
     def _add_primitive(self, builder, pose) -> None:
         import warp as wp
@@ -226,7 +301,7 @@ class EntityRoller(EntityRigid):
         handle = builder.add_link(xform=xform, label=f"{spec.name}_handle") if spec.spins else roller
         self.handle_body = handle
         for k, (centre, half) in enumerate(handle_boxes(float(spec.grip))):
-            builder.add_shape_box(
+            shape = builder.add_shape_box(
                 handle,
                 xform=wp.transform(centre, wp.quat_identity()),
                 hx=half[0],
@@ -235,6 +310,8 @@ class EntityRoller(EntityRigid):
                 cfg=cfg,
                 label=f"{spec.name}_handle_{k}",
             )
+            if k == 1:  # the web, between the shoulder and the top
+                self.web_shape = int(shape)
         if spec.spins:
             joints.append(
                 builder.add_joint_revolute(
@@ -248,7 +325,10 @@ class EntityRoller(EntityRigid):
             self.axle_coord = int(builder.joint_q_start[joints[-1]])
         builder.add_articulation(joints, label=f"{spec.name}_articulation")
         if spec.mass is not None:
-            set_body_mass(builder, roller, float(spec.mass))
+            # The whole tool's, shared as the shapes' own masses share it: the same density, so by volume.
+            share = {body: float(builder.body_mass[body]) for body in {roller, handle}}
+            for body, mass in share.items():
+                set_body_mass(builder, body, float(spec.mass) * mass / sum(share.values()))
 
     def reset(self, pipeline, episode) -> None:
         super().reset(pipeline, episode)

@@ -361,7 +361,8 @@ class SimTools:
         handle = self.env.handles.entity(object_name)
         if handle.obb is None:
             raise ToolRefusal(f"object {object_name!r} has no grasp box")
-        pose = handle.pose(self._body_q())
+        # By the body the box was fit on: a roller's is its handle, which stays upright while the drum it names rolls.
+        pose = np.asarray(self._body_q()[handle.obb.body], dtype=np.float64)
         rotation = quat_to_mat(pose[3:7])
         centre = pose[:3] + rotation @ handle.obb.center_local
         point, yaw = grasp_from_obb(handle.obb, pose, handle_frac)
@@ -562,7 +563,7 @@ class SimTools:
         handle = self.env.handles.entity(object_name)
         if handle.obb is None:
             raise ToolRefusal(f"object {object_name!r} has no bounding box")
-        pose = handle.pose(self._body_q())
+        pose = np.asarray(self._body_q()[handle.obb.body], dtype=np.float64)  # the box's own body, as above
         rotation = quat_to_mat(pose[3:7])
         half = np.asarray(handle.obb.half, dtype=np.float64)
         centre = np.asarray(pose[:3], dtype=np.float64) + rotation @ np.asarray(

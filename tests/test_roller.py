@@ -6,18 +6,21 @@ four boxes are what a gripper touches: a contact measure between the hand and th
 roller, the **contact** tunable and the segmentation all go through the shapes
 the entity collects. Collected off the drum's body alone, the handle was in none
 of them. The handle's shoulder stands ``grip`` minus 18 mm over the axle, so a
-grip too low for the drum puts the shoulder inside it, or under the axle. No
-device: a builder, the entity and a CPU model.
+grip too low for the drum puts the shoulder inside it, or under the axle. The
+mass, stated or tuned, is the whole tool's, and the grasp box is the handle's
+web. No device: a builder, the entity and a CPU model.
 """
 
 from __future__ import annotations
 
+import math
+import types
 import unittest
 
 import newton
 import numpy as np
 
-from robosimstudio_materials.dough import EntityRoller, roller
+from robosimstudio_materials.dough import EntityRoller, handle_boxes, roller
 
 TIER = "fast"
 """Builds one roller into a builder and finalizes it on the CPU."""
@@ -62,6 +65,77 @@ class TestAHandleThatCannotBeBuiltIsRefused(unittest.TestCase):
     def test_a_drum_that_buries_the_shoulder(self) -> None:
         with self.assertRaisesRegex(ValueError, "grip"):
             roller(radius=0.04)
+
+    def test_a_static_roller(self) -> None:
+        """It built a free joint and an axle all the same, a static that rolled."""
+        with self.assertRaisesRegex(ValueError, "static"):
+            roller(static=True)
+
+
+def _tool(entity) -> list[int]:
+    return sorted({entity.body, entity.handle_body})
+
+
+class TestTheMassIsTheWholeTools(unittest.TestCase):
+    """``mass`` set the drum and the handle's 65 g came on top; the tunable reached the drum alone."""
+
+    def test_a_stated_mass_is_drum_and_handle_together(self) -> None:
+        for spins in (True, False):
+            with self.subTest(spins=spins):
+                _, _, free = _built(roller(at=(0.0, 0.0, 0.02), spins=spins))
+                entity, _, model = _built(roller(at=(0.0, 0.0, 0.02), spins=spins, mass=0.5))
+                masses, unstated = model.body_mass.numpy(), free.body_mass.numpy()
+                tool = _tool(entity)
+                self.assertAlmostEqual(float(masses[tool].sum()), 0.5, places=5)
+                np.testing.assert_allclose(masses[tool] / 0.5, unstated[tool] / unstated[tool].sum(), rtol=1e-5)
+
+    def test_the_tunable_reads_and_writes_the_whole_tool(self) -> None:
+        entity, _, model = _built(roller(at=(0.0, 0.0, 0.02)))
+        tool = _tool(entity)
+        masses, inertia = model.body_mass.numpy().copy(), model.body_inertia.numpy().copy()
+        mass = next(t for t in entity.tunables() if t.name == "mass")
+        self.assertAlmostEqual(mass.spec.mass, float(masses[tool].sum()), places=6)
+        self.assertTrue(mass.write("mass", 2.0 * mass.spec.mass))
+        np.testing.assert_allclose(model.body_mass.numpy()[tool], 2.0 * masses[tool], rtol=1e-5)
+        np.testing.assert_allclose(model.body_inertia.numpy()[tool], 2.0 * inertia[tool], rtol=1e-5)
+
+
+class TestTheGraspBoxIsTheHandles(unittest.TestCase):
+    """The inherited box was the drum's, which put the grasp point on the axle, inside the handle's shoulder."""
+
+    def test_the_box_is_the_web_on_the_handles_body(self) -> None:
+        from robosimstudio.solvers.grasp.obb import grasp_from_obb
+
+        for spins in (True, False):
+            with self.subTest(spins=spins):
+                spec = roller(at=(0.0, 0.0, 0.02), spins=spins)
+                entity, _, model = _built(spec)
+                centre, half = handle_boxes(spec.grip)[1]
+                self.assertEqual(entity.handle_body, entity.obb.body)
+                np.testing.assert_allclose(entity.obb.center_local, centre, atol=1e-6)
+                np.testing.assert_allclose(entity.obb.half, half, atol=1e-6)
+                body_q = model.body_q.numpy().astype(np.float64)
+                point, _ = grasp_from_obb(entity.obb, body_q[entity.obb.body])
+                over = float(point[2] - body_q[entity.body][2]) - spec.grip
+                self.assertLess(abs(over), 0.005, f"the grasp point is {over * 1000:+.1f} mm off the grip")
+                top = spec.grip + 0.025 + spec.shape.radius
+                np.testing.assert_allclose(entity.bbox, (0.04, 0.14, top), atol=1e-6, err_msg="the tool's own")
+
+    def test_the_tools_place_it_by_the_handle_while_the_drum_rolls(self) -> None:
+        from robosimstudio_policy_agent.sim_tools import SimTools
+
+        spec = roller(at=(0.0, 0.0, 0.02))
+        entity, _, model = _built(spec)
+        handle = entity.handle(model)
+        body_q = model.body_q.numpy().astype(np.float64)
+        body_q[entity.body, 3:7] = (0.0, math.sin(math.pi / 4), 0.0, math.cos(math.pi / 4))  # rolled a quarter turn
+        tools = types.SimpleNamespace(
+            env=types.SimpleNamespace(handles=types.SimpleNamespace(entity=lambda name: handle)),
+            _body_q=lambda: body_q,
+        )
+        bounds = SimTools.get_object_bounds(tools, "roller")
+        top = float(body_q[entity.handle_body][2]) + spec.grip + 0.025
+        self.assertAlmostEqual(bounds["highest_z"], top, places=5, msg="the web's top, over the axle on the handle")
 
 
 if __name__ == "__main__":
