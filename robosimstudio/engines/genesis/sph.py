@@ -181,7 +181,8 @@ class SphBridge:
                 "Genesis's SPH solver has one particle size per scene, so every liquid in an island states the same"
             )
         self.spacing = spacing[0]
-        lo, hi = self._domain(geoms)
+        shapes = iter_mirrors(model, recipe.get("mirrors", ()))
+        lo, hi = self._domain(geoms, [float(g.local[2]) for g in shapes if g.kind == "plane"])
         flags = dict.fromkeys(
             ("rigid_mpm", "rigid_pbd", "rigid_fem", "mpm_sph", "mpm_pbd", "fem_mpm", "fem_sph"), False
         )
@@ -204,7 +205,7 @@ class SphBridge:
         )
 
         self.mirrors: list[dict] = []
-        for geom in iter_mirrors(model, recipe.get("mirrors", ())):
+        for geom in shapes:
             entry = self._add_mirror(geom)
             if entry is not None:
                 self.mirrors.append(entry)
@@ -250,28 +251,34 @@ class SphBridge:
         """The last control step's reaction per Newton body [N], before shaping. For a reader."""
 
     # ----------------------------------------------------------------- build
-    def _domain(self, geoms) -> tuple[np.ndarray, np.ndarray]:
-        """The SPH solver's box: the liquids' rest bounds grown by the island's reach.
+    def _domain(self, geoms, ground: list[float]) -> tuple[np.ndarray, np.ndarray]:
+        """The SPH solver's box: the liquids' rest bounds grown by the island's reach, its floor the ground's.
 
         Its walls hold a particle in (Genesis clamps one that crosses), so it is
         where water that falls off the bench ends; its size costs nothing, since
         the spatial hash is capped at 150 cells a side (an SPH substep of 1,728
         particles took 0.50 ms with 88 x 88 x 46 cells and 0.49 ms with 25 x 25 x 46,
-        ``p2_cost.py`` at float32).
+        ``p2_cost.py`` at float32). A mirrored ground plane (``ground``, the heights
+        of the compiler's one horizontal plane) is its floor, half a spacing up, where
+        a particle's centre rests on a surface: under ``sph_reach_down`` alone, water
+        poured on a void cell's ground fell through it to the box's floor, 218 mm under
+        (``w4_probe.py``).
         """
         rest = np.concatenate([g.rest for g in geoms]) if geoms else np.zeros((1, 3))
         side = float(self.recipe.get("sph_reach", 0.5))
         down = float(self.recipe.get("sph_reach_down", 0.25))
         lo = rest.min(axis=0) - np.array([side, side, down])
         hi = rest.max(axis=0) + np.array([side, side, side])
+        if ground:
+            lo[2] = max(ground) + 0.5 * self.spacing
         return lo, hi
 
     def _add_mirror(self, geom: ShapeGeometry) -> dict | None:
         """One Newton shape as a free, heavy, gravity-compensated Genesis body, or ``None`` for a plane.
 
-        A plane is left out: the solver's box has a floor, and a plane mirrored as a
-        box would be a body the size of the room. Each mirror is built at its pose,
-        so the first hold is no jump.
+        A plane is left out: it is the solver's box's floor (:meth:`_domain`), and a
+        plane mirrored as a box would be a body the size of the room. Each mirror is
+        built at its pose, so the first hold is no jump.
         """
         gs = self.gs
         if geom.kind == "plane":
