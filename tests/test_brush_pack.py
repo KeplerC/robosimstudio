@@ -243,6 +243,45 @@ class TestTheScrubMeasure(unittest.TestCase):
         self.assertEqual(0, int(grid.cells.sum()))
 
 
+class _WholeLatticeRefused:
+    """A device lattice that serves slices and refuses a read or write of the whole of it."""
+
+    def __init__(self, array) -> None:
+        self.array = array
+
+    def __getitem__(self, key):
+        return self.array[key]
+
+    def numpy(self):
+        raise AssertionError("read every world's lattice back to use one")
+
+    def assign(self, values):
+        raise AssertionError("wrote every world's lattice back to clear one")
+
+    def zero_(self) -> None:
+        self.array.zero_()
+
+
+class TestOneWorldsLattice(unittest.TestCase):
+    """``scrub_grid(world)`` and ``clear_scrub(world)`` touch that world's slab on the device and no other."""
+
+    def test_a_world_is_read_and_cleared_on_its_own(self) -> None:
+        import warp as wp
+
+        from robosimstudio_materials.brush import EntityBrush, ScrubGrid
+
+        grid = ScrubGrid(origin=(0.0, 0.0), cell=0.005, nx=3, ny=2)
+        brush = EntityBrush.__new__(EntityBrush)
+        brush._grid = grid
+        values = np.repeat(np.arange(1, 4, dtype=np.int32), 6)
+        brush._grid_device = _WholeLatticeRefused(wp.array(values, dtype=wp.int32, device="cpu"))
+        for world in range(3):
+            with self.subTest(world=world):
+                np.testing.assert_array_equal(np.full((2, 3), world + 1), brush.scrub_grid(world).cells)
+        brush.clear_scrub(1)
+        np.testing.assert_array_equal([1] * 6 + [0] * 6 + [3] * 6, brush._grid_device.array.numpy())
+
+
 class TestTheCatalogue(unittest.TestCase):
     def test_the_atom_and_its_handler(self) -> None:
         from robosimstudio.assetlib.semantics.atoms import get_atom

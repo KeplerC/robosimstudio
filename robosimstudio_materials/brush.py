@@ -963,17 +963,17 @@ class EntityBrush(Entity):
 
     # ---------------------------------------------------------------- reading
     def scrub_grid(self, world: int = 0) -> ScrubGrid:
-        """This world's coverage lattice, read back from the device."""
+        """This world's coverage lattice, read back from the device: its own slab and no other world's."""
         grid = self._lattice()
         out = ScrubGrid(origin=grid.origin, cell=grid.cell, nx=grid.nx, ny=grid.ny)
         if self._grid_device is not None:
             size = grid.nx * grid.ny
-            flat = self._grid_device.numpy()[world * size : (world + 1) * size]
+            flat = self._grid_device[world * size : (world + 1) * size].numpy()
             out.cells = np.asarray(flat, dtype=np.int32).reshape(grid.ny, grid.nx)
         return out
 
     def clear_scrub(self, world: int | None = None) -> None:
-        """Forget where the tips have been, in one world or all."""
+        """Forget where the tips have been, in one world or all, zeroing that slab on the device."""
         if self._grid_device is None:
             return
         if world is None:
@@ -981,9 +981,7 @@ class EntityBrush(Entity):
             return
         grid = self._lattice()
         size = grid.nx * grid.ny
-        flat = self._grid_device.numpy()
-        flat[world * size : (world + 1) * size] = 0
-        self._grid_device.assign(flat)
+        self._grid_device[world * size : (world + 1) * size].zero_()
 
     def scrubbed(self, lo, hi, *, world: int = 0) -> float:
         """The share of the patch ``[lo, hi]`` (world x, y [m]) this world's tips have scrubbed."""
