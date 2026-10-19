@@ -183,6 +183,9 @@ class TestTheWipeIsGatedOnThePush(unittest.TestCase):
         for _ in range(ForceGatedWipe.KEEP + 5):
             wipe.update()
         self.assertEqual(ForceGatedWipe.KEEP, len(wipe.raw), "a page updates it every step, for as long as it is open")
+        wipe.raw.append(-1.0)  # the newest goes in at the end and the oldest drops off the front
+        self.assertEqual(-1.0, wipe.raw[-1])
+        self.assertEqual(ForceGatedWipe.KEEP, len(wipe.raw))
 
     def test_lifting_a_hard_press_back_through_the_band_wipes_nothing(self) -> None:
         import warp as wp

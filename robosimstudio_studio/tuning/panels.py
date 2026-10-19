@@ -67,15 +67,17 @@ class PanelTune(Panel):
         self.session = session
         self.tuner = MaterialTuner(session.env)
         self.material_dir = material_dir
-        # ``None`` when nothing in the scene has a fabric material -- a SuperDex
-        # sponge is bulk matter, and the tuner drops it rather than mapping
-        # Young's modulus onto ``tri_materials``.
         # One binder per material class the sheets were built with, and ``binder`` is the selected
         # sheet's: one set built from the first sheet's class and pointed at the next left a label's
         # ``tack`` on a towel, where moving it raised in ``replace``, and gave a label after a towel none.
         self.binders: dict[type, SpecBinder] = {}
         for name in self.tuner.names:
-            self.binders.setdefault(type(self.tuner.built[name]), SpecBinder(self.tuner.built[name]))
+            kind = type(self.tuner.built[name])
+            if kind not in self.binders:
+                self.binders[kind] = SpecBinder(self.tuner.built[name])
+        # ``None`` when nothing in the scene has a fabric material -- a SuperDex
+        # sponge is bulk matter, and the tuner drops it rather than mapping
+        # Young's modulus onto ``tri_materials``.
         self.binder = self.binders[type(self.tuner.built[self.tuner.selected])] if self.tuner else None
         self._groups: dict[type, Any] = {}
         # Off the request rather than off a task, for the reason
