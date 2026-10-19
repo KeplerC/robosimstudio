@@ -684,11 +684,13 @@ class _Cup:
         self.calls: list[tuple] = []
         self.held, self.tier = -1, ""
         self.report = SealReport(True, 0.0004, math.radians(1.0), 7)
+        self.owners = {7: "plate", 9: "roller"}
+        """What the robot builds it with: each part it can seal on, by the entity that built it."""
 
     def hold(self, body=None, *, tier="auto"):
         self.calls.append(("hold", body, tier))
         if self.report.sealed:
-            self.held, self.tier = 7, "weld"
+            self.held, self.tier = self.report.body, "weld"
         return self.report
 
     def release(self):
@@ -699,8 +701,9 @@ class _Cup:
 def _env(cups: dict) -> types.SimpleNamespace:
     plate = types.SimpleNamespace(body=7)
     cloth = types.SimpleNamespace(particles=[0, 1])
+    roller = types.SimpleNamespace(body=8, handle_body=9)  # the drum is the body; the cup is on the handle's web
     scene = types.SimpleNamespace(
-        embodiment=types.SimpleNamespace(suctions=cups), by_name={"plate": plate, "towel": cloth}
+        embodiment=types.SimpleNamespace(suctions=cups), by_name={"plate": plate, "towel": cloth, "roller": roller}
     )
     return types.SimpleNamespace(scene=scene)
 
@@ -744,6 +747,14 @@ class TestTheVacuumTool(unittest.TestCase):
         )
         self.assertEqual((True, "plate", "right", "weld"), (out["sealed"], out["held"], out["arm"], out["tier"]))
         self.assertAlmostEqual(1.0, out["tilt_deg"])
+
+    def test_a_part_off_its_entitys_body_is_named(self) -> None:
+        """Sealed on a roller's handle, the cup held "": the scene was asked whose ``body`` it is, the drum's."""
+        from robosimstudio.core.suction import SealReport
+
+        self.cup.report = SealReport(True, 0.0004, 0.0, 9)
+        out = self.tool.vacuum()
+        self.assertEqual((True, "roller"), (out["sealed"], out["held"]))
 
     def test_a_named_part_and_a_tier_reach_the_hold(self) -> None:
         self.tool.vacuum(object_name="plate", tier="wrench")

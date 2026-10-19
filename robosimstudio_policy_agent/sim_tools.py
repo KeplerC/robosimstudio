@@ -1171,7 +1171,7 @@ class Vacuum:
             return {
                 "on": True,
                 "sealed": bool(report.sealed),
-                "held": self._name_of(cup.held),
+                "held": self._name_of(cup),
                 "gap_m": float(report.gap_m),
                 "tilt_deg": float(np.degrees(report.tilt_rad)),
                 "tier": cup.tier,
@@ -1181,9 +1181,18 @@ class Vacuum:
 
         return self.bus.call(switch)
 
-    def _name_of(self, body: int) -> str:
+    def _name_of(self, cup) -> str:
+        """The held part's entity, by the cup's own map of who built each part it can seal on.
+
+        By an entity's :attr:`body` alone, a cup sealed on a roller's handle or a
+        brush's strip held "": neither is the body its entity's pose places. A
+        part named to :meth:`vacuum` is that body, so it is the fallback.
+        """
+        body = cup.held
         if body < 0:
             return ""
+        if int(body) in cup.owners:
+            return cup.owners[int(body)]
         for name, entity in self.env.scene.by_name.items():
             if getattr(entity, "body", None) == body:
                 return name
