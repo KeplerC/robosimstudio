@@ -545,6 +545,84 @@ class TestAPartOfSeveralShapes(unittest.TestCase):
         self.assertAlmostEqual(0.0055, report.gap_m, places=6)
 
 
+class _Program:
+    """What :meth:`Suction.attach` asks of a :class:`~robosimstudio.scene.physics.compose.PhysicsProgram`.
+
+    ``islands`` is ``(name, solver, {entity: bodies})`` in stepping order; :attr:`mujoco_solver`
+    is the real program's rule, the first MuJoCo island's solver.
+    """
+
+    def __init__(self, *islands: tuple[str, str, dict[str, tuple[int, ...]]]) -> None:
+        self.islands = [
+            types.SimpleNamespace(
+                name=name,
+                backend=types.SimpleNamespace(solver=solver),
+                entities=tuple(owned),
+                bodies=np.array(sorted(b for bodies in owned.values() for b in bodies), dtype=np.int32),
+            )
+            for name, solver, owned in islands
+        ]
+        self._solvers = {
+            name: types.SimpleNamespace(model=types.SimpleNamespace(mujoco=object()), island=name)
+            for name, _, _ in islands
+        }
+
+    def island_of(self, entity: str):
+        for island in self.islands:
+            if entity in island.entities:
+                return island
+        raise KeyError(entity)
+
+    def solver_of_island(self, name: str):
+        return self._solvers[name]
+
+    @property
+    def mujoco_solver(self):
+        return next((self._solvers[i.name] for i in self.islands if i.backend.solver == "mujoco"), None)
+
+
+class TestTheWeldIsThePadsOwnSolver(unittest.TestCase):
+    """A weld row holds a part only inside the solver that steps the pad, which need not be the first MuJoCo one."""
+
+    def _attached(self, program: _Program):
+        from robosimstudio.core.suction import Suction
+
+        model = types.SimpleNamespace(device="cpu")
+        cup = Suction(
+            model,
+            arm="right",
+            pad_body=1,
+            pad_radius=0.015,
+            rows={3: 0, 4: 1},
+            owners={3: "plate_a", 4: "plate_b"},
+        )
+        cup.attach(types.SimpleNamespace(program=program))
+        return cup
+
+    def test_a_part_on_another_mujoco_island_is_held_by_the_wrench(self) -> None:
+        cup = self._attached(
+            _Program(
+                ("mujoco", "mujoco", {"plate_a": (3,)}), ("mujoco_1", "mujoco", {"robot": (0, 1), "plate_b": (4,)})
+            )
+        )
+        self.assertEqual(frozenset({4}), cup.weldable)
+        self.assertEqual("mujoco_1", cup.mujoco.island, "the rows were looked for in another solver")
+        self.assertFalse(cup.weld_available(3))
+
+    def test_a_pad_on_no_mujoco_island_welds_nothing(self) -> None:
+        cup = self._attached(
+            _Program(
+                ("featherstone", "featherstone", {"robot": (0, 1)}),
+                ("mujoco", "mujoco", {"plate_a": (3,), "plate_b": (4,)}),
+            )
+        )
+        self.assertEqual((None, frozenset()), (cup.mujoco, cup.weldable))
+
+    def test_one_island_for_both_welds_every_part_with_a_row(self) -> None:
+        cup = self._attached(_Program(("mujoco", "mujoco", {"robot": (0, 1), "plate_a": (3,), "plate_b": (4,)})))
+        self.assertEqual(frozenset({3, 4}), cup.weldable)
+
+
 class _Registry:
     def __init__(self) -> None:
         self.calls: dict[str, dict] = {}

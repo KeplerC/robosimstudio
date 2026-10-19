@@ -300,9 +300,9 @@ class Suction:
         self.owners: dict[int, str] = {int(k): str(v) for k, v in (owners or {}).items()}
         self.pipeline: Any = None
         self.mujoco: Any = None
-        """The MuJoCo solver that carries the weld rows, or ``None``."""
+        """The MuJoCo solver that steps the pad and carries the weld rows, or ``None``."""
         self.weldable: frozenset[int] = frozenset()
-        """The parts the weld tier can hold: those the MuJoCo solver steps itself."""
+        """The parts the weld tier can hold: those the pad's MuJoCo solver steps too."""
         self.tier = ""
         """``"weld"`` or ``"wrench"`` while holding; empty otherwise."""
         self.last = SealReport(False, math.inf, math.nan, -1, "nothing tested yet")
@@ -358,12 +358,23 @@ class Suction:
         )
 
     def attach(self, pipeline: Any) -> None:
-        """The pipeline can be stepped: find the MuJoCo solver and the parts it steps itself."""
+        """The pipeline can be stepped: find the MuJoCo solver that steps the pad, and the parts it steps too.
+
+        A weld row is a constraint inside one solver, so it holds a part only
+        when the solver stepping the pad steps the part as well. A program can
+        have more than one MuJoCo island; a part on another, or a pad on none,
+        is held by the wrench.
+        """
         self.pipeline = pipeline
+        self.mujoco, self.weldable = None, frozenset()
         program = getattr(pipeline, "program", None)
-        self.mujoco = getattr(program, "mujoco_solver", None) if program is not None else None
-        if self.mujoco is None or getattr(getattr(self.mujoco, "model", None), "mujoco", None) is None:
-            self.mujoco, self.weldable = None, frozenset()
+        if program is None:
+            return
+        cup = next((i for i in program.islands if self.pad_body in i.bodies), None)
+        if cup is None or cup.backend.solver != "mujoco":
+            return
+        solver = program.solver_of_island(cup.name)
+        if getattr(getattr(solver, "model", None), "mujoco", None) is None:
             return
         weldable = set()
         for body, owner in self.owners.items():
@@ -371,12 +382,12 @@ class Suction:
                 island = program.island_of(owner)
             except (KeyError, LookupError):
                 continue
-            if island.backend.solver == "mujoco" and body in self.rows:
+            if island.name == cup.name and body in self.rows:
                 weldable.add(body)
-        self.weldable = frozenset(weldable)
+        self.mujoco, self.weldable = solver, frozenset(weldable)
 
     def weld_available(self, body: int) -> bool:
-        """Whether the weld tier can hold ``body``: a row was built and MuJoCo steps the part."""
+        """Whether the weld tier can hold ``body``: a row was built and the pad's MuJoCo solver steps the part."""
         return int(body) in self.weldable
 
     # -------------------------------------------------------------- geometry
