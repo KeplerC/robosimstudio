@@ -45,7 +45,10 @@ in each of three drives, 15 ms at most warm; ``measure.py``, GPU 5).
 **Drawing.** The block's eight particles are its corners, written each control step; its handle is a
 particle body whose ``surface`` is the cutter's own skin and cut faces, which the studio and the
 path tracer both draw. The two pieces stay held where they stand and touch, as a real block on a
-board does, so a finished cut shows as the blade standing through the block and as ``pieces``.
+board does, so a finished cut shows as the blade standing through the block and as ``pieces``. The
+corners do not determine the cut, so each step's drawing is kept under the corners it wrote: the
+page's **Export video** replays the block as each step drew it, and a replay in another process draws
+none (``EntityCuttable.surface_mesh``).
 
 **Measures.** ``pieces`` counts the cut cage's material pieces and ``cut_fraction`` reads how far the
 last cut ran; ``tests/test_cut_tofu`` drives the example's arm panel and reads both.

@@ -7,12 +7,15 @@ Newton physics at all. It holds the vendored walk-on-spheres cage solver (``cage
 control step, after the substeps: reads the knife's pose, applies the edge law (``law.py``), advances
 the cut, steps the cage, feeds the push back onto the knife as a wrench for the next control step,
 and redraws the cut block. Its eight particles are the block's corners, written each step, so the
-renderers treat it as a particle body whose ``surface`` is the cutter's own mesh.
+renderers treat it as a particle body whose ``surface`` is the cutter's own mesh, kept under the
+corners each step wrote so that a replay in this process redraws each step's block
+(:meth:`EntityCuttable.surface_mesh`).
 """
 
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from typing import Any
 
 import newton
@@ -135,6 +138,8 @@ class EntityCuttable(Entity):
         self._feed: Any = None
         self._wrench: Any = None
         self._surface: tuple[np.ndarray, np.ndarray] = (np.zeros((0, 3), np.float32), np.zeros((0, 3), np.int32))
+        self._drawn: OrderedDict[bytes, tuple[np.ndarray, np.ndarray]] = OrderedDict()
+        """The last :data:`DRAWN` drawings of the block, each under the corners its step wrote."""
         self._pieces_version = -1
         self._pieces = 1
         self._dt = 0.02
@@ -180,7 +185,7 @@ class EntityCuttable(Entity):
         self._wrench = WrenchAccumulator(stepping, alpha=0.35, dv_max=5.0)
 
     def handle(self, model: newton.Model) -> Any:
-        """The corners as a particle body whose surface is the cutter's mesh."""
+        """The corners as a particle body whose surface is the cutter's mesh as drawn at those corners."""
         from robosimstudio.scene.handles import DeformableHandle
 
         del model
@@ -399,16 +404,29 @@ class EntityCuttable(Entity):
             tris.append(faces + offset)
             offset += len(flat)
         world = frame.from_cutter(np.concatenate(points)).astype(np.float32)
-        self._surface = (world, np.concatenate(tris).astype(np.int32))
+        faces = np.concatenate(tris).astype(np.int32)
+        last = self._surface[1]
+        if last.shape == faces.shape and np.array_equal(last, faces):
+            faces = last  # shared by the drawings kept while the topology holds
+        self._surface = (world, faces)
+        key = _corner_key(self._corners())
+        self._drawn[key] = self._surface
+        self._drawn.move_to_end(key)
+        while len(self._drawn) > DRAWN:
+            self._drawn.popitem(last=False)
 
-    def surface_mesh(self, positions: Any) -> tuple[np.ndarray, np.ndarray]:
-        """The block as drawn: the cutter's skin and cut faces, ``(vertices, triangles)`` in world.
+    def surface_mesh(self, positions: Any) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """The block as drawn with its corners at ``positions``: ``(vertices, triangles)`` in world.
 
-        Not a function of ``positions``: the cut's topology lives in the cutter, so a replay of
-        the corners' recorded positions redraws the block whole.
+        The cut's topology and the cage inside the corners live in the cutter, so the block cannot be
+        regrown from the eight corners a recording holds. Each step's drawing is kept instead, under
+        the corners that step wrote (the last :data:`DRAWN`), and a replay of recorded corners in this
+        process -- the page's **Export video** -- redraws each step's block as it was, whole until the
+        knife went in. Corners with no drawing kept draw nothing rather than another step's block, so
+        a replay in another process, which holds only the block as built, draws none once the first
+        step has moved the corners.
         """
-        del positions
-        return self._surface
+        return self._drawn.get(_corner_key(positions), (None, None))
 
     def _corners(self) -> np.ndarray:
         return self.block.from_cutter(self.body.sim.x[:8]).astype(np.float32)
@@ -468,6 +486,17 @@ class EntityCuttable(Entity):
         del snapshot
         return {"pieces": float(self.pieces()), "cut_fraction": self.cut_fraction()}
 
+
+def _corner_key(positions: Any) -> bytes:
+    """What a drawing is kept under: the corners as ``particle_q`` holds them, float32."""
+    return np.ascontiguousarray(np.asarray(positions, dtype=np.float32).reshape(-1, 3)).tobytes()
+
+
+DRAWN = 2048
+"""How many drawings of the block it keeps for a replay, the newest. The page's video buffer spans
+1800 control steps (900 frames, one every second step); in ``tests/test_cut_tofu``'s drive the corners
+took 178 values over 728 steps, and the drawings kept under one of them agreed to a float32 ulp. A
+drawing is about 14 KB of vertices, its triangles shared with the last while the topology holds."""
 
 MIN_ADVANCE = 5.0e-4
 """The least the front moves in one step [m], so a slow knife costs few cut steps; the last step to the

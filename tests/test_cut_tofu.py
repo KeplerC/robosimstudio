@@ -7,9 +7,10 @@ button writes -- and reads what the page's **Tofu** folder reads. The right hand
 knife's handle, closes, lifts the knife 70 mm out of its rest, carries it over the tofu and pushes it
 down in 4 mm steps until the edge meets the board. Nothing pins the knife to the hand: the pads
 squeeze its handle. Two controls ride on the same drive: over the tofu, and held 15 mm higher on the
-way down, the tofu is still one piece. A second drive does the same with **Dull blade** ticked, a
-blade a thousand times duller: the arm stalls with the edge a few millimetres into the tofu, read
-off the knife's pose, and it does not part.
+way down, the tofu is still one piece. The drive's first and last steps, replayed the way the page's
+**Export video** replays them, draw the block each of them drew. A second drive does the same with
+**Dull blade** ticked, a blade a thousand times duller: the arm stalls with the edge a few
+millimetres into the tofu, read off the knife's pose, and it does not part.
 """
 
 from __future__ import annotations
@@ -99,17 +100,42 @@ def cut(session, tofu, knife, *, pause_over: float | None = None) -> dict:
     return out
 
 
+def replay(sim, tofu, frames: list) -> dict:
+    """The first and last steps' particles written into a fresh state, as **Export video** replays them.
+
+    ``frames`` holds each step's ``particle_q``, copied as the page's video buffer copies it, beside the
+    block's vertices that step drew. ``first`` and ``last`` pair what the handle draws at the replayed
+    corners with what the step drew; ``nowhere`` is how many vertices it draws at corners no step wrote.
+    """
+    from robosimstudio.core.render.offline import StateReplay
+    from robosimstudio.core.render.particles import surface_mesh
+
+    handle = sim.handles.deformables[tofu.name]
+    state = StateReplay(sim.model)
+    out: dict = {}
+    for name, (q, drawn) in (("first", frames[0]), ("last", frames[-1])):
+        at = state.write({"particle_q": q}).particle_q.numpy()[handle.particles]
+        out[name] = (surface_mesh(handle.surface, at)[0], drawn)
+    out["nowhere"] = len(surface_mesh(handle.surface, at + 1.0e-3)[0])
+    return out
+
+
 def _drive(port: int, *, dull: bool) -> dict:
     """Build the example and drive its page through the cut, holding 15 mm over the board on the way down."""
     sim, kwargs = _run("20_cutting/00_cut_tofu.py")
     tofu, knife = sim["tofu"].entity, sim["knife"]
     session = open_session(sim, port, kwargs.get("page"))
+    frames: list = []
+    session.each_step(
+        lambda: frames.append((np.array(session.env.state.particle_q.numpy(), dtype=np.float32), tofu._surface[0]))
+    )
     try:
         if dull:
             tofu.set_sharpness(0.001)  # what the page's Dull blade box writes
         tick(session, 30)
         got = cut(session, tofu, knife, pause_over=0.015)
         got["tick_ms"] = tofu.timing.get("total_ms", 0.0)
+        got["replay"] = replay(sim, tofu, frames)
     finally:
         session.teardown()
     return got
@@ -153,6 +179,14 @@ class TestTheHandCutsTheTofu(unittest.TestCase):
 
     def test_the_scene_steps_inside_an_interactive_budget(self) -> None:
         self.assertLess(self.got["drive_ms"], 60.0, f"{self.got['drive_ms']:.1f} ms per control step cutting")
+
+    def test_a_replay_draws_the_block_each_step_drew(self) -> None:
+        """Whole at the first step, before the knife went in, and in two at the last; nothing elsewhere."""
+        (first, drawn_first), (last, drawn_last) = self.got["replay"]["first"], self.got["replay"]["last"]
+        self.assertLess(len(first), len(last), "the first step replays with the cut's faces")
+        np.testing.assert_allclose(first, drawn_first, atol=1.0e-6)
+        np.testing.assert_allclose(last, drawn_last, atol=1.0e-6)
+        self.assertEqual(0, self.got["replay"]["nowhere"], "corners no step wrote draw another step's block")
 
 
 class TestADullBladeDoesNotPartIt(unittest.TestCase):
