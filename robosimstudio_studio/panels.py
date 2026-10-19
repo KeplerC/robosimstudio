@@ -826,6 +826,10 @@ class PanelCloth(Panel):
         self.release_all_requested = False
         self.follow_arm = [""] * len(self.draggers)
         """Which arm each handle rides, by slot. ``""`` leaves it on the mouse."""
+        self.grab_set_arm = ""
+        """The hand ``Grab set`` pins the slot it takes to. ``""`` leaves that slot's pin as it is."""
+        self.release_arm_requested = ""
+        """Let go of every handle pinned to this hand and unpin their slots; the other handles stay."""
         self.selected = self.names[0] if self.names else ""
         self.pending: tuple[str, np.ndarray] | None = None
         """A click waiting to be serviced on the main thread."""
@@ -911,7 +915,7 @@ class PanelCloth(Panel):
             return ()
         return tuple(sorted(key.split("/", 1)[-1] for key in handle.sets))
 
-    def grab_set(self, set_name: str) -> int:
+    def grab_set(self, set_name: str, arm: str = "") -> int:
         """Take hold of one declared set. Main thread. Returns particles held.
 
         Aimed at the set's own centroid and restricted to its own indices, with
@@ -923,6 +927,10 @@ class PanelCloth(Panel):
         sixty of them should not look like a handle holding all of it. On a slot
         pinned to a hand it is aimed at the hand instead (:meth:`_hand_frame`),
         and the cap keeps the ones nearest the hand.
+
+        ``arm`` pins the slot the grab takes to that hand, whichever slot that
+        is: a page that pinned a slot by number before asking pinned the one a
+        click grab held whenever the click came first.
 
         Restores the click radius afterwards (:meth:`_grab_all`), because that
         number is the aim tolerance for the *other* way of grabbing and a set
@@ -937,13 +945,14 @@ class PanelCloth(Panel):
             return 0
         points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
         slot = self._acquire()
-        arm = self.follow_arm[slot.index]
+        arm = arm or self.follow_arm[slot.index]
         centre, quat = self._hand_frame(arm) if arm else (points.mean(axis=0), IDENTITY_QUAT)
         dragger = self.draggers[slot.index]
         taken = self._grab_all(dragger, indices, centre, quat)
         if not taken:
             self._release(slot)
             return 0
+        self.follow_arm[slot.index] = arm
         self.miss = 0.0
         self._hand_over(slot, self.selected, dragger, centre, quat)
         slot.place(centre, quat, key=("cloth", self.selected), label=f"{set_name} ({taken})")
@@ -1009,7 +1018,7 @@ class PanelCloth(Panel):
             self._grab(*pending)
         if self.grab_set_requested:
             self.grab_set_requested = False
-            self.grab_set(self.selected_set)
+            self.grab_set(self.selected_set, arm=self.grab_set_arm)
         if self.regrip_requested:
             self.regrip_requested = False
             self._regrip()
@@ -1020,6 +1029,12 @@ class PanelCloth(Panel):
             self.release_all_requested = False
             for handle in self.handles.live:
                 self._release(handle)
+        if self.release_arm_requested:
+            arm, self.release_arm_requested = self.release_arm_requested, ""
+            for handle in self.handles.live:
+                if self.follow_arm[handle.index] == arm:
+                    self._release(handle)
+                    self.follow_arm[handle.index] = ""
         # Before the targets are read, so a linked drag's followers are pinned
         # to where they are *now* rather than to last step's pose.
         self.handles.drain()
