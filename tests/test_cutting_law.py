@@ -134,6 +134,15 @@ class TestTheKnifeAndTheBlockAsBuilt(unittest.TestCase):
         self.assertEqual(-1, knife.coord_start, "no free joint's coordinates to reset")
         self.assertNotIn(int(newton.JointType.FREE), [int(t) for t in builder.joint_type])
         self.assertEqual(2, sum(int(b) == knife.body for b in builder.shape_body), "the handle and the blade")
+        # A bare link was no weld: VBD integrated it and MuJoCo refused it (EntityRigid._add_welded_link).
+        welds = [j for j in range(builder.joint_count) if int(builder.joint_child[j]) == knife.body]
+        self.assertEqual(1, len(welds), "one joint holds it")
+        self.assertEqual(
+            (int(newton.JointType.FIXED), -1),
+            (int(builder.joint_type[welds[0]]), int(builder.joint_parent[welds[0]])),
+            "fixed to the world",
+        )
+        self.assertEqual(int(newton.BodyFlags.KINEMATIC), int(builder.body_flags[knife.body]), "and nothing pushes it")
 
     def test_the_block_finds_its_knife_by_name_and_says_where_a_missing_one_goes(self) -> None:
         import robosimstudio as rss

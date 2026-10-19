@@ -49,7 +49,7 @@ class EntityKnife(EntityRigid):
         spec = self.spec
         xform = wp.transform(tuple(float(v) for v in pose[:3]), wp.quat(*[float(v) for v in pose[3:7]]))
         if spec.static:
-            self.body = builder.add_link(xform=xform, label=spec.name)
+            self.body = self._add_welded_link(builder, xform)
         else:
             self.body = builder.add_body(xform=xform, label=spec.name)
             joint = builder.joint_count - 1

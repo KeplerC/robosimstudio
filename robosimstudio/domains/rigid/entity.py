@@ -105,7 +105,7 @@ class EntityRigid(Entity):
             self._build_usd(builder, path, xform)
         elif path.suffix.lower() in (".obj", ".stl", ".ply", ".glb", ".gltf", ".dae"):
             if self.spec.static:
-                body = builder.add_link(xform=xform, label=self.spec.name)
+                body = self._add_welded_link(builder, xform)
             else:
                 # add_body creates the free joint AND the articulation. The
                 # articulation half is load-bearing: without one SolverMuJoCo takes
@@ -308,7 +308,9 @@ class EntityRigid(Entity):
         the body and free joint itself, so the stage decides what the object
         weighs and collides as. A stage with no physics schema anywhere is
         geometry, and is treated exactly as an ``.obj`` is -- this creates the
-        body and the free joint, and the spec supplies density and collider.
+        body and the free joint, or the weld when the spec is static (it built a
+        free body for ``static=True`` before), and the spec supplies density and
+        collider.
 
         Asking the file rather than taking a flag is deliberate: the two are not
         interchangeable descriptions of one object, they are different claims,
@@ -364,10 +366,13 @@ class EntityRigid(Entity):
 
         import newton.usd
 
-        self.body = builder.add_body(xform=xform, label=self.spec.name)
-        joint = builder.joint_count - 1
-        self.coord_start = int(builder.joint_q_start[joint])
-        self.dof_start = int(builder.joint_qd_start[joint])
+        if self.spec.static:
+            self.body = self._add_welded_link(builder, xform)
+        else:
+            self.body = builder.add_body(xform=xform, label=self.spec.name)
+            joint = builder.joint_count - 1
+            self.coord_start = int(builder.joint_q_start[joint])
+            self.dof_start = int(builder.joint_qd_start[joint])
         cfg = builder.default_shape_cfg.copy()
         cfg.density = float(self.spec.density)
         if self.spec.friction is not None:
@@ -431,6 +436,41 @@ class EntityRigid(Entity):
         """The pose this object measures its episode layouts from: the spec's own."""
         return self._declared.copy()
 
+    def _add_welded_link(self, builder: newton.ModelBuilder, xform) -> int:
+        """A static object's body: a link welded to the world where it stands, and kinematic.
+
+        :attr:`~robosimstudio.specs.ObjectSpec.static` says *welded to the world
+        rather than free*. A bare ``add_link`` is neither: it is a body with no
+        joint, flagged DYNAMIC, and each solver reads that its own way. VBD
+        integrates it like a free body. Under ``GENERIC``, beside the YAM, a static
+        10 cm cube fell 148 mm from 0.2 m to the bench in a second, and a static
+        block resting on the bench sank 3.1 mm. Under the right hand, shut and
+        driven 20 mm below the block's top, the block slid (+10.0, -5.9, -4.4) mm,
+        as a free block did. With no robot, a towel on VBD pressed a static cube
+        14 mm into the bench in two seconds. MuJoCo refuses to convert it: "cannot
+        convert bodies that are outside articulations and have no standalone joint
+        to world". Newton 1.6 did the same on both solvers (``s2_newton.py``), so
+        this is not the 1.7 bump.
+
+        So it is held the way
+        :meth:`~robosimstudio.domains.static.welded.WeldedFixture.weld_in_place`
+        holds a replicated static. A fixed joint from the world at the body's
+        pose, outside any articulation, which MuJoCo converts as a standalone
+        world root (a mocap body, the body being kinematic), saying so once in a
+        ``UserWarning``. And :attr:`newton.BodyFlags.KINEMATIC`, which gives the
+        body an inverse mass of zero in VBD. The joint alone let the block move
+        0.05 mm under the press and the cube 0.01 mm under the towel. With the
+        flag every one of these reads 0.00 mm, and the hand stops 16.7 mm over the
+        block's top, as it does over an ``rss.slab`` (``s1_repro.py``,
+        ``s3_press.py``, ``s4_weld_only.py``). The joint has no coordinates, so a
+        reset has none to write, and no articulation, so forward kinematics leaves
+        the body where its build put it.
+        """
+        body = builder.add_link(xform=xform, label=self.spec.name)
+        builder.add_joint_fixed(-1, body, parent_xform=builder.body_q[body], label=f"{self.spec.name}_weld")
+        builder.body_flags[body] = int(newton.BodyFlags.KINEMATIC)
+        return body
+
     def _add_primitive(self, builder: newton.ModelBuilder, pose) -> None:
         """A body made from a primitive, with no file behind it.
 
@@ -441,7 +481,7 @@ class EntityRigid(Entity):
         """
         xform = wp.transform(tuple(float(v) for v in pose[:3]), wp.quat(*[float(v) for v in pose[3:7]]))
         if self.spec.static:
-            body = builder.add_link(xform=xform, label=self.spec.name)
+            body = self._add_welded_link(builder, xform)
         else:
             body = builder.add_body(xform=xform, label=self.spec.name)
             joint = builder.joint_count - 1
