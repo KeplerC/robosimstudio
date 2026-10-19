@@ -1002,7 +1002,9 @@ class StudioSession:
         if self._wants("object") and (env.handles.objects or self.arms):
             self.objects = PanelObject(self, handles=config.handles, chrome=self.chrome)
             panels.append(self.objects)
-        if self._wants("cloth") and any(e.carries_particles for e in env.scene.by_name.values()):
+        # The things carrying a particle probe, not every particle carrier: a cuttable's eight
+        # corners are a drawing its cage solver writes, and the panels below observe, pin and settle.
+        if self._wants("cloth") and env.deformables():
             self.deformables = PanelCloth(self, handles=config.handles, chrome=self.chrome)
             panels.append(self.deformables)
             # Tuning lives beside the task rather than on a page of its own: a

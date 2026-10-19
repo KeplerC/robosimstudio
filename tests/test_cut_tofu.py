@@ -10,7 +10,8 @@ squeeze its handle. Two controls ride on the same drive: over the tofu, and held
 way down, the tofu is still one piece. The drive's first and last steps, replayed the way the page's
 **Export video** replays them, draw the block each of them drew. A second drive does the same with
 **Dull blade** ticked, a blade a thousand times duller: the arm stalls with the edge a few
-millimetres into the tofu, read off the knife's pose, and it does not part.
+millimetres into the tofu, read off the knife's pose, and it does not part. A third build opens the
+whole page, every panel, and refreshes each of them.
 """
 
 from __future__ import annotations
@@ -24,10 +25,11 @@ from tests.fixtures.examples import _run
 from tests.fixtures.grasp import go, open_session, tick
 
 TIER = "medium"
-"""One GPU: the example built twice and driven through its page, about 11 ms a control step."""
+"""One GPU: the example built three times, twice driven through its page at about 11 ms a control step."""
 
 PORT = 9841
 DULL_PORT = 9842
+ALL_PORT = 9843
 WORK = np.array([0.6, 0.0, 0.75])
 """``bench_075``'s work-surface origin in world [m]."""
 TOFU_Y = -0.16
@@ -208,6 +210,32 @@ class TestADullBladeDoesNotPartIt(unittest.TestCase):
         depth = f"edge {got['edge_depth'] * 1e3:.1f} mm into the tofu, tilted {got['tilt']:.1f} deg"
         self.assertGreater(got["edge_depth"], 0.002, depth)
         self.assertLess(got["edge_depth"], 0.015, depth)
+
+
+class TestTheWholePageOpens(unittest.TestCase):
+    """The page with every panel, ``panels="all"``: the launcher's default, where ``rss.view``'s is ``"drive"``.
+
+    The cloth panel listed the tofu, which owns eight particles -- the corners its cage writes back for
+    the page to draw the cut by -- and called ``observe`` on it: ``AttributeError`` on the first refresh.
+    The tofu carries no particle probe, so it is no deformable the panels serve, and the page has none.
+    """
+
+    def test_it_refreshes_without_a_deformable_fold(self) -> None:
+        from robosimstudio_studio.session import StudioConfig, StudioSession, panel_key
+
+        sim, kwargs = _run("20_cutting/00_cut_tofu.py")
+        session = StudioSession(sim, config=StudioConfig(port=ALL_PORT, panels="all", speed="max", live=False))
+        try:
+            kwargs["page"](session)
+            session.begin_run()
+            tick(session, 20)
+            for panel in session.panels:  # what each refresh does, on every panel, whatever the draw clock says
+                panel.refresh()
+            keys = {panel_key(p) for p in session.panels}
+            self.assertEqual(set(), keys & {"cloth", "tune", "readings"})
+            self.assertEqual({}, sim.deformables(), "nothing on the bench carries a particle probe")
+        finally:
+            session.teardown()
 
 
 if __name__ == "__main__":

@@ -876,6 +876,16 @@ class PanelCloth(Panel):
     unchanged -- only what ends up holding the patch differs, and the readout
     says which it was.
 
+    **What it serves is what the scene observes.** Owning particles is not the
+    question: a cuttable block owns eight, the corners its cage solver writes
+    back after every control step so the page can draw the cut, with no probe
+    to summarise them and nothing a pin on them would move. Listed here, it took
+    the page down on the first refresh (``'EntityCuttable' object has no
+    attribute 'observe'``, with ``panels="all"``). So the panel takes
+    :meth:`~robosimstudio.sim.Sim.deformables`, the things carrying a particle
+    probe -- every kind whose state *is* its particles, from a towel to the
+    water to a SuperDex rope -- which is what ``obs["deformables"]`` reports.
+
     Args:
         session: The page.
         handles: How many patches may be held at once, each on its own gizmo.
@@ -885,7 +895,8 @@ class PanelCloth(Panel):
         super().__init__(session)
         from robosimstudio.core.draggers import ParticleDragger
 
-        self.names = [n for n, e in self.env.scene.by_name.items() if e.carries_particles]
+        deformables = self.env.deformables()
+        self.names = list(deformables)
         self.radius = 0.03
         """How far from a click particles are seized [m]. Also what counts as a miss."""
         self.draggers = [
@@ -929,7 +940,7 @@ class PanelCloth(Panel):
         # linear scan of every cloth's index list per click is a scan per click.
         self._owner = {
             int(i): name
-            for name, cloth in ((n, e) for n, e in self.env.scene.by_name.items() if e.carries_particles)
+            for name, cloth in deformables.items()
             for i in np.asarray(cloth.particles, dtype=np.int64).tolist()
         }
 

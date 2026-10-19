@@ -342,8 +342,12 @@ class PanelReadings(Panel):
         self._folder: Any = None
 
     def _cloth(self) -> Any:
-        deformables = {n: e for n, e in self.session.env.scene.by_name.items() if e.carries_particles}
-        return next(iter(deformables.values()), None) if deformables else None
+        """The first thing carrying a particle probe (``Sim.deformables``), or ``None``.
+
+        Not the first particle carrier: a cuttable's eight corners are a drawing of
+        its cage, and a footprint and a settle speed read off them describe nothing.
+        """
+        return next(iter(self.session.env.deformables().values()), None)
 
     def _read(self) -> list[Any]:
         entity = self._cloth()
