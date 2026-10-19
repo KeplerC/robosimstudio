@@ -288,6 +288,21 @@ def _carried_round(film) -> tuple[bool, str]:
     return gap < 0.02, f"the nearest capsule ended {gap * 1000:.1f} mm from the tool centre (need under 20)"
 
 
+def _mid_twists(film) -> dict[str, float]:
+    """The twist example's readouts: each cable's turns through the middle third of its capsules, unsigned."""
+    import numpy as np
+
+    from robosimstudio_materials.rod.measures import twist_turns
+
+    body_q = np.asarray(film.sim.state.body_q.numpy())
+    out = {}
+    for name in ("soft_twist", "stiff_twist"):
+        bodies = film.sim[name].bodies
+        n = len(bodies)
+        out[name] = abs(twist_turns(body_q[bodies[n // 3 : 2 * n // 3 + 1], 3:7]))
+    return out
+
+
 def _turn_both(film) -> dict:
     """The twist take's turn: each hand's cursor turned 120 degrees inward about the vertical, over four seconds.
 
@@ -300,7 +315,6 @@ def _turn_both(film) -> dict:
     import numpy as np
 
     from robosimstudio.core.math import quat_multiply, quat_to_mat
-    from robosimstudio_materials.rod.measures import twist_turns
 
     level = np.array([0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)])
     arms = {"right": 1.0, "left": -1.0}
@@ -318,22 +332,14 @@ def _turn_both(film) -> dict:
             panel.aim(panel.cursor_pos, quat, moving=i < frames)
         film.hold(1.0 / film.take.fps)
     film.hold(1.0)
-    body_q = film.sim.state.body_q.numpy()
-    film.twist_held = {
-        n: abs(twist_turns(body_q[film.sim[n].bodies[8:17], 3:7])) for n in ("soft_twist", "stiff_twist")
-    }
+    film.twist_held = _mid_twists(film)
     return {"turned_deg": 120.0, "held": {n: round(v, 3) for n, v in film.twist_held.items()}}
 
 
 def _twisted(film) -> tuple[bool, str]:
     """The turn reached both middles while held, and once let go only the stiff cable gave it back."""
-    import numpy as np
-
-    from robosimstudio_materials.rod.measures import twist_turns
-
     held = getattr(film, "twist_held", {"soft_twist": 0.0, "stiff_twist": 0.0})
-    body_q = film.sim.state.body_q.numpy()
-    now = {n: abs(twist_turns(np.asarray(body_q)[film.sim[n].bodies[8:17], 3:7])) for n in held}
+    now = _mid_twists(film)
     ok = (
         held["soft_twist"] > 0.09
         and held["stiff_twist"] > 0.03
