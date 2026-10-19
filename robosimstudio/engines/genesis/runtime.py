@@ -51,9 +51,10 @@ def require_genesis():
         import genesis as gs
     except ImportError as error:
         raise ImportError(
-            "the 'genesis' backend needs the genesis-world wheel and libuipc: install the "
-            "[genesis] extra (uv sync --extra genesis). It ships for Linux/Windows x86 with "
-            "an NVIDIA GPU only."
+            "the 'genesis' backend needs the genesis-world wheel (and libuipc for cloth and soft "
+            "bodies): install the [genesis] extra in a virtual environment of its own, with this "
+            "checkout on PYTHONPATH (the commands are in pyproject.toml's [genesis] comment). It "
+            "ships for Linux/Windows x86 with an NVIDIA GPU only."
         ) from error
     return gs
 
