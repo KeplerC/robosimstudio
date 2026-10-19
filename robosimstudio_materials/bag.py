@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 import newton
 import numpy as np
@@ -35,6 +35,7 @@ __all__ = [
     "Bag",
     "BagSpec",
     "EntityBag",
+    "EntityBagSuperdex",
     "bag",
     "bag_mesh",
     "bags",
@@ -226,6 +227,10 @@ class EntityBag(EntityCloth):
 
     spec: BagSpec
     domain = "bag"
+    hosted: ClassVar[bool] = False
+    """Whether SuperDex integrates this bag, as :class:`EntityBagSuperdex` says. Only it builds one:
+    on a Newton solver the inactive particles would never move, and VBD has no self-contact for
+    the two layers. Decided by the class the compiler picks for the arrangement, as for a soft body."""
 
     def __init__(self, spec: BagSpec, *, world: int = 0) -> None:
         super().__init__(spec, world=world)
@@ -258,6 +263,12 @@ class EntityBag(EntityCloth):
     def build(self, builder: newton.ModelBuilder, episode) -> None:
         del episode
         spec = self.spec
+        if not self.hosted:
+            # Refused rather than built frozen: no Newton solver would move the inactive layers.
+            raise NotImplementedError(
+                f"bag {spec.name!r}: a bag is a self-colliding SuperDex shell; route the 'bag' kind to "
+                "backend('superdex'), as rss.BAG_60HZ does"
+            )
         material = spec.material
         vertices, faces = self.surface()
         placed = self.placed((*spec.pose, *spec.quat))
@@ -593,6 +604,15 @@ DOMAIN = register_domain(
 )
 
 register_entity("bag")(EntityBag)
+
+
+class EntityBagSuperdex(EntityBag):
+    """:class:`EntityBag` for SuperDex, which integrates the bag itself: Newton must leave it alone."""
+
+    hosted = True
+
+
+register_entity("bag", engine="superdex")(EntityBagSuperdex)
 
 
 # Import-only; running it directly would register the bag twice.

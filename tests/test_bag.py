@@ -215,6 +215,24 @@ class TestTheDeclarations(unittest.TestCase):
                 self.assertEqual(3, len(pipeline.steps))
                 self.assertEqual((0.0, 0), (pipeline.sim_time, pipeline.step_count))
 
+    def test_only_superdex_builds_a_bag_and_it_builds_the_layers_inactive(self) -> None:
+        """On GENERIC the bag's kind falls to VBD, which would leave the inactive layers frozen: refused."""
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio.scene.registry import resolve_entity_class
+        from robosimstudio_materials.bag import EntityBagSuperdex, bag
+
+        spec = bag(name="pouch", cells=(4, 4))
+        with self.assertRaisesRegex(NotImplementedError, r"pouch.*backend\('superdex'\)"):
+            resolve_entity_class(spec, rss.GENERIC)(spec).build(newton.ModelBuilder(), None)
+        cls = resolve_entity_class(spec, rss.BAG_60HZ)
+        self.assertIs(EntityBagSuperdex, cls)
+        builder = newton.ModelBuilder()
+        cls(spec).build(builder, None)
+        active = [int(f) & int(newton.ParticleFlags.ACTIVE) for f in builder.particle_flags]
+        self.assertTrue(builder.particle_count > 0 and not any(active), "SuperDex's bag is left to SuperDex")
+
     def test_the_arrangement_puts_the_bag_on_superdex_beside_the_soft_kind(self) -> None:
         import robosimstudio as rss
 
