@@ -176,6 +176,14 @@ class TestTheWipeIsGatedOnThePush(unittest.TestCase):
         self.assertEqual(reading["wiped"], 0.25)
         self.assertEqual(max(wipe.raw), 500.0, "the raw readings keep it")
 
+    def test_the_raw_readings_keep_the_last_ones_only(self) -> None:
+        from robosimstudio_materials.cloth import ForceGatedWipe
+
+        wipe = self._wipe([((10,), 1, (0.0, 0.0, 12.0))])
+        for _ in range(ForceGatedWipe.KEEP + 5):
+            wipe.update()
+        self.assertEqual(ForceGatedWipe.KEEP, len(wipe.raw), "a page updates it every step, for as long as it is open")
+
     def test_lifting_a_hard_press_back_through_the_band_wipes_nothing(self) -> None:
         import warp as wp
 
