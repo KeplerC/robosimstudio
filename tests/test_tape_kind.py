@@ -245,8 +245,8 @@ class TestThePressThatMakesABond(unittest.TestCase):
         }
         label._rows, label._particle, label.broken = one(0, wp.int32), one(0, wp.int32), one(0, wp.int32)
         params = [8.0e3 if f == "press" else float(getattr(LABEL, f)) for f in CONTACT_FIELDS]
+        label._model = model
         label._contact = {
-            "model": model,
             "boxes": one(0, wp.int32),
             "area": one(2.5e-5, float),
             "normal": one(wp.vec3(0.0, 0.0, 1.0), wp.vec3),

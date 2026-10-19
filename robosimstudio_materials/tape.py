@@ -1077,8 +1077,8 @@ class EntityTape(EntityCloth):
         under it, where VBD's contact rests it (:meth:`_lay`). 0 for a loose sheet."""
         self.lift_shapes: np.ndarray = np.zeros(0, dtype=np.int64)
         """The shapes whose margin :attr:`lift` is: the body's boxes under the sheet's bonds."""
-        self._margins: Any = None
         self._model: Any = None
+        """The model the bonds are bound on: the margins, radii and shapes every bond kernel reads."""
         self._under: Any = None
         self._radius: np.ndarray = np.zeros(0, dtype=np.float32)
         """Each bond's particle radius as the bonds were bound [m]: what :meth:`radius_moved` measures from."""
@@ -1427,7 +1427,7 @@ class EntityTape(EntityCloth):
         c = self._contact
         if not c:
             return
-        model = c["model"]
+        model = self._model
         device = state.particle_q.device
         # The solver's copy and the model's, the same array when the solver reads the model's.
         keys = ("enabled", "body_point", "stiffness")
@@ -1539,7 +1539,6 @@ class EntityTape(EntityCloth):
         self._body = wp.array(np.full(len(self.bonds), self.body, dtype=np.int32), dtype=wp.int32, device=device)
         self._anchor = wp.array(self.anchors.astype(np.float32), dtype=wp.vec3, device=device)
         self._limit = wp.array([float(self.spec.material.break_opening)], dtype=wp.float32, device=device)
-        self._margins = model.shape_margin
         self._model = model
         self._under = wp.array(self.lift_shapes.astype(np.int32), dtype=wp.int32, device=device)
         self._radius = model.particle_radius.numpy()[self.bond_particles].astype(np.float32)
@@ -1571,7 +1570,6 @@ class EntityTape(EntityCloth):
                 f"has shapes of types {sorted(set(types[mine].tolist()))}; stick it to an rss.box"
             )
         self._contact = {
-            "model": model,
             "boxes": wp.array(boxes.astype(np.int32), dtype=wp.int32, device=device),
             "area": wp.array(self.bond_area.astype(np.float32), dtype=float, device=device),
             "normal": wp.array(
@@ -1598,7 +1596,7 @@ class EntityTape(EntityCloth):
         the margin into its lift, and from 1 mm the push out through the margin overshot ``reach``.
         """
         c = self._contact
-        model, stiffness, body_point = c["model"], self._arrays["stiffness"], self._arrays["body_point"]
+        model, stiffness, body_point = self._model, self._arrays["stiffness"], self._arrays["body_point"]
         wp.launch(
             _seat_kernel,
             dim=len(self.bonds),
@@ -1656,9 +1654,9 @@ class EntityTape(EntityCloth):
         built, a tabbed label's 144 bonds let go: :data:`LABEL` kept 8 at 1 mm and none from 1.5 mm,
         :data:`PAPER_LABEL` 2 at 1 mm and none from 1.5 mm. Laid this much further, all 144 of either
         held 60 substeps at 0.5 to 2 mm, none lifted (``z2_reset.py``, VBD on the CPU)."""
-        if not len(self.lift_shapes) or self._margins is None:
+        if not len(self.lift_shapes) or self._model is None:
             return 0.0
-        return float(self._margins.numpy()[self.lift_shapes].max()) - self.lift
+        return float(self._model.shape_margin.numpy()[self.lift_shapes].max()) - self.lift
 
     def radius_moved(self) -> float:
         """How far the particle radius a stuck sheet was laid at has moved since the build [m]: what a reset lays
