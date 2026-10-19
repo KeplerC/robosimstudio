@@ -2043,6 +2043,173 @@ ROBOT_CUTTING = (
     ),
 )
 
+# The stuck label: the right hand carries a loose label by its pull tab, lays it on the box and rubs
+# it down with its shut fingertips, the drive tests/test_stick_a_label makes through the same panel.
+STICK = "examples/19_tape/02_stick_a_label.py"
+STICK_AJAR = 0.6
+"""The **Grip amount** the jaws open to around the tab: 38 mm, the far jaw clear of the box."""
+STICK_FAR = (0.0, -0.125, 0.146)
+"""Where the carried label's free end touches the box top, bench frame [m]."""
+STICK_NEAR = (0.0, -0.040, TAPE_TOP + 0.019)
+"""Where the tab is set down, bench frame [m]."""
+STICK_TIP, STICK_PUSH, STICK_HOVER, STICK_CLEAR = 0.0165, 0.003, 0.05, 0.011
+"""The tool centre over the shut fingertips, how far under the label the rub's cursor goes, how high
+the fingertips move between strokes and how far past the tab's furthest corner a stroke starts [m]."""
+
+
+def _stick_column(label, state, c: int, along: float):
+    """The label's grid column ``c``, ``along`` metres from its tab end, where it lies now [m, world]."""
+    import numpy as np
+
+    nx, ny = label.spec.cells
+    cell = label.spec.cell[1]
+    q = state.particle_q.numpy()[np.asarray(label.particles)]
+    j = min(int(along // cell), ny - 1)
+    t = along / cell - j
+    return (1.0 - t) * q[j * (nx + 1) + c] + t * q[(j + 1) * (nx + 1) + c]
+
+
+def _stick_tab_reach(label, state, away) -> float:
+    """How far along ``away`` the tab's furthest corner reaches [m]."""
+    import numpy as np
+
+    from robosimstudio.core.math import quat_to_mat
+
+    pose = label.tab_pose(state)
+    corners = (
+        np.array([[i, j, k] for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)]) * 0.5 * np.asarray(label.spec.tab_size)
+    )
+    return float(np.max((corners @ quat_to_mat(pose[3:7]).T + pose[:3]) @ away))
+
+
+def _stick_onto_tab(film):
+    """Over the tab and down until the jaws straddle it."""
+    import numpy as np
+
+    film.stick_tab = tab = film.sim["label"].entity.tab_pose(film.sim.state)[:3]
+    yield from _go(film, "right", tab + np.array([0.0, 0.0, 0.05]), 0.08)
+    yield from _go(film, "right", tab + np.array([0.0, 0.0, 0.004]), 0.04, tolerance=0.004)
+
+
+def _stick_lay(film):
+    """Up 150 mm, over the box's far end, then down and toward its near end together: it lies down."""
+    import numpy as np
+
+    tab, far, near = film.stick_tab, np.asarray(film.bench(STICK_FAR)), np.asarray(film.bench(STICK_NEAR))
+    yield from _go(film, "right", (tab[0], tab[1], film.bench((0.0, 0.0, 0.15))[2]), 0.04)
+    yield from _go(film, "right", far, 0.03)
+    yield from _wait(60)
+    for k in range(1, 31):
+        yield from _go(film, "right", far + (near - far) * k / 30, 0.03, steps=5)
+    yield from _wait(20)
+
+
+def _stick_off(film):
+    """Up 50 mm off the tab."""
+    import numpy as np
+
+    yield from _go(film, "right", np.asarray(film.bench(STICK_NEAR)) + np.array([0.0, 0.0, 0.05]), 0.05)
+    yield from _wait(30)
+
+
+def _stick_rub(film):
+    """Four strokes along the label's columns 1, 3, 5 and 7, where it lies, from past the tab to past its end."""
+    import numpy as np
+
+    label = film.sim["label"].entity
+    a, b = _stick_column(label, film.sim.state, 4, 0.03), _stick_column(label, film.sim.state, 4, 0.09)
+    away = np.array([b[0] - a[0], b[1] - a[1], 0.0])
+    away /= np.linalg.norm(away)
+    lift, hover = np.array([0.0, 0.0, STICK_TIP - STICK_PUSH]), np.array([0.0, 0.0, STICK_HOVER + STICK_PUSH])
+
+    def ends(c):
+        state = film.sim.state
+        first = _stick_column(label, state, c, 0.03)
+        start = first - away * (float(np.dot(first, away)) - _stick_tab_reach(label, state, away) - STICK_CLEAR)
+        return start + lift, _stick_column(label, state, c, 0.098) + lift
+
+    for c in (1, 3, 5, 7):
+        start, end = ends(c)
+        yield from _go(film, "right", start + hover, 0.08, steps=60)
+        start, end = ends(c)
+        yield from _go(film, "right", start, 0.05, steps=0)
+        yield from _wait(10)
+        yield from _go(film, "right", end, 0.03, steps=30)
+        yield from _wait(10)
+        yield from _go(film, "right", end + hover, 0.05, steps=30)
+
+
+def _stick_clear(film):
+    """Up 60 mm and back 60 mm toward the arm, off the label, so the stuck label shows."""
+    import numpy as np
+
+    panel = film.session.arms["right"]
+    yield from _go(film, "right", np.asarray(panel.cursor_pos) + np.array([-0.06, 0.0, 0.06]), 0.06)
+    yield from _wait(20)
+
+
+def _keep_bonded(name: str) -> Do:
+    def keep(film):
+        film.bonded = {**getattr(film, "bonded", {}), name: float(film.sim["label"].entity.bonded())}
+        return film.bonded
+
+    return Do(fn=keep, label="")
+
+
+def _stuck(film) -> tuple[bool, str]:
+    """Laid, it barely stuck; rubbed, 80% of its bonds hold, read off the page's bonded_fraction."""
+    seen = getattr(film, "bonded", {})
+    laid, rubbed = seen.get("laid", 1.0), float(film.sim["label"].entity.bonded())
+    return (
+        laid < 0.1 and rubbed >= 0.8,
+        f"bonded {laid:.3f} laid and {rubbed:.3f} rubbed (the test asks under 0.1, then 0.8)",
+    )
+
+
+ROBOT_TAPE = (
+    *ROBOT_TAPE,
+    Take(
+        STICK,
+        # In front of the bench and to its right: the label on the bench, the box, the carry 150 mm up
+        # and the four strokes in one view, the Label folder's bonded_fraction beside them.
+        camera=Orbit(Bench(0.0, -0.14, 0.07), distance=1.0, azimuth=38.0, elevation=34.0, fov=38.0),
+        warmup=0.5,
+        layout=Layout(collapse=("Simulation", "Arm: left"), expand=("Label",)),
+        speed=2.0,
+        fps=10,
+        budget=1_800_000,
+        beats=(
+            Wait(seconds=0.4, label="a loose label on the bench beside the box, its tab under the right hand"),
+            Slider(
+                text="Grip amount",
+                value=STICK_AJAR,
+                seconds=0.5,
+                within=RIGHT,
+                label="Grip amount 0.6: the jaws part 38 mm",
+            ),
+            _per_step(_stick_onto_tab, "drag the hand down: the jaws straddle the tab"),
+            Press(text="Close", within=RIGHT, label="Close: the pads take the tab"),
+            Wait(seconds=0.6, mark="closed"),
+            _per_step(_stick_lay, "up, over the box's far end, down toward its near end: the label lies down"),
+            Slider(
+                text="Grip amount",
+                value=STICK_AJAR,
+                seconds=0.5,
+                within=RIGHT,
+                label="Grip amount 0.6: the tab is let go",
+            ),
+            _per_step(_stick_off, "the hand lifts off: laid, not pressed, it barely sticks"),
+            _keep_bonded("laid"),
+            Press(text="Close", within=RIGHT, label="Close: the fingertips shut"),
+            Scroll(pixels=-600, seconds=0.3),  # back to the top: the Label readouts lead the panel
+            _per_step(_stick_rub, "four strokes along the label, 10 mm apart: it sticks where they pressed"),
+            _per_step(_stick_clear, "the hand lifts away"),
+            Wait(seconds=1.5, mark="stuck", label="stuck: bonded_fraction past 0.8"),
+        ),
+        expect=(Check(_stuck, needs=("label",)),),
+    ),
+)
+
 TAKES: tuple[Take, ...] = (
     *FINAL,
     *DRAFTS,

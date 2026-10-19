@@ -72,6 +72,7 @@ NUMBERED = (
     "15_suction/01_pick_scored.py",
     "19_tape/00_peel_a_label.py",
     "19_tape/01_peel_a_label_scored.py",
+    "19_tape/02_stick_a_label.py",
     "20_cutting/00_cut_tofu.py",
     "20_cutting/01_cut_tofu_scored.py",
 )

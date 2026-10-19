@@ -117,9 +117,9 @@
 
 ## [19 Tape](19_tape/README.md)
 
-| [Peel a label](19_tape/00_peel_a_label.py) | [Peel a label, scored](19_tape/01_peel_a_label_scored.py) |
-|---|---|
-| <img src="19_tape/media/00_peel_a_label.webp" width="240"> | |
+| [Peel a label](19_tape/00_peel_a_label.py) | [Peel a label, scored](19_tape/01_peel_a_label_scored.py) | [Stick a label](19_tape/02_stick_a_label.py) |
+|---|---|---|
+| <img src="19_tape/media/00_peel_a_label.webp" width="240"> | | <img src="19_tape/media/02_stick_a_label.webp" width="240"> |
 
 ## [20 Cutting](20_cutting/README.md)
 
