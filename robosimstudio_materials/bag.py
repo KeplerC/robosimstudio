@@ -63,11 +63,12 @@ __all__ = [
 # they would never be told apart.
 #
 # The frame. The engine is float32 and solves in the coordinates it is given. A bag lying on a
-# 0.728 m bench, built in world coordinates as the bridge's own shell builder builds a sheet,
+# 0.728 m bench, built in world coordinates as the bridge's shell builder then built a sheet,
 # never converged: four Newton iterations every engine step, 24 ms each, against 1.6 ms for the same
 # bag built about its own centroid with the offset in its root transform (``p4_rawbag.py`` at the
 # origin, at (0.6, 0, 0.728) and in a local frame; 52 ms per control step on the YAM scene against
-# 8.9 ms, ``p8_prof.py``). So a bag is its own actor kind, built in its own frame (section 6).
+# 8.9 ms, ``p8_prof.py``). So that builder now builds every sheet in its own frame, and a bag is
+# its own actor kind only for what it is built with where its record says nothing (section 6).
 
 
 # =============================================================================
@@ -507,54 +508,35 @@ def _mouth_opening(snapshot, bag: str) -> dict[str, float]:
 # =============================================================================
 
 
-def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None, tet_materials=None) -> dict:
-    """The bag as a SuperDex shell whose nodes live in a frame at its own centroid.
+_BAG_SHELL = {
+    "thickness": float(CANVAS.thickness),
+    "areal_density": float(CANVAS.areal_density),
+    "young": float(CANVAS.shell_young),
+    "poisson": float(CANVAS.shell_poisson),
+    "particle_radius": float(CANVAS.particle_radius),
+    "self_contact": True,
+    "friction": float(CANVAS.friction),
+    "mass_damping": 0.0,
+    "stiffness_damping": 0.0,
+}
+"""What a bag is built with where its record says nothing: :data:`CANVAS`, colliding with itself, undamped."""
 
-    The bridge's ``shell`` builder, with three differences: the rest coordinates are about the
-    centroid and the offset is the root transform (section 1), the contact (friction, falloff) is
-    the bag's own rather than the engine's defaults, and so is the material's damping. Read back,
-    the nodes are put into the world frame through the root, as ``place_actor`` writes them.
+_BAG_NAMES = {"shell_young": "young", "shell_poisson": "poisson"}
+"""The bag's params under its material's field names, as the composer checks a stated field, to the shell's keys."""
+
+
+def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None, tet_materials=None) -> dict:
+    """The bag as a SuperDex shell: the bridge's shell builder, under the bag's own defaults.
+
+    ``bridge.build_shell`` builds every sheet about its own centroid with the offset in the root
+    transform (section 1), states contact (friction, falloff) and damping from the params, and
+    reads the nodes back through the root, as ``place_actor`` writes them. What is the bag's own is
+    what it is built with where its record says nothing (:data:`CANVAS`, self-contact on) and the
+    names it states its modulus under: ``shell_young`` and ``shell_poisson``, its material's.
     """
     del particle_q, tet_indices, tet_materials
-    physics = bridge.physics
-    geom = actor_geometry(bridge.model, {**record, "kind": "shell"})
-    params = geom.params
-    centre = geom.rest.mean(axis=0)
-    thickness = float(params.get("thickness", CANVAS.thickness))
-    material = physics.experimental.shell_material_params_from3d_isotropic(
-        float(params.get("shell_young", CANVAS.shell_young)),
-        float(params.get("shell_poisson", CANVAS.shell_poisson)),
-        float(params.get("areal_density", CANVAS.areal_density)) / max(thickness, 1.0e-6),
-        thickness,
-    )
-    material.mass_damping_coefficient = float(params.get("mass_damping", 0.0))
-    material.stiffness_damping_coefficient = float(params.get("stiffness_damping", 0.0))
-    shape = physics.create_tri_mesh_shape(
-        coordinates=(geom.rest - centre).ravel(), connectivity=geom.tris.astype(np.int32).ravel()
-    )
-    shell = physics.experimental.ShellActorParams(
-        name=str(record.get("name", "bag")),
-        shape=shape,
-        material=material,
-        world_from_local=physics.TransformRT(
-            rotation=physics.Quaternion(0.0, 0.0, 0.0, 1.0), translation=[float(v) for v in centre]
-        ),
-    )
-    shell.point_cloud_collider.radius = float(params.get("particle_radius", CANVAS.particle_radius))
-    shell.point_cloud_collider.self_contact = bool(params.get("self_contact", True))
-    # The falloff too, when the bag states it (``BagSpec.friction_falloff``); unstated, the engine's own 10 mm/s.
-    shell.contact = bridge.contact_params(params, penalty=1.0e9, friction=float(CANVAS.friction), padding=0.0)
-    actor = physics.experimental.create_shell_actor(bridge.scene_of(record.get("world", 0)), shell)
-    actor.register_query(physics.QueryType.NODE_POSITIONS)
-    real = np.float64 if physics.uses_double_precision() else np.float32
-    return {
-        "name": str(record.get("name", "")),
-        "actor": actor,
-        "read": bridge.root_reader(actor),
-        "start": geom.start,
-        "count": geom.count,
-        "prev": geom.rest.astype(real).copy(),
-    }
+    params = {_BAG_NAMES.get(key, key): value for key, value in record.get("params", {}).items()}
+    return bridge.build_shell({**record, "params": params}, defaults=_BAG_SHELL)
 
 
 def _read_bag(model: Any, base: Any) -> Any:
@@ -582,17 +564,24 @@ register_actor_builder(
     "superdex",
     "bag",
     build_bag_actor,
+    # The shell builder's keys, and the two the bag states its modulus under (``_BAG_NAMES``).
     consumes=(
         "areal_density",
+        "contact_padding",
+        "contact_penalty",
+        "contact_smoothing",
+        "contact_threshold",
         "friction",
         "friction_falloff",
         "mass_damping",
         "particle_radius",
+        "poisson",
         "self_contact",
         "shell_poisson",
         "shell_young",
         "stiffness_damping",
         "thickness",
+        "young",
     ),
     summary="SuperDex builds a bag as a self-colliding shell in its own frame.",
 )

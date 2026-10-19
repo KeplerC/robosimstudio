@@ -209,12 +209,32 @@ class GenesisBridge:
                 f"genesis island {recipe.get('island')!r} holds a liquid, which this IPC bridge does not step; "
                 "robosimstudio.engines.genesis.sph.SphBridge does (SolverGenesis picks it from the actors)"
             )
-        gs = ensure_initialized(precision)
-        self.gs = gs
         self.model = model
         self.recipe = dict(recipe)
         self.substeps = max(1, int(substeps))
         self.feedback = str(feedback)
+        # Every refusal the model and the recipe can make, before the engine is asked for: gs.init runs once a
+        # process, so an island refused after it still set the precision every later island gets. Refused after it,
+        # a sheet started inside the bench left a water island built next in the process at float64, which the
+        # runtime warns is 8x slower a substep (g1_order.py). Only the mass check follows the build: it reads
+        # Genesis's own entity.
+        records = list(recipe.get("actors", ()))
+        builds = []
+        for record in records:
+            kind = str(record.get("kind", "tet"))
+            build = actor_builder("genesis", kind)
+            if build is None:
+                raise ValueError(
+                    f"genesis cannot build a {kind!r} actor ({record.get('name')!r}); it builds "
+                    f"{builders_for('genesis')}. The door for a new kind on this engine is "
+                    "engines.geometry.register_actor_builder('genesis', kind, build)."
+                )
+            builds.append(build)
+        geoms = [actor_geometry(model, record) for record in records]
+        shapes = iter_mirrors(model, recipe.get("mirrors", ()))
+        self._check_initial_clearance(geoms, shapes)
+        gs = ensure_initialized(precision)
+        self.gs = gs
 
         control_hz = float(recipe.get("control_hz", 60.0))
         self.scene = gs.Scene(
@@ -237,14 +257,13 @@ class GenesisBridge:
             show_viewer=False,
         )
 
-        self.actors: list[dict] = [self._add_actor(r) for r in recipe.get("actors", ())]
+        self.actors: list[dict] = [self._add_actor(geom, build) for geom, build in zip(geoms, builds, strict=True)]
         self.mirrors: list[dict] = []
-        for geom in iter_mirrors(model, recipe.get("mirrors", ())):
+        for geom in shapes:
             entry = self._add_mirror(geom)
             if entry is not None:
                 self.mirrors.append(entry)
 
-        self._check_initial_clearance()
         self.scene.build()
         self._verify_mass()
         self._link_of = {int(m["entity"].base_link.idx): m for m in self.mirrors}
@@ -275,21 +294,15 @@ class GenesisBridge:
         )
 
     # ----------------------------------------------------------------- build
-    def _add_actor(self, record: dict) -> dict:
+    def _add_actor(self, geom: Any, build: Any) -> dict:
         """One deformable, from the shared reader into a Genesis FEM entity.
 
-        The builder is looked up by kind -- the same registry SuperDex reads --
-        so a kind this engine has never been given is refused by name rather
-        than falling into somebody else's branch.
+        ``build`` is the builder registered for its kind -- the same registry
+        SuperDex reads -- looked up in ``__init__``, where a kind this engine has
+        never been given is refused by name before the engine is asked for,
+        rather than falling into somebody else's branch.
         """
         gs = self.gs
-        geom = actor_geometry(self.model, record)
-        build = actor_builder("genesis", geom.kind)
-        if build is None:
-            raise ValueError(
-                f"genesis cannot build a {geom.kind!r} actor ({geom.name!r}); it builds {builders_for('genesis')}. "
-                "The door for a new kind on this engine is engines.geometry.register_actor_builder('genesis', kind, build)."
-            )
         mesh, material = build(self, geom)
         # ``MeshSet`` is the in-memory path: a plain ``Mesh(file=<Trimesh>)``
         # falls through Genesis's morph dispatch and never reaches the loader.
@@ -379,7 +392,7 @@ class GenesisBridge:
         """A tessellated mirror as an ``.obj``: :func:`write_obj` in this bridge's own directory."""
         return write_obj(self, geom, mesh)
 
-    def _check_initial_clearance(self) -> None:
+    def _check_initial_clearance(self, geoms: list, shapes: list[ShapeGeometry]) -> None:
         """Refuse a scene whose actors start inside a mirror, and say which.
 
         **IPC's barrier is undefined through an intersection**, so libuipc
@@ -396,13 +409,12 @@ class GenesisBridge:
         geometry and asks a human to look, which is a far better failure than
         the one it replaces. Non-box mirrors are skipped rather than
         approximated, so this is a net that catches the common case and never
-        pretends to catch every case.
+        pretends to catch every case. It reads the actors' and the mirrors'
+        geometry off the Newton model alone, so it runs before ``gs.init``.
         """
-        for entry in self.actors:
-            geom = entry["geom"]
+        for geom in geoms:
             lo, hi = geom.rest.min(axis=0), geom.rest.max(axis=0)
-            for mirror in self.mirrors:
-                m = mirror["geom"]
+            for m in shapes:
                 if m.kind != "box" or m.moving:
                     continue
                 # The world AABB of the *rotated* box: half-extents |R| @ scale.
