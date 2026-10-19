@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from robosimstudio.assetlib.materials import get_material
+from robosimstudio.assetlib.materials import get_material, list_materials
 from robosimstudio.scene.tuning import write_live
 from robosimstudio.specs import restage
 from robosimstudio.specs.params import LIVE, RECAPTURE, param_ui
@@ -115,9 +115,25 @@ class MaterialTuner:
             self.apply_contact()
         return tier
 
+    def presets(self) -> tuple[str, ...]:
+        """The named presets the selected cloth can wear: those of its built material's class.
+
+        A tape's spec refuses a material with no adhesive and a paper's one with no plastic trio, so a
+        towel preset adopted onto a label moved its sliders and then failed the rebuild; and no sheet
+        can be made of rice.
+        """
+        kind = type(self.built[self.selected])
+        return tuple(name for name in list_materials() if isinstance(get_material(name).spec, kind))
+
     def adopt(self, preset: str) -> None:
-        """Load a named preset onto the selected cloth."""
+        """Load a named preset onto the selected cloth.
+
+        Raises:
+            ValueError: For a preset that is not one of :meth:`presets`.
+        """
         name = self.selected
+        if preset not in self.presets():
+            raise ValueError(f"{name!r} is a {type(self.built[name]).__name__}; {preset!r} is not one")
         self.working[name] = get_material(preset).spec
         self.origin[name] = preset
         self.live[name].write(self.working[name])

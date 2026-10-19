@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from robosimstudio.assetlib.materials import MaterialRecord, list_materials, write_material
+from robosimstudio.assetlib.materials import MaterialRecord, write_material
 
 from .arrangement import ArrangementBinder
 from .binder import TIER_MARK, SpecBinder
@@ -111,7 +111,7 @@ class PanelTune(Panel):
             if len(self.tuner.names) > 1:
                 self._cloth = gui.add_dropdown("Cloth", options=self.tuner.names, initial_value=self.tuner.selected)
                 self._cloth.on_update(lambda _: setattr(self, "cloth_requested", str(self._cloth.value)))
-            self._presets = ("(as built)", *list_materials())
+            self._presets = ("(as built)", *self.tuner.presets())
             self._preset = gui.add_dropdown("Preset", options=self._presets, initial_value=self._presets[0])
             self._preset.on_update(lambda _: setattr(self, "preset_requested", str(self._preset.value)))
             revert = gui.add_button("Revert to as built")
@@ -148,6 +148,9 @@ class PanelTune(Panel):
                 self.tuner.select(name)
                 self.binder.set_spec(self.tuner.material)
                 self.binder.set_disabled(self.tuner.inert.get(self.tuner.selected, ()))
+                # Its own class's presets: a label's are not a towel's.
+                self._presets = ("(as built)", *self.tuner.presets())
+                self._preset.options = self._presets
                 self._sync_preset()
                 self.refresh()
                 return

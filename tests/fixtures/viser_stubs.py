@@ -140,7 +140,10 @@ class _StubGui:
         return self._widget(label, bool(initial_value), **kwargs)
 
     def add_dropdown(self, label, options=(), initial_value=None, **kwargs):
-        return self._widget(label, initial_value if initial_value is not None else options[0], **kwargs)
+        """A choice. Its ``options`` are kept, as viser keeps them, and a panel may reassign them."""
+        handle = self._widget(label, initial_value if initial_value is not None else options[0], **kwargs)
+        handle.options = tuple(options)
+        return handle
 
     def add_button_group(self, label, options=(), **kwargs):
         """A row of buttons. ``fire("Close")`` is what pressing one of them does.
