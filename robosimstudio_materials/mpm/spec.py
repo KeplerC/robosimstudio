@@ -78,7 +78,8 @@ class ParticleMaterialSpec:
     mass at build and cannot move afterwards.
 
     Attributes:
-        density: Bulk density [kg/m^3]. Particle mass is ``spacing^3 * density``.
+        density: Bulk density [kg/m^3]. A particle's mass is its lattice cell's
+            volume times this (:attr:`ParticleBodySpec.particle_volume`).
         young_modulus: Elastic modulus [Pa]. 1e15 is Newton's "rigid grains":
             a granular's stiffness is the grid's, not the grains'. 5e6 reads as
             a soft solid that can be pressed (dough, clay).
