@@ -81,7 +81,7 @@ def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
                 "genesis was initialised at precision=32 by an earlier island in this process, and this one "
                 "asks for 64: an IPC two-way harvest reads ZERO at float32. Build it in a process of its own."
             )
-        elif str(precision) == "32" and coupler == "legacy":
+        elif str(precision) == "32" and coupler == "legacy" and _ENGINE["precision"] == "64":
             # An IPC island initialised the process at 64 first: the liquid is right, and slow.
             log.warning(
                 "genesis was initialised at precision=64 by an earlier island in this process, so this liquid "
