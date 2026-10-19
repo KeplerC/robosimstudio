@@ -1548,11 +1548,21 @@ class EntityTape(EntityCloth):
             self._seat_bonds()
 
     # ---------------------------------------------------------------- runtime
+    def _counted(self) -> np.ndarray:
+        """Per bond, whether :meth:`peeled` and :meth:`bonded` count it: on a stuck sheet the bonds made at the
+        build (:attr:`made`), on a loose one every bond.
+
+        Opening adhesion gives a stuck sheet no bond past the box's edge, and contact adhesion one left
+        unmade there until it is pressed onto a face. Counted over every bond, an untouched stuck
+        :data:`LABEL` half over the edge read 100/180 bonded, and peeled at most that, where the same
+        sheet under :data:`PAPER_LABEL` read 1.0 and 0.0 (``tests/test_tape_kind``)."""
+        return self.made if self.made.any() else np.ones(len(self.bonds), dtype=bool)
+
     def peeled(self) -> float:
-        """The share of the bonds that have let go, in ``[0, 1]``."""
+        """The share of the bonds counted (:meth:`_counted`) that have let go, in ``[0, 1]``."""
         if self.broken is None or not len(self.bonds):
             return 0.0
-        return float(self.broken.numpy().mean())
+        return float(self.broken.numpy()[self._counted()].mean())
 
     def held(self) -> int:
         """How many bonds hold now: under contact adhesion, the ones made and not yet let go."""
@@ -1562,8 +1572,13 @@ class EntityTape(EntityCloth):
         return int(enabled[0].numpy()[self.bonds].sum())
 
     def bonded(self) -> float:
-        """The share of the bonds holding now, in ``[0, 1]``."""
-        return self.held() / len(self.bonds) if len(self.bonds) else 0.0
+        """The share of the bonds counted (:meth:`_counted`) holding now, in ``[0, 1]``: on a stuck sheet, under
+        either law, one less :meth:`peeled`."""
+        if not len(self.bonds):
+            return 0.0
+        enabled = self._arrays.get("enabled")
+        holding = enabled[0].numpy()[self.bonds] if enabled else self.made
+        return float(holding[self._counted()].mean())
 
     def pull(self, state: newton.State) -> float:
         """How hard the sheet pulls on its tab [N]: the tab's clamps' springs, summed as vectors."""
@@ -1674,9 +1689,10 @@ register_atom(
         cost="cheap",
         reads_scene=True,
         provenance=(
-            "Designed here, on the tape's own bonds: the share the break kernel has marked broken, a history "
-            "over the episode that a reset clears. A broken bond stays broken, so a label laid back down on "
-            "the face still reads peeled."
+            "Designed here, on the tape's own bonds: the share the bond kernels have marked broken, of a stuck "
+            "sheet's bonds made at the build or of every bond of a loose one, a history over the episode that "
+            "a reset clears. Under opening adhesion a broken bond stays broken, so a label laid back down on "
+            "the face still reads peeled; under contact adhesion one pressed back on is made again."
         ),
         calibration=AtomCalibration(
             positives=(
@@ -1719,9 +1735,10 @@ register_atom(
         reads_scene=True,
         provenance=(
             "Designed here, on the tape's own bonds: the share whose attachment is enabled in the solver's "
-            "copy, read this step. Under contact adhesion a bond is made where the sheet is pressed onto its "
-            "body and let go past its reach, so the share rises as a hand rubs the sheet down and falls as it "
-            "peels; under opening adhesion it is one less peeled_fraction."
+            "copy, read this step, of a stuck sheet's bonds made at the build or of every bond of a loose one. "
+            "Under contact adhesion a bond is made where the sheet is pressed onto its body and let go past its "
+            "reach, so the share rises as a hand rubs the sheet down and falls as it peels; on a stuck sheet, "
+            "under either law, it is one less peeled_fraction."
         ),
         calibration=AtomCalibration(
             positives=(

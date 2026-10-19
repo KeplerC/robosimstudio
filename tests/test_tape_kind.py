@@ -649,6 +649,23 @@ class TestNothingUnderItMakesNoBond(unittest.TestCase):
                 np.testing.assert_array_equal(over, model.attachment_particle_body_enabled.numpy()[label.bonds])
                 self.assertEqual(0.0, label.peeled())
 
+    def test_both_laws_read_a_stuck_label_over_the_edge_by_the_bonds_made_at_the_build(self) -> None:
+        """Untouched it reads 1.0 bonded and 0.0 peeled, and lifted 2 mm, past the break and the reach, 0.0 and
+        1.0, under either law. Counted over every bond, contact adhesion's 80 left unmade past the edge read it
+        100/180 bonded untouched and 100/180 peeled at most, where opening adhesion, which builds none there,
+        read 1.0 and 0.0."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model = self._label(material, stuck=True, at=(0.03, -0.05, 0.0505))
+                self.assertEqual((1.0, 0.0), (label.bonded(), label.peeled()))
+                state = model.state()
+                state.particle_q.assign(state.particle_q.numpy() + np.array([0.0, 0.0, 0.002], dtype=np.float32))
+                (label._stick if label.contact else label._break)(state, 1.0 / 960.0)
+                self.assertEqual(0, label.held())
+                self.assertEqual((0.0, 1.0), (label.bonded(), label.peeled()))
+
     def test_a_label_laid_flush_with_the_edges_bonds_on_them(self) -> None:
         """Covering the box's top exactly: its edge vertices lie on the edges, up to float32's rounding past them,
         and every one bonds, as on the example's box and on one off the origin. Tested past the extent with no
@@ -680,6 +697,7 @@ class TestNothingUnderItMakesNoBond(unittest.TestCase):
         self.assertEqual(20, int(past.sum()))
         self.assertTrue(made[~past].all(), "pressed over the face, every vertex bonds")
         self.assertFalse(made[past].any(), "past the edge, none does")
+        self.assertAlmostEqual(160 / 180, label.bonded(), msg="a loose label counts every bond", places=6)
         np.testing.assert_allclose(label._contact["normal"].numpy()[made], np.tile([0.0, 0.0, 1.0], (160, 1)))
 
 
