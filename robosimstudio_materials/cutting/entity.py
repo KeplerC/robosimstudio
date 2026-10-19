@@ -321,8 +321,8 @@ class EntityCuttable(Entity):
         if force <= 0.0:
             return None, None, None
         sweep_world = frame.vector_to_world(sweep)
-        point = frame.from_cutter(contact.centroid * s)
-        return -force * sweep_world, point, self._cage_force(force, sweep, contact.centroid)
+        point = frame.from_cutter(contact.inside_centroid * s)
+        return -force * sweep_world, point, self._cage_force(force, sweep, contact.inside_centroid)
 
     def _begin(self, e0, e1, edgeward) -> bool:
         """Start a cut in the blade's plane; False when the topology refuses the plane."""
@@ -363,7 +363,8 @@ class EntityCuttable(Entity):
         return True
 
     def _cage_force(self, force: float, sweep, centroid) -> np.ndarray:
-        """The push's reaction on the cage, in cutter units: on the front's tips, else on the face pressed."""
+        """The push's reaction on the cage, in cutter units: on the front's tips, else on the face pressed,
+        the one nearest ``centroid``, the middle of the edge inside the block (block frame) [m]."""
         body, s = self.body, self.block.scale
         count = body.sim.num_verts
         out = np.zeros((count, 3))

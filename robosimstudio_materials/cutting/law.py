@@ -30,7 +30,7 @@ duller never reaches it before the arm stalls, and the block does not part.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -219,15 +219,18 @@ class EdgeContact:
     Attributes:
         length: How much of the edge lies over the footprint [m].
         points: The samples that do, ``(k, 3)``.
-        centroid: Their middle; where the push acts.
+        centroid: Their middle.
         inside: How much of it lies between the block's base and top [m]: the edge law's ``L``, which
             a knife tipped with only its lowest few millimetres in the block has little of.
+        inside_centroid: The middle of that part, where the push acts: on a tipped knife, low on the
+            edge, not at the middle of all of it over the footprint. :attr:`centroid` with none inside.
     """
 
     length: float
     points: np.ndarray
     centroid: np.ndarray
     inside: float = 0.0
+    inside_centroid: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
 
 def _clip(edge0: np.ndarray, step: np.ndarray, lo: float, hi: float, axis: int, top: float) -> tuple[float, float]:
@@ -251,13 +254,19 @@ def edge_contact(edge0, edge1, size, samples: int = 17) -> EdgeContact:
     for axis in (0, 1):
         lo, hi = _clip(edge0, step, lo, hi, axis, float(size[axis]))
     if hi <= lo:
-        return EdgeContact(length=0.0, points=np.zeros((0, 3)), centroid=0.5 * (edge0 + edge1))
+        middle = 0.5 * (edge0 + edge1)
+        return EdgeContact(length=0.0, points=np.zeros((0, 3)), centroid=middle, inside_centroid=middle)
     s = np.linspace(lo, hi, int(samples))
     points = edge0[None, :] + s[:, None] * step[None, :]
     below, above = _clip(edge0, step, lo, hi, 2, float(size[2]))
     norm = float(np.linalg.norm(step))
+    centroid = points.mean(axis=0)
     return EdgeContact(
-        length=norm * (hi - lo), points=points, centroid=points.mean(axis=0), inside=norm * max(above - below, 0.0)
+        length=norm * (hi - lo),
+        points=points,
+        centroid=centroid,
+        inside=norm * max(above - below, 0.0),
+        inside_centroid=edge0 + 0.5 * (below + above) * step if above > below else centroid,
     )
 
 

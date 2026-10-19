@@ -67,19 +67,25 @@ class TestTheLaw(unittest.TestCase):
         np.testing.assert_allclose([0.03, 0.05, 0.03], contact.centroid, atol=1e-12)
         self.assertEqual(0.0, self.law.edge_contact([0, 0.2, 0], [0.1, 0.2, 0], (0.06, 0.1, 0.04)).length)
         self.assertAlmostEqual(0.06, contact.inside, msg="a level edge under the top is in the block all along")
+        np.testing.assert_allclose(contact.centroid, contact.inside_centroid, atol=1e-12)
 
     def test_the_law_s_length_is_the_edge_inside_the_block(self) -> None:
-        """A knife tipped 14 degrees, its lowest point 7 mm under the 40 mm top: 29 mm of edge is in the block."""
+        """A knife tipped 14 degrees, its lowest point 7 mm under the 40 mm top: 29 mm of edge is in the block,
+        and the push acts at their middle."""
         tilt = math.radians(14.0)
         low = np.array([0.06, 0.05, 0.033])
         high = low - 0.12 * np.array([math.cos(tilt), 0.0, -math.sin(tilt)])
         contact = self.law.edge_contact(high, low, (0.06, 0.10, 0.04))
         self.assertAlmostEqual(0.06 / math.cos(tilt), contact.length, msg="over the footprint")
         self.assertAlmostEqual(0.007 / math.sin(tilt), contact.inside, msg="under the top")
+        # The push acts at the middle of what is in the block, 16 mm down the edge from the footprint's.
+        np.testing.assert_allclose([0.06 - 0.0035 / math.tan(tilt), 0.05, 0.0365], contact.inside_centroid, atol=1e-12)
+        self.assertAlmostEqual(0.03, contact.centroid[0])
         up = np.array([0.0, 0.0, 0.02])
         over = self.law.edge_contact(high + up, low + up, (0.06, 0.10, 0.04))
         self.assertGreater(over.length, 0.0)
         self.assertEqual(0.0, over.inside, "an edge over the top is not in the block")
+        np.testing.assert_allclose(over.centroid, over.inside_centroid, atol=1e-12)
 
     def test_the_push_grows_caps_at_the_threshold_and_lets_go_at_the_floor(self) -> None:
         push = self.law.edge_push
