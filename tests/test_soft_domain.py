@@ -26,7 +26,7 @@ import numpy as np
 import warp as wp
 
 from robosimstudio.scene.physics import compose
-from robosimstudio.scene.physics.compose import _channels
+from robosimstudio.scene.physics.compose import _channels, _host_recipe
 from robosimstudio.scene.physics.islands import partition
 from robosimstudio.specs import ArrangementSpec, PhysicsManifest, SimRequirements, backend, contacts_with
 from robosimstudio.specs.physics import (
@@ -315,6 +315,44 @@ class TestHostIslandComposition(unittest.TestCase):
             channels = _channels(graph, islands, None, model)
             hosted = {c.destination for c in channels if c.destination == host.name}
             self.assertEqual(hosted, {host.name})
+        finally:
+            BACKENDS._items.pop("probe_host", None)
+
+    def test_a_body_on_a_newton_particle_island_is_mirrored_into_the_host_it_touches(self):
+        """GENERIC puts a free or static cube on VBD, which integrates particles too.
+
+        So a cube beside a deformable on a host engine joined two "deformable" islands, which got
+        no channel: the cube was no mirror in the host's recipe, and a towel on SuperDex fell
+        through a static box onto the bench (``c5a_graph.py``). A deformable on the Newton side
+        has no bodies, and stays out of the recipe as before.
+        """
+        from robosimstudio.scene.physics import build_graph
+
+        _register_stub()
+        try:
+            arrangement = ArrangementSpec(backends=(("soft", backend("probe_host")), ("*", backend("vbd"))))
+            model = _model(bodies=1, shapes=2, particles=18)
+            cube = SimRequirements(domain="rigid", contacts=contacts_with("surface"))
+            parts = {
+                "blob": _Entity("blob", SOFT, range=_Range(particles=(0, 9))),
+                "towel": _Entity("towel", CLOTH, range=_Range(particles=(9, 18))),
+                "cube": _Entity("cube", cube, range=_Range(bodies=(0, 1), shapes=(0, 1))),
+                "table": _Entity("table", TABLE, range=_Range(shapes=(1, 2))),
+            }
+            graph = build_graph(model, parts, None, arrangement, scene_statics={"table"})
+            islands = partition(graph, arrangement, model)
+            host = next(i for i in islands if i.is_host_engine)
+            vbd = next(i for i in islands if i.owns("cube"))
+            self.assertTrue(vbd.is_deformable and vbd.owns("towel"), "the cube's island integrates particles too")
+            channels = [c for c in _channels(graph, islands, None, model) if c.destination == host.name]
+            self.assertEqual([(vbd.name, [0])], [(c.source, c.bodies.tolist()) for c in channels])
+            recipe = _host_recipe(host, channels, graph, model, arrangement)
+            mirrors = {m["shape"]: m for m in recipe["mirrors"]}
+            self.assertEqual(
+                (0, True), (mirrors[0]["body"], mirrors[0]["two_way"]), "the cube, as SOFT touches objects"
+            )
+            self.assertIn(1, mirrors, "the table, as before")
+            self.assertEqual(["blob"], [a["name"] for a in recipe["actors"]], "the towel is VBD's, not the host's")
         finally:
             BACKENDS._items.pop("probe_host", None)
 

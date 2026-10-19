@@ -242,6 +242,13 @@ class ClothMaterialSpec:
     )
     """Poisson ratio to go with :attr:`shell_young`, or ``None`` for the island's."""
 
+    actor_names: ClassVar[dict[str, str]] = {"shell_young": "young", "shell_poisson": "poisson"}
+    """The host actor's name for a field that crosses under another: a membrane's modulus is the
+    shell's ``young``/``poisson`` (:meth:`EntityCloth.host_actor`, the bag's too), the names both
+    engines' shell builders read. The composer's lost-field check looks a field up by it: without
+    it a towel stating ``shell_young=1e6`` on SuperDex was told the field never reached the engine,
+    which built the shell at 1e6 (``c3_entity_side.py``)."""
+
     def __post_init__(self) -> None:
         if self.shell not in ("membrane", "slab"):
             raise ValueError(f"cloth shell must be 'membrane' or 'slab', got {self.shell!r}")

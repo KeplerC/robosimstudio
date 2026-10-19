@@ -127,14 +127,24 @@ def _root_matrix(actor) -> tuple[np.ndarray, np.ndarray]:
     return rot, np.asarray(list(root.translation), float)
 
 
-def _root_reader(actor):
-    """Node positions in the scene's world frame through an actor's root as it stands.
+def _root_reader(actor, *, fixed: bool = False):
+    """Node positions in the scene's world frame through an actor's root.
 
-    A shell's root is its centroid (:meth:`SuperdexBridge.build_shell`); a skinned soft body's moves.
+    A skinned soft body's root moves, so it is read as it stands at every call. ``fixed`` reads it
+    once, now, for an actor whose root nothing moves: a shell's is its centroid
+    (:meth:`SuperdexBridge.build_shell`), it has no recentering, and nothing here writes it -- it
+    stood bit for bit where it was built through the settle, 120 control steps falling onto the
+    bench, a pin, a ridden pin, a re-aimed one, a placement, ``restore_rest`` and a reset
+    (``c4_root.py``, the ``01_cloth/02_engines`` towel on SuperDex, GPU 6). Read per call, the root
+    was 7.3 us of the 13 us the tick spent reading that towel every control step, which is 5.6 us
+    now; the tick's 2.1-2.3 ms and the control step's 6.6-6.9 ms are inside their run-to-run spread
+    either way (five runs each). Whatever comes to write a shell's root must give its entry a new
+    reader.
     """
+    held = _root_matrix(actor) if fixed else None
 
     def read() -> np.ndarray:
-        rot, t = _root_matrix(actor)
+        rot, t = held if held is not None else _root_matrix(actor)
         local = np.asarray(actor.get_node_positions_local(), dtype=np.float64).reshape(-1, 3)
         return local @ rot.T + t
 
@@ -718,14 +728,16 @@ class SuperdexBridge:
         del record
         return self.physics.TransformRT()
 
-    def root_reader(self, actor: Any) -> Any:
+    def root_reader(self, actor: Any, *, fixed: bool = False) -> Any:
         """A ``read`` for an actor's entry: its nodes in the world, through its root as it stands.
 
         The method form of the module's own reader, the rule :meth:`place_actor`
         writes by, so a builder outside this bundle that sets another root reads
         back the way a placement is written, as :meth:`build_shell` does.
+        ``fixed`` reads the root once, now, for an actor whose root nothing
+        moves, as a shell's (:func:`_root_reader`).
         """
-        return _root_reader(actor)
+        return _root_reader(actor, fixed=fixed)
 
     def contact_params(self, params: dict, *, penalty: float, friction: float, padding: float) -> Any:
         """One actor's engine ``ContactParams`` from its host params; see :func:`_contact_params`.
@@ -761,7 +773,8 @@ class SuperdexBridge:
         a control step in world coordinates, 2.1-2.9 about its centroid
         (``p3_rawsheet.py``). A shell has no recentering component -- the engine
         reports ``use_recentering`` off and refuses to set it ("CRecenteringParams
-        component not found") -- so the root stays where it is built, and a pin
+        component not found") -- so the root stays where it is built and is read
+        once, here (:func:`_root_reader`), and a pin
         (:meth:`pin_nodes`) still takes its target in the world: 0.07 mm from it
         at an identity root and at a centroid one alike (``p1_facts.py``).
 
@@ -836,7 +849,7 @@ class SuperdexBridge:
         return {
             "name": str(record.get("name", "")),
             "actor": actor,
-            "read": _root_reader(actor),
+            "read": _root_reader(actor, fixed=True),
             "start": start,
             "count": count,
             "prev": rest.astype(np_real).copy(),
@@ -1563,6 +1576,10 @@ class SuperdexBridge:
 _CONSUMES = {
     # What each builder above actually reads off ``HostActor.params``; the
     # composer warns on anything an actor states outside its kind's set.
+    # ``welds`` is read by ``_build_welds``, which joins every kind's stated
+    # nodes alike: a weld stated on a sheet holds a second sheet hung off it
+    # at 0.000 mm after a second, which falls 4.9 m without it, and on a bag
+    # the same (``c1_shell_weld.py``; ``tests/test_superdex_sheet.py``).
     "shell": (
         "areal_density",
         "contact_padding",
@@ -1577,6 +1594,7 @@ _CONSUMES = {
         "self_contact",
         "stiffness_damping",
         "thickness",
+        "welds",
         "young",
     ),
     "tet": (
