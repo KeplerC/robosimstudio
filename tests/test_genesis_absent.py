@@ -443,6 +443,22 @@ class TestTheSolverIsAHostSolver(unittest.TestCase):
         ):
             self.assertTrue(hasattr(SolverGenesis, name), f"the composer calls {name}")
 
+    def test_a_bridge_states_no_default_the_solver_does_not(self):
+        """The solver passes every option; a default of a bridge's own that differs from its own is one that only a
+        bridge built by hand ever sees."""
+        import inspect
+
+        from robosimstudio.engines.genesis.bridge import GenesisBridge
+        from robosimstudio.engines.genesis.solver import SolverGenesis
+        from robosimstudio.engines.genesis.sph import SphBridge
+
+        solver = inspect.signature(SolverGenesis.open).parameters
+        for bridge in (GenesisBridge, SphBridge):
+            for name, param in inspect.signature(bridge.__init__).parameters.items():
+                if param.kind is inspect.Parameter.KEYWORD_ONLY and param.default is not inspect.Parameter.empty:
+                    with self.subTest(bridge=bridge.__name__, option=name):
+                        self.assertEqual(solver[name].default, param.default)
+
     def test_open_is_the_only_thing_it_writes(self):
         """The point of SolverHost: a second engine costs one method."""
         from robosimstudio.engines.genesis.solver import SolverGenesis

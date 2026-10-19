@@ -238,6 +238,8 @@ class SphBridge:
             (:func:`longest_substep`) are refused before the engine is asked for: 20 a
             60 Hz control step for the ``water`` preset at 4 mm.
         precision: ``"32"`` (see the module docstring); ``"64"`` runs, 8x slower.
+            Neither has a default here: they are the arrangement's, which
+            :class:`~robosimstudio.engines.genesis.solver.SolverGenesis` passes.
         feedback: ``"auto"`` or ``"off"``.
         pose_source: ``"fresh"`` or ``"snapshot"``.
     """
@@ -247,8 +249,8 @@ class SphBridge:
         model: Any,
         recipe: dict,
         *,
-        substeps: int = 20,
-        precision: str = "32",
+        substeps: int,
+        precision: str,
         feedback: str = "auto",
         pose_source: str = "fresh",
     ) -> None:
