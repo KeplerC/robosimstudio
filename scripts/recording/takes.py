@@ -222,8 +222,6 @@ def _paper_folded(film) -> tuple[bool, str]:
 
 def _flap_shut(film) -> tuple[bool, str]:
     """The box flap's hinge kept 1.8 rad once the hand had gone, and its free edge rests no higher than the rim."""
-    import math
-
     import numpy as np
 
     from robosimstudio.assetlib.semantics.snapshot import Snapshot
@@ -256,8 +254,6 @@ def _round_the_post(film) -> dict:
     shrinking by what the wrap lays on the post; the capsule's distance from the
     hand at the end is kept for :func:`_carried_round`.
     """
-    import math
-
     import numpy as np
 
     from robosimstudio.core.math import quat_multiply
@@ -310,8 +306,6 @@ def _turn_both(film) -> dict:
     turns them the same way, a degree a control step. The mid-cable twists at the
     end are kept for :func:`_twisted`.
     """
-    import math
-
     import numpy as np
 
     from robosimstudio.core.math import quat_multiply, quat_to_mat
