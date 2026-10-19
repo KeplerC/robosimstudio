@@ -695,10 +695,11 @@ class _Seat:
     """Where a point would rest on the box under it, in the body's frame: what :func:`_seat_on` finds.
 
     ``shape`` is the box, -1 with none; ``over`` whether the point lies over the face, within its
-    extent and :data:`_FLUSH`; ``face`` the face's outward normal; ``gap`` the point's distance off the
-    box's surface less the box's margin [m], so a particle presses ``radius - gap`` into the contact;
-    ``thick`` the contact thickness, the particle's radius plus that margin [m]; and ``anchor`` the point
-    on the surface under it, ``thick`` off it along ``face``, where VBD's contact rests the particle.
+    extent and :data:`_FLUSH`, ``False`` with no box, so it alone says a bond can be placed there;
+    ``face`` the face's outward normal; ``gap`` the point's distance off the box's surface less the
+    box's margin [m], so a particle presses ``radius - gap`` into the contact; ``thick`` the contact
+    thickness, the particle's radius plus that margin [m]; and ``anchor`` the point on the surface
+    under it, ``thick`` off it along ``face``, where VBD's contact rests the particle.
     """
 
     shape: int
@@ -723,13 +724,14 @@ def _seat_on(
     A point lies over a face when at most one of its coordinates in the box's frame is past the box's
     half extent, by more than :data:`_FLUSH`: over that face, or inside the box. Past an edge or a corner
     nothing is under it, and the box's nearest point is that edge, its normal tilted between the faces:
-    a vertex 5 mm past the top's edge and 0.5 mm over it gets ``(0.995, 0, 0.1)``.
+    a vertex 5 mm past the top's edge and 0.5 mm over it gets ``(0.995, 0, 0.1)``. With no box nothing is.
     """
     seat = _Seat()
     seat.shape = _nearest_box(local, boxes, shape_transform, shape_scale, shape_margin)
     margin = _margin_of(shape_margin, seat.shape)
     seat.thick = radius + margin
     if seat.shape < 0:
+        seat.over = False
         return seat
     frame = shape_transform[seat.shape]
     half = shape_scale[seat.shape]
@@ -828,7 +830,7 @@ def _stick_kernel(
     pose = body_q[target]
     local = wp.transform_point(wp.transform_inverse(pose), particle_q[p])
     seat = _seat_on(local, particle_radius[p], boxes, shape_transform, shape_scale, shape_margin)
-    if seat.shape < 0 or not seat.over:
+    if not seat.over:
         return
     pair = 0.5 * (soft_ke + shape_ke[seat.shape])
     if pair * (particle_radius[p] - seat.gap) < params[5] * area[k]:
