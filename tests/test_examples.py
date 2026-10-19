@@ -218,8 +218,8 @@ class TestTheMultiEngineDemos(unittest.TestCase):
         Skips where Genesis is absent, which is the checkout's own environment: the
         extra lives in a virtual environment of its own (``examples/21_water``). In a
         process of its own, because Genesis is initialised once per process: built
-        here, the water's float32 was what ``tests/test_genesis``, after this module in
-        a tier run, weighed its cloth at, where its IPC harvest asks for float64."""
+        here, the water's float32 would be what ``tests/test_genesis``, after this module
+        in a tier run, found, where an IPC island is refused (its harvest asks for float64)."""
         import importlib.util
 
         if importlib.util.find_spec("genesis") is None:
