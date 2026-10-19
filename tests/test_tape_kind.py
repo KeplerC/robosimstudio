@@ -373,6 +373,88 @@ class TestAContactBondsSpring(unittest.TestCase):
         self.assertFalse(label.broken.numpy().any())
 
 
+class TestNothingUnderItMakesNoBond(unittest.TestCase):
+    """A vertex past the box's edge has nothing under it: stuck at the build or pressed, it is not bonded."""
+
+    HALF = (0.05, 0.06, 0.025)
+    """The example's 100 x 120 x 50 mm box, its centre 25 mm up."""
+
+    def _label(self, material, *, stuck: bool, at: tuple[float, float, float]):
+        """A 40 x 95 mm label without a tab, its corner at ``at``, over the box, built and bound on the CPU."""
+        from types import SimpleNamespace
+
+        import newton
+        import warp as wp
+
+        from robosimstudio_materials.tape import EntityTape, tape
+
+        builder = newton.ModelBuilder()
+        box = builder.add_body(xform=wp.transform((0.0, 0.0, 0.025), wp.quat_identity()), label="box")
+        builder.add_shape_box(box, hx=self.HALF[0], hy=self.HALF[1], hz=self.HALF[2])
+        label = EntityTape(tape(name="label", on="box", at=at, material=material, stuck=stuck, tab=0.0))
+        label.build(builder, None)
+        model = builder.finalize(device="cpu")
+        label._bind_bonds(SimpleNamespace(model=model))
+        return label, model
+
+    def test_over_a_face_is_within_its_extent(self) -> None:
+        from robosimstudio_materials.tape import over_a_face
+
+        points = [
+            (0.0, 0.0, 0.0255),  # over the top
+            (0.049, 0.059, 0.0255),  # over the top, by its corner
+            (0.055, 0.0, 0.0255),  # 5 mm past the top's +x edge
+            (0.055, 0.065, 0.0255),  # past its corner
+            (0.0505, 0.0, 0.01),  # over the +x side, below the top
+            (0.0, 0.0, 0.02),  # inside, under the top
+        ]
+        over, box = over_a_face(points, [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)], [self.HALF], [0.0])
+        np.testing.assert_array_equal([True, True, False, False, True, True], over)
+        np.testing.assert_array_equal(np.zeros(6), box)
+        over, box = over_a_face(points[:1], np.zeros((0, 7)), np.zeros((0, 3)), np.zeros(0))
+        self.assertFalse(over[0], "no box: nothing is under it")
+        self.assertEqual(-1, box[0])
+
+    def test_a_stuck_label_over_the_edge_bonds_only_over_the_face(self) -> None:
+        """Half over the +x edge: four of its nine columns, 80 vertices, past it. Bonded there, a contact bond
+        was seated on the edge along ``(0.995, 0, 0.1)`` and let go on the first substep, reading 44% peeled
+        untouched, and an opening bond held the overhang level in the air, 18 mm over where it hangs free
+        (``t2_overhang.py``, CPU VBD)."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model = self._label(material, stuck=True, at=(0.03, -0.05, 0.0505))
+                q = model.particle_q.numpy()[label.bond_particles]
+                enabled = model.attachment_particle_body_enabled.numpy()[label.bonds]
+                over = q[:, 0] <= self.HALF[0] + 1.0e-6
+                if material.adhesion == "opening":
+                    self.assertEqual(100, len(label.bonds), "a vertex with nothing under it gets no bond")
+                else:
+                    self.assertEqual(180, len(label.bonds), "each still bonds where it is pressed onto a face")
+                np.testing.assert_array_equal(over, enabled)
+                np.testing.assert_array_equal(over, label.made)
+                self.assertEqual(100, label.held())
+                label.broken.fill_(1)
+                label._reset_bonds()
+                np.testing.assert_array_equal(over, model.attachment_particle_body_enabled.numpy()[label.bonds])
+                self.assertEqual(0.0, label.peeled())
+
+    def test_a_label_pressed_past_the_edge_bonds_only_over_the_face(self) -> None:
+        """Pressed 0.1 mm into the top, its last column 0.1 mm past the edge: the 20 vertices there bonded to
+        the edge along ``(0.243, 0, 0.970)``, 0.4 mm into the contact (``t2_stick.py``)."""
+        from robosimstudio_materials.tape import LABEL
+
+        label, model = self._label(LABEL, stuck=False, at=(0.0101, -0.05, 0.0504))
+        label._stick(model.state(), 1.0 / 960.0)
+        made = model.attachment_particle_body_enabled.numpy()[label.bonds]
+        past = model.particle_q.numpy()[label.bond_particles][:, 0] > self.HALF[0]
+        self.assertEqual(20, int(past.sum()))
+        self.assertTrue(made[~past].all(), "pressed over the face, every vertex bonds")
+        self.assertFalse(made[past].any(), "past the edge, none does")
+        np.testing.assert_allclose(label._contact["normal"].numpy()[made], np.tile([0.0, 0.0, 1.0], (160, 1)))
+
+
 class TestThePresets(unittest.TestCase):
     def test_each_preset_is_soft_enough_for_its_tab_to_pull_it(self) -> None:
         # Paper's edge_ke 30 and tri_ke 1e4 held the tab still under the hand's pull (the module's section 1).

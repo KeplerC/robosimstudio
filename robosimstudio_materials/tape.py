@@ -65,7 +65,8 @@ __all__ = [
 # Opening adhesion, the bonds :data:`PAPER_LABEL` is built with. Newton 1.7's
 # ``ModelBuilder.add_attachment_particle_body`` ties one particle to a point fixed in a body by a
 # spring (stiffness [N/m], no force cap, no break), which ``SolverVBD`` applies to both ends. Every
-# particle of the flat part gets one, to the body ``on`` names, at the point it was built over.
+# particle of the flat part that lies over a face of the body ``on`` names gets one, at the point it
+# was built over; past the face's edge nothing is under a particle, and it gets none.
 # Newton has no strength: a bond holds at any load. Strength is the model stated here, the cohesive
 # zone of the peel literature in its simplest form: a bond breaks once the sheet has lifted
 # off the body by more than :attr:`TapeMaterialSpec.break_opening` along the face's normal, and a
@@ -371,8 +372,9 @@ class TapeSpec(ClothSpec):
 
     Attributes:
         on: The body the sheet sticks to, by name: a free body built before the tape, on the same
-            solver (``rss.box`` under :data:`TAPE_60HZ`). Every particle of the flat part is bonded to
-            it except the row at the fold. ``""`` sticks it to nothing: a loose strip, its tab still on.
+            solver (``rss.box`` under :data:`TAPE_60HZ`). Every particle of the flat part can bond to
+            it except the row at the fold; built stuck, the ones over a face of its box are bonded.
+            ``""`` sticks it to nothing: a loose strip, its tab still on.
         tab: How much of the sheet's length is turned up, at ``y = 0``, into the pull tab [m]. ``0``
             builds no tab: the sheet is stuck along its whole length and nothing holds its end.
         tab_size: The tab's extents [m]: across the sheet, its thickness along the sheet (what the
@@ -388,9 +390,12 @@ class TapeSpec(ClothSpec):
         tab_color: Display RGB of the tab.
         dry: How far past the fold the sheet carries no adhesive [m], like a label's lift tab. ``0``
             bonds every row on the face but the fold's. Without a tab it runs from the sheet's end.
-        stuck: Built stuck to ``on``: every bond made at the build and again at every reset. ``False``
-            builds the sheet loose, its bonds made only where it is pressed onto ``on``, which needs
-            contact adhesion (:attr:`TapeMaterialSpec.adhesion`).
+        stuck: Built stuck to ``on``: a bond made at the build and again at every reset wherever the
+            sheet lies over a face of the body's box, none past its edge, where nothing is under it.
+            Opening adhesion gives a vertex past the edge no bond at all, contact adhesion one made
+            only once it is pressed onto a face. ``False`` builds the sheet loose, its bonds made only
+            where it is pressed onto ``on``, which needs contact adhesion
+            (:attr:`TapeMaterialSpec.adhesion`).
         settle_frames: ``0``, unlike cloth's 60: a reset puts the body back at its spawn pose and the
             tab where it was built, so the sheet goes back where it was built too, on that pose.
             Settled for 30 frames first, the box came back to its spawn pose with the settled label
@@ -674,6 +679,113 @@ def _nearest_box(
     return hit
 
 
+@wp.struct
+class _Seat:
+    """Where a point would rest on the box under it, in the body's frame: what :func:`_seat_on` finds.
+
+    ``shape`` is the box, -1 with none; ``over`` whether the point lies over the face, within its
+    extent; ``face`` the face's outward normal; ``gap`` how far the point is off the box's surface
+    less its margin [m], negative inside the contact; ``thick`` the contact thickness, the particle's
+    radius plus that margin [m]; and ``anchor`` the point on the surface under it, ``thick`` off it
+    along ``face``, where VBD's contact rests the particle.
+    """
+
+    shape: int
+    over: wp.bool
+    face: wp.vec3
+    gap: float
+    thick: float
+    anchor: wp.vec3
+
+
+@wp.func
+def _seat_on(
+    local: wp.vec3,
+    radius: float,
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+) -> _Seat:
+    """The seat on the body's box nearest a point in the body's frame: every kernel that places a bond calls this.
+
+    A point lies over a face when at most one of its coordinates in the box's frame is past the box's
+    half extent: over that face, or inside the box. Past an edge or a corner nothing is under it, and
+    the box's nearest point is that edge, its normal tilted between the faces: a vertex 5 mm past the
+    top's edge and 0.5 mm over it gets ``(0.995, 0, 0.1)``.
+    """
+    seat = _Seat()
+    seat.shape = _nearest_box(local, boxes, shape_transform, shape_scale, shape_margin)
+    margin = _margin_of(shape_margin, seat.shape)
+    seat.thick = radius + margin
+    if seat.shape < 0:
+        return seat
+    frame = shape_transform[seat.shape]
+    half = shape_scale[seat.shape]
+    inside = wp.transform_point(wp.transform_inverse(frame), local)
+    g = _box_gap(inside, half)
+    n_shape = wp.vec3(g[0], g[1], g[2])
+    past = int(0)
+    for i in range(3):
+        if wp.abs(inside[i]) > half[i]:
+            past += 1
+    seat.over = past <= 1
+    seat.face = wp.transform_vector(frame, n_shape)
+    seat.gap = g[3] - margin
+    seat.anchor = wp.transform_point(frame, inside - n_shape * g[3]) + seat.face * seat.thick
+    return seat
+
+
+@wp.kernel
+def _over_kernel(
+    points: wp.array(dtype=wp.vec3),
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+    over: wp.array(dtype=wp.bool),
+    shape: wp.array(dtype=wp.int32),
+):
+    i = wp.tid()
+    seat = _seat_on(points[i], 0.0, boxes, shape_transform, shape_scale, shape_margin)
+    over[i] = seat.shape >= 0 and seat.over
+    shape[i] = seat.shape
+
+
+def over_a_face(
+    points: np.ndarray, transforms: np.ndarray, halves: np.ndarray, margins: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Which points lie over a face of a body's boxes, within its extent, and the box nearest each.
+
+    The test the stick kernel makes a bond by, through the same warp function, on the CPU: what the
+    build bonds a stuck sheet by. ``points`` are in the body's frame [m]; ``transforms`` are the boxes'
+    in it, ``(x, y, z, qx, qy, qz, qw)``, ``halves`` their half extents and ``margins`` their contact
+    margins [m]. Returns ``(over, box)``, ``box`` an index into the boxes given, -1 for none. On the
+    CPU because the build has no device model yet: the tape's kernels compile for it once, 1.8 s on a
+    cold kernel cache.
+    """
+    points = np.asarray(points, dtype=np.float32).reshape(-1, 3)
+    count = len(np.asarray(margins).reshape(-1))
+    cpu = "cpu"
+    over = wp.zeros(len(points), dtype=wp.bool, device=cpu)
+    box = wp.zeros(len(points), dtype=wp.int32, device=cpu)
+    if len(points):
+        wp.launch(
+            _over_kernel,
+            dim=len(points),
+            inputs=[
+                wp.array(points, dtype=wp.vec3, device=cpu),
+                wp.array(np.arange(count, dtype=np.int32), dtype=wp.int32, device=cpu),
+                wp.array(np.asarray(transforms, dtype=np.float32).reshape(-1, 7), dtype=wp.transform, device=cpu),
+                wp.array(np.asarray(halves, dtype=np.float32).reshape(-1, 3), dtype=wp.vec3, device=cpu),
+                wp.array(np.asarray(margins, dtype=np.float32).reshape(-1), dtype=float, device=cpu),
+            ],
+            outputs=[over, box],
+            device=cpu,
+        )
+    return over.numpy().astype(bool), box.numpy().astype(np.int64)
+
+
 @wp.kernel
 def _stick_kernel(
     rows: wp.array(dtype=wp.int32),
@@ -708,10 +820,12 @@ def _stick_kernel(
     ceiling. ``soft_ke`` is a float frozen into a captured graph, as VBD's own launches take it, and
     cloth's ``contact_ke`` is RECAPTURE; ``shape_ke`` is the model's array, read live.
 
-    The anchor goes where the particle would rest on that face, under it. ``enabled`` and
-    ``body_point`` are the solver's copies and the ``_model`` ones the model's, written alike as
-    :func:`_break_kernel` writes them: a ``CONSTRAINT_PROPERTIES`` notify copies the model's over the
-    solver's.
+    The anchor goes where the particle would rest on that face, under it (:func:`_seat_on`). A
+    particle past the face's edge has nothing under it and makes no bond: seated on the edge, along
+    the tilted normal there, a bond would start most of its distance past the edge into its lift.
+    ``enabled`` and ``body_point`` are the solver's copies and the ``_model`` ones the model's, written
+    alike as :func:`_break_kernel` writes them: a ``CONSTRAINT_PROPERTIES`` notify copies the model's
+    over the solver's.
     """
     k = wp.tid()
     row = rows[k]
@@ -720,26 +834,16 @@ def _stick_kernel(
     p = particle[k]
     pose = body_q[target]
     local = wp.transform_point(wp.transform_inverse(pose), particle_q[p])
-    s = _nearest_box(local, boxes, shape_transform, shape_scale, shape_margin)
-    if s < 0:
+    seat = _seat_on(local, particle_radius[p], boxes, shape_transform, shape_scale, shape_margin)
+    if seat.shape < 0 or not seat.over:
         return
-    frame = shape_transform[s]
-    inside = wp.transform_point(wp.transform_inverse(frame), local)
-    g = _box_gap(inside, shape_scale[s])
-    margin = _margin_of(shape_margin, s)
-    n_shape = wp.vec3(g[0], g[1], g[2])
-    face = wp.transform_vector(frame, n_shape)
-    surface = wp.transform_point(frame, inside - n_shape * g[3])
-    thick = particle_radius[p] + margin
-    pair = 0.5 * (soft_ke + shape_ke[s])
-    depth = particle_radius[p] - (g[3] - margin)
-    if pair * depth < params[5] * area[k]:
+    pair = 0.5 * (soft_ke + shape_ke[seat.shape])
+    if pair * (particle_radius[p] - seat.gap) < params[5] * area[k]:
         return
-    anchor = surface + face * thick
-    body_point[row] = anchor
-    body_point_model[row] = anchor
-    normal[k] = face
-    dmin[k] = thick
+    body_point[row] = seat.anchor
+    body_point_model[row] = seat.anchor
+    normal[k] = seat.face
+    dmin[k] = seat.thick
     enabled[row] = True
     enabled_model[row] = True
     broken[k] = 0
@@ -846,27 +950,21 @@ def _seat_kernel(
     body_point_model: wp.array(dtype=wp.vec3),
 ):
     """Each bond's contact thickness, its spring at contact and its anchor, as :func:`_stick_kernel` would
-    make the bond over its built anchor: the radius and the margin of the box nearest it, as the model
-    holds them now, and the anchor that far off the face, where VBD's contact rests the particle. One
-    thread per bond; the spring and the anchor go into the solver's copy and the model's."""
+    make the bond over its built anchor, through the same :func:`_seat_on`: the radius and the margin of
+    the box nearest it, as the model holds them now, and the anchor that far off the face, where VBD's
+    contact rests the particle. One thread per bond; the spring and the anchor go into the solver's copy
+    and the model's."""
     k = wp.tid()
-    s = _nearest_box(anchor[k], boxes, shape_transform, shape_scale, shape_margin)
-    thick = particle_radius[particle[k]] + _margin_of(shape_margin, s)
-    dmin[k] = thick
-    spring = area[k] * adhesion_stiffness(thick, params[1], params[2], params[0])
+    seat = _seat_on(anchor[k], particle_radius[particle[k]], boxes, shape_transform, shape_scale, shape_margin)
+    dmin[k] = seat.thick
+    spring = area[k] * adhesion_stiffness(seat.thick, params[1], params[2], params[0])
     stiffness[rows[k]] = spring
     stiffness_model[rows[k]] = spring
-    if s < 0:
+    if seat.shape < 0:
         return
-    frame = shape_transform[s]
-    inside = wp.transform_point(wp.transform_inverse(frame), anchor[k])
-    g = _box_gap(inside, shape_scale[s])
-    n_shape = wp.vec3(g[0], g[1], g[2])
-    face = wp.transform_vector(frame, n_shape)
-    seated = wp.transform_point(frame, inside - n_shape * g[3]) + face * thick
-    normal[k] = face
-    body_point[rows[k]] = seated
-    body_point_model[rows[k]] = seated
+    normal[k] = seat.face
+    body_point[rows[k]] = seat.anchor
+    body_point_model[rows[k]] = seat.anchor
 
 
 # =============================================================================
@@ -900,6 +998,9 @@ class EntityTape(EntityCloth):
         """Attachment index of each bond, in the model's order."""
         self.bond_particles: np.ndarray = np.zeros(0, dtype=np.int32)
         """Global particle index of each bond."""
+        self.made: np.ndarray = np.zeros(0, dtype=bool)
+        """Per bond, whether it is made at the build and again at every reset: on a stuck sheet, where its
+        particle lies over a face of the body's box; on a loose one, none."""
         self.anchors: np.ndarray = np.zeros((0, 3))
         """Each bond's anchor in the body's frame [m]."""
         self.along: np.ndarray = np.zeros(0)
@@ -940,12 +1041,48 @@ class EntityTape(EntityCloth):
             )
         return int(hits[0])
 
+    def _over_faces(self, builder: newton.ModelBuilder, sheet: wp.transform, flat: np.ndarray) -> np.ndarray:
+        """Which of a stuck sheet's bondable vertices, as the sheet is placed, lie over a face of the body's boxes.
+
+        Within the face's extent, by :func:`over_a_face`, the test the stick kernel makes a bond by. Past
+        the edge nothing is under a vertex. Bonded there, a contact bond was seated on the edge along its
+        tilted normal and let go on the first substep, read as peeled before anything pulled, and an
+        opening bond held its vertex where it was built, the overhang stuck level in the air
+        (``t2_overhang.py``). On a body with no box every vertex is over it: the face is the sheet's own.
+        """
+        to_body = wp.transform_inverse(_transform(builder.body_q[self.body]))
+        local = [wp.transform_point(to_body, wp.transform_point(sheet, wp.vec3(*[float(c) for c in v]))) for v in flat]
+        box = int(newton.GeoType.BOX)
+        boxes = [s for s in range(builder.shape_count) if builder.shape_body[s] == self.body]
+        boxes = [s for s in boxes if int(builder.shape_type[s]) == box]
+        if not boxes:
+            return np.ones(len(flat), dtype=bool)
+        over, _ = over_a_face(
+            np.asarray(local, dtype=np.float64).reshape(-1, 3),
+            [[float(c) for c in builder.shape_transform[s]] for s in boxes],
+            [[float(c) for c in builder.shape_scale[s]] for s in boxes],
+            [float(builder.shape_margin[s]) for s in boxes],
+        )
+        return over
+
     def build(self, builder: newton.ModelBuilder, episode) -> None:
         del episode
         spec, material = self.spec, self.spec.material
         vertices, faces, _ = tape_surface(spec.size, spec.cells, spec.tab)
         placed = self.placed((*spec.pose, *spec.quat))
         sheet = _transform(placed[:7])
+        across, along = spec.cell
+        rows, made = np.zeros(0, dtype=np.int64), np.zeros(0, dtype=bool)
+        if spec.on:
+            self.body = self._named_body(builder, spec.on)
+            self.contact = material.adhesion == "contact"
+            rows = bonded_rows(vertices, spec.tab, along, spec.dry)
+            made = np.full(len(rows), bool(spec.stuck))
+            if spec.stuck:
+                made = self._over_faces(builder, sheet, vertices[rows])
+                if not self.contact:
+                    # Opening adhesion makes its bonds at the build alone: a row with nothing under it has none.
+                    rows, made = rows[made], made[made]
         start = int(builder.particle_count)
         self.surface_count = len(vertices)
         builder.add_cloth_mesh(
@@ -969,12 +1106,8 @@ class EntityTape(EntityCloth):
             self._build_tab(builder, vertices, start, sheet)
         if not spec.on:
             return
-        self.body = self._named_body(builder, spec.on)
         to_body = wp.transform_inverse(_transform(builder.body_q[self.body]))
         self.normal = np.array(wp.transform_vector(to_body, wp.transform_vector(sheet, wp.vec3(0.0, 0.0, 1.0))))
-        across, along = spec.cell
-        rows = bonded_rows(vertices, spec.tab, along, spec.dry)
-        self.contact = material.adhesion == "contact"
         self.bond_area = sheet_areas(spec.size, spec.cells)[rows]
         stiffness = np.full(len(rows), float(material.tack) * across * along)
         if self.contact:
@@ -982,15 +1115,16 @@ class EntityTape(EntityCloth):
             # kernels read it.
             stiffness = self.bond_area * contact_stiffness(material, float(material.particle_radius))
         bonds, anchors = [], []
-        for i, k in zip(rows, stiffness, strict=True):
+        for i, k, on in zip(rows, stiffness, made, strict=True):
             p = start + int(i)
             local = np.array(wp.transform_point(to_body, wp.vec3(*builder.particle_q[p])))
             bonds.append(
                 builder.add_attachment_particle_body(
-                    p, self.body, body_point=wp.vec3(*local), stiffness=float(k), enabled=bool(spec.stuck)
+                    p, self.body, body_point=wp.vec3(*local), stiffness=float(k), enabled=bool(on)
                 )
             )
             anchors.append(local)
+        self.made = made
         self.bonds = np.asarray(bonds, dtype=np.int32)
         self.bond_particles = (start + rows).astype(np.int32)
         self.anchors = np.asarray(anchors, dtype=np.float64).reshape(-1, 3)
@@ -1355,11 +1489,13 @@ class EntityTape(EntityCloth):
                 state.joint_q[c : c + 7].assign(self.tab_q0.astype(np.float32))
 
     def _reset_bonds(self) -> None:
-        """Every bond as built, in every array a solver reads: stuck or loose, at its anchor, and under
-        contact adhesion seated as a bond starts (:meth:`_seat_bonds`), not with the secant, the anchor and
-        the face the last episode left."""
+        """Every bond as built, in every array a solver reads: made or not (:attr:`made`), at its anchor, and
+        under contact adhesion seated as a bond starts (:meth:`_seat_bonds`), not with the secant, the anchor
+        and the face the last episode left. The seat writes a contact bond's anchor into every copy itself."""
         self.broken.zero_()
-        rows = {"enabled": bool(self.spec.stuck), "body_point": self.anchors.astype(np.float32)}
+        rows = {"enabled": self.made}
+        if not self._contact:
+            rows["body_point"] = self.anchors.astype(np.float32)
         for key, value in rows.items():
             for array in self._arrays.get(key, ()):
                 values = array.numpy()
@@ -1379,7 +1515,7 @@ class EntityTape(EntityCloth):
         """How many bonds hold now: under contact adhesion, the ones made and not yet let go."""
         enabled = self._arrays.get("enabled")
         if not enabled or not len(self.bonds):
-            return len(self.bonds) if self.spec.stuck else 0
+            return int(self.made.sum())
         return int(enabled[0].numpy()[self.bonds].sum())
 
     def bonded(self) -> float:
