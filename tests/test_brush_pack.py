@@ -309,6 +309,31 @@ class TestTheTipsAreRead(unittest.TestCase):
         np.testing.assert_allclose(brush.tip_positions(body_q), expected, atol=1e-6)
 
 
+class TestCarriedWithTheHandle(unittest.TestCase):
+    def test_each_pose_turns_by_the_library_product(self) -> None:
+        """``_carried`` moves poses rigidly; its orientations are ``quat_multiply(turn, q)`` one pose at a time."""
+        from robosimstudio.core.math import mat_to_quat, quat_multiply, quat_to_mat
+        from robosimstudio_materials.brush import _carried
+
+        rng = np.random.default_rng(11)
+
+        def pose() -> np.ndarray:
+            q = rng.normal(size=4)
+            return np.concatenate([rng.normal(size=3), q / np.linalg.norm(q)])
+
+        start, end = pose(), pose()
+        poses = np.stack([pose() for _ in range(32)])
+        out = _carried(poses, start, end)
+        turn = quat_to_mat(end[3:7]) @ quat_to_mat(start[3:7]).T
+        q = mat_to_quat(turn)
+        np.testing.assert_allclose(out[:, 3:7], [quat_multiply(q, p[3:7]) for p in poses], atol=1e-12)
+        np.testing.assert_allclose(out[:, :3], (poses[:, :3] - start[:3]) @ turn.T + end[:3], atol=1e-12)
+        # The start pose itself lands on the end pose (up to the quaternion's sign).
+        (back,) = _carried(start[None], start, end)
+        np.testing.assert_allclose(back[:3], end[:3], atol=1e-12)
+        self.assertAlmostEqual(1.0, abs(float(np.dot(back[3:7], end[3:7]))), places=12)
+
+
 class TestTheCatalogue(unittest.TestCase):
     def test_the_atom_and_its_handler(self) -> None:
         from robosimstudio.assetlib.semantics.atoms import get_atom

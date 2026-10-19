@@ -568,13 +568,14 @@ def _z_axes(quats) -> np.ndarray:
 
 def _carried(poses: np.ndarray, start: np.ndarray, end: np.ndarray) -> np.ndarray:
     """``(N, 7)`` poses moved rigidly with a body that went from pose ``start`` to pose ``end``."""
-    from robosimstudio.core.math import mat_to_quat, quat_to_mat
+    from robosimstudio.core.math import mat_to_quat, quat_multiply, quat_to_mat
 
     poses, start, end = (np.asarray(v, dtype=np.float64) for v in (poses, start, end))
     turn = quat_to_mat(end[3:7]) @ quat_to_mat(start[3:7]).T
-    x, y, z, w = mat_to_quat(turn)
-    # The turn's quaternion times each pose's, as a matrix on the right-hand xyzw factor.
-    left = np.array([[w, -z, y, x], [z, w, -x, y], [-y, x, w, z], [-x, -y, -z, w]])
+    q = mat_to_quat(turn)
+    # The turn's quaternion times each pose's, as a matrix on the right-hand factor: the
+    # product is linear in it, so the library's product with each basis quaternion is a column.
+    left = np.stack([quat_multiply(q, basis) for basis in np.eye(4)], axis=1)
     out = np.empty_like(poses)
     out[:, :3] = (poses[:, :3] - start[:3]) @ turn.T + end[:3]
     out[:, 3:7] = poses[:, 3:7] @ left.T
