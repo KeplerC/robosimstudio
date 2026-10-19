@@ -96,6 +96,8 @@ class ArrangementBinder:
         """Path -> the value its control was built with, i.e. what the scene runs."""
         self._ui: dict[str, ParamUI] = {}
         """Path -> how its control was built, for telling a slider set back."""
+        self._serves: dict[str, tuple[str, ...]] = {}
+        """Backend path -> every domain its section serves; the path names only the first."""
 
     # ------------------------------------------------------------------ build
     def build(self, gui: Any) -> None:
@@ -114,6 +116,7 @@ class ArrangementBinder:
                 if isinstance(value, (tuple, list, dict)) or value is None:
                     continue
                 self._add(gui, f"backend:{domains[0]}:{name}", name, value, rule.ui)
+                self._serves[f"backend:{domains[0]}:{name}"] = domains
         try:
             coupler_info = get_coupler(self.spec.coupling.method)
             schema = dict(coupler_info.schema or {})
@@ -173,7 +176,7 @@ class ArrangementBinder:
                 readout[0].value = _fmt(value, readout[1])
             if self.program is not None and path.split(":")[0] in ("backend", "coupling"):
                 try:
-                    self.applied[path] = self.program.apply(path, value)
+                    self.applied[path] = self._apply_live(path, value)
                 except Exception as exc:  # a private-API applier on a newer newton; the rebuild still carries it
                     print(f"[studio] could not apply {path} live ({type(exc).__name__}: {exc}); pending rebuild")
                     self.applied[path] = REBUILD
@@ -185,6 +188,25 @@ class ArrangementBinder:
             if self.applied[path] == REBUILD and back:
                 del self.applied[path]
         return taken
+
+    def _apply_live(self, path: str, value: Any) -> str:
+        """Apply one edit to the running program, under whichever of its section's domains has an island.
+
+        A section shared by several domains names only the first in its path,
+        and that one need not be in the scene: a liquid scene shown every
+        backend has an mpm section headed ``granular``.
+        """
+        kind, _, rest = path.partition(":")
+        domains = self._serves.get(path, ())
+        if kind != "backend" or len(domains) < 2:
+            return self.program.apply(path, value)
+        param = rest.partition(":")[2]
+        for domain in domains[:-1]:
+            try:
+                return self.program.apply(f"backend:{domain}:{param}", value)
+            except KeyError:
+                continue
+        return self.program.apply(f"backend:{domains[-1]}:{param}", value)
 
     def _fold(self, path: str, value: Any) -> None:
         kind, _, rest = path.partition(":")

@@ -182,6 +182,25 @@ class OneSectionPerBackendTheSceneUses(unittest.TestCase):
         self.assertEqual(GENERIC.backend_for("*"), spec.backend_for("*"))
         self.assertEqual(GENERIC.backend_for("soft"), spec.backend_for("soft"))
 
+    def test_a_shared_section_applies_live_under_the_domain_the_scene_has(self):
+        """Its path names ``granular``; a liquid-only program knows ``liquid``, and the edit still lands live."""
+        from robosimstudio.specs.params import RECAPTURE
+
+        asked = []
+
+        def apply(path, value):
+            asked.append(path)
+            if not path.startswith("backend:liquid:"):
+                raise KeyError(f"no island or domain {path.split(':')[1]!r}")
+            return RECAPTURE
+
+        binder, _ = self._sections(None)
+        binder.program = SimpleNamespace(apply=apply)
+        binder.pending["backend:granular:max_iterations"] = 40
+        binder.drain()
+        self.assertEqual(RECAPTURE, binder.applied["backend:granular:max_iterations"])
+        self.assertEqual(["backend:granular:max_iterations", "backend:liquid:max_iterations"], asked)
+
 
 if __name__ == "__main__":
     unittest.main()
