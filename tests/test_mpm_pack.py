@@ -300,6 +300,37 @@ class TestTheContainerMargins(unittest.TestCase):
         self.assertEqual({"cup", "cup_floor", "cup_collision_00"}, given)
         self.assertEqual(3, sum(builder.shape_margin[s] == 0.0 for s in shapes.values()))
 
+    def test_a_static_containers_convex_hulls_are_its_own(self) -> None:
+        """Newton labels the hulls past a decomposition's first ``<label>_convex_<i>``; each gets the margin.
+
+        ``approximate_meshes(method="coacd")`` over a 100 mm U of three slabs
+        welded to the world gave ``bowl`` and ``bowl_convex_1`` to
+        ``bowl_convex_26``, all on body -1 (Newton 1.6.0's builder). Matched by
+        the whole name alone, only the first hull had a margin and a liquid
+        leaked through the other 26.
+        """
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm.entity import DEFAULT_CONTAINER_MARGIN, EntityParticleBody
+
+        builder = newton.ModelBuilder()
+        labels = (
+            "bowl",
+            "bowl_convex_1",
+            "bowl_convex_26",
+            "bowl_collision",
+            "bowl_collision_01_convex_2",
+            "bowl_2",
+            "bowl_2_convex_1",
+            "bowl_holder_convex_1",
+        )
+        shapes = {label: builder.add_shape_box(body=-1, hx=0.01, hy=0.01, hz=0.01, label=label) for label in labels}
+        pool = EntityParticleBody(rss.liquid(name="h", material="honey", containers=("bowl",)))
+        pool._apply_container_margins(builder)
+        given = {label for label, s in shapes.items() if builder.shape_margin[s] == DEFAULT_CONTAINER_MARGIN}
+        self.assertEqual(set(labels[:5]), given)
+
 
 class TestTheRecords(unittest.TestCase):
     def test_a_record_carries_the_specs_domain_and_builds_the_spec(self) -> None:

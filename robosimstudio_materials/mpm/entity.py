@@ -269,9 +269,12 @@ class EntityParticleBody(ParticleMixin, Entity):
         Found by label, and by the whole name: a container's shapes are the
         ones on the body that carries its name (a rigid body's, with a shell
         collider's floor and walls) and the world-fixed ones a static builds,
-        labelled with the name or ``<name>_collision_<i>``. A prefix is not
-        enough, since ``cup`` would then also take ``cup_holder`` and ``cup_2``. A
-        name that matches nothing is a warning rather than an error, because
+        labelled with the name, ``<name>_collision`` or ``<name>_collision_<i>``,
+        each followed by ``_convex_<i>`` for the hulls past the first that
+        Newton's convex decomposition adds (a static bowl with
+        ``approximate="coacd"`` is ``bowl`` and ``bowl_convex_1`` to ``_26``). A
+        prefix is not enough, since ``cup`` would then also take ``cup_holder``
+        and ``cup_2``. A name that matches nothing is a warning rather than an error, because
         the container may be built in a later stage of a scene that will be
         compiled again with it -- but a liquid poured into a wall with no
         margin leaks, and the warning says which name was missed.
@@ -283,12 +286,8 @@ class EntityParticleBody(ParticleMixin, Entity):
         bodies = list(getattr(builder, "body_label", []))
         for name in self.spec.containers:
             owned = {i for i, label in enumerate(bodies) if label == name}
-            part = re.compile(rf"{re.escape(name)}_collision_\d+")
-            shapes = [
-                s
-                for s in range(len(labels))
-                if builder.shape_body[s] in owned or labels[s] == name or part.fullmatch(labels[s])
-            ]
+            own = re.compile(rf"{re.escape(name)}(?:_collision(?:_\d+)?)?(?:_convex_\d+)?")
+            shapes = [s for s in range(len(labels)) if builder.shape_body[s] in owned or own.fullmatch(labels[s])]
             if not shapes:
                 warnings.warn(
                     f"particle body {self.spec.name!r}: container {name!r} has no shapes in the builder yet, "
