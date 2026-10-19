@@ -1563,6 +1563,10 @@ class SuperdexBridge:
 _CONSUMES = {
     # What each builder above actually reads off ``HostActor.params``; the
     # composer warns on anything an actor states outside its kind's set.
+    # ``welds`` is read by ``_build_welds``, which joins every kind's stated
+    # nodes alike: a weld stated on a sheet holds a second sheet hung off it
+    # at 0.000 mm after a second, which falls 4.9 m without it, and on a bag
+    # the same (``c1_shell_weld.py``; ``tests/test_superdex_sheet.py``).
     "shell": (
         "areal_density",
         "contact_padding",
@@ -1577,6 +1581,7 @@ _CONSUMES = {
         "self_contact",
         "stiffness_damping",
         "thickness",
+        "welds",
         "young",
     ),
     "tet": (

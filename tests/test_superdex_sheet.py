@@ -7,7 +7,8 @@ the float32 engine solves worst at bench height (a bag there never converged; se
 the cloth said. It now builds every sheet about its centroid with the offset in the root, reads
 the nodes back through the root, and states the cloth's own friction. What moved with the root is
 checked here on the engine, at two worlds, each its own scene: the read-back against what Newton
-holds, a pin (the engine takes its target in the world), a placement, and a reset.
+holds, a pin (the engine takes its target in the world), a placement, and a reset. And a weld
+stated on a sheet or a bag, which the bridge's weld pass builds for a shell as for a soft body.
 ``tests/test_superdex_shell.py`` checks the builder against a stand-in engine.
 """
 
@@ -98,6 +99,88 @@ class TestASheetOnSuperdex(unittest.TestCase):
         self.bridge.restore_rest()
         np.testing.assert_allclose(self._read(entry), self.rest[1], atol=1.0e-6)
         self.assertTrue(self.sim.state_is_finite())
+
+
+class _Arr:
+    def __init__(self, a) -> None:
+        self.a = np.asarray(a)
+
+    def numpy(self):
+        return self.a
+
+
+def _grid(origin, n: int = 5, size: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+    """A flat ``n`` x ``n`` sheet, its corner at ``origin``: vertices and triangles."""
+    xs = np.linspace(0.0, size, n + 1)
+    vertices = np.array([(x, y, 0.0) for x in xs for y in xs]) + np.asarray(origin)
+    tris = []
+    for i in range(n):
+        for j in range(n):
+            a = i * (n + 1) + j
+            tris += [(a, a + n + 1, a + 1), (a + n + 1, a + n + 2, a + 1)]
+    return vertices, np.asarray(tris)
+
+
+@unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing builds the sheet")
+class TestAWeldStatedOnASheetHolds(unittest.TestCase):
+    """The bridge's weld pass joins a sheet's or a bag's stated nodes as it does a soft body's.
+
+    So both builders declare ``welds``. On the engine alone: two 0.1 m sheets at bench height, the
+    second's corner on a node of the first, whose x = 0.6 m edge is pinned. The second hangs off the
+    first only by a weld stated in the first's record, kind ``shell`` or ``bag``: measured 0.000 mm
+    apart after a second, the welded corner sagging 83 mm with the first sheet's free edge, where
+    unwelded it falls 4.9 m (``c1_shell_weld.py``).
+    """
+
+    def _hang(self, kind: str, weld: bool) -> tuple[float, float, int]:
+        from types import SimpleNamespace
+
+        import robosimstudio_materials.bag  # noqa: F401 -- registers the bag's builder
+        from robosimstudio.engines.superdex.bridge import SuperdexBridge
+
+        va, ta = _grid((0.6, 0.0, 0.8))
+        vb, tb = _grid((0.7, 0.0, 0.8))
+        joined = int(np.argmin(np.linalg.norm(va - vb[0], axis=1)))
+        empty = _Arr(np.zeros((0, 7)))
+        model = SimpleNamespace(
+            particle_q=_Arr(np.vstack([va, vb]).astype(np.float32)),
+            tri_indices=_Arr(np.vstack([ta, tb + len(va)])),
+            tri_count=len(ta) + len(tb),
+            tet_count=0,
+            body_count=0,
+            shape_count=0,
+            **{f"shape_{key}": empty for key in ("type", "scale", "transform", "body", "material_mu")},
+        )
+        sheet = {"thickness": 0.004, "areal_density": 0.3, "young": 1.0e5, "poisson": 0.3, "self_contact": False}
+        stated = {**sheet, "welds": [{"to": "b", "nodes": [joined], "contact": False}]} if weld else sheet
+        record = {"kind": kind, "particle_start": 0, "particle_count": len(va), "params": stated}
+        recipe = {
+            "island": "weld",
+            "gravity": [0.0, 0.0, -9.81],
+            "actors": [
+                {**record, "name": "a", "entity": "a"},
+                {"name": "b", "entity": "b", "kind": "shell", "particle_start": len(va), "particle_count": len(vb)},
+            ],
+            "mirrors": [],
+        }
+        recipe["actors"][1]["params"] = sheet  # the hung sheet states no weld of its own
+        bridge = SuperdexBridge(model, recipe)
+        edge = np.flatnonzero(va[:, 0] < 0.6 + 1.0e-9)
+        bridge.pin_nodes("a", edge, va[edge], stiffness=1.0e4, damping=10.0)
+        for _ in range(240):
+            bridge.scene.step(1.0 / 240.0)
+        a, b = (np.asarray(e["read"](), dtype=np.float64).reshape(-1, 3) for e in bridge.actors)
+        return float(np.linalg.norm(a[joined] - b[0])), float(vb[0, 2] - b[0, 2]), len(bridge.welds)
+
+    def test_a_sheet_and_a_bag_each_hold_what_they_weld(self) -> None:
+        for kind in ("shell", "bag"):
+            with self.subTest(kind=kind):
+                gap, drop, welds = self._hang(kind, weld=True)
+                self.assertEqual(1, welds)
+                self.assertLess(gap, 1.0e-4, "the welded pair stays together")
+                self.assertLess(drop, 0.2, "the second sheet hangs off the first")
+        _, drop, welds = self._hang("shell", weld=False)
+        self.assertEqual((0, True), (welds, drop > 1.0), "unwelded, the second sheet falls")
 
 
 if __name__ == "__main__":

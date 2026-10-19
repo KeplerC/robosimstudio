@@ -299,6 +299,27 @@ class TestTheDeclarations(unittest.TestCase):
         params = EntityBagSuperdex(bag(name="bag")).host_actor().params
         self.assertEqual((1.0e6, 0.3), (params["young"], params["poisson"]), "the canvas, under the shell's names")
 
+    def test_a_weld_stated_on_a_sheet_or_a_bag_is_one_its_builder_reads(self) -> None:
+        """The bridge's weld pass joins a shell's stated nodes as a soft body's, so neither is told it is unread."""
+        import importlib
+        import warnings
+
+        from robosimstudio.engines.geometry import actor_builder, actor_consumes
+        from robosimstudio.specs.physics import HostActor, get_backend
+
+        compose = importlib.import_module("robosimstudio.scene.physics.compose")
+        get_backend("superdex")  # loads the engine bundle, which registers its builders
+        actor_builder("superdex", "bag")  # the lookup scans the packs, which registers the bag's
+        island = SimpleNamespace(backend=SimpleNamespace(solver="superdex"))
+        welds = [{"to": "plate", "nodes": [0], "contact": False}]
+        for kind in ("shell", "bag"):
+            with self.subTest(kind=kind), warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                self.assertIn("welds", actor_consumes("superdex", kind))
+                actor = HostActor(kind=kind, params={"thickness": 1.0e-3, "welds": welds})
+                compose._warn_lost_material(SimpleNamespace(name="towel", entity=None), actor, island)
+                self.assertEqual([], [str(w.message) for w in caught])
+
     def test_a_key_the_shell_builder_learns_is_the_bags_too(self) -> None:
         """The bag's declaration is read off the shell builder's, not copied from it key by key.
 
