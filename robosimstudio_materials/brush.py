@@ -544,6 +544,30 @@ def _floor_inertia(builder: newton.ModelBuilder, bodies) -> None:
         builder.body_inv_inertia[b] = wp.mat33(*np.linalg.inv(floored).ravel().tolist())
 
 
+def _free_coord(builder: newton.ModelBuilder, body: int) -> int:
+    """The first coordinate of the free joint ``body`` hangs on, or -1 for a body on none (a fixed handle)."""
+    free = int(newton.JointType.FREE)
+    for j in range(builder.joint_count):
+        if int(builder.joint_child[j]) == int(body) and int(builder.joint_type[j]) == free:
+            return int(builder.joint_q_start[j])
+    return -1
+
+
+def _carried(poses: np.ndarray, start: np.ndarray, end: np.ndarray) -> np.ndarray:
+    """``(N, 7)`` poses moved rigidly with a body that went from pose ``start`` to pose ``end``."""
+    from robosimstudio.core.math import mat_to_quat, quat_to_mat
+
+    poses, start, end = (np.asarray(v, dtype=np.float64) for v in (poses, start, end))
+    turn = quat_to_mat(end[3:7]) @ quat_to_mat(start[3:7]).T
+    x, y, z, w = mat_to_quat(turn)
+    # The turn's quaternion times each pose's, as a matrix on the right-hand xyzw factor.
+    left = np.array([[w, -z, y, x], [z, w, -x, y], [-y, x, w, z], [-x, -y, -z, w]])
+    out = np.empty_like(poses)
+    out[:, :3] = (poses[:, :3] - start[:3]) @ turn.T + end[:3]
+    out[:, 3:7] = poses[:, 3:7] @ left.T
+    return out
+
+
 _GROUPS = itertools.count(2)
 """Collision groups handed to brushes, one each, negated: ``-2``, ``-3``, ... (``-1`` is Newton's
 "collide with everything", ``0`` nothing, ``1`` what every other shape carries)."""
@@ -564,6 +588,8 @@ class EntityBrush(Entity):
         """The grip: the brush's own, or the named handle's body."""
         self.coord_start: int = -1
         """The own grip's free-joint coordinates; -1 for a named handle, which its own entity restores."""
+        self._handle_coord: int = -1
+        """A named handle's free-joint coordinates, where its reset writes the episode's pose; -1 otherwise."""
         self.bodies: np.ndarray = np.zeros(0, dtype=np.int32)
         self.shapes: np.ndarray = np.zeros(0, dtype=np.int32)
         self.joints: np.ndarray = np.zeros(0, dtype=np.int32)
@@ -652,6 +678,7 @@ class EntityBrush(Entity):
             body = self._named_body(builder, spec.handle)
             pose = builder.body_q[body]
             self.handle_body, self.coord_start = body, -1
+            self._handle_coord = _free_coord(builder, body)
             # On another solver its support cannot come back from the bristles
             # (see the module docstring), so there it holds itself up.
             from robosimstudio.core.builder import set_body_attribute
@@ -887,19 +914,34 @@ class EntityBrush(Entity):
     def reset(self, pipeline, episode, *, world: int = 0) -> None:
         """This world's strips, bristles and own grip back on their build pose, at rest, and its lattice cleared.
 
-        A named handle is its own entity's to restore; the strips go back to
-        where its build pose holds them.
+        A named handle is its own entity's to restore, and an episode may put it
+        somewhere other than where it was built. Its reset runs first (it was
+        built first) and writes that pose into the joint coordinates, so the
+        strips and bristles go back to their build pose on the handle, carried
+        to where the handle is now. The handle's body is put there too: the
+        kinematics pass after the entities places the strips' welds from it,
+        and would otherwise place them from where the last episode left it.
         """
         del episode
         if self._rest_body_q is None:
             return
         rows = self._global(self.bodies, world)
+        rest = self._rest_body_q[rows]
+        handle: tuple[int, np.ndarray] | None = None
+        if self._handle_coord >= 0:
+            row = int(self._global([self.handle_body], world)[0])
+            c = self._handle_coord if self.worlds is None else int(self.worlds.coord(self._handle_coord, world))
+            placed = pipeline.state_0.joint_q.numpy()[c : c + 7]
+            rest = _carried(rest, self._rest_body_q[row], placed)
+            handle = (row, placed)
         coords = np.arange(self.coord_start, self.coord_start + 7, dtype=np.int64) if self.coord_start >= 0 else None
         if coords is not None and self.worlds is not None:
             coords = np.asarray([self.worlds.coord(int(c), world) for c in coords], dtype=np.int64)
         for state in (pipeline.state_0, pipeline.state_1):
             body_q = state.body_q.numpy()
-            body_q[rows] = self._rest_body_q[rows]
+            body_q[rows] = rest
+            if handle is not None:
+                body_q[handle[0]] = handle[1]
             state.body_q.assign(body_q)
             body_qd = state.body_qd.numpy()
             body_qd[rows] = 0.0
@@ -910,10 +952,13 @@ class EntityBrush(Entity):
                 state.joint_q.assign(joint_q)
         if world == 0:
             # A teleport leaves the coupled solver holding last episode's contact
-            # anchors and warm starts.
+            # anchors and warm starts. ``flags=0`` clears those and nothing else:
+            # by default the solvers also put every joint coordinate back to the
+            # model's, which undid each entity reset before this one, the
+            # handle's episode pose among them.
             reset_solvers = getattr(pipeline, "reset_solvers", None)
             if reset_solvers is not None:
-                reset_solvers()
+                reset_solvers(flags=0)
         self.clear_scrub(world)
 
     # ---------------------------------------------------------------- reading
