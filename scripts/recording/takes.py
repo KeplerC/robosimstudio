@@ -968,24 +968,24 @@ def _turn(arm: str, quat, seconds: float, label: str) -> Do:
 
     What a drag of the gizmo's rotation ring writes, written through the panel's
     own ``aim``: no beat drags a ring, so the clip shows the gizmo turning with
-    the pointer off it.
+    the pointer off it. To an orientation, eased, where :class:`~.beats.Turn`
+    turns by an angle about an axis at an even rate.
     """
 
     def turn(film):
         import numpy as np
+
+        from robosimstudio.core.math import quat_slerp
 
         from .page import ease
 
         panel = film.session.arms[arm]
         a = np.asarray(panel.cursor_quat, dtype=np.float64)
         b = np.asarray(quat, dtype=np.float64)
-        b = -b if float(a @ b) < 0.0 else b
-        half = math.acos(min(1.0, float(a @ b)))
+        half = math.acos(min(1.0, abs(float(a @ b))))
         frames = max(1, round(seconds * film.take.fps))
         for k in range(1, frames + 1):
-            t = ease(k / frames)
-            q = b if half < 1e-6 else (math.sin((1.0 - t) * half) * a + math.sin(t * half) * b) / math.sin(half)
-            panel.aim(panel.cursor_pos, q / np.linalg.norm(q), moving=k < frames)
+            panel.aim(panel.cursor_pos, quat_slerp(a, b, ease(k / frames)), moving=k < frames)
             film.advance()
         return {"turned_deg": round(math.degrees(2.0 * half), 1)}
 

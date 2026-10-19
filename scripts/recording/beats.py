@@ -390,24 +390,6 @@ class Grasp(Beat):
         return {"arm": arm, "drags": done}
 
 
-def _quat_about(axis, radians: float) -> tuple[float, float, float, float]:
-    """The xyzw quaternion of a turn of ``radians`` about the unit ``axis``."""
-    s = math.sin(0.5 * radians)
-    return (axis[0] * s, axis[1] * s, axis[2] * s, math.cos(0.5 * radians))
-
-
-def _quat_mul(a, b) -> tuple[float, float, float, float]:
-    """``a`` after ``b``, both xyzw."""
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return (
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    )
-
-
 @dataclass(frozen=True)
 class Turn(Beat):
     """Turn an arm's gizmo ``degrees`` about the world ``axis`` through its centre, over ``seconds``.
@@ -427,6 +409,8 @@ class Turn(Beat):
     seconds: float = 1.0
 
     def play(self, film):
+        from robosimstudio.core.math import quat_from_axis_angle, quat_multiply
+
         panel = film.session.arms[self.gizmo]
         film.settle(self.gizmo)
         unit = _axis(self.axis)
@@ -436,7 +420,7 @@ class Turn(Beat):
         start = tuple(float(v) for v in panel.cursor_quat)
         frames = max(1, round(self.seconds * film.take.fps))
         for k in range(1, frames + 1):
-            turned = _quat_mul(_quat_about(unit, math.radians(self.degrees) * k / frames), start)
+            turned = quat_multiply(quat_from_axis_angle(unit, math.radians(self.degrees) * k / frames), start)
             panel.aim(position, turned, moving=k < frames)
             film.advance()
         return {"axis": [round(v, 4) for v in unit], "degrees": self.degrees, "from_xyzw": [round(v, 4) for v in start]}
