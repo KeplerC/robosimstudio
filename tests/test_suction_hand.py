@@ -152,6 +152,14 @@ class TestTheSealGeometry(unittest.TestCase):
         self.assertAlmostEqual(0.0, tilt, places=5)
         self.assertFalse(covered, "a 6 mm edge cannot carry a 30 mm cup")
 
+    def test_a_pose_gone_non_finite_reads_nan_rather_than_raising(self) -> None:
+        """A blown-up state still gives the page's readout a number to print, as a finite one does."""
+        from robosimstudio.core.suction import face_on_box
+
+        gap, tilt, covered = face_on_box(np.full(7, np.nan), 0.015, PLATE, PLATE_HALF)
+        self.assertTrue(math.isnan(gap) and math.isnan(tilt))
+        self.assertFalse(covered)
+
 
 class TestTheSealSays(unittest.TestCase):
     """:meth:`Suction.seal` over a CPU model: a pad body and a plate body, posed by hand."""

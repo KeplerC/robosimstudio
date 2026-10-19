@@ -117,7 +117,8 @@ def face_on_box(face_pose, pad_radius: float, box_pose, half) -> tuple[float, fl
         is the one whose outward normal is most opposed to the cup's normal,
         among the faces the centre is not beyond the far side of: a cup over a
         plate pointing up faces the plate's sides, not its underside through
-        it, and reports a right angle.
+        it, and reports a right angle. Each axis keeps at least one of its two
+        faces, since the centre cannot be beyond both, so there is always one.
     """
     face_pose = np.asarray(face_pose, dtype=np.float64).reshape(7)
     box_pose = np.asarray(box_pose, dtype=np.float64).reshape(7)
@@ -126,15 +127,16 @@ def face_on_box(face_pose, pad_radius: float, box_pose, half) -> tuple[float, fl
     rot = quat_to_mat(box_pose[3:7])
     local = rot.T @ (face_pose[:3] - box_pose[:3])
     facing: list[tuple[float, float, bool]] = []
-    behind: list[tuple[float, float, bool]] = []
     for axis in range(3):
         for sign in (1.0, -1.0):
+            gap = float(sign * local[axis] - half[axis])
+            if gap < -2.0 * half[axis]:
+                continue
             outward = sign * rot[:, axis]
             tilt = math.acos(float(np.clip(-np.dot(normal, outward), -1.0, 1.0)))
-            gap = float(sign * local[axis] - half[axis])
             covered = all(abs(local[k]) + pad_radius <= half[k] + 1e-9 for k in range(3) if k != axis)
-            (facing if gap >= -2.0 * half[axis] else behind).append((gap, tilt, covered))
-    return min(facing or behind, key=lambda found: found[1])
+            facing.append((gap, tilt, covered))
+    return min(facing, key=lambda found: found[1])
 
 
 def flat_faces(model: newton.Model, body: int) -> list[tuple[np.ndarray, np.ndarray]]:
