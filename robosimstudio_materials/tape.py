@@ -142,7 +142,8 @@ __all__ = [
 # at ``GENERIC``'s 16 substeps; the break kernel is one launch a substep (``p11_cost.py``, GPU 1).
 # Contact adhesion is two launches a substep, one thread a bond: ``02_stick_a_label``'s 126 bonds beside
 # the YAM step in 35.1-35.5 ms a control step through the page, carried, laid and rubbed
-# (``m1_screen.py``, five drives, GPU 6).
+# (``m1_screen.py``, five drives, GPU 6). Either law adds one launch a control step, outside the graph,
+# that lays the bonds again where the box's contact margin has moved (``EntityTape._relay``).
 
 
 # =============================================================================
@@ -962,6 +963,64 @@ def _seat_kernel(
     body_point_model[rows[k]] = seat.anchor
 
 
+@wp.kernel
+def _relay_kernel(
+    rows: wp.array(dtype=wp.int32),
+    particle: wp.array(dtype=wp.int32),
+    target: int,
+    contact: int,
+    under: wp.array(dtype=wp.int32),
+    boxes: wp.array(dtype=wp.int32),
+    shape_transform: wp.array(dtype=wp.transform),
+    shape_scale: wp.array(dtype=wp.vec3),
+    shape_margin: wp.array(dtype=float),
+    particle_radius: wp.array(dtype=float),
+    normal: wp.array(dtype=wp.vec3),
+    body_q: wp.array(dtype=wp.transform),
+    enabled: wp.array(dtype=wp.bool),
+    laid: wp.array(dtype=float),
+    anchor: wp.array(dtype=wp.vec3),
+    body_point: wp.array(dtype=wp.vec3),
+    body_point_model: wp.array(dtype=wp.vec3),
+    particle_q: wp.array(dtype=wp.vec3),
+):
+    """Each held bond whose contact thickness has moved since it was laid, laid again where VBD's contact rests
+    its particle now: the particle and the anchor moved off the face by the change. One thread per bond.
+
+    ``laid`` is the thickness each was laid at, the particle's radius plus a margin [m]. Under contact
+    adhesion (``contact`` 1) it is the bond's ``dmin``, against the margin of the box under its anchor
+    (:func:`_seat_on`); under opening adhesion, against the largest margin of the boxes ``under`` the
+    sheet, as a reset lays it (:meth:`EntityTape.margin_moved`), and ``anchor`` is the break kernel's
+    copy of the anchors. The anchor goes into the solver's copy and the model's (:func:`_stick_kernel`).
+    """
+    k = wp.tid()
+    row = rows[k]
+    if not enabled[row]:
+        return
+    p = particle[k]
+    thick = laid[k]
+    if contact != 0:
+        seat = _seat_on(body_point[row], particle_radius[p], boxes, shape_transform, shape_scale, shape_margin)
+        if seat.shape >= 0:
+            thick = seat.thick
+    elif under.shape[0] > 0:
+        margin = _margin_of(shape_margin, under[0])
+        for j in range(1, under.shape[0]):
+            margin = wp.max(margin, _margin_of(shape_margin, under[j]))
+        thick = particle_radius[p] + margin
+    moved = thick - laid[k]
+    if moved == 0.0:
+        return
+    n = normal[k]
+    point = body_point[row] + n * moved
+    body_point[row] = point
+    body_point_model[row] = point
+    if contact == 0:
+        anchor[k] = point
+    laid[k] = thick
+    particle_q[p] = particle_q[p] + wp.transform_vector(body_q[target], n) * moved
+
+
 # =============================================================================
 # 5. The entity: cloth, plus the bonds, the tab and the break kernel
 # =============================================================================
@@ -1017,6 +1076,14 @@ class EntityTape(EntityCloth):
         self.lift_shapes: np.ndarray = np.zeros(0, dtype=np.int64)
         """The shapes whose margin :attr:`lift` is: the body's boxes under the sheet's bonds."""
         self._margins: Any = None
+        self._model: Any = None
+        self._under: Any = None
+        self._radius: np.ndarray = np.zeros(0, dtype=np.float32)
+        self._laid: Any = None
+        """Opening adhesion: per bond, the contact thickness its particle and anchor are laid at [m], on the device:
+        the particle's radius plus the margin the sheet is laid at (:meth:`_relay`). Contact adhesion's is its
+        ``dmin``."""
+        self._normals: Any = None
         self._arrays: dict[str, list[Any]] = {}
         self._rows: Any = None
         self._particle: Any = None
@@ -1296,10 +1363,61 @@ class EntityTape(EntityCloth):
 
     # -------------------------------------------------------------- phase 3
     def contribute_hooks(self, hooks) -> None:
+        if len(self.bonds):
+            hooks.add("before", self._relay, name=f"relay:{self.spec.name}")
         if len(self.bonds) and self.contact:
             hooks.add("post_solve", self._stick, name=f"stick:{self.spec.name}")
         elif len(self.bonds):
             hooks.add("post_solve", self._break, name=f"bonds:{self.spec.name}")
+
+    def _relay(self, state: newton.State, dt: float) -> None:
+        """Once a control step, before its substeps: every held bond laid again where VBD's contact rests its
+        particle, the particle and the anchor moved off the face by how far the contact thickness has moved
+        since the bond was laid. What a reset does for the sheet (:meth:`margin_moved`), between resets.
+
+        The box's contact ``thickness`` writes its margin live, and the next collide rests a particle that
+        much further off the face; a sheet left where it lay was pushed out through it and overshot. A
+        tabbed label stuck at no margin beside the YAM, the margin written live with no reset, kept none of
+        :data:`PAPER_LABEL`'s 144 bonds at 1 and 2 mm and 5 and 8 of :data:`LABEL`'s; laid again here, all
+        144 of either at 1 mm, and at 2 mm all but the row by the fold or part of it, 135-140 in two drives
+        each (``scene_live.py``, ``scene_live2.py``, GPU 1). That row goes as the tab, which rests on the box
+        by its own contact and is not moved here, is thrown up 16 mm by the jump; written in 0.25 mm steps a
+        control step apart, as a dragged slider can write it, all 144 of either held to 2 mm, the tab rising
+        4.6 mm at most. Moved by its pose too,
+        the tab came off worse, VBD reading the jump as a velocity against its own pose history, and with
+        the anchors moved alone 46 and 9 bonds held at 1 mm (``a2_variants.py``, VBD on the CPU). It runs
+        once a control step, outside the graph, because a write lands between control steps: in a substep
+        phase the first solve after it has already pushed the sheet out. A particle radius written live
+        moves the thickness too, and is laid again alike: at 1.5 mm, from 0.5, all 144 held on the CPU
+        where 2 and none did (``a2_cpu2.py``)."""
+        del dt
+        if self._laid is None:
+            return
+        c = self._contact
+        model = self._model
+        arrays = (c["dmin"], c["normal"]) if c else (self._laid, self._normals)
+        body_point = self._arrays["body_point"]
+        wp.launch(
+            _relay_kernel,
+            dim=len(self.bonds),
+            inputs=[
+                self._rows,
+                self._particle,
+                self.body,
+                1 if c else 0,
+                self._under,
+                c["boxes"] if c else self._under,
+                model.shape_transform,
+                model.shape_scale,
+                model.shape_margin,
+                model.particle_radius,
+                arrays[1],
+                state.body_q,
+                self._arrays["enabled"][0],
+            ],
+            outputs=[arrays[0], self._anchor, body_point[0], body_point[-1], state.particle_q],
+            device=state.particle_q.device,
+        )
 
     def _stick(self, state: newton.State, dt: float) -> None:
         """Contact adhesion's substep: make bonds where pressed, then hold or release each by the law."""
@@ -1419,6 +1537,13 @@ class EntityTape(EntityCloth):
         self._anchor = wp.array(self.anchors.astype(np.float32), dtype=wp.vec3, device=device)
         self._limit = wp.array([float(self.spec.material.break_opening)], dtype=wp.float32, device=device)
         self._margins = model.shape_margin
+        self._model = model
+        self._under = wp.array(self.lift_shapes.astype(np.int32), dtype=wp.int32, device=device)
+        self._radius = model.particle_radius.numpy()[self.bond_particles].astype(np.float32)
+        self._laid = wp.array(self._laid_at(self.lift), dtype=float, device=device)
+        self._normals = wp.array(
+            np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32), dtype=wp.vec3, device=device
+        )
         self.broken = wp.zeros(len(self.bonds), dtype=wp.int32, device=device)
         if self.contact and len(self.bonds):
             self._bind_contact(pipeline)
@@ -1518,6 +1643,7 @@ class EntityTape(EntityCloth):
     def margin_moved(self) -> float:
         """How far the margin a stuck sheet was laid at has moved since the build [m]: what a reset lays it
         further off the face by. The box's contact ``thickness`` writes the margin live; 0 for a loose sheet.
+        Between resets :meth:`_relay` lays the held bonds again by the change, at the next control step.
 
         Built over no margin, the margin then written and the scene reset with the sheet where it was
         built, a tabbed label's 144 bonds let go: :data:`LABEL` kept 8 at 1 mm and none from 1.5 mm,
@@ -1526,6 +1652,10 @@ class EntityTape(EntityCloth):
         if not len(self.lift_shapes) or self._margins is None:
             return 0.0
         return float(self._margins.numpy()[self.lift_shapes].max()) - self.lift
+
+    def _laid_at(self, margin: float) -> np.ndarray:
+        """Each bond's contact thickness laid at ``margin`` [m], in float32 as :func:`_relay_kernel` sums it."""
+        return self._radius + np.float32(margin)
 
     def _reset_bonds(self, moved: float | None = None) -> None:
         """Every bond as built, in every array a solver reads: made or not (:attr:`made`), at its anchor, and
@@ -1539,6 +1669,7 @@ class EntityTape(EntityCloth):
             anchors = (self.anchors + moved * self.normal).astype(np.float32)
             rows["body_point"] = anchors
             self._anchor.assign(anchors)
+            self._laid.assign(self._laid_at(self.lift + moved))
         for key, value in rows.items():
             for array in self._arrays.get(key, ()):
                 values = array.numpy()
