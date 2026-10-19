@@ -338,7 +338,9 @@ class SphBridge:
             q_idx.append(np.arange(entity.q_start, entity.q_start + 7))
             d_idx.append(np.arange(entity.dof_start, entity.dof_start + 6))
             entry["mass"] = float(entity.get_mass())
-            entry["com"] = np.asarray(entity.links[0].inertial_pos, dtype=np.float64).reshape(3)
+            com = np.asarray(entity.links[0].inertial_pos, dtype=np.float64).reshape(3)
+            # A tessellated capsule's centre comes back 1e-18 m off its origin: that is its origin.
+            entry["com"] = com if float(np.linalg.norm(com)) > 1.0e-9 else np.zeros(3)
         self._q_idx = np.concatenate(q_idx) if q_idx else np.zeros(0, np.int64)
         self._d_idx = np.concatenate(d_idx) if d_idx else np.zeros(0, np.int64)
         self._moving = [i for i, m in enumerate(self.mirrors) if m["geom"].moving]
