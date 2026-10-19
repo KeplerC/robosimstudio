@@ -179,5 +179,68 @@ class TestTheInPlaceRateMustFitAControlStep(unittest.TestCase):
         self.assertIn("'960'", message)
 
 
+class TestTheHarvestCoversTheStepTaken(unittest.TestCase):
+    """The proxy coupler harvests once per coupled step at its ``dt``; the entry calls the solver ``substeps`` times in it.
+
+    Newton's own step and harvest are stubbed: the step records an impulse of
+    one newton times its own length, as a load at rest would put on a
+    collider, and the harvest divides the last impulse by the ``dt`` it is
+    given. A wrench of exactly 1 N is the harvest dividing by the length of
+    the step that made the impulse.
+    """
+
+    def _wrenches(self, *, substeps: int, step_hz: float, coupled_steps: int) -> list[float]:
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import numpy as np
+        import warp as wp
+        from newton.solvers import SolverImplicitMPM
+
+        from robosimstudio.engines.newton.mpm import SolverMPM
+
+        impulse = {"n_s": 0.0}
+
+        def init(self, model, config, **kwargs) -> None:
+            self.model = model
+
+        def step(self, state_in, state_out, control, contacts, dt) -> None:
+            impulse["n_s"] = 1.0 * dt
+
+        def harvest(self, body_local_to_proxy_global, out_body_f, *, dt, **kwargs) -> None:
+            out_body_f.assign(np.full((1, 6), impulse["n_s"] / dt, dtype=np.float32))
+
+        dt = 1.0 / 960.0  # GENERIC's substep: sixteen at 60 Hz
+        with (
+            mock.patch.object(SolverImplicitMPM, "__init__", init),
+            mock.patch.object(SolverImplicitMPM, "step", step),
+            mock.patch.object(SolverImplicitMPM, "coupling_harvest_proxy_wrenches", harvest),
+        ):
+            solver = SolverMPM(SimpleNamespace(device=SimpleNamespace(is_capturing=False)), step_hz=step_hz)
+            state = SimpleNamespace()
+            out = wp.zeros(1, dtype=wp.spatial_vector, device="cpu")
+            read = []
+            for _ in range(coupled_steps):
+                for _ in range(substeps):
+                    solver.step(state, state, None, None, dt / substeps)
+                solver.coupling_harvest_proxy_wrenches(None, out, dt=dt, state=state, contacts=None)
+                read.append(float(out.numpy()[0][2]))
+        return read
+
+    def test_one_substep_harvests_on_the_step_and_holds_between(self) -> None:
+        read = self._wrenches(substeps=1, step_hz=60.0, coupled_steps=32)
+        self.assertEqual([0.0] * 15 + [1.0] * 17, [round(v, 6) for v in read])
+
+    def test_two_substeps_divide_by_the_step_not_twice_it(self) -> None:
+        """``backend("mpm", substeps=2)`` read half of every collider wrench, a cup of honey half its weight."""
+        read = self._wrenches(substeps=2, step_hz=120.0, coupled_steps=16)
+        self.assertEqual([0.0] * 7 + [1.0] * 9, [round(v, 6) for v in read])
+
+    def test_a_step_on_a_call_other_than_the_last_is_harvested(self) -> None:
+        """Three substeps and a stride of two: the first coupled step's MPM step falls on its second call."""
+        read = self._wrenches(substeps=3, step_hz=1440.0, coupled_steps=4)
+        self.assertEqual([1.0] * 4, [round(v, 6) for v in read])
+
+
 if __name__ == "__main__":
     unittest.main()
