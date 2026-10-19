@@ -29,9 +29,10 @@ or not. :meth:`Suction.hold` answers the second in one of two tiers:
   and opposite wrenches every substep, so the arm carries what it lifts: the
   same 2 kg plate sags the YAM 35 mm and rides 5 mm under the cup. The spring
   pulls the part toward the pose it had under the face, damped on the two
-  bodies' relative velocity, and lets go on the device when its pull passes
-  :attr:`Suction.break_force`, the vacuum times the face's area (49.5 N for the
-  shipped 30 mm cup). The fallback where the weld is not available, and the
+  bodies' relative velocity, and lets go on the device when the pull a stiff
+  seal would feel at its stretch passes :attr:`Suction.break_force`, the vacuum
+  times the face's area (49.5 N for the shipped 30 mm cup, a 12.4 mm stretch on
+  a part of any mass). The fallback where the weld is not available, and the
   tier whose hold has the ceiling a real cup has.
 
 Every number here is ``tests/test_suction_pick`` on an RTX PRO 6000 (GPU 5,
@@ -76,7 +77,11 @@ BREAK_PRESSURE = 70_000.0
 """The vacuum a seal holds against the air [Pa]: the 0.7 bar a shop cup is rated for.
 Times the face's area it is the force the wrench tier lets go at."""
 WRENCH_STIFFNESS = 4000.0
-"""The wrench tier's spring [N/m]: the 49 N a 30 mm cup breaks at is a 12 mm stretch."""
+"""The wrench tier's spring [N/m]: the 49 N a 30 mm cup breaks at is a 12 mm stretch.
+
+The break reads the stretch against this stiffness even where a light part's
+spring is softened below it, so the seal lets go at the same stretch whatever
+the part weighs."""
 WRENCH_ANGULAR_STIFFNESS = 40.0
 """The wrench tier's angular spring [N.m/rad]."""
 WRENCH_DAMPING_RATIO = 1.0
@@ -215,9 +220,12 @@ def _cup_wrench_kernel(
     Newton's conventions: ``body_qd`` is (linear at the centre of mass,
     angular) and ``body_f`` is (force, torque about the centre of mass), both
     in world. The springs are softened to a natural frequency of half the
-    substep rate, so a light part does not make the explicit force unstable,
-    and the seal breaks on the device when the linear spring's pull passes
-    ``break_force``, so a captured graph lets go on the substep it happens.
+    substep rate, so a light part does not make the explicit force unstable.
+    The seal breaks on the device, so a captured graph lets go on the substep
+    it happens, when the stretch times the unsoftened ``lin_stiffness`` passes
+    ``break_force``: the pull a stiff seal would feel. Read off the softened
+    spring instead, the break would be a stretch that grows as the part gets
+    lighter (43 mm for 5 g at 960 Hz).
     """
     part = held[0]
     if part < 0:
@@ -236,11 +244,12 @@ def _cup_wrench_kernel(
     k = wp.min(lin_stiffness, mass * omega * omega)
     k_ang = wp.min(ang_stiffness, moment * omega * omega)
 
-    pull = (com_target - com) * k
-    if wp.length(pull) > break_force[0]:
+    stretch = com_target - com
+    if wp.length(stretch) * lin_stiffness > break_force[0]:
         held[0] = -1
         broke[0] = 1
         return
+    pull = stretch * k
 
     qd_pad = body_qd[pad]
     qd = body_qd[part]
@@ -319,7 +328,10 @@ class Suction:
     def break_force(self) -> float:
         """The pull the wrench tier lets go at [N]: by default the vacuum times the face's area.
 
-        A device value, so a change reaches a graph that is already captured.
+        Read as the stretch times :data:`WRENCH_STIFFNESS`, the pull a stiff
+        seal would feel, so the seal lets go at one stretch whatever the part
+        weighs. A device value, so a change reaches a graph that is already
+        captured.
         """
         return float(self._break_dev.numpy()[0])
 

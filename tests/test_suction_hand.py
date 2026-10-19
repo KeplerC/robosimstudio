@@ -545,6 +545,39 @@ class TestAPartOfSeveralShapes(unittest.TestCase):
         self.assertAlmostEqual(0.0055, report.gap_m, places=6)
 
 
+class TestTheWrenchBreaksAtOneStretch(unittest.TestCase):
+    """The wrench tier lets go at ``break_force / WRENCH_STIFFNESS`` of stretch (12.4 mm), whatever the part weighs.
+
+    The kernel on a CPU model at 960 Hz, where a 5 g part's spring is softened to 1152 N/m.
+    """
+
+    def _breaks(self, mass: float, stretch: float) -> bool:
+        import newton
+        import warp as wp
+
+        from robosimstudio.core.suction import Suction
+
+        builder = newton.ModelBuilder()
+        pad = builder.add_body(xform=wp.transform_identity(), mass=1.0)
+        part = builder.add_body(xform=wp.transform((0.0, 0.0, -stretch), wp.quat_identity()), mass=mass)
+        model = builder.finalize(device="cpu")
+        cup = Suction(model, arm="right", pad_body=pad, pad_radius=0.015)
+        cup._held_dev.assign(np.array([part], dtype=np.int32))
+        state = model.state()
+        cup.apply(state, 1.0 / 960.0)
+        return cup.broke
+
+    def test_a_light_part_and_a_heavy_one_let_go_at_the_same_stretch(self) -> None:
+        from robosimstudio.core.suction import BREAK_PRESSURE, WRENCH_STIFFNESS
+
+        limit = BREAK_PRESSURE * math.pi * 0.015**2 / WRENCH_STIFFNESS
+        self.assertAlmostEqual(0.0124, limit, places=4)
+        for mass in (0.005, 2.0):
+            with self.subTest(mass=mass):
+                self.assertFalse(self._breaks(mass, limit - 0.001))
+                self.assertTrue(self._breaks(mass, limit + 0.001))
+
+
 class _Program:
     """What :meth:`Suction.attach` asks of a :class:`~robosimstudio.scene.physics.compose.PhysicsProgram`.
 
