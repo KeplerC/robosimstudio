@@ -332,6 +332,18 @@ class TestTheLiquidCouplerArithmetic(unittest.TestCase):
         for word in ("'water'", "1 of 2", "sph_reach=0.5"):
             self.assertIn(word, logs.output[0])
 
+    def test_a_reset_forgets_the_last_reaction(self):
+        """``last_force`` is the last control step's reaction; after a reset there has been none."""
+        from unittest import mock
+
+        from robosimstudio.engines.genesis.sph import SphBridge
+
+        bridge = object.__new__(SphBridge)
+        bridge.actors, bridge.rig, bridge.feedback_enabled = [], mock.Mock(), False
+        bridge.last_force = {3: np.array([0.0, 0.0, -1.1])}
+        bridge.restore_rest()
+        self.assertEqual({}, bridge.last_force)
+
 
 class TestTheSolverIsAHostSolver(unittest.TestCase):
     def test_it_inherits_the_shared_contract(self):

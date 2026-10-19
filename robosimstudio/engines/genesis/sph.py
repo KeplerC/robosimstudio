@@ -489,13 +489,14 @@ class SphBridge:
             entry["rest"] = np.asarray(entry["entity"].get_particles_pos().cpu(), dtype=np.float32).reshape(-1, 3)
 
     def restore_rest(self) -> None:
-        """The particles back where they settled, at rest; the next tick places the mirrors afresh."""
+        """The particles back where they settled, at rest, and no reaction read; the next tick places the mirrors afresh."""
         for entry in self.actors:
             entity, rest = entry["entity"], entry["rest"]
             entity.set_particles_pos(rest)
             entity.set_particles_vel(np.zeros_like(rest))
             entry["prev"] = rest.astype(np.float64).copy()
         self.rig.mark_teleport()
+        self.last_force = {}
         if self.feedback_enabled and self.apply_wrenches is not None:
             self.apply_wrenches(self._acc.zero())
 

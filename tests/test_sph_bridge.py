@@ -95,6 +95,8 @@ class TestAnEmptyMirrorTurnedOffItsCentreFeelsNothing(unittest.TestCase):
             bridge.tick(state, dt)
             forces.append(float(np.linalg.norm(bridge.last_force[body])))
         self.assertLess(max(forces[1:]), 0.05, f"an empty mirror turning reads {max(forces[1:]):.3f} N")
+        bridge.restore_rest()
+        self.assertEqual({}, bridge.last_force, "a reset leaves the last reaction for a reader")
 
 
 def _water(builder, centre: np.ndarray, n: int = 4, spacing: float = 0.004) -> int:
