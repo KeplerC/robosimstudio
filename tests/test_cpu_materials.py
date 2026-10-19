@@ -160,6 +160,19 @@ class TestWhatACpuServes(unittest.TestCase):
             unserved(GENERIC.with_backend("paper", backend("newton.solvers.SolverVBD")), {"paper": ["p"]}), ()
         )
 
+    def test_an_entity_naming_a_gpu_only_backend_itself_is_told_there_is_no_other(self) -> None:
+        """Not pointed at ``rss.CPU``'s MuJoCo, which is what ``CPU`` would otherwise suggest for a heap."""
+        from robosimstudio.scene.physics import CompositionError
+        from robosimstudio.scene.physics.devices import on_device
+        from robosimstudio.specs.physics import backend
+
+        with self.assertRaises(CompositionError) as caught:
+            on_device(backend("mpm"), "cpu", owner="rice", domain="granular", declared=True)
+        message = str(caught.exception)
+        self.assertIn("'rice' (granular) is on 'mpm', which runs on cuda only (Newton's implicit MPM", message)
+        self.assertIn("nothing steps granular. Build it on a GPU.", message)
+        self.assertNotIn("mujoco", message)
+
     def test_every_cuda_only_backend_says_why(self) -> None:
         from robosimstudio.specs.physics import get_backend
 

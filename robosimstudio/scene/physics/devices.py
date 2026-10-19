@@ -312,6 +312,12 @@ def on_device(
     if info is None:
         return spec
     if declared and info.devices and "cpu" not in info.devices:
+        if needs_a_gpu(domain):
+            why = f" ({info.cpu_note})" if info.cpu_note else ""
+            raise CompositionError(
+                f"{owner!r} ({domain}) is on {spec.solver!r}, which runs on {' and '.join(info.devices)} only{why}, "
+                f"and this scene is on a CPU, where nothing steps {domain}. Build it on a GPU."
+            )
         instead = CPU.backend_for(domain)
         raise CompositionError(
             f"{owner!r} ({domain}) is on {spec.solver!r}, which runs on {' and '.join(info.devices)} only, and this "
