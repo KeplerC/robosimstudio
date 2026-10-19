@@ -291,7 +291,7 @@ class Suction:
         self.tier = ""
         """``"weld"`` or ``"wrench"`` while holding; empty otherwise."""
         self.last = SealReport(False, math.inf, math.nan, -1, "nothing tested yet")
-        """The last seal test or hold."""
+        """The last seal test or hold; a look with ``record=False`` (the page's **Seal** readout) leaves it."""
         self._held = -1
         device = model.device
         self._break_dev = wp.array([BREAK_PRESSURE * math.pi * self.pad_radius**2], dtype=wp.float32, device=device)
@@ -379,22 +379,26 @@ class Suction:
             self._faces[body] = flat_faces(self.model, body)
         return self._faces[body]
 
-    def seal(self, body: int, body_q: Any = None) -> SealReport:
+    def seal(self, body: int, body_q: Any = None, *, record: bool = True) -> SealReport:
         """Whether the cup is on ``body`` now: within :data:`GAP_TOLERANCE` and :data:`TILT_TOLERANCE`, fully over it.
 
         Args:
             body: The part's model body index.
             body_q: The bodies' poses to test against, ``(N, 7)``; the
                 pipeline's current state when not given.
+            record: Keep the report as :attr:`last`. The page's **Seal** readout
+                passes False, so a look at the cup does not overwrite what a
+                hold found.
         """
-        body = int(body)
-        poses = self._body_q(body_q)
+        report = self._seal(int(body), self._body_q(body_q))
+        if record:
+            self.last = report
+        return report
+
+    def _seal(self, body: int, poses: np.ndarray) -> SealReport:
         faces = self._flat(body)
         if not faces:
-            self.last = SealReport(
-                False, math.inf, math.nan, body, "the part offers no flat face: no box or mesh shape"
-            )
-            return self.last
+            return SealReport(False, math.inf, math.nan, body, "the part offers no flat face: no box or mesh shape")
         best: tuple[float, float, bool] | None = None
         for pose, half in faces:
             found = face_on_box(poses[self.pad_body], self.pad_radius, _compose(poses[body], pose), half)
@@ -413,25 +417,27 @@ class Suction:
             why = f"the face reads {-gap * 1e3:.1f} mm inside the part"
         elif not covered:
             why = "the cup hangs over the part's edge"
-        self.last = SealReport(not why, gap, tilt, body, why)
-        return self.last
+        return SealReport(not why, gap, tilt, body, why)
 
-    def under(self, body_q: Any = None) -> SealReport:
+    def under(self, body_q: Any = None, *, record: bool = True) -> SealReport:
         """The seal test against whatever is under the cup: the part that seals, else the nearest refusal.
 
         What a vacuum switched on finds. Every part with a weld row is tested;
         a sealing part wins, the nearest by gap among several, and with none the
-        report is the refusal of the part whose face is closest.
+        report is the refusal of the part whose face is closest. ``record`` is
+        :meth:`seal`'s.
         """
         if not self.rows:
-            self.last = SealReport(False, math.inf, math.nan, -1, "nothing in the scene offers the cup a flat face")
-            return self.last
-        poses = self._body_q(body_q)
-        reports = [self.seal(body, poses) for body in sorted(self.rows)]
-        sealing = [r for r in reports if r.sealed]
-        pool = sealing or [r for r in reports if math.isfinite(r.gap_m)] or reports
-        self.last = min(pool, key=lambda r: abs(r.gap_m) if math.isfinite(r.gap_m) else math.inf)
-        return self.last
+            report = SealReport(False, math.inf, math.nan, -1, "nothing in the scene offers the cup a flat face")
+        else:
+            poses = self._body_q(body_q)
+            reports = [self._seal(body, poses) for body in sorted(self.rows)]
+            sealing = [r for r in reports if r.sealed]
+            pool = sealing or [r for r in reports if math.isfinite(r.gap_m)] or reports
+            report = min(pool, key=lambda r: abs(r.gap_m) if math.isfinite(r.gap_m) else math.inf)
+        if record:
+            self.last = report
+        return report
 
     # ------------------------------------------------------------------ hold
     @property

@@ -124,10 +124,11 @@ def seal_text(suction) -> str:
 
     Holding, the gap is the held part's; otherwise it is whatever is under the
     cup (:meth:`~robosimstudio.core.suction.Suction.under`), so the number counts
-    down as the hand comes down onto a plate.
+    down as the hand comes down onto a plate. A look, not a test the cup made:
+    it leaves :attr:`~robosimstudio.core.suction.Suction.last` to the holds.
     """
     holding = suction.holding
-    report = suction.seal(suction.held) if holding else suction.under()
+    report = suction.seal(suction.held, record=False) if holding else suction.under(record=False)
     gap = f"gap {report.gap_m * 1000:.1f} mm" if np.isfinite(report.gap_m) else "nothing under the cup"
     return f"{'sealed' if holding else 'not sealed'}, {gap}, holding {suction.held_mass:.3f} kg"
 

@@ -7,7 +7,8 @@ fingers and a span of 0; ``yam_bimanual_suction`` puts it on the right arm only,
 with the left arm exactly ``yam_bimanual``'s; the gripper axis refuses the cup
 for the whole two-root robot with the reason. :func:`face_on_box` reads gap,
 tilt and cover off synthetic poses, :meth:`Suction.seal` turns them into the
-sentences the page shows, and ``sim.vacuum`` appears only on a robot with a cup,
+sentences the page shows (its **Seal** readout looking without overwriting
+:attr:`Suction.last`), and ``sim.vacuum`` appears only on a robot with a cup,
 is tagged privileged, and maps its arguments onto :meth:`Suction.hold` and
 :meth:`Suction.release`. Only a robot carrying a cup is kept to one world.
 """
@@ -224,6 +225,33 @@ class TestTheSealSays(unittest.TestCase):
         from robosimstudio.core.suction import BREAK_PRESSURE
 
         self.assertAlmostEqual(BREAK_PRESSURE * math.pi * 0.015**2, self.cup.break_force, places=3)
+
+    def test_the_seal_readout_leaves_last_to_the_hold(self) -> None:
+        """The page's **Seal** readout re-tests the cup every refresh; ``last`` stays what the hold found."""
+        from robosimstudio.core.suction import Suction
+        from robosimstudio_studio.panels import seal_text
+
+        cup = Suction(self.model, arm="right", pad_body=self.pad, pad_radius=0.015, rows={self.plate: 0})
+        now = [self.poses(_down(z=0.0065))]
+        # A CPU model has no MuJoCo solver, so the hold is the wrench tier's.
+        cup.pipeline = types.SimpleNamespace(
+            state_0=types.SimpleNamespace(body_q=types.SimpleNamespace(numpy=lambda: now[0]))
+        )
+        held = cup.hold()
+        self.assertTrue(held.sealed and cup.holding, held.why)
+        # The part rides 1 mm lower under the cup than where it sealed.
+        now[0] = self.poses(_down(z=0.0075))
+        self.assertTrue(seal_text(cup).startswith("sealed, gap 1.5 mm"), seal_text(cup))
+        self.assertIs(held, cup.last, "the readout's look replaced the hold's report")
+        cup.release()
+        # Not holding, the readout looks under the cup; the refusal of an armed box is a hold too.
+        now[0] = self.poses(_down(z=0.010))
+        refused = cup.hold()
+        now[0] = self.poses(_down(z=0.0065))
+        self.assertTrue(seal_text(cup).startswith("not sealed, gap 0.5 mm"), seal_text(cup))
+        self.assertIs(refused, cup.last)
+        # A test the cup is asked for still records.
+        self.assertIs(cup.seal(self.plate), cup.last)
 
 
 class _Registry:
