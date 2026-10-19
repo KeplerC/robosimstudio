@@ -46,6 +46,17 @@ class TestTheBlockOfWater(unittest.TestCase):
         with self.assertRaises(ValueError):
             WaterMaterialSpec(viscosity=-1.0e-4)
 
+    def test_a_preset_named_to_the_spec_is_its_material(self) -> None:
+        """``WaterSpec(material="oil")`` weighs oil and records as oil, as ``rss.water(material="oil")`` does."""
+        from robosimstudio_materials.water import OIL, Water, WaterSpec
+
+        spec = WaterSpec(material="oil")
+        self.assertIs(OIL, spec.material)
+        self.assertAlmostEqual(1728 * 0.004**3 * 900.0, spec.mass, places=9)
+        self.assertIn("100 g", Water.from_spec(spec, name="oil").summary)
+        with self.assertRaisesRegex(TypeError, "honey"):
+            WaterSpec(material="honey")
+
     def test_the_engine_reads_what_the_spec_states(self) -> None:
         from robosimstudio.engines.genesis.sph import SPH_CONSUMES
         from robosimstudio_materials.water import OIL, EntityWater, water

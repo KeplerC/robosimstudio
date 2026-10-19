@@ -159,7 +159,7 @@ class WaterSpec:
         size: ``(x, y, z)`` [m] of the block as built: a cup's inside, its depth.
         at: Where the **bottom-face centre** goes, in the cell's work-surface frame.
         quat: Orientation, xyzw, about the bottom-face centre.
-        material: A :class:`WaterMaterialSpec`.
+        material: A :class:`WaterMaterialSpec`, or a preset's name (``"water"``, ``"oil"``), resolved here.
         particle_spacing: The lattice spacing [m], which is also Genesis's particle
             size: every liquid in one island states the same.
         settle_frames: Control steps run before the rest state is recorded.
@@ -191,6 +191,7 @@ class WaterSpec:
     render: str = "points"
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "material", _material(self.material))
         if self.render not in self.RENDERS:
             raise ValueError(f"water {self.name!r}: render must be one of {self.RENDERS}, got {self.render!r}")
         if any(not float(v) > 0.0 for v in self.size):
@@ -249,7 +250,7 @@ class EntityWater(ParticleMixin, Entity):
         self.sets: dict[str, np.ndarray] = {}
         self.probe: ParticleProbe | None = None
         self.rest: dict[str, np.ndarray] = {}
-        self.material: WaterMaterialSpec = _material(spec.material)
+        self.material: WaterMaterialSpec = spec.material
         self.bridge: Any = None
         """The Genesis bridge stepping this water, found at scene-ready."""
 
@@ -367,7 +368,7 @@ def water(
         material: ``"water"``, ``"oil"`` or a :class:`WaterMaterialSpec`.
         **kwargs: Any other :class:`WaterSpec` field.
     """
-    return WaterSpec(name=name, size=size, at=at, material=_material(material), **kwargs)
+    return WaterSpec(name=name, size=size, at=at, material=material, **kwargs)
 
 
 TOUCHES = ("surface", "fixtures", "objects")
