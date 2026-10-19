@@ -42,8 +42,8 @@ __all__ = ["ensure_initialized", "require_genesis"]
 
 log = logging.getLogger(__name__)
 
-_ENGINE: dict[str, Any] = {"precision": None}
-"""Process-global engine state: the precision ``init`` actually ran with."""
+_ENGINE: dict[str, Any] = {"precision": None, "coupler": None}
+"""Process-global engine state: the precision ``init`` actually ran with, and whose island asked for it."""
 
 
 def require_genesis():
@@ -77,13 +77,17 @@ def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
     gs = require_genesis()
     if _ENGINE["precision"] is not None:
         if str(precision) == "64" and _ENGINE["precision"] == "32" and coupler == "ipc":
-            # A liquid island (legacy coupler, float32 by choice) was built first in
-            # this process, and an IPC island now wants 64: its harvest would read zero.
+            # An island built first in this process set float32 (a liquid's by choice, or an IPC
+            # island measuring the difference), and an IPC island now wants 64: its harvest would read zero.
+            earlier = (
+                "a liquid island's, as rss.WATER_60HZ states"
+                if _ENGINE.get("coupler") == "legacy"
+                else "an IPC island that asked for 32"
+            )
             raise RuntimeError(
-                "genesis was initialised at precision=32 by an earlier island in this process (a liquid island's, "
-                "as rss.WATER_60HZ states), and gs.init runs once a process: this IPC island, which asks for 64, "
-                "would run its two-way harvest at float32, where it reads ZERO for a stiff constraint. Build the IPC "
-                "scene in a process of its own."
+                f"genesis was initialised at precision=32 by an earlier island in this process ({earlier}), and "
+                "gs.init runs once a process: this IPC island, which asks for 64, would run its two-way harvest at "
+                "float32, where it reads ZERO for a stiff constraint. Build the IPC scene in a process of its own."
             )
         elif str(precision) == "64" and _ENGINE["precision"] == "32":
             # A liquid island that asked for 64 gets 32: its harvest still reads, as a momentum change.
@@ -139,6 +143,7 @@ def ensure_initialized(precision: str = "64", *, coupler: str = "ipc") -> Any:
     try:
         gs.init(backend=backend, precision=str(precision), logging_level="warning")
         _ENGINE["precision"] = str(precision)
+        _ENGINE["coupler"] = str(coupler)
     finally:
         # Also when gs.init raises part-way: the defaults may already be changed.
         if torch is not None and before is not None:
