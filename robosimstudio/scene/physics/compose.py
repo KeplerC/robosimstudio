@@ -514,7 +514,9 @@ def _warn_lost_material(node: Any, declared: HostActor, island: Any) -> None:
     # them back out -- are not lost, and saying so sends a reader hunting for a
     # bug in a modulus that is in fact applied.
     carried = set(getattr(type(material), "via_model", ()))
-    lost = [name for name in stated if name not in declared.params and name not in carried]
+    # And a field the actor carries under another name: a fabric's ``shell_young`` is a shell's ``young``.
+    renamed = dict(getattr(type(material), "actor_names", {}))
+    lost = [name for name in stated if renamed.get(name, name) not in declared.params and name not in carried]
     if not lost:
         return
     unset = [f.name for f in dataclasses.fields(material) if getattr(material, f.name) is None]

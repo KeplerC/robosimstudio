@@ -316,10 +316,11 @@ class EntityBag(EntityCloth):
             "mass_damping": float(spec.mass_damping),
             "stiffness_damping": float(spec.stiffness_damping),
         }
+        # Under the shell's names, as cloth states them (``ClothMaterialSpec.actor_names``).
         if material.shell_young is not None:
-            params["shell_young"] = float(material.shell_young)
+            params["young"] = float(material.shell_young)
         if material.shell_poisson is not None:
-            params["shell_poisson"] = float(material.shell_poisson)
+            params["poisson"] = float(material.shell_poisson)
         return HostActor(kind="bag", params=params)
 
     def apply_model_materials(self, model: newton.Model) -> None:
@@ -521,9 +522,6 @@ _BAG_SHELL = {
 }
 """What a bag is built with where its record says nothing: :data:`CANVAS`, colliding with itself, undamped."""
 
-_BAG_NAMES = {"shell_young": "young", "shell_poisson": "poisson"}
-"""The bag's params under its material's field names, as the composer checks a stated field, to the shell's keys."""
-
 
 def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None, tet_materials=None) -> dict:
     """The bag as a SuperDex shell: the bridge's shell builder, under the bag's own defaults.
@@ -531,12 +529,11 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
     ``bridge.build_shell`` builds every sheet about its own centroid with the offset in the root
     transform (section 1), states contact (friction, falloff) and damping from the params, and
     reads the nodes back through the root, as ``place_actor`` writes them. What is the bag's own is
-    what it is built with where its record says nothing (:data:`CANVAS`, self-contact on) and the
-    names it states its modulus under: ``shell_young`` and ``shell_poisson``, its material's.
+    what it is built with where its record says nothing: :data:`CANVAS`, self-contact on. Its
+    modulus is the shell's ``young``/``poisson``, as a sheet's is.
     """
     del particle_q, tet_indices, tet_materials
-    params = {_BAG_NAMES.get(key, key): value for key, value in record.get("params", {}).items()}
-    return bridge.build_shell({**record, "params": params}, defaults=_BAG_SHELL)
+    return bridge.build_shell(record, defaults=_BAG_SHELL)
 
 
 def _read_bag(model: Any, base: Any) -> Any:
@@ -564,7 +561,7 @@ register_actor_builder(
     "superdex",
     "bag",
     build_bag_actor,
-    # The shell builder's keys, and the two the bag states its modulus under (``_BAG_NAMES``).
+    # The shell builder's keys.
     consumes=(
         "areal_density",
         "contact_padding",
@@ -577,8 +574,6 @@ register_actor_builder(
         "particle_radius",
         "poisson",
         "self_contact",
-        "shell_poisson",
-        "shell_young",
         "stiffness_damping",
         "thickness",
         "young",

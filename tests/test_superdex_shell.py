@@ -256,13 +256,13 @@ class TestItsContactAndDampingAreItsOwn(unittest.TestCase):
 
 class TestTheBagIsTheSameBuilder(unittest.TestCase):
     def test_the_bag_builds_through_the_shell_builder_under_its_canvas(self) -> None:
-        """Its modulus under its material's own names, its canvas where its record says nothing."""
+        """Its modulus under the shell's names, its canvas where its record says nothing."""
         from robosimstudio.engines.geometry import actor_builder
         from robosimstudio_materials.bag import CANVAS
 
         vertices, faces = _sheet()
         bridge = _bridge(vertices, faces)
-        record = {**_record(vertices, shell_young=2.0e6), "kind": "bag"}
+        record = {**_record(vertices, young=2.0e6), "kind": "bag"}
         entry = actor_builder("superdex", "bag")(bridge, record, None, None, None)
         params = bridge.physics.built[-1].params
         self.assertEqual(2.0e6, params.material.young)
@@ -288,15 +288,47 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual("shell", actor.kind)
         self.assertLessEqual(set(actor.params), set(actor_consumes("superdex", "shell")))
 
-    def test_the_bag_reads_what_the_shell_builder_reads_and_its_two_own_names(self) -> None:
+    def test_the_bag_reads_what_the_shell_builder_reads(self) -> None:
+        """Its modulus too: it states ``young``/``poisson`` as a sheet does, with no names of its own."""
         from robosimstudio.engines.geometry import actor_consumes
         from robosimstudio.specs.physics import get_backend
+        from robosimstudio_materials.bag import EntityBagSuperdex, bag
 
         get_backend("superdex")
-        self.assertEqual(
-            {*actor_consumes("superdex", "shell"), "shell_young", "shell_poisson"},
-            set(actor_consumes("superdex", "bag")),
+        self.assertEqual(set(actor_consumes("superdex", "shell")), set(actor_consumes("superdex", "bag")))
+        params = EntityBagSuperdex(bag(name="bag")).host_actor().params
+        self.assertEqual((1.0e6, 0.3), (params["young"], params["poisson"]), "the canvas, under the shell's names")
+
+    def test_a_fabrics_modulus_is_not_called_lost_where_it_crosses_as_young(self) -> None:
+        """The composer's entity-side check looks a field up by the name it crosses under.
+
+        A towel stating ``shell_young`` on SuperDex was told the field never reached the engine,
+        which built its shell at that modulus; the bag kept its material's names to dodge the same.
+        """
+        import importlib
+        import warnings
+
+        from robosimstudio.specs.physics import get_backend
+        from robosimstudio_materials.bag import EntityBagSuperdex, bag
+        from robosimstudio_materials.cloth import ClothMaterialSpec, EntityCloth, sheet
+
+        compose = importlib.import_module("robosimstudio.scene.physics.compose")
+        get_backend("superdex")
+        island = SimpleNamespace(backend=SimpleNamespace(solver="superdex"))
+        towel = EntityCloth(sheet(name="towel", material=ClothMaterialSpec(shell_young=1.0e6, shell_poisson=0.4)))
+        for name, entity in (("towel", towel), ("bag", EntityBagSuperdex(bag(name="bag")))):
+            with self.subTest(entity=name), warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                compose._warn_lost_material(SimpleNamespace(name=name, entity=entity), entity.host_actor(), island)
+                self.assertEqual([], [str(w.message) for w in caught])
+        slab = EntityCloth(
+            sheet(name="slab", material=ClothMaterialSpec(shell="slab", thickness=4e-3, shell_young=1e6))
         )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            compose._warn_lost_material(SimpleNamespace(name="slab", entity=slab), slab.host_actor(), island)
+        lost = [str(w.message) for w in caught if "never reach" in str(w.message)]
+        self.assertTrue(lost and "shell_young" in lost[0], "a slab is a tet body, which takes no shell modulus")
 
 
 if __name__ == "__main__":

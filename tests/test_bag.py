@@ -145,8 +145,9 @@ class TestTheDeclarations(unittest.TestCase):
                 self.assertEqual("bag", actor.kind)
                 self.assertLessEqual(set(actor.params), set(actor_consumes("superdex", "bag")))
                 default = ClothMaterialSpec()
+                # Under the name each crosses as: the canvas's ``shell_young`` is the shell's ``young``.
                 stated = {
-                    f.name
+                    ClothMaterialSpec.actor_names.get(f.name, f.name)
                     for f in dataclasses.fields(material)
                     if getattr(material, f.name) != getattr(default, f.name)
                 }
