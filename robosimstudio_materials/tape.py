@@ -143,7 +143,8 @@ __all__ = [
 # Contact adhesion is two launches a substep, one thread a bond: ``02_stick_a_label``'s 126 bonds beside
 # the YAM step in 35.1-35.5 ms a control step through the page, carried, laid and rubbed
 # (``m1_screen.py``, five drives, GPU 6). Either law adds one launch a control step, outside the graph,
-# that lays the bonds again where the box's contact margin has moved (``EntityTape._relay``).
+# that lays the bonds again where the box's contact margin has moved (``EntityTape._relay``): 35.6 ms
+# a control step with it in two drives, 35.2-35.5 without, laid and rubbed (``step_ms.py``, GPU 5).
 
 
 # =============================================================================
@@ -340,13 +341,14 @@ LABEL = replace(
     reach=1.0e-3,
     # A bond's hold along the face, 0.4 N on a 5 mm cell. At 1, with stiction_speed 0.01 m/s, the shut
     # fingertips rubbing at 30 mm/s, 5 mm under the label, dragged it along with them (``p18_film.py``,
-    # one drive); at these two, four strokes 3 mm under it made 87-93% of the bonds in eight drives.
+    # one drive); at these two, four strokes 3 mm under it made 85-93% of the bonds in twelve drives.
     stiction=4.0,
     stiction_speed=0.1,
     # 0.125 N on a 5 mm cell: a label laid by the hand makes 1-6 of 126 bonds (``m1_screen.py``, five
-    # drives), the shut fingertips rubbing it 87-93% in four strokes (``stick_ab.py``, eight drives,
-    # GPU 1). Measured as 8 kPa when the press was read off the sheet's 10 kN/m alone; the pair's mean
-    # with the box's 2.5 kN/m is 6.25 kN/m, so 5 kPa is the same depth, 20 um on a 5 mm cell.
+    # drives), the shut fingertips rubbing it 85-93% in four strokes (``stick_ab.py`` and ``step_ms.py``,
+    # twelve drives, GPUs 1 and 5). Measured as 8 kPa when the press was read off the sheet's 10 kN/m
+    # alone; the pair's mean with the box's 2.5 kN/m is 6.25 kN/m, so 5 kPa is the same depth, 20 um on
+    # a 5 mm cell.
     press=5.0e3,
 )
 """A paper label that sticks where it is pressed: it peeled whole at 2.9 N drawn up on the rig, and drawn
@@ -1873,9 +1875,9 @@ register_atom(
         calibration=AtomCalibration(
             positives=(
                 "examples/19_tape/02_stick_a_label, the loose label carried by its tab, laid on the box and "
-                "rubbed by the right hand's shut fingertips in four strokes 10 mm apart, reads 0.87-0.93 in eight "
-                "drives (stick_ab.py, GPU 1; tests/test_stick_a_label), 0.25-0.29 after the first stroke "
-                "(m1_screen.py, five drives, GPU 6).",
+                "rubbed by the right hand's shut fingertips in four strokes 10 mm apart, reads 0.85-0.93 in twelve "
+                "drives (stick_ab.py, GPU 1, and step_ms.py, GPU 5; tests/test_stick_a_label), 0.25-0.29 after "
+                "the first stroke (m1_screen.py and step_ms.py, nine drives, GPUs 6 and 5).",
             ),
             negatives=(
                 "The same label laid and not rubbed reads 0.008-0.048, 1-6 of its 126 bonds; rubbed with the "
@@ -1949,9 +1951,9 @@ for _name, _spec, _notes in (
     (
         "label",
         LABEL,
-        "Rubbed down by the YAM's shut fingertips, 87-93% of the bonds held, and drawn up by its tab all but 0-3 "
-        "of 126 let go at 2.15-2.38 N (stick_ab.py, eight drives); on the pull rig it peeled whole at 2.9 N "
-        "(p4_law.py).",
+        "Rubbed down by the YAM's shut fingertips, 85-93% of the bonds held in twelve drives (stick_ab.py, "
+        "step_ms.py), and drawn up by its tab all but 0-3 of 126 let go at 2.15-2.38 N in eight (stick_ab.py); "
+        "on the pull rig it peeled whole at 2.9 N (p4_law.py).",
     ),
     ("masking_tape", MASKING_TAPE, "On the pull rig it peeled whole at 4.2 N (p4_law.py). Not driven by the YAM."),
     (
