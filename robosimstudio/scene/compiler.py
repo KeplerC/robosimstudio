@@ -591,13 +591,22 @@ def _build_base(
             # A hand named by the pairing replaces every arm's. It has to clear
             # the per-arm names as well as set the robot's, because an arm's own
             # entry wins over the robot's default -- leaving them would put the
-            # requested hand on nothing and read as the flag being ignored.
+            # requested hand on nothing and read as the flag being ignored. And
+            # the arm's mount with its name: it says where *that* hand bolts on
+            # and wins over a hand's own, so left behind it would bolt the new
+            # hand where the old one sat (a cup 105 mm out on the YAM's wrist).
+            # An arm that already carries the named hand keeps its entry, mount
+            # and all: that mount is where this very hand bolts on.
             from dataclasses import replace as _replace
 
+            own = embodiment_spec.gripper
             embodiment_spec = _replace(
                 embodiment_spec,
                 gripper=binding.gripper,
-                arms=tuple(_replace(a, gripper="") for a in embodiment_spec.arms),
+                arms=tuple(
+                    a if (a.gripper or own) == binding.gripper else _replace(a, gripper="", gripper_mount=None)
+                    for a in embodiment_spec.arms
+                ),
             )
         arm_gains = binding.arm_actuation or request.arm_actuation
         gripper_gains = binding.gripper_actuation or request.gripper_actuation
@@ -683,6 +692,14 @@ def _build_base(
             entity.replicated = True
         entity.build_into(builder, episode)
         entities.append(entity)
+
+    # --- 4. what the robot needs the whole scene for ----------------------
+    # A vacuum cup couples to the parts it may hold with weld rows the builder
+    # has to carry before it finalizes, and the parts build after the robot
+    # (step 3), so the robot's own after_build is too early to name them.
+    after_scene_built = getattr(embodiment, "after_scene_built", None)
+    if callable(after_scene_built):
+        after_scene_built(builder, entities)
 
     # --- 5. finalize ------------------------------------------------------
     # Scene-wide, and after every entity has built: a texture bound by one
@@ -966,12 +983,27 @@ def _run_ready(pipeline, lifecycle) -> None:
             capture()
 
 
+def _adds_substep_kernels(entity: Any) -> bool:
+    """Whether ``entity`` puts kernels in the substep block.
+
+    Its class overriding ``contribute_hooks`` is what says so, unless the
+    instance answers ``adds_substep_kernels = False``: a class whose kernels
+    belong to only some of its instances says which ones. A robot is that case,
+    because only a vacuum cup's wrench is a kernel, and a robot with jaws must
+    replicate as it did before cups existed.
+    """
+    if type(entity).contribute_hooks is Entity.contribute_hooks:
+        return False
+    return bool(getattr(entity, "adds_substep_kernels", True))
+
+
 def _replication_refusal(base: _BaseBuild, request: SceneRequest) -> str:
     """Why this scene must not be replicated yet, or empty when it may be.
 
     Refusing by *capability* rather than by a list of task names, and the
     capability is narrow: an entity that contributes **substep kernels** with
-    world-0 particle and body indices baked into them. Replicated, every world's
+    world-0 particle and body indices baked into them (its ``contribute_hooks``,
+    as :func:`_adds_substep_kernels` reads it). Replicated, every world's
     physics would run against world 0's arrays -- plausible motion in the wrong
     place, which is the failure worth refusing where it can still be named. An
     entity whose kernels are written per world says so with
@@ -987,7 +1019,7 @@ def _replication_refusal(base: _BaseBuild, request: SceneRequest) -> str:
     contributors = sorted(
         entity.name
         for entity in base.entities
-        if type(entity).contribute_hooks is not Entity.contribute_hooks and not getattr(entity, "world_aware", False)
+        if _adds_substep_kernels(entity) and not getattr(entity, "world_aware", False)
     )
     if contributors:
         return f"these entities contribute substep physics written for one world: {', '.join(contributors)}"

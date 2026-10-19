@@ -29,6 +29,7 @@ from .beats import (
     Check,
     Click,
     Corner,
+    Do,
     Drag,
     DragTo,
     Expectation,
@@ -774,10 +775,205 @@ PARTICLE_DRAFTS = (
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS)
+
+def _note(key: str, read, label: str) -> Do:
+    """Read something off the scene or the page between two frames and keep it in the timeline under ``key``."""
+    return Do(fn=lambda film: {key: read(film)}, label=label)
+
+
+def _noted(film, key: str):
+    """What a :func:`_note` kept."""
+    for span in film.spans:
+        if key in span:
+            return span[key]
+    raise KeyError(key)
+
+
+def _jaws(film) -> float:
+    """The right hand's jaw opening [mm]."""
+    return round(1000.0 * float(film.sim.gripper("right").width(film.sim.state)), 1)
+
+
+def _jaws_on(width_mm: float, within_mm: float):
+    """The jaws closed on a tool's faces: the opening noted after Close is the tool's own width."""
+
+    def check(film):
+        width = _noted(film, "jaws_mm")
+        return abs(width - width_mm) <= within_mm, (
+            f"the jaws closed to {width:.1f} mm on its {width_mm:.0f} mm faces (need within {within_mm:.0f})"
+        )
+
+    return check
+
+
+# The brush: the hand closes on its handle, presses the bristles to the bench and scrubs the square in
+# three strokes, the gesture tests/test_scrub_bench drives through the same arm panel.
+BRUSH_PAD_TIP = 0.0165
+"""How far the YAM's pad tips reach below its tool centre [m] (tests/test_scrub_bench's ``PAD_TIP``)."""
+BRUSH_CLOSE_OVER_SOLE = 0.008
+"""Where the pad tips stop when the hand closes: this far over the brush's sole [m], as the test closes."""
+BRUSH_PRESS = 0.004
+"""How far below the closing height the hand scrubs [m], as the test presses."""
+BRUSH_STROKE = 0.15
+"""Each stroke along the bench's y [m]; three of them, 12 mm apart in x, cover the 100 mm square."""
+BRUSH_LANE = 0.012
+
+
+def _over_the_sole(film) -> tuple[float, float, float]:
+    """Where the tool centre closes on the handle: over its middle, the pad tips 8 mm over the sole."""
+    brush, handle = film.sim["brush"].entity, film.position("handle")
+    z = float(brush.floor_z) + float(brush.spec.sole_top) + BRUSH_CLOSE_OVER_SOLE + BRUSH_PAD_TIP
+    return (handle[0], handle[1], z)
+
+
+def _scrubbed(film) -> tuple[bool, str]:
+    """``00_scrub_the_bench``'s readout: the share of the square's 5 mm cells a bristle tip touched while down."""
+    lo, hi = film.bench((-0.025, -0.27, 0.0))[:2], film.bench((0.075, -0.17, 0.0))[:2]
+    share = float(film.sim["brush"].entity.scrubbed(lo, hi))
+    return share >= 0.5, f"{100.0 * share:.1f}% of the square scrubbed (tests/test_scrub_bench asks half)"
+
+
+ROBOT_BRUSH = (
+    Take(
+        "examples/14_brush/00_scrub_the_bench.py",
+        # From in front of the bench, 1.15 m off, the brush end on: its bristles show under the fingers,
+        # the strokes run left to right across the drawn square, and no link is near enough to loom.
+        camera=Orbit(Bench(0.03, -0.25, 0.06), distance=1.15, azimuth=-20.0, elevation=32.0, fov=30.0),
+        warmup=1.0,  # the field settles under its sole before the first frame
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        budget=1_500_000,
+        beats=(
+            Wait(seconds=0.5, label="the right hand, open, over the brush's handle"),
+            Drag("right", "z", to=_over_the_sole, seconds=1.4, label="drag the gizmo down onto the handle"),
+            Wait(seconds=0.3),
+            Press(text="Close", within=RIGHT, label="Close: the jaws take the handle's 22 mm faces"),
+            Wait(seconds=0.8, mark="closed"),
+            _note("jaws_mm", _jaws, "the jaw opening"),
+            Drag("right", "z", -BRUSH_PRESS, seconds=0.8, label="press the bristles 4 mm onto the bench"),
+            Drag("right", "x", -BRUSH_LANE, seconds=0.6, label="the first lane"),
+            # tests/test_scrub_bench walks the cursor at 0.10 m/s; eased over 2 s, these 150 mm peak at 0.11.
+            Drag("right", "y", BRUSH_STROKE, seconds=2.0, label="scrub out across the square"),
+            Drag("right", "x", BRUSH_LANE, seconds=0.6, label="over 12 mm"),
+            Drag("right", "y", -BRUSH_STROKE, seconds=2.0, label="and back"),
+            Drag("right", "x", BRUSH_LANE, seconds=0.6, label="over 12 mm"),
+            Drag("right", "y", BRUSH_STROKE, seconds=2.0, label="and out again"),
+            Wait(seconds=0.8, mark="scrubbed", label="the panel reads the share scrubbed"),
+            Drag("right", "z", 0.04, seconds=1.0, label="lift: the brush comes up in the fingers"),
+            Wait(seconds=1.0, mark="lifted", label="the bristles spring back"),
+        ),
+        expect=(
+            Check(_jaws_on(22.0, 3.0)),
+            Check(_scrubbed),
+            Held("handle", since="closed", at="lifted", tolerance=0.005),
+            Rose("handle", 0.03, at="lifted", since="scrubbed"),
+        ),
+    ),
+)
+
+
+# The suction hand: down onto the plate, the right arm's Vacuum box ticked, lift, carry, down, unticked.
+# The gestures are tests/test_suction_pick's, through the same arm panel, with the gizmo put 3 mm into the
+# plate rather than 4 and a lowering aimed to stop the held plate 2 mm over the bench (it stops 2.8 mm
+# over and drops that far when the box is unticked). What holds the plate is the vacuum: the Seal readout
+# on the panel says sealed and the mass it holds.
+PLATE_HALF = 0.003
+"""The plate's half-thickness [m]: 6 mm thick."""
+INTO_PLATE = 0.003
+"""How far under the plate's top the gizmo is put [m]. The cup stops on the plate with its face 0.1 to 0.2 mm
+over it (the Seal readout's gap once ticked, inside the seal's 2 mm), and the panel reads the hand 6 mm behind
+the gizmo: too far to put the gizmo back on the hand, so the arm keeps the face down on the plate."""
+SQUARE = (-0.11, -0.22, 0.11, 0.0)
+"""``00_pick_a_plate``'s square in the bench frame [m]: x0, y0, x1, y1."""
+
+
+def _seal(film) -> str:
+    """The right arm's **Seal** readout, as the page shows it."""
+    return film.page.text("Seal", RIGHT)
+
+
+def _plate_over_bench(clearance: float):
+    """Where the gizmo goes for the held plate's underside to stop ``clearance`` [m] over the bench."""
+
+    def there(film) -> tuple[float, float, float]:
+        cursor = film.where(film.gizmo("right"))
+        underside = film.position("plate")[2] - PLATE_HALF
+        bench = film.bench((0.0, 0.0, 0.0))[2]
+        return (cursor[0], cursor[1], cursor[2] - (underside - bench - clearance))
+
+    return there
+
+
+def _sealed(film) -> tuple[bool, str]:
+    """The Seal readout said sealed once the box was ticked, holding the plate's 0.300 kg."""
+    readout = str(_noted(film, "seal"))
+    return readout.startswith("sealed") and "0.300 kg" in readout, f"the Seal readout said {readout!r}"
+
+
+def _landed(film) -> tuple[bool, str]:
+    """The cup let go and the plate lies flat on the bench inside the square."""
+    import math as m
+
+    import numpy as np
+
+    plate = np.asarray(film.position("plate"))
+    lo, hi = np.asarray(film.bench((*SQUARE[:2], 0.0))[:2]), np.asarray(film.bench((*SQUARE[2:], 0.0))[:2])
+    inside = bool(np.all(plate[:2] >= lo) and np.all(plate[:2] <= hi))
+    top = 1000.0 * (plate[2] + PLATE_HALF - film.bench((0.0, 0.0, 0.0))[2])
+    body = int(film.sim.scene.by_name["plate"].body)
+    w = abs(float(film.sim.state.body_q.numpy()[body][6]))
+    tilt = m.degrees(2.0 * m.acos(min(1.0, w)))
+    holding = bool(film.sim.suction("right").holding)
+    ok = inside and top < 10.0 and tilt < 3.0 and not holding
+    return ok, (
+        f"the plate at ({plate[0]:.3f}, {plate[1]:.3f}) {'inside' if inside else 'outside'} the square, its top "
+        f"{top:.1f} mm over the bench (need under 10), tilted {tilt:.2f} deg (need under 3), "
+        f"{'still held' if holding else 'let go'}"
+    )
+
+
+ROBOT_SUCTION = (
+    Take(
+        "examples/15_suction/00_pick_a_plate.py",
+        # From in front of the bench, 1.2 m off: the plate, the drawn square and the carry between them.
+        camera=Orbit(Bench(0.0, -0.18, 0.06), distance=1.2, azimuth=25.0, elevation=32.0, fov=36.0),
+        warmup=1.0,  # the plate settles flat before the first frame
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        budget=1_200_000,
+        beats=(
+            Wait(seconds=0.5, label="the cup over the plate; Seal reads the gap to it"),
+            Drag(
+                "right", "z", to=Top("plate", dz=-INTO_PLATE), seconds=1.6, label="drag the gizmo down onto the plate"
+            ),
+            Wait(seconds=0.6, label="Seal: not sealed, the face on the plate"),
+            Toggle(text="Vacuum", within=RIGHT, label="tick Vacuum"),
+            Wait(seconds=0.8, mark="sealed", label="Seal: sealed, holding 0.3 kg"),
+            _note("seal", _seal, "the Seal readout"),
+            Drag("right", "z", 0.08, seconds=1.2, label="lift: the vacuum holds the plate"),
+            Wait(seconds=0.5, mark="lifted"),
+            Drag("right", "y", 0.20, seconds=2.0, label="carry it over the square"),
+            Wait(seconds=0.5, mark="carried"),
+            Drag("right", "z", to=_plate_over_bench(0.002), seconds=1.2, label="lower it to 2 mm over the bench"),
+            Wait(seconds=0.5, mark="lowered"),
+            Toggle(text="Vacuum", within=RIGHT, label="untick Vacuum: it lets go"),
+            Wait(seconds=0.6),
+            Drag("right", "z", 0.06, seconds=1.0, label="and the hand lifts away"),
+            Wait(seconds=1.0, mark="placed", label="the plate rests in the square"),
+        ),
+        expect=(
+            Check(_sealed),
+            Rose("plate", 0.06, at="lifted"),
+            Held("plate", since="sealed", at="lowered", tolerance=0.003),
+            Check(_landed, needs=("plate",)),
+        ),
+    ),
+)
+
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *PARTICLE_DRAFTS, *ROBOT_BRUSH, *ROBOT_SUCTION)
 
 KEPT: dict[str, str] = {
     "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
+    "14_brush/01_scrub_scored": "the same brush, handle and square as 00_scrub_the_bench with a goal beside them; its clip is that one's",
+    "15_suction/01_pick_scored": "the same plate, cup and square as 00_pick_a_plate with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

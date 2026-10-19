@@ -36,6 +36,7 @@ collider is the authored mesh, since its hull would be a cylinder.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -62,6 +63,7 @@ __all__ = [
     "EntityRod",
     "RodSpec",
     "SpecCable",
+    "add_capsule_chain",
     "fixture_shape_cfg",
 ]
 
@@ -215,6 +217,69 @@ def _half_heights_of(points) -> np.ndarray:
     return 0.5 * np.linalg.norm(np.diff(pts, axis=0), axis=1)
 
 
+def add_capsule_chain(
+    builder: newton.ModelBuilder,
+    rod: newton.Rod,
+    *,
+    cfg: Any,
+    color,
+    gains: Mapping[str, float],
+    label: str,
+    wrap_in_articulation: bool = True,
+) -> None:
+    """One capsule chain on cable joints, ``add_rod`` in the ``rod=`` form of Newton 1.6.
+
+    Geometry and frames on a :class:`newton.Rod`, the eight stiffness and
+    damping numbers stated outright, keyed as :class:`RodMaterialSpec` names
+    them (``stretch_ke`` ... ``twist_kd``). All eight, because the builder pairs
+    a slot's damping with its stiffness only while *both* are left ``None`` --
+    a shear stiffness given alone would silently take 0 damping -- so whoever
+    calls this resolves the pairs first (:meth:`RodSpec.drive_gains` does for
+    a cable). ``body_frame_origin="com"`` puts each capsule's frame at its
+    centre with local ``+z`` toward the next node, which is what
+    :meth:`EntityRod.centerline` reads back. A module function rather than a
+    method so a kind built *out of* capsule chains -- a brush's bristles --
+    builds them the way a cable is built without being a cable.
+    """
+    builder.add_rod(
+        rod=rod,
+        body_frame_origin="com",
+        cfg=cfg,
+        color=color,
+        stretch_stiffness=float(gains["stretch_ke"]),
+        stretch_damping=float(gains["stretch_kd"]),
+        shear_stiffness=float(gains["shear_ke"]),
+        shear_damping=float(gains["shear_kd"]),
+        bend_stiffness=float(gains["bend_ke"]),
+        bend_damping=float(gains["bend_kd"]),
+        twist_stiffness=float(gains["twist_ke"]),
+        twist_damping=float(gains["twist_kd"]),
+        label=label,
+        wrap_in_articulation=wrap_in_articulation,
+    )
+
+
+def rod_slot_dofs(model: newton.Model, joints) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The dof rows of the rod joints among ``joints``, one array per slot: ``(stretch, shear, bend, twist)``.
+
+    ``add_rod`` builds each rod joint with four dofs in that fixed order
+    (``STRETCH=0, SHEAR=1, BEND=2, TWIST=3``). Told apart by type, so the welds
+    and a free joint that share a span with them are left out. A module function
+    beside :func:`add_capsule_chain` for the same reason: a cable's drive
+    tunables and a brush's bristles both read their chains' slots here.
+    """
+    starts = model.joint_qd_start.numpy()
+    types = model.joint_type.numpy()
+    slots: tuple[list[int], list[int], list[int], list[int]] = ([], [], [], [])
+    for j in (int(v) for v in joints):
+        if int(types[j]) != int(newton.JointType.ROD):
+            continue
+        begin = int(starts[j])
+        for slot, rows in enumerate(slots):
+            rows.append(begin + slot)
+    return tuple(np.asarray(rows, dtype=np.int64) for rows in slots)
+
+
 def _segment_mass(spec: RodSpec) -> float:
     """One capsule's mass [kg], from what the spec declares.
 
@@ -309,28 +374,17 @@ class EntityRod(Centerline, Entity):
     def _add_rod(self, builder: newton.ModelBuilder, points, quats) -> None:
         """``add_rod`` at this spec's own numbers. Shared by :meth:`build` and :meth:`place`.
 
-        The ``rod=`` form of Newton 1.6: geometry and frames on a
-        :class:`newton.Rod`, the eight stiffness and damping numbers stated
-        outright. All eight, because the builder pairs a slot's damping with its
-        stiffness only while *both* are left ``None`` -- a shear stiffness given
-        alone would silently take 0 damping -- and :meth:`RodSpec.drive_gains`
-        is where the ``None`` pairs are resolved.
+        :func:`add_capsule_chain` with this rod's geometry and
+        :meth:`RodSpec.drive_gains`, which is where the ``None`` pairs are
+        resolved.
         """
         spec = self.spec
-        gains = spec.drive_gains()
-        builder.add_rod(
-            rod=newton.Rod(points, quaternions=quats, radius=float(spec.radius)),
-            body_frame_origin="com",
+        add_capsule_chain(
+            builder,
+            newton.Rod(points, quaternions=quats, radius=float(spec.radius)),
             cfg=self._shape_cfg(),
             color=spec.color,
-            stretch_stiffness=gains["stretch_ke"],
-            stretch_damping=gains["stretch_kd"],
-            shear_stiffness=gains["shear_ke"],
-            shear_damping=gains["shear_kd"],
-            bend_stiffness=gains["bend_ke"],
-            bend_damping=gains["bend_kd"],
-            twist_stiffness=gains["twist_ke"],
-            twist_damping=gains["twist_kd"],
+            gains=spec.drive_gains(),
             label=spec.name,
             wrap_in_articulation=self.wrap_rod_in_articulation(),
         )
@@ -1016,21 +1070,11 @@ class EntityRod(Centerline, Entity):
     def _drive_dofs(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """The cable joints' dof rows, one array per slot: ``(stretch, shear, bend, twist)``.
 
-        ``add_rod`` builds each cable joint with four dofs in that fixed order
-        (``STRETCH=0, SHEAR=1, BEND=2, TWIST=3``). Four arrays rather than the
+        :func:`rod_slot_dofs` over the rod's span. Four arrays rather than the
         two pairs this used to return, so a slider moves one slot: the pairs
         are equal only while the spec left ``shear_*``/``twist_*`` at ``None``.
         """
-        starts = self.model.joint_qd_start.numpy()
-        slots: tuple[list[int], list[int], list[int], list[int]] = ([], [], [], [])
-        for j in (int(v) for v in self.joints):
-            begin = int(starts[j])
-            end = int(starts[j + 1]) if j + 1 < len(starts) else begin
-            if end - begin < 4:
-                continue
-            for slot, rows in enumerate(slots):
-                rows.append(begin + slot)
-        return tuple(np.asarray(rows, dtype=np.int64) for rows in slots)
+        return rod_slot_dofs(self.model, self.joints)
 
     def tunables(self, pipeline=None):
         """The rod's stiffness, its contact material, and the latch -- live.
