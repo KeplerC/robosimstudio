@@ -129,6 +129,19 @@ class TestTheArrangement(unittest.TestCase):
         active = [int(f) & int(newton.ParticleFlags.ACTIVE) for f in builder.particle_flags]
         self.assertTrue(builder.particle_count == 8 and not any(active), "Genesis's water is left to Genesis")
 
+    def test_each_preset_takes_the_substeps_it_states(self) -> None:
+        """Water holds at the arrangement's 20 a control step; oil's cohesion asks the 35 its docstring states."""
+        import math
+
+        import robosimstudio as rss
+        from robosimstudio.engines.genesis.sph import longest_substep
+        from robosimstudio_materials.water import EntityWater, water
+
+        step = 1.0 / rss.WATER_60HZ.control_hz
+        for material, need in (("water", 20), ("oil", 35)):
+            longest, _ = longest_substep(EntityWater(water(material=material)).host_actor().params)
+            self.assertEqual(need, math.ceil(step / longest - 1.0e-9), material)
+
     def test_the_flat_names_resolve(self) -> None:
         import robosimstudio as rss
         from robosimstudio_materials import water

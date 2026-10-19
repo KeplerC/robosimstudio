@@ -5,7 +5,8 @@
 things that scene never does. Water on a void cell has nothing under it but the
 ground plane, which the bridge does not build as a body; the cup is boxes, whose
 centre of mass is their origin, so a mesh mirror off its centre is never harvested
-there; and its water never reaches the solver's box.
+there; its water never reaches the solver's box; and it holds water, never the oil
+preset, whose cohesion takes more substeps than the arrangement states.
 
 Needs the ``[genesis]`` extra, which lives in a virtual environment of its own
 (``pyproject.toml``); it skips without it, as ``tests/test_genesis.py`` does.
@@ -19,7 +20,7 @@ import unittest
 import numpy as np
 
 TIER = "medium"
-"""One GPU, the [genesis] extra: a 64-particle scene, and three bridges built by hand."""
+"""One GPU, the [genesis] extra: a 64-particle scene, three bridges built by hand, and a cup of oil."""
 
 
 def _importable(module: str) -> bool:
@@ -191,6 +192,55 @@ class TestWaterAtTheSolversWallIsSaid(unittest.TestCase):
         said = [line for line in logs.output if "sph_reach" in line]
         self.assertEqual(1, len(said), logs.output)
         self.assertIn("'tight'", said[0])
+
+
+@unittest.skipUnless(HAS_GENESIS, "the [genesis] extra is not installed")
+class TestOilRestsInTheCupAtItsOwnSubsteps(unittest.TestCase):
+    """The oil preset in the pour example's cup: refused at the water's 20 substeps, held still at the 35 it states.
+
+    At 20 all of its 1,728 particles left the cup and at 27, 353 did (``oil_rest.py``): its cohesion, three times
+    water's, sets the substep."""
+
+    WALL = 0.008
+    INNER = (0.05, 0.05, 0.07)
+
+    def _scene(self, physics):
+        import robosimstudio as rss
+        from robosimstudio_materials.liquid import cup
+
+        scene = rss.Scene(cell="bench_075", physics=physics)
+        scene.add(cup(name="cup", inner=self.INNER, wall=self.WALL))
+        oil = scene.add(rss.water(name="oil", at=(0.0, 0.0, self.WALL + 0.001), material="oil", settle_frames=0))
+        return scene, oil
+
+    def test_the_waters_arrangement_refuses_it_by_name(self) -> None:
+        import robosimstudio as rss
+
+        scene, _ = self._scene(rss.WATER_60HZ)
+        with self.assertRaisesRegex(ValueError, r"'oil'.*surface tension.*substeps=35"):
+            scene.build()
+
+    def test_its_own_substeps_hold_it_in_the_cup(self) -> None:
+        import robosimstudio as rss
+
+        physics = rss.WATER_60HZ.with_backend("water", rss.backend("genesis", substeps=35, precision="32"))
+        scene, oil = self._scene(physics)
+        sim = scene.build()
+        sim.run(90).sync()
+        bridge, body = sim.scene.program.solver.solver("genesis").bridge, int(sim["cup"].bodies[0])
+        carried = []
+        for _ in range(30):
+            sim.run(1).sync()
+            carried.append(-float(bridge.last_force[body][2]))
+        bench = np.asarray(rss.get_cell("bench_075").surface_frame[:3], dtype=np.float64)
+        lo = bench + np.array([-0.5 * self.INNER[0], -0.5 * self.INNER[1], self.WALL]) - 0.002
+        hi = bench + np.array([0.5 * self.INNER[0], 0.5 * self.INNER[1], self.WALL + self.INNER[2]]) + 0.002
+        q = np.asarray(oil.particle_q, dtype=np.float64)
+        inside = int(np.all((q >= lo) & (q <= hi), axis=1).sum())
+        weight = oil.spec.mass * 9.81
+        self.assertTrue(sim.state_is_finite())
+        self.assertEqual(len(q), inside, f"{len(q) - inside} of {len(q)} particles left the cup")
+        self.assertAlmostEqual(1.0, float(np.mean(carried)) / weight, delta=0.1, msg="the cup carries the oil")
 
 
 if __name__ == "__main__":

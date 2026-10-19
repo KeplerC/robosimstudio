@@ -32,7 +32,11 @@ genesis-world 1.3.3), and what each fixed here:
   the glass), and 5e3 Pa lost 618 at 16 (``p3_pour.py``). The viscosity
   has its own limit (Genesis's, ``0.01 * (2 * spacing)**2 / mu``), which is why
   :data:`WATER` states ``mu`` 5e-4: at 1e-3 it allows 0.64 ms, and a 20-substep step
-  is 0.83 ms.
+  is 0.83 ms. So has the cohesion: :data:`OIL`'s ``gamma`` of 0.03 kept none of 1,728
+  particles in the cup at 20 substeps and all of them at 35 (``oil_rest.py``). An
+  island whose substeps are longer than its liquid holds by any of the three is
+  refused by name, with the substeps it needs
+  (:func:`~robosimstudio.engines.genesis.sph.longest_substep`).
 * **The particle spacing is the solver's.** Genesis's SPH has one particle size per
   scene; 4 mm costs 14 ms a control step for 1,728 particles at 20 substeps. 3 mm
   rests in the cup at 40 substeps (1.001 of its weight) and costs 32 ms for 4,352
@@ -104,7 +108,8 @@ class WaterMaterialSpec:
         exponent: The Tait equation's exponent.
         viscosity: Genesis's ``mu``, a kernel viscosity; its own stability bound is
             ``0.01 * (2 * spacing)**2 / mu`` per substep.
-        surface_tension: Genesis's ``gamma``, a cohesion between neighbours.
+        surface_tension: Genesis's ``gamma``, a cohesion between neighbours. Past
+            water's 0.01 it bounds the substep too (:data:`OIL`).
         color: Display colour.
     """
 
@@ -131,7 +136,14 @@ WATER = WaterMaterialSpec()
 """Water: 1000 kg/m^3, 1e4 Pa, ``mu`` 5e-4 -- the setting a 20-substep pour holds (the module docstring)."""
 
 OIL = WaterMaterialSpec(density=900.0, viscosity=1.0e-3, surface_tension=0.03, color=(0.86, 0.74, 0.30))
-"""A thin oil: lighter, twice water's ``mu``, three times its cohesion."""
+"""A thin oil: lighter, twice water's ``mu``, three times its cohesion, and 35 substeps a 60 Hz control step at 4 mm.
+
+Its cohesion sets them (:func:`~robosimstudio.engines.genesis.sph.longest_substep`): at
+rest in the pour example's cup its 1,728 particles all left it at 20 substeps, 353 did
+at 27, and at 35 all stayed and the cup read 0.976 N of their 0.976 N weight, at 37 ms
+a control step against water's 26 there (``oil_rest.py``). :data:`WATER_60HZ` states 20
+and refuses it by name; ``WATER_60HZ.with_backend("water", backend("genesis",
+substeps=35, precision="32"))`` runs it."""
 
 _MATERIALS = {"water": WATER, "oil": OIL}
 
