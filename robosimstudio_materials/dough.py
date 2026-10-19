@@ -28,6 +28,7 @@ import numpy as np
 from robosimstudio.core.tuning import BodyWriter
 from robosimstudio.domains.rigid.entity import EntityRigid
 from robosimstudio.scene.registry import register_entity
+from robosimstudio.solvers import ObbGrasp
 from robosimstudio.specs import ObjectSpec
 from robosimstudio.specs.asset import ShapeSpec
 from robosimstudio.specs.base import Vec3
@@ -136,7 +137,8 @@ class RollerSpec(ObjectSpec):
     the tool centre's height over the axle when the jaws close on the handle.
     ``spins`` puts the handle on a revolute joint about the axle; ``False``
     makes the two one body. ``mass`` is the whole tool's, drum and handle
-    together. A roller is a tool, so it cannot be ``static``.
+    together. A roller is a tool, so it cannot be ``static``, and it is built
+    here, a capsule drum, so it takes a capsule ``shape`` and no ``asset``.
     """
 
     entity: str = "roller"
@@ -155,9 +157,15 @@ class RollerSpec(ObjectSpec):
         super().__post_init__()
         if self.static:
             raise ValueError(f"roller {self.name!r}: a roller is a tool the hand moves, so it cannot be static")
+        # An asset or no shape built no handle: handle_body stayed -1, and the world's shapes were collected.
+        if self.asset is not None or self.shape is None or self.shape.kind != "capsule":
+            got = "an asset" if self.asset is not None else f"shape {getattr(self.shape, 'kind', None)!r}"
+            raise ValueError(
+                f"roller {self.name!r}: the drum is built here as a capsule, so it takes a capsule shape, not {got}"
+            )
         # The fingertips land on the shoulder, so a shoulder inside the drum (or under the axle) is a
         # handle whose boxes turn inside out or one the fingers meet the drum before.
-        radius = float(self.shape.radius) if self.shape is not None else 0.0
+        radius = float(self.shape.radius)
         if self.grip - SHOULDER <= radius:
             raise ValueError(
                 f"roller {self.name!r}: grip {self.grip:g} m stands the handle's shoulder "
@@ -214,6 +222,20 @@ class _ToolMass(BodyWriter):
         return wrote
 
 
+@dataclass(frozen=True)
+class _WebGrasp(ObbGrasp):
+    """The web's box, with the width the jaws close across: its 20 mm along the drum.
+
+    :attr:`ObbGrasp.grasp_width` is the widest axis but the long one: on the web,
+    its height, the way the fingers come down rather than the way they close,
+    which read the web as 43 mm across.
+    """
+
+    @property
+    def grasp_width(self) -> float:
+        return float(2.0 * self.half[1])
+
+
 class EntityRoller(EntityRigid):
     """A :class:`RollerSpec`: the roller on a free joint, the handle on a revolute joint about its axle."""
 
@@ -233,7 +255,7 @@ class EntityRoller(EntityRigid):
         between the hand and the roller, and the **contact** tunable, would have
         missed every box the fingers close on.
         """
-        bodies = {self.body, self.handle_body}
+        bodies = {self.body, self.handle_body} - {-1}  # -1 is the world's, the bench's shapes
         self.shapes = np.asarray(
             [s for s in range(builder.shape_count) if builder.shape_body[s] in bodies], dtype=np.int32
         )
@@ -244,20 +266,21 @@ class EntityRoller(EntityRigid):
         The inherited box is the drum's, which put the grasp point on the axle,
         inside the handle's shoulder. On the handle's body, not the drum's, so the
         box stays on the web while the drum rolls under it; ``ObbGrasp.body`` says
-        which body places it. The heuristic's long axis is the web's height
-        here, so its yaw and width are not the grip's: the jaws close across the
-        web's 20 mm along the drum.
+        which body places it. The long axis is stated, the web's x across the
+        drum: the heuristic's would be its height, a near-vertical axis whose
+        heading turned 90 degrees under a 0.2 degree tilt. The jaws close square
+        to it, across the web's 20 mm along the drum, and that is the width.
         """
-        from robosimstudio.solvers.grasp.obb import ObbGrasp, _shape_corners_local
+        from robosimstudio.solvers.grasp.obb import _shape_corners_local
 
         if not self.spec.obb_grasp or self.web_shape < 0:
             return
         web = _shape_corners_local(builder, self.web_shape)
         lo, hi = web.min(axis=0), web.max(axis=0)
         centre, half = (lo + hi) / 2.0, (hi - lo) / 2.0
-        long_axis = int(np.argmax(half))
+        long_axis = 0
         heavy = np.sign(float(builder.body_com[self.handle_body][long_axis]) - centre[long_axis])
-        self.obb = ObbGrasp(
+        self.obb = _WebGrasp(
             body=self.handle_body,
             center_local=centre,
             half=half,
