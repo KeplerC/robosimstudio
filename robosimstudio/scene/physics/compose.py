@@ -491,8 +491,9 @@ def _warn_lost_material(node: Any, declared: HostActor, island: Any) -> None:
     """
     engine = island.backend.solver
     info = get_backend(engine)
-    # The kind's own builder first -- a shell builder never reads ``friction``,
-    # and only it can say so -- the engine-wide declaration as the fallback.
+    # The kind's own builder first -- Genesis's shell builder never reads
+    # ``friction`` and SuperDex's does, and only each can say so -- the
+    # engine-wide declaration as the fallback.
     consumes = actor_consumes(engine, declared.kind) or info.consumes
     if consumes:
         unread = sorted(set(declared.params) - set(consumes))

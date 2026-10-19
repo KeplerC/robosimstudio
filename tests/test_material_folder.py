@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import math
 import unittest
+from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 
@@ -273,7 +275,8 @@ class TestAWholeLawIsWrittenAsOneSet(unittest.TestCase):
         np.testing.assert_allclose([LABEL.peak_opening, LABEL.reach], _law(label), rtol=1e-6)
 
     def test_the_inspector_writes_its_edits_as_one_set_and_refuses_one_the_kernels_do(self) -> None:
-        """Its binder holds the law it was opened on, not what the folder wrote since: a peak it takes can be
+        """With no Material folder on its own page it writes the tunable directly, and its binder holds the law
+        it was opened on, not what was written since (here by another page's folder): a peak it takes can be
         one the kernels refuse, which is refused on the status line, the slider put back."""
         from robosimstudio_materials.tape import LABEL
         from robosimstudio_studio.inspector import PanelInspector
@@ -282,7 +285,8 @@ class TestAWholeLawIsWrittenAsOneSet(unittest.TestCase):
         session = SimpleNamespace(env=panel.session.env, server=None, selected=None, status="")
         inspector, gui = PanelInspector(session), _StubGui()
         inspector._section_parameters(gui, SimpleNamespace(entity=label))
-        (binder, _), peak = inspector._binders[0], _slider(gui, "peak_opening")
+        (binder, _, sheet), peak = inspector._binders[0], _slider(gui, "peak_opening")
+        self.assertEqual("", sheet, "no folder on its page, so a direct write")
         peak.fire(8.0e-4)  # under LABEL's 1 mm reach, past the kernels' 0.4 mm
         inspector.drain()
         np.testing.assert_allclose([1.0e-4, 4.0e-4], _law(label), rtol=1e-6, err_msg="nothing written")
@@ -404,6 +408,149 @@ class TestEachSheetShowsItsOwnClasssFields(unittest.TestCase):
         panel.drain()
         self.assertAlmostEqual(1000.0, panel.tuner.working["towel"].tri_ke, places=6)
         self.assertAlmostEqual(1.0e7, panel.tuner.working["label"].tack, delta=1.0, msg="and the label kept its edit")
+
+
+@dataclass(frozen=True)
+class _Laid:
+    """A sheet as the task lays it out: what ``Apply & rebuild`` substitutes the working material into."""
+
+    name: str
+    material: Any
+
+
+class _Task(SimpleNamespace):
+    def with_entities(self, **views):
+        return _Task(**{**vars(self), **views})
+
+
+def _both(*entities, on: int = 0):
+    """One page with the Material folder and the inspector open on sheet ``on``, as the session drains them."""
+    from robosimstudio_studio.inspector import PanelInspector
+
+    panel, folder, env = _page(*entities)
+    env.task = _Task(
+        deformables=tuple(_Laid(e.spec.name, e.spec.material) for e in entities), physics=env.request.physics
+    )
+    session = panel.session
+    session.tune, session.server, session.selected, session.status = panel, None, None, ""
+    session.episode_id, session.num_worlds, session.load_request = 7, 1, None
+    inspector, gui = PanelInspector(session), _StubGui()
+    inspector._section_parameters(gui, SimpleNamespace(entity=entities[on]))
+    return panel, folder, inspector, gui
+
+
+def _tick(panel, inspector) -> None:
+    """One loop's drains, in the session's order: the inspector is before the folder."""
+    inspector.drain()
+    panel.drain()
+
+
+class TestAnInspectorEditIsTheFoldersEditToo(unittest.TestCase):
+    """The inspector wrote a sheet's ``material`` tunable directly and never told the folder's tuner, whose
+    working spec is what ``Apply & rebuild``, Revert, a preset and ``Pending rebuild`` read. Over these
+    stand-ins: a towel's ``tri_ke`` set to 1000 on the inspector held in the model while the working spec and
+    the folder's slider stayed at 10000, so a rebuild built it at 10000 again; ``areal_density`` moved there
+    was never pending; the folder's ``edge_ke`` set to 10 left the inspector showing 0.1. The same on
+    ``19_tape/00_peel_a_label``'s page: the inspector's ``tack`` at 2e6 reached the bonds while the working
+    spec stayed at 4e6, its ``thickness`` was never pending, and after Revert it still showed 2e6."""
+
+    def test_a_live_edit_survives_apply_and_rebuild(self) -> None:
+        towel = _sheet("towel", ClothMaterialSpec())
+        panel, folder, inspector, gui = _both(towel)
+        _slider(gui, "tri_ke").fire(3.0)  # a log slider: 1000
+        _tick(panel, inspector)
+        self.assertTrue(np.allclose(towel.env.model.tri_materials.values[:, 0], 1000.0), "still written live")
+        self.assertAlmostEqual(1000.0, panel.tuner.working["towel"].tri_ke, places=6)
+        self.assertAlmostEqual(3.0, _slider(folder, "tri_ke").value, msg="the folder's slider follows")
+        folder.find("Apply & rebuild").fire()
+        panel.drain()
+        task, episode = panel.session.load_request[:2]
+        self.assertAlmostEqual(1000.0, task.deformables[0].material.tri_ke, places=6)
+        self.assertEqual(7, episode)
+
+    def test_a_rebuild_field_is_pending(self) -> None:
+        panel, folder, inspector, gui = _both(_sheet("towel", ClothMaterialSpec()))
+        _slider(gui, "areal_density").fire(0.45)
+        _tick(panel, inspector)
+        self.assertEqual(("areal_density",), panel.tuner.pending())
+        self.assertEqual("areal_density", folder.find("Pending rebuild").value)
+
+    def test_a_folder_edit_after_it_keeps_it_and_revert_puts_both_back(self) -> None:
+        panel, folder, inspector, gui = _both(_sheet("towel", ClothMaterialSpec()))
+        _slider(gui, "tri_ke").fire(3.0)
+        _tick(panel, inspector)
+        _slider(folder, "edge_ke").fire(1.0)  # 10, on the folder
+        _tick(panel, inspector)
+        self.assertAlmostEqual(1000.0, panel.tuner.working["towel"].tri_ke, places=6, msg="kept beside the folder's")
+        self.assertAlmostEqual(10.0, panel.tuner.working["towel"].edge_ke, places=6)
+        panel.revert_requested = True
+        _tick(panel, inspector)
+        inspector.drain()  # the next loop's first drain
+        self.assertIs(panel.tuner.built["towel"], panel.tuner.working["towel"])
+        self.assertAlmostEqual(math.log10(ClothMaterialSpec().tri_ke), _slider(gui, "tri_ke").value)
+
+    def test_a_folder_edit_shows_on_the_inspector(self) -> None:
+        panel, folder, inspector, gui = _both(_sheet("towel", ClothMaterialSpec()))
+        _slider(folder, "edge_ke").fire(1.0)
+        _tick(panel, inspector)
+        inspector.drain()  # the next loop's first drain
+        self.assertAlmostEqual(1.0, _slider(gui, "edge_ke").value)
+        self.assertAlmostEqual(10.0, inspector._binders[0][0].spec.edge_ke, places=6)
+        folder.find("Preset").fire("terry_towelling")
+        _tick(panel, inspector)
+        inspector.drain()
+        self.assertIs(panel.tuner.working["towel"], inspector._binders[0][0].spec)
+
+    def test_an_edit_pending_on_the_inspector_lands_on_the_folders(self) -> None:
+        """A folder edit between two of the inspector's drains: following it keeps the inspector's control."""
+        panel, folder, inspector, gui = _both(_sheet("towel", ClothMaterialSpec()))
+        _slider(folder, "edge_ke").fire(1.0)
+        panel.drain()
+        _slider(gui, "tri_ke").fire(3.0)
+        inspector.drain()
+        self.assertAlmostEqual(1000.0, panel.tuner.working["towel"].tri_ke, places=6)
+        self.assertAlmostEqual(10.0, panel.tuner.working["towel"].edge_ke, places=6, msg="the folder's edit stays")
+        self.assertAlmostEqual(3.0, _slider(gui, "tri_ke").value)
+        self.assertAlmostEqual(1.0, _slider(gui, "edge_ke").value)
+
+    def test_a_sheet_the_folder_is_not_showing(self) -> None:
+        """The inspector's subject need not be the folder's selected sheet; the folder's controls stay on its own."""
+        towel = _sheet("towel", ClothMaterialSpec())
+        panel, _, inspector, gui = _both(towel, _sheet("label", PAPER_LABEL), on=1)
+        _slider(gui, "tack").fire(7.0)
+        _tick(panel, inspector)
+        self.assertAlmostEqual(1.0e7, panel.tuner.working["label"].tack, delta=1.0)
+        self.assertIs(towel.spec.material, panel.tuner.working["towel"], "the towel is not the sheet edited")
+        self.assertIs(panel.tuner.material, panel.binder.spec, "the folder still shows the towel")
+
+    def test_one_the_sheet_refuses_is_refused_on_the_status_line(self) -> None:
+        """A loose tape's spec refuses opening adhesion, which only the folder's tuner checks."""
+        from robosimstudio_materials.tape import LABEL
+
+        panel, folder, inspector, gui = _both(_tape(stuck=False))
+        _slider(gui, "adhesion").fire("opening")
+        _tick(panel, inspector)
+        self.assertIs(LABEL, panel.tuner.working["label"])
+        self.assertEqual("contact", _slider(gui, "adhesion").value, "the control goes back")
+        self.assertIn("adhesion not changed", panel.session.status)
+        self.assertEqual("none", folder.find("Pending rebuild").value)
+
+    def test_the_inspector_checks_a_peak_against_the_reach_the_folder_dragged(self) -> None:
+        """The stale binder: it held LABEL's 1 mm reach after the folder dragged it to 0.4 mm, took a 0.8 mm
+        peak and left the kernels to refuse it. Following the folder, its own spec refuses it."""
+        label = _tape(stuck=False)
+        panel, folder, inspector, gui = _both(label)
+        _slider(folder, "peak_opening").fire(1.0e-4)
+        _tick(panel, inspector)
+        _slider(folder, "reach").fire(4.0e-4)
+        _tick(panel, inspector)
+        inspector.drain()
+        self.assertAlmostEqual(4.0e-4, _slider(gui, "reach").value)
+        _slider(gui, "peak_opening").fire(8.0e-4)
+        _tick(panel, inspector)
+        np.testing.assert_allclose([1.0e-4, 4.0e-4], _law(label), rtol=1e-6, err_msg="nothing written")
+        self.assertIn("peak_opening not changed", panel.session.status)
+        self.assertAlmostEqual(1.0e-4, _slider(gui, "peak_opening").value)
 
 
 if __name__ == "__main__":

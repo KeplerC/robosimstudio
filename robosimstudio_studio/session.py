@@ -1012,7 +1012,8 @@ class StudioSession:
             # The *material* folder stays for what the inspector's generated one
             # cannot do -- presets, save, revert, and `Apply & rebuild` for the
             # fields no live write can reach. Per-field tuning of the selected
-            # cloth is the inspector's now, from the same binder.
+            # cloth is the inspector's now, from the same binder, and its edits go
+            # through this folder's tuner, so a rebuild and Revert see them.
             self.tune = PanelTune(self, material_dir=config.material_dir)
             self.readings = PanelReadings(self)
             panels += [self.tune, self.readings]
