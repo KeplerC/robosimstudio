@@ -85,6 +85,32 @@ class TestADeclarationFromASpecIsAValue(unittest.TestCase):
         with self.assertRaises(TypeError):
             Rod.from_spec(object(), name="rubber_band")
 
+    def test_a_rods_record_states_the_requirements_the_rod_runs(self) -> None:
+        """Read as ``EntityRodSuperdex.sim_requirements`` reads the spec: a declared ``sim`` first, else its self-contact.
+
+        Self-contact is the spec's, which the rod is built from, so one passed beside it is refused
+        rather than stated on the record alone; so are contacts beside a spec that declares them.
+        """
+        from robosimstudio.specs.physics import SimRequirements
+        from robosimstudio_materials.rod import Rod
+        from robosimstudio_materials.rod.band import band
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
+
+        for on in (True, False):
+            for declared in (None, SimRequirements(domain="rod", self_contact=on)):
+                with self.subTest(self_contact=on, declared=declared is not None):
+                    spec = band(diameter=0.08, self_contact=on if declared is None else not on, sim=declared)
+                    record = Rod.from_spec(spec, name="rubber_band")
+                    self.assertIs(EntityRodSuperdex(spec).sim_requirements().self_contact, record.sim.self_contact)
+                    self.assertIs(on, record.sim.self_contact)
+                    if declared is not None:
+                        self.assertEqual(declared, record.sim)
+        with self.assertRaisesRegex(TypeError, "self_contact is the spec's"):
+            Rod.from_spec(band(diameter=0.08), name="rubber_band", self_contact=True)
+        declares = band(diameter=0.08, sim=SimRequirements(domain="rod"))
+        with self.assertRaisesRegex(ValueError, "state touches there"):
+            Rod.from_spec(declares, name="rubber_band", touches=("hands",))
+
 
 class TestTheScoredBandExampleDeclaresItsBandAsAValue(unittest.TestCase):
     """``examples/18_bands/01_band_on_pegs_scored``'s ``main()`` again with another band: refused, not the first kept."""
