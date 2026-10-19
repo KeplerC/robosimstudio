@@ -291,7 +291,7 @@ class EntityCuttable(Entity):
         force, lag = edge_push(
             depth=t_edge - t_front,
             gap=self._t_end - t_edge,
-            length=contact.length,
+            length=contact.inside,
             young=spec.material.young_modulus,
             push=spec.push,
             threshold=threshold,

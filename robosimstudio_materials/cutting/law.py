@@ -232,34 +232,45 @@ class EdgeContact:
         length: How much of the edge lies over the footprint [m].
         points: The samples that do, ``(k, 3)``.
         centroid: Their middle; where the push acts.
+        inside: How much of it lies between the block's base and top [m]: the edge law's ``L``, which
+            a knife tipped with only its lowest few millimetres in the block has little of.
     """
 
     length: float
     points: np.ndarray
     centroid: np.ndarray
+    inside: float = 0.0
+
+
+def _clip(edge0: np.ndarray, step: np.ndarray, lo: float, hi: float, axis: int, top: float) -> tuple[float, float]:
+    """The part ``[lo, hi]`` of the segment's parameter that lies in ``[0, top]`` along ``axis``."""
+    if abs(step[axis]) < 1.0e-15:
+        return (lo, hi) if 0.0 <= edge0[axis] <= top else (1.0, 0.0)
+    a = (0.0 - edge0[axis]) / step[axis]
+    b = (top - edge0[axis]) / step[axis]
+    return max(lo, min(a, b)), min(hi, max(a, b))
 
 
 def edge_contact(edge0, edge1, size, samples: int = 17) -> EdgeContact:
     """The part of the segment ``edge0``-``edge1`` (block frame) over the block's ``x``-``y`` footprint.
 
-    The segment is clipped to the footprint exactly, and ``samples`` points are spread over what is left.
+    The segment is clipped to the footprint exactly, and ``samples`` points are spread over what is left;
+    :attr:`EdgeContact.inside` clips it to the block's height too.
     """
     edge0, edge1 = np.asarray(edge0, float), np.asarray(edge1, float)
     step = edge1 - edge0
     lo, hi = 0.0, 1.0
     for axis in (0, 1):
-        if abs(step[axis]) < 1.0e-15:
-            if not 0.0 <= edge0[axis] <= float(size[axis]):
-                lo, hi = 1.0, 0.0
-            continue
-        a = (0.0 - edge0[axis]) / step[axis]
-        b = (float(size[axis]) - edge0[axis]) / step[axis]
-        lo, hi = max(lo, min(a, b)), min(hi, max(a, b))
+        lo, hi = _clip(edge0, step, lo, hi, axis, float(size[axis]))
     if hi <= lo:
         return EdgeContact(length=0.0, points=np.zeros((0, 3)), centroid=0.5 * (edge0 + edge1))
     s = np.linspace(lo, hi, int(samples))
     points = edge0[None, :] + s[:, None] * step[None, :]
-    return EdgeContact(length=float(np.linalg.norm(step)) * (hi - lo), points=points, centroid=points.mean(axis=0))
+    below, above = _clip(edge0, step, lo, hi, 2, float(size[2]))
+    norm = float(np.linalg.norm(step))
+    return EdgeContact(
+        length=norm * (hi - lo), points=points, centroid=points.mean(axis=0), inside=norm * max(above - below, 0.0)
+    )
 
 
 def edge_push(
