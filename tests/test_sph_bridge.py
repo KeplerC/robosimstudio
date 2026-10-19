@@ -164,6 +164,52 @@ class TestWaterOnAMirrorOffItsCentre(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_GENESIS, "the [genesis] extra is not installed")
+class TestWaterOnACapsuleMirror(unittest.TestCase):
+    """Water walled in on a capsule lying along x. Its tessellated centre comes back about 1e-18 m off its origin,
+    and Genesis's midpoint rule tests the centre exactly: off the bridge's zero-gain servo it read 0.0 N of the
+    water's 0.040 N."""
+
+    def test_it_carries_the_water(self) -> None:
+        import newton
+        import warp as wp
+
+        from robosimstudio.engines.genesis.sph import SphBridge
+
+        origin = np.array([0.0, 0.0, 0.5])
+        builder = newton.ModelBuilder()
+        count = _water(builder, origin + np.array([0.0, 0.0, 0.03]))
+        body = builder.add_body(xform=wp.transform(wp.vec3(*origin), wp.quat_identity()), mass=1.0)
+        along_x = wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), np.pi / 2)
+        builder.add_shape_capsule(
+            body, xform=wp.transform(wp.vec3(0.0, 0.0, -0.08), along_x), radius=0.1, half_height=0.05
+        )
+        walls = []
+        for x, y, hx, hy in ((0.014, 0.0, 0.004, 0.018), (-0.014, 0.0, 0.004, 0.018), (0.0, 0.014, 0.01, 0.004)):
+            for sign in (1.0, -1.0) if y else (1.0,):
+                at = wp.vec3(*(origin + np.array([x, sign * y, 0.043])))
+                walls.append(
+                    builder.add_shape_box(-1, xform=wp.transform(at, wp.quat_identity()), hx=hx, hy=hy, hz=0.027)
+                )
+        model = builder.finalize()
+        recipe = {
+            "island": "capsule",
+            "control_hz": 60.0,
+            "actors": [{"particle_start": 0, "particle_count": count, "kind": "sph", "name": "water", "params": {}}],
+            "mirrors": [{"shape": 0, "body": body, "two_way": True}] + [{"shape": s, "body": -1} for s in walls],
+        }
+        bridge = SphBridge(model, recipe, substeps=20, precision="32")
+        bridge.apply_wrenches = lambda wrench: None
+        centre = np.asarray(bridge.mirrors[0]["entity"].links[0].inertial_pos, dtype=np.float64)
+        self.assertTrue(centre.any() and np.linalg.norm(centre) < 1.0e-9, f"the capsule's centre is {centre}")
+        state, carried = model.state(), []
+        for _ in range(60):
+            bridge.tick(state, 1.0 / 60.0)
+            carried.append(-float(bridge.last_force[body][2]))
+        weight = count * 1000.0 * 0.004**3 * 9.81
+        self.assertAlmostEqual(1.0, float(np.mean(carried[20:])) / weight, delta=0.15, msg="the capsule carries it")
+
+
+@unittest.skipUnless(HAS_GENESIS, "the [genesis] extra is not installed")
 class TestWaterAtTheSolversWallIsSaid(unittest.TestCase):
     """Genesis holds a particle at its box's face, so water carried past ``sph_reach`` stops at a wall nobody drew:
     the bridge says so, once, naming the island and the reach."""

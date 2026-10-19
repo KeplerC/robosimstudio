@@ -447,10 +447,13 @@ class SphBridge:
             entry["mass"] = float(entity.get_mass())
             com = np.asarray(entity.links[0].inertial_pos, dtype=np.float64).reshape(3)
             if com.any() and entry["geom"].two_way and entry["geom"].moving:
-                # Off the midpoint rule, which drops the water's push on a centre not exactly at the origin.
+                # Off the midpoint rule, which drops the water's push on a centre not exactly at the origin. Exactly,
+                # as Genesis tests it (``is_aligned`` in ``func_midpoint_free_body``), so not thresholded: a capsule
+                # 1e-18 m off read 0.0 N unservoed, and its water's weight servoed (tests/test_sph_bridge.py).
                 entity.set_dofs_kv(np.zeros(6))
                 entity.control_dofs_velocity(np.zeros(6))
-            # A tessellated capsule's centre comes back 1e-18 m off its origin: that is its origin.
+            # A tessellated capsule's centre comes back 1e-18 m off its origin: where the read and the torque arm are
+            # concerned, that is its origin.
             entry["com"] = com if float(np.linalg.norm(com)) > 1.0e-9 else np.zeros(3)
             # Where its reaction is read, so where it acts: the centre of mass, in its body's frame.
             entry["at"] = compose(entry["geom"].local, np.array([*entry["com"], 0.0, 0.0, 0.0, 1.0]))
