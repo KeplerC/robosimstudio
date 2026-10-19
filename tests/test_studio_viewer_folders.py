@@ -7,7 +7,8 @@ studio steps itself, so that Pause did not pause and that Reset had nothing to c
 Visualization folder pushed the example readouts below the fold: the press-dough clip filmed on
 1.7 never showed its height readout. ``ViewerStudio`` adds neither. The bare Newton viewer is
 built beside it, so the day Newton stops adding them this test says so rather than passing on
-nothing.
+nothing. The core tier's ``rss.viewer`` and ``rss.draw`` pages keep Newton's Simulation folder, the
+only Pause and Reset they have: its Reset, greyed out with no callback, calls ``sim.reset()``.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ TIER = "fast"
 
 STUDIO_PORT = 9811
 NEWTON_PORT = 9812
+BARE_PORT = 9813
 NEWTONS = {"Pause", "Step", "Reset", "Show Visual", "Show Collision", "Enable Picking"}
 """Some of what Newton 1.7 puts in its two folders, by label."""
 
@@ -52,6 +54,31 @@ class TestNewtonsFoldersStayOffTheStudioPage(unittest.TestCase):
             studio._sync_gui_controls()  # Newton's per-frame sync, with no handles to sync
         finally:
             studio.close()
+
+
+class TestTheBareViewersSimulationFolderDrivesTheScene(unittest.TestCase):
+    """``rss.viewer`` and ``rss.draw`` keep Newton's Simulation folder: no other Pause or Reset is on them."""
+
+    def test_reset_resets_the_scene_and_the_documented_loop_asks_before_it_steps(self) -> None:
+        from types import SimpleNamespace
+
+        import newton
+
+        from robosimstudio.sim.draw import Viewer, viewer
+
+        resets: list[int] = []
+        sim = SimpleNamespace(
+            model=newton.ModelBuilder().finalize(device="cpu"), name="bare", reset=lambda: resets.append(1)
+        )
+        page = Viewer(sim, port=BARE_PORT)
+        try:
+            self.assertFalse(page._viewer._simulation_gui_handles["reset"].disabled, "Reset is live")
+            page._viewer._interaction_events.put(("reset",))  # what a click on it queues
+            self.assertTrue(page.should_step())
+            self.assertEqual([1], resets)
+        finally:
+            page.close()
+        self.assertIn("if viewer.should_step():", viewer.__doc__, "the loop the docs show honours Pause")
 
 
 if __name__ == "__main__":
