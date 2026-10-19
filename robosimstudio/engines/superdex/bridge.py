@@ -128,7 +128,10 @@ def _root_matrix(actor) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _root_reader(actor):
-    """Node positions in the scene's world frame for an actor whose root moves (a skinned soft body)."""
+    """Node positions in the scene's world frame through an actor's root as it stands.
+
+    A shell's root is its centroid (:meth:`SuperdexBridge.build_shell`); a skinned soft body's moves.
+    """
 
     def read() -> np.ndarray:
         rot, t = _root_matrix(actor)
@@ -262,8 +265,9 @@ class SuperdexBridge:
     ``count`` and ``prev`` (the rest positions, in the engine's precision) --
     and may use what the bridge offers every builder: :attr:`physics`,
     :attr:`model`, :attr:`recipe`, :meth:`scene_of`, :meth:`actor_root`,
-    :meth:`root_reader`, :meth:`contact_params`, and :attr:`actors`, the entries built before it
-    (each stamped with its ``entity`` and ``world``).
+    :meth:`root_reader`, :meth:`contact_params`, :meth:`build_shell` (the shell
+    builder, under a kind's own defaults), and :attr:`actors`, the entries built
+    before it (each stamped with its ``entity`` and ``world``).
 
     **One scene per world.** A replicated model superimposes its worlds at the
     origin, which is right for Newton -- its broadphase pairs within a world --
@@ -702,14 +706,14 @@ class SuperdexBridge:
         return self.scenes[int(world) % self.num_worlds]
 
     def actor_root(self, record: dict) -> Any:
-        """Where this record's actor sits in its scene: identity, always.
+        """Where a soft body or a rod sits in its scene: identity.
 
-        Every world has its own scene, so an actor keeps its own rest
+        Every world has its own scene, so such an actor keeps its own rest
         coordinates and node positions read back *local* mean the Newton world
-        frame -- there is nothing to translate on the way in or out. That is
-        this bridge's builders' rule; a builder registered from outside may set
-        another root (a bag's is its centroid) and reads through it, and
-        :meth:`place_actor` writes through whichever root an actor has.
+        frame -- there is nothing to translate on the way in or out. A shell
+        does not sit here: :meth:`build_shell` roots every sheet and bag at its
+        centroid and reads through it, and :meth:`place_actor` writes through
+        whichever root an actor has.
         """
         del record
         return self.physics.TransformRT()
@@ -718,8 +722,8 @@ class SuperdexBridge:
         """A ``read`` for an actor's entry: its nodes in the world, through its root as it stands.
 
         The method form of the module's own reader, the rule :meth:`place_actor`
-        writes by, so a builder outside this bundle that sets another root (a
-        bag's is its centroid) reads back the way a placement is written.
+        writes by, so a builder outside this bundle that sets another root reads
+        back the way a placement is written, as :meth:`build_shell` does.
         """
         return _root_reader(actor)
 
@@ -732,19 +736,58 @@ class SuperdexBridge:
         """
         return _contact_params(self.physics, params, penalty=penalty, friction=friction, padding=padding)
 
-    def _build_shell_actor(self, record: dict, particle_q: np.ndarray, tet_indices=None, tet_materials=None) -> dict:
-        """A membrane sheet as a SuperDex shell actor.
+    def build_shell(self, record: dict, *, defaults: dict | None = None) -> dict:
+        """A membrane as a SuperDex shell actor in a frame at its own centroid: the one shell builder.
 
-        Triangles come off the model exactly as the render path reads them;
-        elastic moduli are the island's (``shell_young``/``shell_poisson`` on
-        the backend -- cloth specs speak VBD stiffnesses, not Young/Poisson),
-        converted by the engine's own helper into thickness-integrated shell
-        stiffness plus an areal density.
+        Triangles come off the model exactly as the render path reads them. The
+        modulus is the sheet's own ``young``/``poisson`` when it states them, the
+        island's ``shell_young``/``shell_poisson`` otherwise (cloth specs speak
+        VBD stiffnesses, not Young/Poisson), converted by the engine's own
+        helper into thickness-integrated shell stiffness plus an areal density.
+
+        **The frame.** The engine is float32 and solves in the coordinates it
+        is given, so the rest layout goes in about its centroid, the centroid
+        is the root transform, and the nodes read back through the root
+        (:meth:`root_reader`), the rule :meth:`place_actor` writes by. A bag
+        built in bench-height world coordinates never converged, 24 ms an engine
+        step against 1.6 ms about its centroid (``robosimstudio_materials.bag``,
+        section 1). A flat sheet pays far less for the world frame: the
+        ``01_cloth/02_engines`` towel on SuperDex (0.3 m, 20 x 20 cells, the
+        YAM beside it) steps in 6.7 ms a control step at rest either way, where
+        both frames converge in no Newton iteration, and in its first second,
+        falling onto the bench, 0.57 iterations an engine step became 0.40 and
+        the steps that converged 97 per cent instead of 80 (``p2_cloth.py``,
+        GPU 6). Draped over a 10 cm cube on the engine alone, at rest: 3.4-3.9 ms
+        a control step in world coordinates, 2.1-2.9 about its centroid
+        (``p3_rawsheet.py``). A shell has no recentering component -- the engine
+        reports ``use_recentering`` off and refuses to set it ("CRecenteringParams
+        component not found") -- so the root stays where it is built, and a pin
+        (:meth:`pin_nodes`) still takes its target in the world: 0.07 mm from it
+        at an identity root and at a centroid one alike (``p1_facts.py``).
+
+        **Contact** is the params' through :func:`_contact_params`: ``friction``
+        (a cloth's ``ClothMaterialSpec.friction``), ``friction_falloff`` and the
+        rest of that set, each unstated one at the engine's own (mu 0.5, 10 mm/s,
+        a 1e9 penalty, no padding: what a shell is built with when nothing is
+        said). The engine meets two surfaces at the geometric mean of their
+        coefficients -- a 0.1 m sheet on a 20 degree slope crept 11.6 mm in 2 s
+        at 0.2 on 1.0 and 11.7 mm at 0.447 on 0.447, 6.4 mm at 0.5 on 1.0 and at
+        0.707 on 0.707 (``p5_slope.py``) -- so a towel at the fabric default of
+        0.2, which this builder used to hand the engine as 0.5, meets the bench
+        (1.0) at 0.45 where it met it at 0.71: what VBD's
+        ``sqrt(soft_contact_mu * shape_material_mu)`` gives the same towel.
+        **Damping** -- ``mass_damping`` [1/s], ``stiffness_damping`` [s] -- is
+        set when stated and left at the engine's zeros otherwise.
+
+        Args:
+            record: The recipe's actor record.
+            defaults: Params a kind's own builder supplies under the record's,
+                which win over them: the bag's canvas (``robosimstudio_materials.bag``).
         """
         physics = self.physics
-        del particle_q  # the shared reader takes it off the model
         geom = actor_geometry(self.model, {**record, "kind": "shell"})
-        start, count, params, rest, tris = geom.start, geom.count, geom.params, geom.rest, geom.tris
+        start, count, rest, tris = geom.start, geom.count, geom.rest, geom.tris
+        params = {**(defaults or {}), **geom.params}
 
         thickness = float(params.get("thickness", 0.002))
         areal_density = float(params.get("areal_density", 0.3))
@@ -758,33 +801,51 @@ class SuperdexBridge:
             areal_density / max(thickness, 1.0e-5),
             thickness,
         )
+        for key, attr in (
+            ("mass_damping", "mass_damping_coefficient"),
+            ("stiffness_damping", "stiffness_damping_coefficient"),
+        ):
+            if params.get(key) is not None:
+                setattr(material, attr, float(params[key]))
+        centre = rest.mean(axis=0)
         shape = physics.create_tri_mesh_shape(
-            coordinates=rest.ravel(),
+            coordinates=(rest - centre).ravel(),
             connectivity=tris.astype(np.int32).ravel(),
         )
         shell_params = physics.experimental.ShellActorParams(
             name=str(record.get("name", f"shell:{start}")),
             shape=shape,
             material=material,
-            world_from_local=self.actor_root(record),
+            world_from_local=physics.TransformRT(
+                rotation=physics.Quaternion(0.0, 0.0, 0.0, 1.0), translation=[float(v) for v in centre]
+            ),
         )
         shell_params.point_cloud_collider.radius = float(params.get("particle_radius", 0.002))
         shell_params.point_cloud_collider.self_contact = bool(params.get("self_contact", False))
+        engine = shell_params.contact  # what an unstated key keeps
+        shell_params.contact = _contact_params(
+            physics,
+            params,
+            penalty=float(engine.penalty_coefficient),
+            friction=float(engine.coulomb_friction_coefficient),
+            padding=float(engine.penalty_threshold_extra_padding),
+        )
         actor = physics.experimental.create_shell_actor(self.scene_of(record.get("world", 0)), shell_params)
-        try:
-            actor.set_recentering_params(physics.RecenteringParams(use_recentering=False))
-        except (physics.Error, RuntimeError):
-            pass  # a shell that recenters differently still reads back through its root transform
         actor.register_query(physics.QueryType.NODE_POSITIONS)
         np_real = np.float64 if physics.uses_double_precision() else np.float32
         return {
             "name": str(record.get("name", "")),
             "actor": actor,
-            "read": actor.get_node_positions_local,
+            "read": _root_reader(actor),
             "start": start,
             "count": count,
             "prev": rest.astype(np_real).copy(),
         }
+
+    def _build_shell_actor(self, record: dict, particle_q: np.ndarray, tet_indices=None, tet_materials=None) -> dict:
+        """A cloth's membrane: :meth:`build_shell` with nothing under the record's params."""
+        del particle_q, tet_indices, tet_materials  # the shared reader takes them off the model
+        return self.build_shell(record)
 
     def _build_soft_actor(
         self, record: dict, particle_q: np.ndarray, tet_indices: np.ndarray = None, tet_materials: np.ndarray = None
@@ -1097,11 +1158,12 @@ class SuperdexBridge:
 
         for entry in self.actors:
             # Through the entry's own reader rather than one call for every
-            # kind: a soft or shell actor answers ``get_node_positions_local``,
-            # and not every actor type does -- the engine refuses NodePositions
-            # for some and states them as a rest mesh plus a per-node
-            # displacement instead. The tick has no business knowing which; the
-            # builder that made the actor does.
+            # kind: a soft actor's local nodes are world, a shell's are about
+            # its centroid and come through its root, and not every actor type
+            # answers ``get_node_positions_local`` at all -- the engine refuses
+            # NodePositions for some and states them as a rest mesh plus a
+            # per-node displacement instead. The tick has no business knowing
+            # which; the builder that made the actor does.
             entry["prev"] = self.rig.write_particles(
                 state, entry["start"], entry["count"], np.asarray(entry["read"]()), dt, entry["prev"]
             )
@@ -1325,7 +1387,9 @@ class SuperdexBridge:
             entity_name: Which actor's nodes (the entity's name).
             nodes: Global model particle indices, as the callers already hold.
             targets: World positions ``[n, 3]``, in Newton's frame, which is
-                also every scene's frame.
+                also every scene's frame. Whatever the actor's root: the engine
+                takes a node constraint's target in the world, so a sheet built
+                about its centroid is pinned as a sponge at identity is.
             world: Which world's actor. 0 when nothing replicated it.
         """
         entry = next(
@@ -1418,10 +1482,10 @@ class SuperdexBridge:
 
         ``positions`` is this actor's nodes in the Newton world frame, in the
         order the model holds them. They are written through the actor's own
-        root transform: identity for every actor this bridge's builders make
-        (recentering is off), so local **is** world there, and the centroid for
-        a bag, whose builder (``robosimstudio_materials.bag``) solves about its
-        own middle in float32 and reads back through the root (:meth:`root_reader`).
+        root transform: identity for a soft body (recentering is off), so local
+        **is** world there, and the centroid for a sheet or a bag, which
+        :meth:`build_shell` solves about its own middle in float32 and reads
+        back through the root (:meth:`root_reader`).
 
         Velocities go to zero and ``prev`` is refreshed from what the engine
         reports back, because a teleport is not motion: the first speed reading
@@ -1499,7 +1563,22 @@ class SuperdexBridge:
 _CONSUMES = {
     # What each builder above actually reads off ``HostActor.params``; the
     # composer warns on anything an actor states outside its kind's set.
-    "shell": ("areal_density", "particle_radius", "poisson", "self_contact", "thickness", "young"),
+    "shell": (
+        "areal_density",
+        "contact_padding",
+        "contact_penalty",
+        "contact_smoothing",
+        "contact_threshold",
+        "friction",
+        "friction_falloff",
+        "mass_damping",
+        "particle_radius",
+        "poisson",
+        "self_contact",
+        "stiffness_damping",
+        "thickness",
+        "young",
+    ),
     "tet": (
         "anchors",
         "boundary_samples",

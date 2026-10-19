@@ -96,7 +96,7 @@ class TestALostMaterialFieldIsLoud(unittest.TestCase):
         get_backend("superdex")  # loads the engine bundle, which registers its builders
         self.assertNotEqual(engine_consumes("superdex"), (), "superdex declares, per builder")
         self.assertIn("friction", actor_consumes("superdex", "tet"))
-        self.assertNotIn("friction", actor_consumes("superdex", "shell"), "the shell builder never reads it")
+        self.assertIn("friction", actor_consumes("superdex", "shell"), "the shell builder states it in the contact")
         self.assertEqual(get_backend("vbd").consumes, (), "a Newton solver reads the model, not the actor")
 
     def test_a_kind_s_own_builder_sharpens_the_engine_s_declaration(self) -> None:

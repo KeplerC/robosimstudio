@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """``SuperdexBridge.place_actor`` puts an actor's nodes where it is told, whatever its root.
 
-Every actor the bridge's own builders make sits at an identity root, so its local
-nodes are world nodes. A bag (``robosimstudio_materials.bag``) is built about its
-own centroid, with the offset in its root transform, because the engine is
-float32 and a bag solved in bench-height coordinates never converged. A
-placement written straight into its local nodes read back a whole centroid away,
+A soft body sits at an identity root, so its local nodes are world nodes. A shell
+-- a sheet or a bag (``robosimstudio_materials.bag``) -- is built about its own
+centroid, with the offset in its root transform, because the engine is float32
+and a bag solved in bench-height coordinates never converged. A placement
+written straight into a bag's local nodes read back a whole centroid away,
 0.61 m along x and 0.73 m up, and the next step started from there. Here a bag
 and a sponge (an identity root) in one scene are each moved and read back, and a
 band, a rod the engine sets no nodes of, is refused by name.

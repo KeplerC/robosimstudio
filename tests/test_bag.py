@@ -319,13 +319,10 @@ class TestTheEngineActor(unittest.TestCase):
         physics = mock.MagicMock()
         physics.uses_double_precision.return_value = False
         physics.experimental.create_shell_actor.return_value = actor
-        bridge = SimpleNamespace(
-            physics=physics,
-            model=SimpleNamespace(particle_q=Arr(vertices), tri_indices=Arr(faces), tri_count=len(faces)),
-            contact_params=lambda *args, **kwargs: None,
-            scene_of=lambda world: None,
-            root_reader=lambda a: SuperdexBridge.root_reader(bridge, a),
-        )
+        # The bridge's own shell builder, which the bag's is, over a model that holds only the bag.
+        bridge = object.__new__(SuperdexBridge)
+        bridge.physics, bridge.recipe, bridge.scenes, bridge.num_worlds = physics, {}, [None], 1
+        bridge.model = SimpleNamespace(particle_q=Arr(vertices), tri_indices=Arr(faces), tri_count=len(faces))
         record = {"name": "bag", "particle_start": 0, "particle_count": len(vertices)}
         entry = build_bag_actor(bridge, {**record, "params": entity.host_actor().params})
         np.testing.assert_allclose(entry["read"](), np.tile([0.6, 0.01, 0.75], (len(vertices), 1)), atol=1e-12)
