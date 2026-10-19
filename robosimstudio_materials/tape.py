@@ -1524,7 +1524,12 @@ class EntityTape(EntityCloth):
 
     def margin_moved(self) -> float:
         """How far the margin a stuck sheet was laid at has moved since the build [m]: what a reset lays it
-        further off the face by. The box's contact ``thickness`` writes the margin live; 0 for a loose sheet."""
+        further off the face by. The box's contact ``thickness`` writes the margin live; 0 for a loose sheet.
+
+        Built over no margin, the margin then written and the scene reset with the sheet where it was
+        built, a tabbed label's 144 bonds let go: :data:`LABEL` kept 8 at 1 mm and none from 1.5 mm,
+        :data:`PAPER_LABEL` 2 at 1 mm and none from 1.5 mm. Laid this much further, all 144 of either
+        held 60 substeps at 0.5 to 2 mm, none lifted (``z2_reset.py``, VBD on the CPU)."""
         if not len(self.lift_shapes) or self._margins is None:
             return 0.0
         return float(self._margins.numpy()[self.lift_shapes].max()) - self.lift
