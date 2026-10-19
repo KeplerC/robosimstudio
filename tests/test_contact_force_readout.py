@@ -195,6 +195,27 @@ class TestTheWipeIsGatedOnThePush(unittest.TestCase):
         body_q[[5, 6], 0] += 0.0005
         self.assertEqual(wipe.update()["wiped"], 0.25)
 
+    def test_a_scene_reset_brings_the_stain_back_and_the_jump_home_is_no_rub(self) -> None:
+        from robosimstudio_materials.cloth import ForceGatedWipe
+
+        sim = _Sim(**vars(_scene(_coupler([((10,), 1, (0.0, 0.0, 30.0))], capacity=8))), step_count=40)
+        body_q = np.zeros((8, 7), dtype=np.float32)
+        sim.state = SimpleNamespace(body_q=SimpleNamespace(numpy=body_q.copy))
+        wipe = ForceGatedWipe(sim, "towel", "stain", "right", (20.0, 60.0), window=1)
+        wipe.update()
+
+        def stroke(along: float, step: int) -> float:
+            body_q[[5, 6], 0] += along
+            sim.step_count = step
+            return wipe.update()["wiped"]
+
+        self.assertEqual(stroke(0.001, 41), 0.25)
+        # The page's Reset: the count back to 0, the hand 50 mm away at home, the record still on the stain.
+        self.assertEqual(stroke(0.05, 0), 0.0, "the towel a reset puts back is clean, and the jump wipes nothing")
+        self.assertEqual(stroke(0.001, 1), 0.25, "a stroke after it wipes again")
+        wipe.reset()  # Clean stain
+        self.assertEqual(stroke(0.05, 2), 0.0, "the jump after Clean stain is no rub either")
+
     def test_a_push_past_the_band_is_too_hard_and_wipes_nothing(self) -> None:
         wipe = self._wipe([((10, 11), 1, (0.0, 0.0, 90.0))])
         reading = wipe.update()

@@ -1103,6 +1103,10 @@ class ForceGatedWipe:
     wiped in one drive of two; latched, none in either (``scrub_lift.py``, the strokes of
     ``tests/test_scrub_a_stain.py``, GPU 3).
 
+    A reset of the scene puts the towel back clean, so the stain comes back with it: an update that
+    finds the sim's step count gone back calls :meth:`reset`, as the page's **Clean stain** does. The
+    hand's jump home is not a rub, since a reset also forgets where the hand was.
+
     Args:
         sim: A scene that stages ``coupler("one_way", contact_forces=True)``.
         cloth: The sheet's name.
@@ -1143,6 +1147,8 @@ class ForceGatedWipe:
         self.bodies = self.bodies[self.bodies >= 0]
         self.where: np.ndarray | None = None
         """The hand's bodies' mean position in the sheet's plane at the last update [m]."""
+        self.step = -1
+        """The sim's step count at the last update; one that went back is the scene reset."""
 
     def slid(self) -> bool:
         """Whether the hand moved at least :attr:`rub` along the sheet since the last update."""
@@ -1162,6 +1168,10 @@ class ForceGatedWipe:
 
     def update(self) -> dict[str, float]:
         """Read the push, mark what the hand touched, and return the readout."""
+        step = int(getattr(self.sim, "step_count", 0))
+        if step < self.step:
+            self.reset()
+        self.step = step
         forces = self.sim.pipeline.program.solver.shape_contact_forces()
         now = float(forces[self.hand, 2].sum())
         self.raw.append(now)
@@ -1214,11 +1224,13 @@ class ForceGatedWipe:
         )
 
     def reset(self) -> None:
+        """The stain back whole, and the push and the hand's last position forgotten."""
         self.wiped[:] = False
         self.crushed[:] = False
         self.recent.clear()
         self.raw.clear()
         self.push, self.hard = 0.0, False
+        self.where = None
 
 
 def _pairs(snapshot, cloth: str, panel: dict[str, Any]) -> np.ndarray:
