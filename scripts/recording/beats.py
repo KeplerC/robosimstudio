@@ -391,6 +391,42 @@ class Grasp(Beat):
 
 
 @dataclass(frozen=True)
+class Turn(Beat):
+    """Turn an arm's gizmo ``degrees`` about the world ``axis`` through its centre, over ``seconds``.
+
+    What a drag of one of the gizmo's rings writes to the arm panel's cursor --
+    its orientation, its position kept -- written from code a film frame at a
+    time, so the pointer does not move: the rings are drei rotators, and no beat
+    grabs one through the browser yet. The hand follows through the panel's own
+    setpoint law and IK, as it follows an arrow; nothing is written to a joint.
+    Positive ``degrees`` turn counter-clockwise looking down ``axis``. First lets
+    the hand catch up with its gizmo, like :class:`Drag`.
+    """
+
+    gizmo: str = "right"
+    axis: Any = "z"
+    degrees: float = 0.0
+    seconds: float = 1.0
+
+    def play(self, film):
+        from robosimstudio.core.math import quat_from_axis_angle, quat_multiply
+
+        panel = film.session.arms[self.gizmo]
+        film.settle(self.gizmo)
+        unit = _axis(self.axis)
+        norm = math.sqrt(sum(v * v for v in unit))
+        unit = tuple(v / norm for v in unit)
+        position = tuple(float(v) for v in panel.cursor_pos)
+        start = tuple(float(v) for v in panel.cursor_quat)
+        frames = max(1, round(self.seconds * film.take.fps))
+        for k in range(1, frames + 1):
+            turned = quat_multiply(quat_from_axis_angle(unit, math.radians(self.degrees) * k / frames), start)
+            panel.aim(position, turned, moving=k < frames)
+            film.advance()
+        return {"axis": [round(v, 4) for v in unit], "degrees": self.degrees, "from_xyzw": [round(v, 4) for v in start]}
+
+
+@dataclass(frozen=True)
 class Press(Beat):
     """Click the button reading ``text``, inside the folder whose title starts with ``within``."""
 

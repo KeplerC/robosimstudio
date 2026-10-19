@@ -10,6 +10,8 @@ is the kind behind `rss.heap`; the shared implementation is
 
 ## Sweep rice into the tray
 
+![Sweep rice into the tray](media/00_sweep_rice.webp)
+
 A heap of rice under the right hand, a pusher standing on its edge beyond it and a three-walled tray on the near side: turn the hand to point down, drag it onto the pusher, close on it, and sweep the heap into the tray at a walking pace.
 
 The rice is 16,000 particles on Newton's implicit MPM, stepped once per 60 Hz
@@ -22,7 +24,10 @@ under it. The tray's walls are five voxels thick and its open side faces the
 heap, so the sweep ends inside it. Swept at 0.15 m/s as the test sweeps it,
 93% of the rice is in the tray and the rest is on the bench, but for a grain
 the squeeze shot off the bench's edge in two sweeps of thirty (the others lost
-none); a tool faster than ~0.36 m/s outruns the grid. The panel reads the
+none); a tool faster than ~0.36 m/s outruns the grid. What reaches the tray
+is packed, not heaped: 88% of the grains end in a strip 32 mm deep along the
+pusher's face, half of them within 1.3 mm of the bench, and a tenth runs
+round the pusher's ends (`sweep_where.py`, GPU 0). The panel reads the
 share of the rice inside the tray.
 
 ```bash

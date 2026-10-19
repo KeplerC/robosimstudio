@@ -12,7 +12,10 @@ two islands a written pose reaches the cable only through the kinematic path
 why), and the drive the verifier used, a massless tip teleported each step,
 read 0.000 turns here while passing on the one-island scene.
 
-Measured on this scene (``probe6.py``, RTX PRO 6000, newton 1.6.0):
+The page's **hold the tips** box starts unticked, because the tips are the
+hands' until someone ticks it, so this ticks it first. Measured on this scene,
+re-measured after the cables moved to one per hand (``slider`` probe, GPU 2) to
+the same digits as before (``probe6.py``, RTX PRO 6000, newton 1.6.0):
 both cables straight and untwisted at rest; after the turn 0.348 turns in the
 middle third of each (8 of the 23 joints' share of one turn, 0.3478) with
 straightness 1.000 throughout the roll; released, the stiff cable reads 0.244
@@ -91,6 +94,7 @@ class TestTheTwistPage(unittest.TestCase):
         cls.rods = [cls.sim.scene.by_name[n] for n in cls.names]
         cls.sim.run(60)
         cls.at_rest = cls.read()
+        cls.hold.value = True  # the tips start free, for the hands; the slider rolls them only in the hold
         cls.straight_rest = cls.straight()
         cls.straight_rolling = 1.0
         for k in range(1, SLIDER_STEPS + 1):

@@ -87,17 +87,18 @@ FLAT = {
     "heap": "robosimstudio_materials.granular",
     "liquid": "robosimstudio_materials.liquid",
     "dough": "robosimstudio_materials.dough",
+    "roller": "robosimstudio_materials.dough",
     "ParticleBodySpec": "robosimstudio_materials.mpm.spec",
     "brush": "robosimstudio_materials.brush",
     "BrushSpec": "robosimstudio_materials.brush",
 }
-"""Flat name -> the module the thing behind it is defined in: each kind's constructor and spec.
+"""Flat name -> the module the thing behind it is defined in: each kind's constructor and spec, and the dough's roller.
 
 The arrangement tables (``GRANULAR_60HZ`` and the like) are instances and carry
 no module of their own, so they are checked by absence only, with every other
 name ``robosimstudio._PACKS`` provides."""
 
-LISTED = ["brush", "dough", "heap", "liquid", "materials", "paper", "papers", "rod", "sheet", "sponge"]
+LISTED = ["brush", "dough", "heap", "liquid", "materials", "paper", "papers", "rod", "roller", "sheet", "sponge"]
 """The lower-case flat names, as ``dir(rss)`` lists them when the package is installed."""
 
 

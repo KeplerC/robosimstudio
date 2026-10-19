@@ -48,6 +48,7 @@ Every panel obeys the same contract:
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -906,6 +907,17 @@ class PanelCloth(Panel):
         self.release_all_requested = False
         self.follow_arm = [""] * len(self.draggers)
         """Which arm each handle rides, by slot. ``""`` leaves it on the mouse."""
+        self.set_requests: deque[tuple[str, str, str, bool]] = deque()
+        """A page's own set grabs and releases, ``(cloth, set, arm, hold)``, waiting for :meth:`drain`. See :meth:`request_set`."""
+        self._follow: list[Any] = []
+        """The ``Pin N to hand`` dropdowns, by slot; none on a page without the fold."""
+        self._grab_pins: dict[int, str] = {}
+        """Slots a set grab pinned to a hand, each with the pin it had before: the grab's to put back when it lets go."""
+        self._requested: dict[int, tuple[str, str, str]] = {}
+        """Slots :meth:`request_set` took, by the ``(cloth, set, arm)`` it was asked for."""
+        self._retake: dict[int, str] = {}
+        """Slots pinned in the dropdown while holding a grip, each with the hand it was pinned to, for :meth:`drain`
+        to take again on that hand once :attr:`follow_arm` reads it."""
         self.selected = self.names[0] if self.names else ""
         self.pending: tuple[str, np.ndarray] | None = None
         """A click waiting to be serviced on the main thread."""
@@ -969,11 +981,13 @@ class PanelCloth(Panel):
             regrip = gui.add_button("Re-grip here")
             regrip.on_click(lambda _: setattr(self, "regrip_requested", True))
             arms = ("", *self.session.arms.keys())
+            self._follow = []
             for slot in range(len(self.draggers)):
-                follow = gui.add_dropdown(f"Pin {slot + 1} to hand", options=arms, initial_value="")
+                follow = gui.add_dropdown(f"Pin {slot + 1} to hand", options=arms, initial_value=self.follow_arm[slot])
                 # slot is bound per iteration, not read from the loop variable at
                 # callback time -- viser fires these long after the loop is over.
-                follow.on_update(lambda _, s=slot, w=follow: self.follow_arm.__setitem__(s, str(w.value)))
+                follow.on_update(lambda _, s=slot, w=follow: self._pick_arm(s, str(w.value)))
+                self._follow.append(follow)
             self._held = gui.add_text("Held", initial_value="nothing", disabled=True)
             self._state = gui.add_text("Cloth", initial_value="", disabled=True)
 
@@ -991,7 +1005,7 @@ class PanelCloth(Panel):
             return ()
         return tuple(sorted(key.split("/", 1)[-1] for key in handle.sets))
 
-    def grab_set(self, set_name: str) -> int:
+    def grab_set(self, set_name: str, arm: str = "", cloth: str = "") -> int:
         """Take hold of one declared set. Main thread. Returns particles held.
 
         Aimed at the set's own centroid and restricted to its own indices, with
@@ -1000,40 +1014,120 @@ class PanelCloth(Panel):
         3 cm of a cursor. The dragger's ``max_particles`` still caps it, keeping
         the ones nearest the centroid, which is why the readout says how many:
         the shirt's ``far_side`` is three thousand particles and a handle holding
-        sixty of them should not look like a handle holding all of it.
+        sixty of them should not look like a handle holding all of it. On a slot
+        pinned to a hand it is aimed at the hand instead (:meth:`_hand_frame`),
+        and the cap keeps the ones nearest the hand.
 
-        Restores the click radius afterwards, because that number is the aim
-        tolerance for the *other* way of grabbing and a set grab has no business
-        changing what counts as a miss.
+        ``arm`` pins the slot the grab takes to that hand, whichever slot that
+        is: a page that pinned a slot by number before asking pinned the one a
+        click grab held whenever the click came first. That pin is the grab's,
+        shown on the slot's dropdown and put back when the grab lets go
+        (:meth:`_forget`); a pin chosen in the dropdown is the user's and stays.
+        ``cloth`` names the deformable; ``""`` is the selected one.
+
+        Restores the click radius afterwards (:meth:`_grab_all`), because that
+        number is the aim tolerance for the *other* way of grabbing and a set
+        grab has no business changing what counts as a miss.
         """
-        handle = self.env.handles.deformables.get(self.selected)
-        cloth = self.env.scene.by_name.get(self.selected)
-        if handle is None or cloth is None or not set_name:
+        name = cloth or self.selected
+        handle = self.env.handles.deformables.get(name)
+        body = self.env.scene.by_name.get(name)
+        if handle is None or body is None or not set_name:
             return 0
-        indices = handle.sets.get(set_name) or handle.sets.get(f"{self.selected}/{set_name}")
+        indices = handle.sets.get(set_name) or handle.sets.get(f"{name}/{set_name}")
         if indices is None or not len(indices):
             return 0
-        points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
-        centre = points.mean(axis=0)
-        reach = float(np.linalg.norm(points - centre, axis=1).max())
-
+        # Before a slot is taken: an unknown hand raised out of drain with the slot reserved, never placed.
+        arms = self.env.scene.embodiment.iks if self.env.scene.embodiment else {}
+        if arm and arm not in arms:
+            self.session.status = f"{name}: no arm {arm!r} to hold {set_name!r} on; the arms are {sorted(arms)}"
+            return 0
         slot = self._acquire()
+        arm = arm or self.follow_arm[slot.index]
+        if arm:
+            centre, quat = self._hand_frame(arm)
+        else:  # aimed at the set's own centroid, so only then is it read
+            points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
+            centre, quat = points.mean(axis=0), IDENTITY_QUAT
         dragger = self.draggers[slot.index]
-        was = dragger.radius
-        dragger.radius = reach + 1e-6
-        try:
-            taken = dragger.grab(self.env.state, centre, IDENTITY_QUAT, candidates=indices, fallback_nearest=False)
-        finally:
-            dragger.radius = was
+        taken = self._grab_all(dragger, indices, centre, quat)
         if not taken:
             self._release(slot)
             return 0
+        if arm != self.follow_arm[slot.index]:
+            self._grab_pins[slot.index] = self.follow_arm[slot.index]
+            self._pin(slot.index, arm)
         self.miss = 0.0
-        self._hand_over(slot, self.selected, dragger, centre, IDENTITY_QUAT)
-        slot.place(centre, IDENTITY_QUAT, key=("cloth", self.selected), label=f"{set_name} ({taken})")
-        if hasattr(cloth, "release_handle"):
-            cloth.release_handle()
+        self._hand_over(slot, name, dragger, centre, quat)
+        slot.place(centre, quat, key=("cloth", name), label=f"{set_name} ({taken})")
+        if hasattr(body, "release_handle"):
+            body.release_handle()
         return int(taken)
+
+    def request_set(self, cloth: str, set_name: str, arm: str = "", *, hold: bool = True) -> None:
+        """Ask for a grab of one declared set on the next step, or let go of one asked for. Any thread.
+
+        A page's own way to :meth:`grab_set`: the request carries its cloth, set
+        and hand, so the panel's ``Cloth`` and ``Set`` selections -- the user's
+        -- are left as they are. ``hold=False`` lets go of the handles a request
+        for the same three took, and of nothing else: a grip made by hand stays,
+        pinned to the same hand or not.
+        """
+        self.set_requests.append((str(cloth), str(set_name), str(arm), bool(hold)))
+
+    def _serve(self, cloth: str, set_name: str, arm: str, hold: bool) -> None:
+        """Carry out one :meth:`request_set`. Main thread."""
+        asked = (cloth, set_name, arm)
+        if hold:
+            if self.grab_set(set_name, arm=arm, cloth=cloth):
+                self._requested[self.handles.newest().index] = asked
+            return
+        for handle in self.handles.live:
+            if self._requested.get(handle.index) == asked:
+                self._release(handle)
+
+    def _pin(self, index: int, arm: str) -> None:
+        """Pin slot ``index`` to ``arm`` (``""`` unpins), and show it on the slot's dropdown."""
+        self.follow_arm[index] = arm
+        if index < len(self._follow):
+            self._follow[index].value = arm  # fires _pick_arm, which finds nothing changed
+
+    def _pick_arm(self, index: int, arm: str) -> None:
+        """A ``Pin N to hand`` dropdown changed: the slot's pin is the user's now, and a release leaves it.
+
+        A grip the slot already holds is taken again in the hand's frame by
+        :meth:`drain`, on the main thread, before the slot is first aimed at the
+        hand: kept in the frame it was taken in, the patch was carried onto the
+        hand, which :meth:`_seize` already prevents for a grip taken after the pin.
+        """
+        if arm == self.follow_arm[index]:
+            return  # :meth:`_pin` showing a pin it made, not the user choosing one
+        # Marked with the hand, before the pin is written: a drain that reads the
+        # old pin keeps the mark for the step that reads the new one.
+        if arm:
+            self._retake[index] = arm
+        else:
+            self._retake.pop(index, None)
+        self.follow_arm[index] = arm
+        self._grab_pins.pop(index, None)
+
+    def _retake_on_hand(self, index: int, arm: str) -> None:
+        """Take slot ``index``'s grip again where it lies, in ``arm``'s frame (:meth:`_hand_frame`). Main thread."""
+        position, quat = self._hand_frame(arm)
+        pin = self.pins.get(index)
+        if pin is not None:
+            points = self.env.state.particle_q.numpy()[pin.nodes].astype(np.float64)
+            pin.offsets = (points - position) @ quat_to_mat(quat)
+            return
+        dragger = self.draggers[index]
+        self._grab_all(dragger, dragger.grabbed_indices.copy(), position, quat)
+
+    def _forget(self, index: int) -> None:
+        """What a slot's grab brought with it goes with the grab: the pin a set grab made, and its request."""
+        self._requested.pop(index, None)
+        self._retake.pop(index, None)
+        if index in self._grab_pins:
+            self._pin(index, self._grab_pins.pop(index))
 
     def owner_of(self, particle: int) -> str:
         """Which cloth a particle belongs to, or ``""``.
@@ -1094,6 +1188,8 @@ class PanelCloth(Panel):
         if self.grab_set_requested:
             self.grab_set_requested = False
             self.grab_set(self.selected_set)
+        while self.set_requests:
+            self._serve(*self.set_requests.popleft())
         if self.regrip_requested:
             self.regrip_requested = False
             self._regrip()
@@ -1113,6 +1209,13 @@ class PanelCloth(Panel):
                 continue
             arm = self.follow_arm[handle.index]
             if arm:
+                marked = self._retake.pop(handle.index, None)
+                if marked == arm:
+                    self._retake_on_hand(handle.index, arm)
+                elif marked is not None:
+                    # The dropdown moved on between reading the pin and the mark: the
+                    # step that reads the new pin takes the grip on that hand.
+                    self._retake.setdefault(handle.index, marked)
                 # The hand is driving, so the handle follows it rather than the
                 # other way round: a gizmo left behind on the bench while the
                 # cloth rode away on the gripper is a gizmo that lies.
@@ -1167,6 +1270,7 @@ class PanelCloth(Panel):
         slot = self.handles.acquire()
         self._drop_pin(slot.index)
         self.draggers[slot.index].release()
+        self._forget(slot.index)
         return slot
 
     def _seize(self, slot, name: str, cloth, position, quat) -> bool:
@@ -1185,6 +1289,12 @@ class PanelCloth(Panel):
             self.miss = dragger.last_distance
             return False
         self.miss = 0.0
+        arm = self.follow_arm[slot.index]
+        if arm:
+            # Found where the click aimed, held where the hand is: the same patch, seized again in the
+            # frame grab_set takes a set in on a pinned slot.
+            position, quat = self._hand_frame(arm)
+            self._grab_all(dragger, dragger.grabbed_indices.copy(), position, quat)
         self._hand_over(slot, name, dragger, position, quat)
         slot.place(position, quat, key=("cloth", name), label=f"{name} ({taken})")
         # A task with a rigid pull-tab must let go of it once something else
@@ -1192,6 +1302,35 @@ class PanelCloth(Panel):
         if hasattr(cloth, "release_handle"):
             cloth.release_handle()
         return True
+
+    def _hand_frame(self, arm: str) -> tuple[np.ndarray, np.ndarray]:
+        """The frame a grip on a slot pinned to ``arm`` keeps its offsets in: the hand's pose, now.
+
+        :meth:`drain` aims a pinned slot at the hand's pose every step, so a grip
+        taken in any other frame -- the identity at a click, or at a set's
+        centroid -- is moved onto the hand on the next step and turned by its
+        orientation: a YAM pointing down holds its strip mirrored end for end.
+        Taken in the hand's frame, the patch keeps the place it has relative to
+        the fingers. Both ways of grabbing, a click and a declared set, use it.
+        """
+        position, quat = self.env.arm(arm).ee_pose(self.env.state)
+        return np.asarray(position, dtype=np.float64), np.asarray(quat, dtype=np.float64)
+
+    def _grab_all(self, dragger, indices, position, quat) -> int:
+        """Seize ``indices`` in the frame at ``position``, the radius widened to reach the furthest of them.
+
+        Up to the dragger's ``max_particles``, the nearest kept. Restores the
+        click radius afterwards: it is the aim tolerance of a click, and a grab
+        of particles already chosen has no business changing what counts as a
+        miss.
+        """
+        points = self.env.state.particle_q.numpy()[np.asarray(indices, dtype=np.int64)]
+        was = dragger.radius
+        dragger.radius = float(np.linalg.norm(points - position, axis=1).max()) + 1e-6
+        try:
+            return dragger.grab(self.env.state, position, quat, candidates=indices, fallback_nearest=False)
+        finally:
+            dragger.radius = was
 
     def _hand_over(self, slot, name: str, dragger, position, quat) -> bool:
         """Give a landed grab to the engine that owns the body. Main thread.
@@ -1287,6 +1426,7 @@ class PanelCloth(Panel):
             return
         self._drop_pin(slot.index)
         self.draggers[slot.index].release()
+        self._forget(slot.index)
         slot.clear()
 
     def declared_states(self) -> str:
@@ -1386,6 +1526,7 @@ class PanelCloth(Panel):
     def on_reset(self, obs: dict[str, Any], info: dict[str, Any]) -> None:
         del obs, info
         self.pending = None
+        self.set_requests.clear()  # asked of the episode the reset ended
         # The engine has already dropped these -- ``restore_rest`` unpins before
         # it restores, since a pin made since the capture is a constraint the
         # captured composition does not have -- so this is the page catching up
@@ -1395,6 +1536,8 @@ class PanelCloth(Panel):
         for dragger in self.draggers:
             dragger.release()
         self.handles.release_all()
+        for index in range(len(self.draggers)):
+            self._forget(index)
         self.miss = 0.0
         if self._held is not None:
             self._held.value = "nothing"

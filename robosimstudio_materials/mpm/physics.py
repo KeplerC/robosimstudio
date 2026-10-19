@@ -170,7 +170,7 @@ than about two voxels (8 mm at the registered 4 mm) leak under the capturable
 
 The rate is the pour's. The 0.36 m/s rule a tool obeys at 60 Hz binds a
 falling liquid too, and honey is past it 7 mm below the lip it left
-(``v = sqrt(2 g h)``): the pour example's scene, its cup carried by the drag
+(``v = sqrt(2 g h)``): the pour example's first scene, its cup carried by the drag
 handle to 100 mm over the bench beside the bowl, tilted 130 degrees over 2 s
 and held 3 s (``pour_probe``, RTX PRO 6000, Newton 1.6.0, graph-captured),
 had at 60 Hz 17 of 8,000 particles below the bench before the cup had tilted,

@@ -385,7 +385,8 @@ class SimTools:
         handle = self.env.handles.entity(object_name)
         if handle.obb is None:
             raise ToolRefusal(f"object {object_name!r} has no grasp box")
-        pose = handle.pose(self._body_q())
+        # By the body the box was fit on: a roller's is its handle, which stays upright while the drum it names rolls.
+        pose = np.asarray(self._body_q()[handle.obb.body], dtype=np.float64)
         rotation = quat_to_mat(pose[3:7])
         centre = pose[:3] + rotation @ handle.obb.center_local
         point, yaw = grasp_from_obb(handle.obb, pose, handle_frac)
@@ -586,7 +587,7 @@ class SimTools:
         handle = self.env.handles.entity(object_name)
         if handle.obb is None:
             raise ToolRefusal(f"object {object_name!r} has no bounding box")
-        pose = handle.pose(self._body_q())
+        pose = np.asarray(self._body_q()[handle.obb.body], dtype=np.float64)  # the box's own body, as above
         rotation = quat_to_mat(pose[3:7])
         half = np.asarray(handle.obb.half, dtype=np.float64)
         centre = np.asarray(pose[:3], dtype=np.float64) + rotation @ np.asarray(
@@ -1170,7 +1171,7 @@ class Vacuum:
             return {
                 "on": True,
                 "sealed": bool(report.sealed),
-                "held": self._name_of(cup.held),
+                "held": self._name_of(cup),
                 "gap_m": float(report.gap_m),
                 "tilt_deg": float(np.degrees(report.tilt_rad)),
                 "tier": cup.tier,
@@ -1180,9 +1181,18 @@ class Vacuum:
 
         return self.bus.call(switch)
 
-    def _name_of(self, body: int) -> str:
+    def _name_of(self, cup) -> str:
+        """The held part's entity, by the cup's own map of who built each part it can seal on.
+
+        By an entity's :attr:`body` alone, a cup sealed on a roller's handle or a
+        brush's strip held "": neither is the body its entity's pose places. A
+        part named to :meth:`vacuum` is that body, so it is the fallback.
+        """
+        body = cup.held
         if body < 0:
             return ""
+        if int(body) in cup.owners:
+            return cup.owners[int(body)]
         for name, entity in self.env.scene.by_name.items():
             if getattr(entity, "body", None) == body:
                 return name
