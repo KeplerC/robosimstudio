@@ -30,7 +30,7 @@ import numpy as np
 
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
-from robosimstudio.core.probes.clearance import _segment_segment
+from robosimstudio.core.probes.clearance import segment_segment
 
 __all__ = ["crossings", "knot_length", "overhand", "self_clearance"]
 
@@ -116,7 +116,7 @@ def _segment_distances(points: np.ndarray, skip: int) -> np.ndarray:
     """
     a0, a1 = points[:-1], points[1:]
     i, j = np.triu_indices(len(a0), k=max(1, int(skip)))
-    return _segment_segment(a0, a1, a0, a1)[i, j]
+    return segment_segment(a0, a1, a0, a1)[i, j]
 
 
 def self_clearance(positions: np.ndarray, radius: float, *, skip: int | None = None) -> float:

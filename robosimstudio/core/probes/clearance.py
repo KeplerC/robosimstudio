@@ -39,12 +39,12 @@ import newton
 import numpy as np
 import warp as wp
 
-__all__ = ["ClearanceProbe"]
+__all__ = ["ClearanceProbe", "segment_segment"]
 
 _EPS = 1.0e-12
 
 
-def _segment_segment(p1: np.ndarray, q1: np.ndarray, p2: np.ndarray, q2: np.ndarray) -> np.ndarray:
+def segment_segment(p1: np.ndarray, q1: np.ndarray, p2: np.ndarray, q2: np.ndarray) -> np.ndarray:
     """Closest distance between every segment of one set and of the other.
 
     Ericson's ``ClosestPtSegmentSegment``, vectorised to an ``[n, m]`` table.
@@ -76,6 +76,10 @@ def _segment_segment(p1: np.ndarray, q1: np.ndarray, p2: np.ndarray, q2: np.ndar
     closest_1 = p1[:, None, :] + d1[:, None, :] * s[..., None]
     closest_2 = p2[None, :, :] + d2[None, :, :] * t[..., None]
     return np.linalg.norm(closest_1 - closest_2, axis=-1)
+
+
+_segment_segment = segment_segment
+"""The name the probe's tests import it by."""
 
 
 def _rotate(quat: np.ndarray, v: np.ndarray) -> np.ndarray:
@@ -273,7 +277,7 @@ class ClearanceProbe:
             return float("inf"), -1, -1
         first_a, last_a = self._world(a, body_q)
         first_b, last_b = self._world(b, body_q)
-        gaps = _segment_segment(first_a, last_a, first_b, last_b)
+        gaps = segment_segment(first_a, last_a, first_b, last_b)
         gaps -= self.radius[a][:, None] + self.radius[b][None, :]
         gaps[~self._testable_pairs(a, b)] = np.inf
         i, j = np.unravel_index(int(np.argmin(gaps)), gaps.shape)
