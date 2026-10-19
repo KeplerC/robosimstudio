@@ -440,12 +440,24 @@ class PanelReadings(Panel):
             entity = self._cloth()
             if entity is not None:
                 pipeline = self.session.env.pipeline
-                entity.settle(pipeline)
+                # A kind that does not settle -- a SuperDex rope, the cloth example's
+                # own ``MyCloth``: each joins the record without a run -- is
+                # re-baselined where it lies. Called outright, the button took the
+                # page loop down with ``'EntityRodSuperdex' object has no attribute
+                # 'settle'`` (``examples/03_rope/02_superdex``, and ``MyCloth`` on
+                # ``examples/01_cloth/04_your_own_cloth``).
+                settle = getattr(entity, "settle", None)
+                if callable(settle):
+                    settle(pipeline)
                 # The settle stepped the whole particle array, so every thing that
                 # shares it takes its baseline again, not only this cloth.
                 for thing in getattr(pipeline, "particle_settles", {}).get("things", [entity]):
                     thing.snapshot_rest(pipeline)
-                self._note.value = "re-settled; baseline moved with it"
+                self._note.value = (
+                    "re-settled; baseline moved with it"
+                    if callable(settle)
+                    else f"{entity.name} does not settle; re-baselined where it lies"
+                )
             self.refresh()
 
     def refresh(self) -> None:

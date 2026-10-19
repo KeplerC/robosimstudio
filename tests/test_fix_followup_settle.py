@@ -87,6 +87,32 @@ class TestStudioResettle(unittest.TestCase):
             panel.drain()
         self.assertEqual((1, 1), (cloth.settles, cloth.snapshots))
 
+    def test_a_thing_that_does_not_settle_is_rebaselined_where_it_lies(self) -> None:
+        """A SuperDex rope joins the record without a run and has no ``settle``: the button raised
+        ``AttributeError`` out of the page loop, measured on ``examples/03_rope/02_superdex`` and, for
+        the same reason, ``examples/01_cloth/04_your_own_cloth``."""
+        from robosimstudio.domains.capabilities import ParticleMixin
+
+        class _Rope(ParticleMixin):
+            name = "cable"
+            snapshots = 0
+
+            def snapshot_rest(self, pipeline) -> None:
+                del pipeline
+                self.snapshots += 1
+
+        rope, cloth = _Rope(), _thing()
+        pipeline = SimpleNamespace(particle_settles={"runs": set(), "things": [rope, cloth]})
+        panel = self._panel(pipeline, rope)
+        with (
+            mock.patch.object(type(panel), "_busy", return_value=""),
+            mock.patch.object(type(panel), "_cloth", return_value=rope),
+            mock.patch.object(type(panel), "refresh"),
+        ):
+            panel.drain()
+        self.assertEqual((1, 1, 0), (rope.snapshots, cloth.snapshots, cloth.settles), "nothing stepped")
+        self.assertEqual("cable does not settle; re-baselined where it lies", panel._note.value)
+
 
 if __name__ == "__main__":
     unittest.main()
