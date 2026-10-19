@@ -93,6 +93,24 @@
 | [Pick up a plate](15_suction/00_pick_a_plate.py) | [Pick up a plate, scored](15_suction/01_pick_scored.py) |
 |---|---|
 
+## [16 Bags](16_bags/README.md)
+
+| [Open a bag](16_bags/00_open_a_bag.py) | [Open a bag, scored](16_bags/01_open_a_bag_scored.py) |
+|---|---|
+| <img src="16_bags/media/00_open_a_bag.webp" width="240"> | |
+
+## [17 Knots](17_knots/README.md)
+
+| [Pull a knot tight](17_knots/00_pull_knot_tight.py) |
+|---|
+| <img src="17_knots/media/00_pull_knot_tight.webp" width="240"> |
+
+## [18 Bands](18_bands/README.md)
+
+| [Hook a band on pegs](18_bands/00_band_on_pegs.py) | [Hook a band, scored](18_bands/01_band_on_pegs_scored.py) |
+|---|---|
+| <img src="18_bands/media/00_band_on_pegs.webp" width="240"> | |
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |

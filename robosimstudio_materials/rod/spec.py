@@ -238,6 +238,27 @@ class RodSpec:
     hung 26 mm off the bench at a clip's foot, measured). Read by the SuperDex
     implementation, which builds the rod at this shape and moves it onto
     :attr:`nodes` before the first step."""
+    self_contact: bool = False
+    """Whether the rod touches itself: a strand pulled across another is pushed back
+    instead of passing through it, so a knot stays a knot.
+
+    Read by the foreign-engine rod (SuperDex tests the rod's skin against itself,
+    segments within one and a half radii of each other along it left out); the
+    capsule chain's own collision filter decides for it. A declared :attr:`sim`
+    decides in its place, by its ``self_contact``. Off by default: it costs a broad phase over
+    the rod's own samples every Newton iteration, which a cable that never folds
+    back on itself does not need."""
+    closed: bool = False
+    """Whether the rod is a **loop**: :attr:`nodes` go round once and the last
+    joins the first, with no ends -- a rubber band, an O-ring, a drive belt.
+
+    Needs :attr:`nodes` (three or more, the first not repeated at the end), and
+    then :attr:`segments` is the number of nodes, one element per node, and
+    :attr:`length` the perimeter, closing leg included. Read by the foreign-engine
+    rod, whose polyline can be periodic (SuperDex closes it with an element from
+    the last node to the first, and its tubular skin with it); the capsule chain
+    has two ends and refuses one. No :attr:`anchors`, :attr:`joins` or
+    :attr:`stress_free`: a loop has no end to clamp, mould or straighten."""
     joins: tuple[tuple[str, str, float], ...] = ()
     """``((end, entity, length), ...)``: the last ``length`` metres of the rod at
     ``end`` (``"start"`` or ``"end"``) are moulded into ``entity`` -- a cable
@@ -248,15 +269,32 @@ class RodSpec:
     """The asset's physics declaration, or ``None`` for the rod default."""
 
     def __post_init__(self) -> None:
+        # The polylines are held as plain tuples whatever was given (``overhand()`` returns an
+        # array), so the spec compares and hashes as the value a ``SpecFactory`` takes it for.
+        if self.stress_free is not None and not isinstance(self.stress_free, str):
+            free = np.asarray(self.stress_free, dtype=np.float64)
+            if free.ndim == 2:
+                object.__setattr__(self, "stress_free", tuple(map(tuple, free.tolist())))
         if self.nodes is None:
+            if self.closed:
+                raise ValueError(f"rod {self.name!r}: a closed rod needs nodes, the loop it goes round")
             return
         pts = np.asarray(self.nodes, dtype=np.float64).reshape(-1, 3)
-        if len(pts) < 2:
-            raise ValueError(f"rod {self.name!r}: nodes needs at least two points, got {len(pts)}")
+        object.__setattr__(self, "nodes", tuple(map(tuple, pts.tolist())))
+        if len(pts) < (3 if self.closed else 2):
+            raise ValueError(
+                f"rod {self.name!r}: nodes needs at least {3 if self.closed else 2} points, got {len(pts)}"
+            )
+        if self.closed:
+            if self.anchors or self.joins or self.stress_free is not None:
+                raise ValueError(f"rod {self.name!r}: a closed rod has no end to anchor, join or straighten")
+            pts = np.vstack([pts, pts[:1]])  # the closing leg counts toward the length and the elements
         legs = np.diff(pts, axis=0)
         norms = np.linalg.norm(legs, axis=1)
         if not np.all(norms > 0.0):
-            raise ValueError(f"rod {self.name!r}: nodes has a zero-length leg")
+            raise ValueError(
+                f"rod {self.name!r}: nodes has a zero-length leg (a closed rod's first node is not repeated)"
+            )
         # Frozen, so the echoes are written the one way a frozen dataclass allows.
         object.__setattr__(self, "length", float(norms.sum()))
         object.__setattr__(self, "segments", int(len(pts) - 1))
@@ -284,7 +322,11 @@ class RodSpec:
         }
 
     def rest_polyline(self) -> np.ndarray:
-        """``(segments + 1, 3)`` rest nodes in the work-surface frame: :attr:`nodes`, or the straight line."""
+        """The rest nodes in the work-surface frame: :attr:`nodes`, or the straight line.
+
+        ``(segments + 1, 3)`` for an open rod; a closed one's ``segments`` is its node count, so it gives
+        ``(segments, 3)``, the seam left for the reader to repeat.
+        """
         if self.nodes is not None:
             return np.asarray(self.nodes, dtype=np.float64).reshape(-1, 3)
         start = np.asarray(self.start, dtype=np.float64)

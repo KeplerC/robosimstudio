@@ -56,6 +56,11 @@ class SolverSuperdex(SolverHost):
             for the engine's 4.
         linear_iterations: A cap on the linear solver's iterations per Newton
             step, or ``None`` for the engine's own (it ran 1000 per contact).
+        integration: The engine's time integrator by name (``"backward_euler"``,
+            the engine's own, or ``"bdf2"``...), or ``None`` to leave it. An
+            unknown name is refused with the names there are. On the knot the
+            two hands pull (``examples/17_knots``), BDF2 drew the knot to 239 mm
+            but let a tail slide 88 mm through a hand, so no shipped scene sets it.
     """
 
     def open(
@@ -80,6 +85,7 @@ class SolverSuperdex(SolverHost):
         preconditioner: str | None = None,
         newton_iterations: int | None = None,
         linear_iterations: int | None = None,
+        integration: str | None = None,
     ) -> Any:
         """The SuperDex bridge, with the island-wide scalars folded into the recipe.
 
@@ -111,4 +117,5 @@ class SolverSuperdex(SolverHost):
             preconditioner=preconditioner,
             newton_iterations=newton_iterations,
             linear_iterations=linear_iterations,
+            integration=integration,
         )

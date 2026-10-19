@@ -29,10 +29,10 @@ what you do with it is the task's business.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any
 
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.features import FeatureSpec
 from robosimstudio.assetlib.semantics.published import PublishedState
 from robosimstudio.assetlib.semantics.states import StateSpec
@@ -217,7 +217,7 @@ class Body:
             notes=notes,
             provenance="",
             mesh_sha="",
-            build=_Spec(spec),
+            build=SpecFactory(spec),
         )
         if getattr(spec, "entity", "") != "static":
             return record
@@ -225,15 +225,3 @@ class Body:
         # only what rests on it.
         sim = SimRequirements(domain="static", contacts=contacts_with("surface"), notes=notes)
         return replace(record, sim=sim)
-
-
-@dataclass(frozen=True)
-class _Spec:
-    """A build factory that returns one spec. A value, so two declarations of a
-    type compare by the spec they build: the same cube declared twice is one
-    asset, and two different cubes under one name are a clash."""
-
-    spec: Any
-
-    def __call__(self) -> Any:
-        return self.spec

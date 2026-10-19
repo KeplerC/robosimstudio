@@ -239,6 +239,38 @@ def _flap_shut(film) -> tuple[bool, str]:
     )
 
 
+def _band_on_both(film) -> tuple[bool, str]:
+    """The band is round both pegs of the board and stretched there, the hand gone."""
+    import numpy as np
+
+    from robosimstudio_materials.rod.band import encircles
+
+    ref = film.sim["band"]
+    points = np.asarray(ref.particle_q, dtype=np.float64)
+    pegs = {"upper": (0.26, 0.08), "lower": (0.135, 0.05)}  # the example's heights and lengths [m]
+    on = {n: encircles(points, (0.7, -0.2, 0.75 + z), (-1.0, 0.0, 0.0), length) for n, (z, length) in pegs.items()}
+    stretch = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum()) / float(ref.entity.spec.length)
+    return all(on.values()) and stretch > 1.1, f"round {on}, stretch {stretch:.3f} (need both, over 1.1)"
+
+
+def _knot_tight(film) -> tuple[bool, str]:
+    """The knot kept its three crossings, gave back rope, and both tails are still in their hands."""
+    import numpy as np
+
+    from robosimstudio_materials.rod.knot import crossings, knot_length, overhand
+
+    points = np.asarray(film.sim["rope"].particle_q, dtype=np.float64)
+    built = knot_length(overhand(at=(0.03, 0.0), size=0.10, radius=0.006, tail=0.12, spacing=0.008))
+    now, cross = knot_length(points), crossings(points)
+    hand = {a: film.sim.arm(a).ee_pose(film.sim.state)[0] for a in ("left", "right")}  # the page is shut by now
+    held = max(float(np.linalg.norm(points[i] - hand[a])) for i, a in ((0, "right"), (-1, "left")))
+    ok = cross == 3 and now < 0.95 * built and held < 0.06
+    return (
+        ok,
+        f"{cross} crossings, {now * 1e3:.0f} of {built * 1e3:.0f} mm in the knot, tails {held * 1e3:.0f} mm off the hands",
+    )
+
+
 def _sprang_back(film) -> tuple[bool, str]:
     """The span's middle is back where it hung before the hand took it."""
     key = str(Segment("cable", 0.5))
@@ -362,6 +394,21 @@ def _poured(film) -> tuple[bool, str]:
     lo, hi = np.array(film.bench((0.05, -0.23, -0.005))), np.array(film.bench((0.19, -0.09, 0.04)))
     share = fill_fraction(np.asarray(film.sim["honey"].particle_q, dtype=np.float64), lo, hi)
     return share >= 0.9, f"{share:.3f} of the honey in the bowl (need 0.9)"
+
+
+def _bag_open(film) -> tuple[bool, str]:
+    """The bag's mouth stands 30 mm open in the right hand, and its layers stayed apart."""
+    import numpy as np
+
+    from robosimstudio_materials.bag import layer_gap, mouth_opening
+
+    bag = film.sim["bag"]
+    points = np.asarray(bag.particle_q, dtype=np.float64)
+    mouth, gap = mouth_opening(points, bag.entity), layer_gap(points, bag.entity)
+    return mouth["height"] >= 0.03 and gap > 0.0015, (
+        f"the mouth stands {mouth['height'] * 1000:.1f} mm open (need 30), {mouth['area'] * 1e4:.1f} cm^2, "
+        f"the layers at least {gap * 1000:.2f} mm apart (need 1.5)"
+    )
 
 
 RIGHT = "Arm: right"
@@ -598,13 +645,22 @@ def handle(example: str, thing: str, at: Any, *, camera: Any, lift: float = 0.10
     )
 
 
-def routine(example: str, *, speed: float, success: str, done: Any = None, budget: int = 1_500_000) -> Take:
+def routine(
+    example: str,
+    *,
+    speed: float,
+    success: str,
+    done: Any = None,
+    budget: int = 1_500_000,
+    needs: tuple[str, ...] = (),
+) -> Take:
     """A demo: the home pose, then its Run button, filmed to the routine's end.
 
     ``done(film)`` is the demo's own success measure; a take without one is still a draft.
     """
     return Take(
         example,
+        needs=needs,
         fps=12,
         speed=speed,
         warmup=0.5,
@@ -714,6 +770,7 @@ DRAFTS = (
     ),
     Take(
         "examples/02_soft/00_sponge.py",
+        needs=("superdex",),
         # The sponge under the Panda's tool-down hand, from the bench's open side.
         camera=Camera(eye=(0.80, -0.50, 1.02), look_at=(0.457, -0.115, 0.80)),
         warmup=1.0,  # the foam settles on the bench before the first frame
@@ -735,6 +792,7 @@ DRAFTS = (
     Take(
         "examples/02_soft/00_sponge.py",
         name="press_sponge",
+        needs=("superdex",),
         camera=Camera(eye=(0.80, -0.50, 1.02), look_at=(0.457, -0.115, 0.80)),
         warmup=1.0,
         beats=(
@@ -919,14 +977,74 @@ DRAFTS = (
         ),
         expect=(Check(_twisted, needs=("soft_twist", "stiff_twist")),),
     ),
-    handle(
+    Take(
         "examples/03_rope/02_superdex.py",
-        "cable",
-        Segment("cable", 0.5),
-        camera=Orbit(At("cable", dz=0.03), distance=0.75, azimuth=-25.0, elevation=25.0),
-        lift=0.08,
-        across=("x", 0.05),
         needs=("superdex",),
+        camera=Orbit(Bench(-0.10, -0.06, 0.10), distance=1.25, azimuth=-30.0, elevation=30.0, fov=40.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="the right hand over the SuperDex cable's middle"),
+            # The cable's axis lies 11.2 mm up; the tool centre closes 10 mm over it, as in 00_cable.
+            Drag("right", "z", to=(0.550, -0.011, 0.771), seconds=1.2, label="drag the gizmo down onto it"),
+            Wait(seconds=0.3),
+            # Close would shut the jaws through it: SuperDex's push on the fingers is not fed back.
+            Slider(text="Grip amount", value=0.80, seconds=0.8, within=RIGHT, label="Grip amount 0.80: jaws on it"),
+            Wait(seconds=1.0, mark="closed"),
+            Drag("right", "z", to=(0.550, -0.011, 0.891), seconds=1.8, label="drag it up, slowly"),
+            Wait(seconds=2.0, mark="lifted", label="held by friction, nothing pinned"),
+        ),
+        # The node in the jaws. Measured 113 mm in tests/test_superdex_cable_robot.
+        expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.761)), 0.08, at="lifted"),),
+    ),
+    Take(
+        "examples/17_knots/00_pull_knot_tight.py",
+        needs=("superdex",),
+        budget=1_800_000,  # 24 s, both arms in view: 1.4 MB at quality 46
+        camera=Orbit(Bench(0.0, 0.0, 0.08), distance=1.3, azimuth=-15.0, elevation=30.0, fov=40.0),
+        warmup=1.0,  # the knot settles
+        layout=Layout(collapse=("Simulation",)),
+        beats=(
+            Wait(seconds=0.5, label="a loose overhand knot, a hand over each tail"),
+            # tests/test_knot_pull's gesture: each tool centre 10 mm over its tail's axis, the sliders to
+            # 0.90, each hand up 120 mm, then each out 85 mm, one at a time at about 40 mm/s.
+            Drag("right", "z", to=Bench(0.03, -0.1247, 0.0167), seconds=1.4, label="the right hand down onto its tail"),
+            Drag("left", "z", to=Bench(0.03, 0.1247, 0.0167), seconds=1.4, label="the left onto the other"),
+            Slider(text="Grip amount", value=0.90, seconds=0.8, within=RIGHT, label="Grip amount 0.90"),
+            Slider(text="Grip amount", value=0.90, seconds=0.8, within="Arm: left", label="and on the left"),
+            Wait(seconds=0.5),
+            Drag("right", "z", 0.12, seconds=3.0, label="up 120 mm"),
+            Drag("left", "z", 0.12, seconds=3.0),
+            Drag("right", "y", -0.085, seconds=2.2, label="and out: the knot draws up"),
+            Drag("left", "y", 0.085, seconds=2.2),
+            Wait(seconds=2.0, label="three crossings still: a knot"),
+        ),
+        expect=(Check(_knot_tight, needs=("rope",)),),
+    ),
+    Take(
+        "examples/18_bands/00_band_on_pegs.py",
+        needs=("superdex",),
+        budget=1_300_000,  # 17 s with the whole arm in view: 966 KB at quality 46 at the default
+        camera=Orbit(Bench(0.03, -0.20, 0.17), distance=1.0, azimuth=-62.0, elevation=28.0, fov=40.0),
+        warmup=1.5,  # the band settles on the upper peg
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.5, label="a band on the upper peg, the right hand in front of it"),
+            Press(text="Close", within=RIGHT, label="Close: the shut jaws are the hook"),
+            Wait(seconds=0.6),
+            # tests/test_band_on_pegs's path, at about its 50 mm/s: through the loop, down past the
+            # lower peg, in under it to 1 mm off the board, up, and back out along the jaws.
+            Drag("right", "x", to=Bench(0.030, -0.20, 0.201), seconds=1.2, label="into the loop"),
+            Drag("right", "z", to=Bench(0.030, -0.20, 0.105), seconds=2.2, label="down past the lower peg"),
+            Drag("right", "x", to=Bench(0.082, -0.20, 0.105), seconds=1.2, label="in under it"),
+            Drag("right", "z", to=Bench(0.082, -0.20, 0.120), seconds=0.5, label="up"),
+            Drag("right", "x", to=Bench(-0.025, -0.20, 0.120), seconds=2.3, label="back out"),
+            # The gizmo's arrows and arcs reach 0.14 m along +x from the hand: from 25 mm off they sat over
+            # the lower peg and hid the band on it, so the hand goes on back until they end short of its tip.
+            Drag("right", "x", to=Bench(-0.13, -0.20, 0.120), seconds=1.2, label="and clear of the pegs"),
+            Wait(seconds=2.0, label="stretched round both pegs"),
+        ),
+        expect=(Check(_band_on_both, needs=("band",)),),
     ),
     # 60 s of scene: four strokes at 3x read as a wipe and fit 2 MB; at 2x the clip was 2.6 MB at quality 46.
     routine(
@@ -935,6 +1053,7 @@ DRAFTS = (
         success="the bar is wiped:",
         done=_wiped,
         budget=2_000_000,
+        needs=("superdex",),
     ),
     routine(
         "examples/08_demos/route_the_cable/route_the_cable.py", speed=2.0, success="the cable is routed:", done=_routed
@@ -1253,6 +1372,31 @@ ROBOT_PARTICLES = (
     ),
 )
 
+ROBOT_BAGS: tuple[Take, ...] = (
+    # The right hand pinching the top layer's lip by contact and opening the mouth, nothing holding the bag
+    # down; tests/test_open_a_bag.py drives the same path through the panel. Seen from the mouth's side and
+    # a little in front, so the opening shows under the hand: the gizmo's arrows and arcs point +x, +y, +z.
+    Take(
+        "examples/16_bags/00_open_a_bag.py",
+        needs=("superdex",),
+        camera=Orbit(Bench(0.0, -0.10, 0.04), distance=0.95, azimuth=-80.0, elevation=25.0, fov=38.0),
+        warmup=0.5,
+        layout=Layout(collapse=("Simulation", "Arm: left")),
+        beats=(
+            Wait(seconds=0.4, label="a canvas bag, its lip turned up toward the right hand"),
+            Drag(
+                "right", "z", to=Bench(z=0.025), seconds=1.2, label="drag the hand down: its open jaws straddle the lip"
+            ),
+            Wait(seconds=0.3),
+            Press(text="Close", within=RIGHT, label="Close: the pads pinch the lip"),
+            Wait(seconds=1.0, mark="closed"),
+            Drag("right", "z", to=Bench(z=0.08), seconds=1.2, label="drag it up to 80 mm"),
+            Drag("right", "y", to=Bench(y=-0.065), seconds=1.5, label="and back over the bag: the mouth opens"),
+            Wait(seconds=2.0, mark="open", label="nothing holds the bag down; its layers stay apart"),
+        ),
+        expect=(Check(_bag_open, needs=("bag",)),),
+    ),
+)
 
 # The brush: the hand closes on its handle, presses the bristles to the bench and scrubs the square in
 # three strokes, the gesture tests/test_scrub_bench drives through the same arm panel.
@@ -1416,10 +1560,12 @@ ROBOT_SUCTION = (
     ),
 )
 
-TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES, *ROBOT_BRUSH, *ROBOT_SUCTION)
+TAKES: tuple[Take, ...] = (*FINAL, *DRAFTS, *ROBOT_PARTICLES, *ROBOT_BAGS, *ROBOT_BRUSH, *ROBOT_SUCTION)
 
 KEPT: dict[str, str] = {
+    "16_bags/01_open_a_bag_scored": "the same bag, hands and gesture as 00_open_a_bag with a goal beside them; its clip is that one's",
     "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
+    "18_bands/01_band_on_pegs_scored": "the same pegboard, band and hook as 00_band_on_pegs with a goal beside them; its clip is that one's",
     "14_brush/01_scrub_scored": "the same brush, handle and square as 00_scrub_the_bench with a goal beside them; its clip is that one's",
     "15_suction/01_pick_scored": "the same plate, cup and square as 00_pick_a_plate with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",

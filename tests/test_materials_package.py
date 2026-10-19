@@ -18,10 +18,11 @@ have to hold, and each fails silently when it does not:
   ``granular``, ``liquid`` and ``dough`` imports another at any scope, and the
   package imports nothing from the studio, the benchmark or the agents. With
   the other kinds left out of the package, one still registers and hands out
-  its spec and its entity. ``paper`` and ``brush`` are the declared exceptions:
-  a sheet of paper is a cloth whose hinges yield, so it imports ``cloth`` and
-  nothing else, and a brush's bristles are the rope's capsule chains, so it
-  imports ``rod``; each stands with its base kind alone. The particle kinds share ``mpm/``, which
+  its spec and its entity. ``paper``, ``bag`` and ``brush`` are the declared
+  exceptions: a sheet of paper is a cloth whose hinges yield and a bag is a cloth
+  sewn into a pocket, so each imports ``cloth`` and nothing else, and a brush's
+  bristles are the rope's capsule chains, so it imports ``rod``; each stands with its
+  base kind alone. The particle kinds share ``mpm/``, which
   is not a kind and stays when any of them is left out.
 * **The library names the sibling only as a string.** An ``import
   robosimstudio_materials`` anywhere under ``robosimstudio/`` is the sibling
@@ -66,6 +67,7 @@ KINDS = {
     "soft": ("sponge", "SoftSpec", "robosimstudio_materials.soft", "soft"),
     "rod": ("rod", "RodSpec", "robosimstudio_materials.rod.entity", "rod"),
     "paper": ("paper", "PaperSpec", "robosimstudio_materials.paper", "paper"),
+    "bag": ("bag", "BagSpec", "robosimstudio_materials.bag", "bag"),
     "granular": ("heap", "ParticleBodySpec", "robosimstudio_materials.granular", "heap"),
     "liquid": ("liquid", "ParticleBodySpec", "robosimstudio_materials.liquid", "liquid"),
     "dough": ("dough", "ParticleBodySpec", "robosimstudio_materials.dough", "dough"),
@@ -84,6 +86,8 @@ FLAT = {
     "RodSpec": "robosimstudio_materials.rod.spec",
     "paper": "robosimstudio_materials.paper",
     "PaperSpec": "robosimstudio_materials.paper",
+    "bag": "robosimstudio_materials.bag",
+    "BagSpec": "robosimstudio_materials.bag",
     "heap": "robosimstudio_materials.granular",
     "liquid": "robosimstudio_materials.liquid",
     "dough": "robosimstudio_materials.dough",
@@ -98,7 +102,21 @@ The arrangement tables (``GRANULAR_60HZ`` and the like) are instances and carry
 no module of their own, so they are checked by absence only, with every other
 name ``robosimstudio._PACKS`` provides."""
 
-LISTED = ["brush", "dough", "heap", "liquid", "materials", "paper", "papers", "rod", "roller", "sheet", "sponge"]
+LISTED = [
+    "bag",
+    "bags",
+    "brush",
+    "dough",
+    "heap",
+    "liquid",
+    "materials",
+    "paper",
+    "papers",
+    "rod",
+    "roller",
+    "sheet",
+    "sponge",
+]
 """The lower-case flat names, as ``dir(rss)`` lists them when the package is installed."""
 
 
@@ -245,7 +263,7 @@ class TestEachKindStandsAlone(unittest.TestCase):
     """
 
     def test_no_kind_imports_another_at_any_scope(self) -> None:
-        """Beyond what :data:`NEEDS` declares: paper may import cloth and the brush the rope, and that is the whole list."""
+        """Beyond what :data:`NEEDS` declares: paper and the bag may import cloth and the brush the rope, and that is the whole list."""
         for kind in KINDS:
             with self.subTest(kind=kind):
                 module = MATERIALS / f"{kind}.py"
@@ -369,6 +387,7 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
 
         self.assertEqual(
             [
+                "robosimstudio_materials.bag",
                 "robosimstudio_materials.brush",
                 "robosimstudio_materials.cloth",
                 "robosimstudio_materials.dough",
@@ -394,6 +413,9 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
             "liquid",
             "dough",
             "PaperSpec",
+            "bag",
+            "bags",
+            "BagSpec",
             "brush",
             "BrushSpec",
         ):
@@ -420,6 +442,7 @@ class TestTheWheelShipsThePackage(unittest.TestCase):
             "robosimstudio_materials/soft.py",
             "robosimstudio_materials/rod/__init__.py",
             "robosimstudio_materials/paper.py",
+            "robosimstudio_materials/bag.py",
         ):
             self.assertIn(path, text)
         self.assertNotIn("_domain_packs", text)
