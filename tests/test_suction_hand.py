@@ -288,6 +288,28 @@ class TestTheSealSays(unittest.TestCase):
             self.assertIs(again, cup.last)
         np.testing.assert_array_equal(offset, cup._offset_dev.numpy(), "the hold was re-made where the plate is now")
 
+    def test_a_weld_hold_forgets_an_earlier_break(self) -> None:
+        """``broke`` is since the last hold, so a weld hold after a wrench seal broke reads False."""
+        import warp as wp
+
+        now = [self.poses(_down(z=0.0065))]
+        cup = self._cup(now)
+        rows = types.SimpleNamespace(
+            equality_constraint_enabled=wp.zeros(2, dtype=wp.bool, device="cpu"),
+            equality_constraint_relpose=wp.zeros(2, dtype=wp.transform, device="cpu"),
+        )
+        # What the weld tier touches of a SolverMuJoCo: its rows and the notify that copies them.
+        cup.mujoco = types.SimpleNamespace(
+            model=types.SimpleNamespace(mujoco=rows), notify_model_changed=lambda flags: None
+        )
+        cup.weldable = frozenset({self.plate})
+        cup._broke_dev.fill_(1)
+        self.assertTrue(cup.broke, "the stand-in for a wrench seal that broke")
+        report = cup.hold(self.plate, tier="weld")
+        self.assertTrue(report.sealed and cup.tier == "weld", report.why)
+        self.assertTrue(bool(rows.equality_constraint_enabled.numpy()[0]))
+        self.assertFalse(cup.broke, "a weld hold still reports a wrench seal broken before it")
+
     def test_a_refused_part_leaves_the_held_one_held(self) -> None:
         now = [self.poses(_down(z=0.0065))]
         cup = self._cup(now)

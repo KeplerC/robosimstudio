@@ -461,7 +461,7 @@ class Suction:
 
     @property
     def broke(self) -> bool:
-        """Whether the wrench tier's seal broke since the last hold."""
+        """Whether the wrench tier's seal broke since the last hold, of either tier, or the last reset."""
         return bool(int(self._broke_dev.numpy()[0]))
 
     @property
@@ -518,11 +518,11 @@ class Suction:
         if held >= 0:
             self.release()
         relpose = _compose(_inverse(poses[self.pad_body]), poses[body]).astype(np.float32)
+        self._broke_dev.zero_()
         if tier == "weld":
             self._weld(body, relpose)
         else:
             self._offset_dev.assign(relpose.reshape(1, 7))
-            self._broke_dev.zero_()
             self._held_dev.assign(np.array([body], dtype=np.int32))
         self._held, self.tier = body, tier
         self.last = report
