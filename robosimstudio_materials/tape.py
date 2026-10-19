@@ -391,11 +391,12 @@ class TapeSpec(ClothSpec):
         tab_color: Display RGB of the tab.
         dry: How far past the fold the sheet carries no adhesive [m], like a label's lift tab. ``0``
             bonds every row on the face but the fold's. Without a tab it runs from the sheet's end.
-        stuck: Built stuck to ``on``: a bond made at the build and again at every reset wherever the
-            sheet lies over a face of the body's box, none past its edge, where nothing is under it.
-            Opening adhesion gives a vertex past the edge no bond at all, contact adhesion one made
-            only once it is pressed onto a face. ``False`` builds the sheet loose, its bonds made only
-            where it is pressed onto ``on``, which needs contact adhesion
+        stuck: Built stuck to ``on``, laid the box's contact margin further off the face than
+            :attr:`pose` puts it, where VBD's contact rests it: a bond made at the build and again at
+            every reset wherever the sheet lies over a face of the body's box, none past its edge,
+            where nothing is under it. Opening adhesion gives a vertex past the edge no bond at all,
+            contact adhesion one made only once it is pressed onto a face. ``False`` builds the sheet
+            loose, its bonds made only where it is pressed onto ``on``, which needs contact adhesion
             (:attr:`TapeMaterialSpec.adhesion`).
         settle_frames: ``0``, unlike cloth's 60: a reset puts the body back at its spawn pose and the
             tab where it was built, so the sheet goes back where it was built too, on that pose.
@@ -685,10 +686,10 @@ class _Seat:
     """Where a point would rest on the box under it, in the body's frame: what :func:`_seat_on` finds.
 
     ``shape`` is the box, -1 with none; ``over`` whether the point lies over the face, within its
-    extent; ``face`` the face's outward normal; ``gap`` how far the point is off the box's surface
-    less its margin [m], negative inside the contact; ``thick`` the contact thickness, the particle's
-    radius plus that margin [m]; and ``anchor`` the point on the surface under it, ``thick`` off it
-    along ``face``, where VBD's contact rests the particle.
+    extent; ``face`` the face's outward normal; ``gap`` the point's distance off the box's surface
+    less the box's margin [m], so a particle presses ``radius - gap`` into the contact; ``thick`` the
+    contact thickness, the particle's radius plus that margin [m]; and ``anchor`` the point on the
+    surface under it, ``thick`` off it along ``face``, where VBD's contact rests the particle.
     """
 
     shape: int
