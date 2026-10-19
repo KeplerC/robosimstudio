@@ -52,6 +52,12 @@ none (``EntityCuttable.surface_mesh``).
 
 **Measures.** ``pieces`` counts the cut cage's material pieces and ``cut_fraction`` reads how far the
 last cut ran; ``tests/test_cut_tofu`` drives the example's arm panel and reads both.
+
+**Without a GPU.** The cutter is Warp code and runs on Warp's CPU device, one thread, beside the
+knife on MuJoCo's C library, so this kind builds and cuts on a CPU (``tests/test_cpu_materials``):
+a control step in which the edge advances costs 1 to 2 s there against 7.6 ms on a GPU, and one in
+which it does not, 9 to 13 ms. The example's cut through its page averaged 273 ms a control step and
+parted the tofu in two.
 """
 
 from __future__ import annotations

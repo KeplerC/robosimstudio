@@ -25,7 +25,8 @@ such as Ubuntu 22.04 and later.
 **Linux aarch64 (ARM64)**
 
 SuperDex ships no wheel for ARM64, so the `superdex` and `cpu` extras install
-nothing there. Sponges cannot be built, and on a CPU neither can cloth or rope.
+nothing there. Sponges and bags cannot be built, and on a CPU neither can cloth or
+rope.
 
 **GPUs without RT cores**
 
@@ -93,13 +94,43 @@ Nothing else changes between the two: a scene built on a machine with no CUDA
 device runs on the CPU by itself.
 
 - MuJoCo's C library steps the arm and the rigid bodies.
-- SuperDex steps cloth, rope and soft bodies.
+- SuperDex steps cloth, bags, rope and soft bodies.
 - Newton's tiled tracer renders.
 - A scene left on the default physics (`rss.GENERIC`) runs as `rss.CPU`, and a
   solver with no CPU path is replaced by `rss.CPU`'s for that kind of thing, with
   the change printed.
 - One world per process, and no signed-distance-field contact
   (`full_surface_contact` against a mesh, `hydroelastic`).
+
+### Which Materials Run Without a GPU
+
+| Kind | Made with | Without a GPU |
+|---|---|---|
+| Cloth | `rss.sheet` | Runs, on SuperDex |
+| Soft bodies | `rss.sponge` | Runs, on SuperDex |
+| Rope | `rss.rod` | Runs, on SuperDex, one-way: the cable does not push back on what touches it (`rss.CPU` says why) |
+| Bags | `rss.bag` | Runs, on SuperDex, the engine a bag is on with a GPU too |
+| Cutting | `rss.cuttable`, `rss.knife` | Runs: the cage cutter on Warp's CPU device, the knife on MuJoCo's C library |
+| Paper | `rss.paper` | Refused: its yielding hinges are VBD's |
+| Tape | `rss.tape` | Refused: its bonds are VBD's |
+| Brush | `rss.brush` | Refused: its bristles are capsule chains on VBD |
+| Granular, liquid, dough | `rss.heap`, `rss.liquid`, `rss.dough` | Refused: Newton's implicit MPM |
+| Water | `rss.water` | Refused: Genesis's SPH |
+
+A scene holding a refused kind is refused as it starts to build, before anything
+in it is built, with one sentence per thing naming it, its kind, the solver it is
+on and why that solver has no CPU path, rather than by a failure inside a solver. VBD and the
+implicit MPM run their Warp kernels on one CPU thread there: a 1922-particle towel
+stepped at 0.003x realtime, and the granular example's 28,812-grain rice bed at
+0.009x. Genesis is initialised on its GPU backend. A solver named by its dotted
+path, such as `rss.backend("newton.solvers.SolverVBD")`, states no devices and is
+not refused.
+
+Cutting runs, slowly while it cuts: the cutter's walks run on one CPU thread, so
+a control step in which the edge advances took 1 to 2 s on the development
+machine's CPU, against 7.6 ms on a GPU. The cutting example's whole cut, driven
+through its page, averaged 273 ms a control step there, against 13 ms, and the
+tofu parted the same way.
 
 ### Verifying the Installation
 
@@ -146,11 +177,11 @@ rss.sheet(name="towel", size=(0.2, 0.2),
 
 | Extra | Adds |
 |---|---|
-| `cpu` | What a machine without a GPU uses: SuperDex, for cloth, rope and soft bodies |
+| `cpu` | What a machine without a GPU uses: SuperDex, for cloth, bags, rope and soft bodies |
 | `superdex` | SuperDex, the CPU FEM engine behind `rss.sponge` (Python 3.12, no ARM64 wheel) |
 | `rtx` | The OVRTX path tracer; uv installs it by default as the `rtx` group |
 | `usd` | USD scene import |
-| `genesis` | Genesis's IPC coupler as a second foreign engine (NVIDIA GPU only) |
+| `genesis` | Genesis as a second foreign engine: its IPC coupler, and the SPH behind `rss.water` (NVIDIA GPU only) |
 | `gap` | The graph runtime `robosimstudio_policy_agent` runs policies with; large, as it brings torch and cuRobo |
 | `curobo` | cuRobo, the collision-aware planner behind `motion="plan"` |
 | `lerobot-feetech` | The Feetech motor bus behind leader-arm teleoperation |
