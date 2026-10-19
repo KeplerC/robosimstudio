@@ -111,8 +111,17 @@ the scene scripts ship a bimanual robot, the bag, knot and band need the
 ``[superdex]`` extra to build, and the water the ``[genesis]`` one, which lives
 in a virtual environment of its own."""
 
-DEMO_ENGINES = {name: ("genesis" if "water" in name else "superdex") for name in DEMOS}
-"""The foreign engine each demo is about."""
+DEMO_ENGINES = {
+    "02_soft/00_sponge.py": "superdex",
+    "03_materials/03_knot.py": "superdex",
+    "03_materials/04_band.py": "superdex",
+    "03_materials/06_bag.py": "superdex",
+    "03_materials/14_water.py": "genesis",
+    "06_tasks/06_bag_scored.py": "superdex",
+    "06_tasks/07_band_scored.py": "superdex",
+    "06_tasks/10_water_scored.py": "genesis",
+}
+"""The foreign engine each demo is about, by its path: stated, not read off the file's name."""
 
 HAS_ROPE = bool(ROPE)
 NO_ROPE = "the older rope scripts (examples/scenes/) are not in this tree"

@@ -241,6 +241,7 @@ class TestTheMultiEngineDemos(unittest.TestCase):
 
     def test_each_demo_stages_its_engine_for_the_domain_it_is_about(self) -> None:
         """Static, so it holds whichever wheels are present: the arrangement is data."""
+        self.assertLessEqual(set(DEMOS), set(DEMO_ENGINES), "every demo states the engine it is about")
         for name, engine in DEMO_ENGINES.items():
             with self.subTest(demo=name):
                 text = (EXAMPLES / name).read_text()
