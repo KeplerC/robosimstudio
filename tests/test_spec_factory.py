@@ -27,6 +27,7 @@ def _declarations(size: float):
     from robosimstudio_materials.mpm.declare import Heap
     from robosimstudio_materials.rod import Rod
     from robosimstudio_materials.rod.band import band
+    from robosimstudio_materials.tape import Tape
     from robosimstudio_materials.water import Water
 
     knife = rss.knife(name="knife", blade_length=4 * size)
@@ -39,6 +40,7 @@ def _declarations(size: float):
         ("brush", Brush.from_spec(rss.brush(name="brush", sole=(4 * size, 2 * size, 0.008)), name="brush")),
         ("cuttable", Cuttable.from_spec(rss.cuttable(name="tofu", knife=knife, size=(size,) * 3), name="tofu")),
         ("knife", Cuttable.knife(knife, name="knife")),
+        ("tape", Tape.from_spec(rss.tape(name="label", on="box", size=(2 * size, 4 * size)), name="label")),
     )
 
 

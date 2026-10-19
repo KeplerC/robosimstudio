@@ -21,7 +21,7 @@ import numpy as np
 import warp as wp
 
 from robosimstudio.assetlib.materials import CalibrationSpec, MaterialRecord, register_material, register_material_kind
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
 from robosimstudio.assetlib.semantics.states import StateSpec
@@ -1628,16 +1628,6 @@ TOUCHES = ("surface", "fixtures", "objects", "hands", "deformables")
 """What a tape contacts unless it says otherwise."""
 
 
-@dataclass(frozen=True)
-class _Spec:
-    """A build factory returning one spec, as a value, so two declarations of one type compare equal."""
-
-    spec: Any
-
-    def __call__(self) -> Any:
-        return self.spec
-
-
 class Tape:
     """Constructors for a tape's asset record, from the spec that places one."""
 
@@ -1666,7 +1656,7 @@ class Tape:
             tags=tuple(tags),
             states=tuple(states),
             sim=SimRequirements(domain="tape", contacts=contacts_with(*TOUCHES), notes=notes),
-            build=_Spec(spec),
+            build=SpecFactory(spec),
         )
 
 
