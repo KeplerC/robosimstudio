@@ -53,13 +53,13 @@ def main():
         out = {n: studio.gui.add_number(f"{n}: mid-cable twist (turns)", 0.0, step=1e-3, disabled=True) for n in cables}
 
         def drive() -> None:
-            body_q = np.asarray(sim.pipeline.snapshot.body_q)
+            body_q, middle = np.asarray(sim.pipeline.snapshot.body_q), slice(segments // 3, 2 * segments // 3 + 1)
             for name, cable in cables.items():
                 if held.value:  # the page's kinematic hold, not a hand: roll the tip towards the slider
                     cable.entity.roll(sim.pipeline, 2 * np.pi * roll.value)
                 else:  # the tips are the hands' (a release of a free tip does nothing)
                     cable.entity.pin(sim.pipeline, on=False)
-                out[name].value = round(twist_turns(body_q[cable.bodies[8:17], 3:7]), 3)  # the middle third
+                out[name].value = round(twist_turns(body_q[cable.bodies[middle], 3:7]), 3)  # the middle third
 
         studio.each_step(drive)
 

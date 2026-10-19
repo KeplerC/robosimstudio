@@ -65,7 +65,7 @@ from .request import SceneRequest
 Composer = Callable[..., PhysicsProgram]
 """Builds the physics for a finalized model. See :func:`compile_scene`."""
 
-__all__ = ["CannotReplicate", "CompiledScene", "compile_scene", "resolve_regions"]
+__all__ = ["CannotReplicate", "CompiledScene", "compile_scene", "declared_domains", "resolve_regions"]
 
 
 class CannotReplicate(NotImplementedError):
@@ -226,7 +226,7 @@ def _make_entity(spec, arrangement=None, *, gripper_span: float = 0.08) -> Entit
     return cls(spec, **({"gripper_span": gripper_span} if takes_span else {}))
 
 
-def _declared_domains(request: SceneRequest) -> set[str]:
+def declared_domains(request: SceneRequest) -> set[str]:
     """The domains the request's specs declare, by the rule ``resolve_entity_class`` reads them.
 
     The spec's ``sim.domain`` when it carries one, else the registered entity
@@ -521,7 +521,7 @@ def _build_base(
     # before any entity builds -- MuJoCo's gravcomp, VBD's per-joint flags. Done
     # here, from the arrangement, so no entity has to import a solver to know
     # which attributes its builder calls will be allowed to keep.
-    register_custom_attributes(builder, arrangement, domains=_declared_domains(request))
+    register_custom_attributes(builder, arrangement, domains=declared_domains(request))
 
     entities: list[Entity] = []
     embodiment: Entity | None = None
@@ -593,13 +593,22 @@ def _build_base(
             # A hand named by the pairing replaces every arm's. It has to clear
             # the per-arm names as well as set the robot's, because an arm's own
             # entry wins over the robot's default -- leaving them would put the
-            # requested hand on nothing and read as the flag being ignored.
+            # requested hand on nothing and read as the flag being ignored. And
+            # the arm's mount with its name: it says where *that* hand bolts on
+            # and wins over a hand's own, so left behind it would bolt the new
+            # hand where the old one sat (a cup 105 mm out on the YAM's wrist).
+            # An arm that already carries the named hand keeps its entry, mount
+            # and all: that mount is where this very hand bolts on.
             from dataclasses import replace as _replace
 
+            own = embodiment_spec.gripper
             embodiment_spec = _replace(
                 embodiment_spec,
                 gripper=binding.gripper,
-                arms=tuple(_replace(a, gripper="") for a in embodiment_spec.arms),
+                arms=tuple(
+                    a if (a.gripper or own) == binding.gripper else _replace(a, gripper="", gripper_mount=None)
+                    for a in embodiment_spec.arms
+                ),
             )
         arm_gains = binding.arm_actuation or request.arm_actuation
         gripper_gains = binding.gripper_actuation or request.gripper_actuation

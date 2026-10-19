@@ -129,9 +129,11 @@ class SolverMPM(SolverImplicitMPM):
         self._calls = 0
         self._call_dt: float | None = None
         self._stride = 1
-        self._stepped = False
+        self._steps = 0
+        self._step_dt = 0.0
         self._was_capturing = False
         self._held_wrenches: dict[int, wp.array] = {}
+        self._harvested_at: dict[int, int] = {}
 
     # ----------------------------------------------------------------- rate
     @property
@@ -183,34 +185,56 @@ class SolverMPM(SolverImplicitMPM):
             )
         self._was_capturing = capturing
         self._calls += 1
-        self._stepped = not self._calls % stride
-        if not self._stepped:
+        if self._calls % stride:
             if state_out is not state_in:
                 self._carry(state_in, state_out)
             return
         step_dt = float(dt) * stride
+        self._steps += 1
+        self._step_dt = step_dt
         super().step(state_in, state_out, control, contacts, step_dt)
         if self.project_outside_after_step:
             self.project_outside(state_out, state_out, step_dt, gap=self.project_gap)
 
     def reset(self, state: newton.State, world_mask=None, flags=None) -> None:
-        """Newton's reset, and the cadence starts again from phase zero.
+        """Newton's reset, and the cadence starts again from phase zero with no wrench held.
 
         A reset happens between control steps, where the phase is already zero
         when the rate fits (which the composer checked); stating it keeps a
-        reset taken mid-settle from carrying a partial step into the run.
+        reset taken mid-settle from carrying a partial step into the run. The
+        held wrenches are zeroed and count as harvested, so the coupled steps
+        before the first MPM step of the new episode -- fifteen of every
+        sixteen calls at the registered stride -- read no load rather than the
+        last contact of the episode before. Zeroing is a device memset, so it
+        stays capturable; a ``world_mask`` reset zeroes every world's, which
+        the next MPM step, at most one stride later, harvests again.
         """
         self._calls = 0
+        for ptr, held in self._held_wrenches.items():
+            held.zero_()
+            self._harvested_at[ptr] = self._steps
         super().reset(state, world_mask=world_mask, flags=flags)
 
     # ------------------------------------------------------------- coupling
     def coupling_harvest_proxy_wrenches(self, body_local_to_proxy_global, out_body_f, *, dt: float, **kwargs) -> None:
         """The collider impulses as wrenches over the *step* this solver took, held through the skipped calls.
 
-        The proxy coupler harvests after every call and divides the impulse by
-        the call's ``dt``; the impulse was accumulated over ``stride`` calls, so
-        on the call that stepped the wrench is the mean force over that step.
-        On a skipped call the wrench is **copied from a persistent array**
+        The proxy coupler harvests once per coupled step, at that step's ``dt``,
+        and the entry calls this solver ``substeps`` times inside it at
+        ``dt / substeps``; the impulse is the last MPM step's, so it is divided
+        by that step's own length (``stride`` calls of the entry's ``dt``), not
+        by the coupler's ``dt`` times the stride. With
+        ``backend("mpm", substeps=2)`` the coupler's ``dt`` was twice the
+        call's, and a 50 mm cube of honey at rest in a free cup, 1.717 N of
+        it, read -0.858 N on the cup at two substeps against -1.719 N at one;
+        it now reads -1.719 N at two (``probe_c2_weight``, the honey-cup scene
+        of ``tests/test_mpm_kinds`` under LIQUID_120HZ, 1 s at rest after 2 s,
+        RTX PRO 6000, Newton 1.6.0).
+        Whether to harvest is whether this solver stepped since this array's
+        last harvest, not whether the entry's last call stepped: with three
+        substeps and a stride of two, a step can fall on a call other than the
+        last. On a coupled step with no MPM step in it the wrench is
+        **copied from a persistent array**
         rather than harvested again, and that is load-bearing under a captured
         graph, not a saving: Newton's impulse field lives in the step's
         temporaries, so a harvest on a skipped call reads the *previous* step's
@@ -223,13 +247,13 @@ class SolverMPM(SolverImplicitMPM):
         built, RTX PRO 6000, Newton 1.6.0). The held copy is allocated on the
         first harvest, which the pipeline's eager warm-up makes an eager one.
         """
+        del dt  # the coupled step's; the impulse is the last MPM step's
         held = self._held_wrenches.get(out_body_f.ptr)
         if held is None:
             held = self._held_wrenches[out_body_f.ptr] = wp.zeros_like(out_body_f)
-        if not self._stepped:
+        if self._harvested_at.get(out_body_f.ptr, 0) == self._steps:
             wp.copy(out_body_f, held)
             return
-        super().coupling_harvest_proxy_wrenches(
-            body_local_to_proxy_global, out_body_f, dt=float(dt) * self._stride, **kwargs
-        )
+        self._harvested_at[out_body_f.ptr] = self._steps
+        super().coupling_harvest_proxy_wrenches(body_local_to_proxy_global, out_body_f, dt=self._step_dt, **kwargs)
         wp.copy(held, out_body_f)

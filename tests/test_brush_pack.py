@@ -99,6 +99,44 @@ class TestTheFlatNames(unittest.TestCase):
 
         self.assertIs(add_capsule_chain, rod.add_capsule_chain)
 
+    def test_the_slots_the_brush_and_the_cable_tune_are_the_rod_joints_alone(self) -> None:
+        """A free joint, a chain and the weld under it in one span: the four slots are the chain's rows."""
+        import newton
+        import warp as wp
+        from newton.solvers import SolverVBD
+
+        from robosimstudio_materials.rod import add_capsule_chain, rod_slot_dofs
+
+        builder = newton.ModelBuilder()
+        SolverVBD.register_custom_attributes(builder)
+        grip = builder.add_body(xform=wp.transform_identity())
+        builder.add_shape_box(grip, hx=0.01, hy=0.01, hz=0.01)
+        chain = newton.Rod.create_straight(
+            start=wp.vec3(0.0, 0.0, -0.01),
+            direction=wp.vec3(0.0, 0.0, -1.0),
+            length=0.02,
+            segment_count=4,
+            radius=0.001,
+        )
+        first = builder.body_count
+        gains = dict.fromkeys(("stretch", "shear", "bend", "twist"), 1.0)
+        add_capsule_chain(
+            builder,
+            chain,
+            cfg=builder.default_shape_cfg,
+            color=(1.0, 1.0, 1.0),
+            gains={f"{slot}_{k}": v for slot, v in gains.items() for k in ("ke", "kd")},
+            label="bristle",
+        )
+        builder.add_joint_fixed(parent=grip, child=first)
+        model = builder.finalize(device="cpu")
+        types, starts = model.joint_type.numpy(), model.joint_qd_start.numpy()
+        rods = [j for j in range(model.joint_count) if int(types[j]) == int(newton.JointType.ROD)]
+        self.assertEqual(3, len(rods))
+        slots = rod_slot_dofs(model, range(model.joint_count))
+        for slot, rows in enumerate(slots):
+            np.testing.assert_array_equal(starts[rods] + slot, rows)
+
 
 class TestTheSpec(unittest.TestCase):
     def test_the_defaults_count_their_bodies(self) -> None:
@@ -203,6 +241,97 @@ class TestTheScrubMeasure(unittest.TestCase):
         self.assertEqual(0.0, grid.fraction((2.0, 2.0), (2.1, 2.1)), "a patch off the lattice")
         grid.clear()
         self.assertEqual(0, int(grid.cells.sum()))
+
+
+class _WholeLatticeRefused:
+    """A device lattice that serves slices and refuses a read or write of the whole of it."""
+
+    def __init__(self, array) -> None:
+        self.array = array
+
+    def __getitem__(self, key):
+        return self.array[key]
+
+    def numpy(self):
+        raise AssertionError("read every world's lattice back to use one")
+
+    def assign(self, values):
+        raise AssertionError("wrote every world's lattice back to clear one")
+
+    def zero_(self) -> None:
+        self.array.zero_()
+
+
+class TestOneWorldsLattice(unittest.TestCase):
+    """``scrub_grid(world)`` and ``clear_scrub(world)`` touch that world's slab on the device and no other."""
+
+    def test_a_world_is_read_and_cleared_on_its_own(self) -> None:
+        import warp as wp
+
+        from robosimstudio_materials.brush import EntityBrush, ScrubGrid
+
+        grid = ScrubGrid(origin=(0.0, 0.0), cell=0.005, nx=3, ny=2)
+        brush = EntityBrush.__new__(EntityBrush)
+        brush._grid = grid
+        values = np.repeat(np.arange(1, 4, dtype=np.int32), 6)
+        brush._grid_device = _WholeLatticeRefused(wp.array(values, dtype=wp.int32, device="cpu"))
+        for world in range(3):
+            with self.subTest(world=world):
+                np.testing.assert_array_equal(np.full((2, 3), world + 1), brush.scrub_grid(world).cells)
+        brush.clear_scrub(1)
+        np.testing.assert_array_equal([1] * 6 + [0] * 6 + [3] * 6, brush._grid_device.array.numpy())
+
+
+class TestTheTipsAreRead(unittest.TestCase):
+    """The tips' axes over the whole ``(N, 4)`` array agree with ``quat_to_mat`` taken one tip at a time."""
+
+    def test_the_axes_match_one_quaternion_at_a_time(self) -> None:
+        from robosimstudio.core.math import quat_to_mat
+        from robosimstudio_materials.brush import _z_axes
+
+        quats = np.random.default_rng(7).normal(size=(64, 4))
+        quats[1] = 0.0  # no length: quat_to_mat's identity
+        quats[2] *= 1.0e-3  # far off the unit sphere
+        expected = np.stack([quat_to_mat(q)[:, 2] for q in quats])
+        np.testing.assert_allclose(_z_axes(quats), expected, atol=1e-12)
+        self.assertEqual((0, 3), _z_axes(np.zeros((0, 4))).shape)
+
+    def test_a_tip_is_half_a_capsule_along_its_axis(self) -> None:
+        from robosimstudio.core.math import quat_to_mat
+        from robosimstudio_materials.brush import EntityBrush
+
+        rng = np.random.default_rng(3)
+        body_q = np.concatenate([rng.normal(size=(10, 3)), rng.normal(size=(10, 4))], axis=1).astype(np.float32)
+        brush = EntityBrush.__new__(EntityBrush)
+        brush.worlds, brush.half_height = None, 0.0025
+        brush.bristle_bodies = np.array([[0, 2], [5, 7]], dtype=np.int32)
+        expected = [body_q[b, :3] + quat_to_mat(body_q[b, 3:7])[:, 2] * 0.0025 for b in (2, 7)]
+        np.testing.assert_allclose(brush.tip_positions(body_q), expected, atol=1e-6)
+
+
+class TestCarriedWithTheHandle(unittest.TestCase):
+    def test_each_pose_turns_by_the_library_product(self) -> None:
+        """``_carried`` moves poses rigidly; its orientations are ``quat_multiply(turn, q)`` one pose at a time."""
+        from robosimstudio.core.math import mat_to_quat, quat_multiply, quat_to_mat
+        from robosimstudio_materials.brush import _carried
+
+        rng = np.random.default_rng(11)
+
+        def pose() -> np.ndarray:
+            q = rng.normal(size=4)
+            return np.concatenate([rng.normal(size=3), q / np.linalg.norm(q)])
+
+        start, end = pose(), pose()
+        poses = np.stack([pose() for _ in range(32)])
+        out = _carried(poses, start, end)
+        turn = quat_to_mat(end[3:7]) @ quat_to_mat(start[3:7]).T
+        q = mat_to_quat(turn)
+        np.testing.assert_allclose(out[:, 3:7], [quat_multiply(q, p[3:7]) for p in poses], atol=1e-12)
+        np.testing.assert_allclose(out[:, :3], (poses[:, :3] - start[:3]) @ turn.T + end[:3], atol=1e-12)
+        # The start pose itself lands on the end pose (up to the quaternion's sign).
+        (back,) = _carried(start[None], start, end)
+        np.testing.assert_allclose(back[:3], end[:3], atol=1e-12)
+        self.assertAlmostEqual(1.0, abs(float(np.dot(back[3:7], end[3:7]))), places=12)
 
 
 class TestTheCatalogue(unittest.TestCase):

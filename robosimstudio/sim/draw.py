@@ -83,6 +83,11 @@ class Viewer:
         self._viewer = ViewerViser(port=port, label=label or getattr(sim, "name", "") or PAGE_TITLE, share=share)
         title_page(self._viewer._server)
         self._viewer.set_model(sim.model)
+        # Newton greys its Reset out until something is registered, and calls it from should_step() or
+        # show(), on the loop's own thread.
+        reset = getattr(sim, "reset", None)
+        if callable(reset):
+            self._viewer.set_reset_callback(reset)
 
     @property
     def server(self):
@@ -107,7 +112,8 @@ class Viewer:
         """Whether the page's own **Pause** lets the next step run, or its **Step** asked for one.
 
         Newton 1.7's viewer puts a Simulation folder with Pause, Step and Reset on this page; it only
-        records the clicks, and a loop that does not ask here steps through a pause.
+        records the clicks, and a loop that does not ask here steps through a pause. Its Reset calls
+        ``sim.reset()``, here or in :meth:`show`; a scene with no ``reset`` leaves it greyed out.
         """
         return self._viewer.should_step()
 
@@ -143,7 +149,8 @@ def viewer(sim: Any, *, port: int = 8080, label: str = "", share: bool = False) 
         target = viewer.scene.add_transform_controls("/target", scale=0.15, position=(0.6, 0.0, 0.9))
         while viewer.is_running():
             ...                       # read the gizmo, command the arm
-            sim.step(action, mode="joint_position")
+            if viewer.should_step():  # the page's Pause and Step
+                sim.step(action, mode="joint_position")
             viewer.show()
 
     The other two doors: :func:`draw` is this with no loop of your own, and

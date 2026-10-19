@@ -21,13 +21,16 @@ own name.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.features import FeatureSpec
 from robosimstudio.assetlib.semantics.published import PublishedState
 from robosimstudio.assetlib.semantics.states import StateSpec
 from robosimstudio.assetlib.sim import SimRequirements, contacts_with
+
+from .spec import RodSpec
 
 __all__ = ["Rod"]
 
@@ -118,3 +121,56 @@ class Rod:
             provenance=provenance,
             build=build,
         )
+
+    @staticmethod
+    def from_spec(spec: RodSpec, *, name: str, **kwargs: Any) -> AssetRecord:
+        """A rod a constructor returned (``rss.rod``, ``band``), as the record a document's ``(:objects ...)`` names.
+
+        :meth:`from_length` with the spec's own length and radius, and the spec as a
+        :class:`~robosimstudio.assetlib.record.SpecFactory`: the same rod declared twice
+        is one asset, and a different one under the same name is a clash where a
+        ``build=lambda: spec`` kept the first. The document's object name replaces the
+        spec's ``name``.
+
+        The record's ``sim`` is the one the rod runs, read as
+        ``EntityRodSuperdex.sim_requirements`` reads it: the spec's declared ``sim``
+        when it has one, else the rod default with the spec's ``self_contact``. So
+        self-contact is the spec's to state, and a declared ``sim`` states the
+        contacts and notes too.
+
+        Args:
+            spec: The :class:`~robosimstudio_materials.rod.spec.RodSpec` to place.
+            name: What the task calls it.
+            **kwargs: Any other :meth:`from_length` argument but ``length``,
+                ``radius``, ``build`` and ``self_contact``; ``touches`` and
+                ``notes`` only when the spec declares no ``sim``.
+
+        Raises:
+            TypeError: For a spec that is not a ``RodSpec``, or a ``self_contact``
+                passed here rather than on the spec.
+            ValueError: For ``touches`` or ``notes`` beside a spec that declares
+                its ``sim``.
+        """
+        if not isinstance(spec, RodSpec):
+            raise TypeError(f"Rod.from_spec takes a RodSpec, got {type(spec).__name__}")
+        if "self_contact" in kwargs:
+            raise TypeError(
+                f"Rod.from_spec {name!r}: self_contact is the spec's, which the rod is built from; "
+                "state it there (rss.rod(..., self_contact=True), band(..., self_contact=True))"
+            )
+        declared = spec.sim if isinstance(spec.sim, SimRequirements) else None
+        stated = sorted({"touches", "notes"} & set(kwargs))
+        if declared is not None and stated:
+            raise ValueError(
+                f"Rod.from_spec {name!r}: the spec declares its sim, which the rod runs; "
+                f"state {' and '.join(stated)} there"
+            )
+        record = Rod.from_length(
+            name=name,
+            length=float(spec.length),
+            radius=float(spec.radius),
+            self_contact=bool(spec.self_contact),
+            build=SpecFactory(spec),
+            **kwargs,
+        )
+        return record if declared is None else replace(record, sim=declared)

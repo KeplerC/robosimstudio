@@ -13,6 +13,7 @@ Then the same gesture on the same bag with self-contact off: the layers lie in e
 
 from __future__ import annotations
 
+import importlib.util
 import time
 import unittest
 from unittest import mock
@@ -24,6 +25,8 @@ from tests.fixtures.grasp import go, open_session, tick
 
 TIER = "medium"
 """One GPU: the example built twice, self-contact on and off, each driven through its page for ~8 s of scene."""
+
+HAS_SUPERDEX = importlib.util.find_spec("superdex") is not None
 
 PORT = 9761
 CONTROL_PORT = 9762
@@ -88,6 +91,7 @@ def _drive(port: int, *, self_contact: bool) -> dict:
     return out
 
 
+@unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing steps the bag")
 class TestTheHandOpensTheBag(unittest.TestCase):
     """Right hand down onto the lip, Close, up and back: the mouth opens and the layers stay apart."""
 
@@ -124,6 +128,7 @@ class TestTheHandOpensTheBag(unittest.TestCase):
         self.assertGreater(min(self.got["gaps"]), 0.0015, f"least gap {min(self.got['gaps']) * 1e3:.2f} mm")
 
 
+@unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing steps the bag")
 class TestWithoutSelfContactTheLayersLieInEachOther(unittest.TestCase):
     """The same bag and gesture with the shell's self-contact off: the mouth still opens, its layers not held apart."""
 

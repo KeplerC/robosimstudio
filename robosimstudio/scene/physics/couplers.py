@@ -395,10 +395,13 @@ class SolverOneWay:
         n = int(contacts.soft_contact_count.numpy()[0])
         n = min(n, int(contacts.soft_contact_max))
         offset = int(contacts.rigid_contact_max)
-        corners = contacts.soft_contact_indices.numpy()[:n]
-        shape = contacts.soft_contact_shape.numpy()[:n]
-        force = self.observables.contact_f.numpy()[offset : offset + n, :3].astype(np.float64)
-        return np.asarray(corners).reshape(n, 3), np.asarray(shape), force
+        # Sliced on the device, then copied: the buffers hold soft_contact_max rows, a million under the
+        # scrub example's towel, and copied whole they took 1.7 ms a read against 0.13 ms for its 11,522
+        # live ones (``p8_cost.py``, GPU 1).
+        corners = contacts.soft_contact_indices[:n].numpy()
+        shape = contacts.soft_contact_shape[:n].numpy()
+        force = self.observables.contact_f[offset : offset + n].numpy()[:, :3].astype(np.float64)
+        return np.asarray(corners).reshape(n, 3), np.asarray(shape), force.reshape(n, 3)
 
     def solver(self, name: str):
         return {self.names[0]: self.rigid, self.names[1]: self.soft}[name]

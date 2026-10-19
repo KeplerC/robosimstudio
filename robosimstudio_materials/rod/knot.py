@@ -30,6 +30,7 @@ import numpy as np
 
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
+from robosimstudio.core.probes.clearance import segment_segment
 
 __all__ = ["crossings", "knot_length", "overhand", "self_clearance"]
 
@@ -108,31 +109,22 @@ def overhand(
     return np.stack([np.interp(s_new, arc, path[:, k]) for k in range(3)], axis=1)
 
 
-def _segment_distances(points: np.ndarray, skip: int) -> np.ndarray:
-    """Axis-to-axis distance between every pair of segments at least ``skip`` apart along the rod, ``[pairs]``."""
+def _segment_distances(points: np.ndarray, skip: int, *, closed: bool = False) -> np.ndarray:
+    """Axis-to-axis distance between every pair of segments at least ``skip`` apart along the rod, ``[pairs]``.
+
+    The clearance probe's closest points of two segments, a zero-length leg measured as the point it is.
+    ``closed``: ``points`` go once round a loop, its closing segment last, and two segments are as
+    far apart as the shorter way round.
+    """
     a0, a1 = points[:-1], points[1:]
-    n = len(a0)
-    i, j = np.triu_indices(n, k=max(1, int(skip)))
-    p, q = a0[i], a0[j]
-    d1, d2 = a1[i] - p, a1[j] - q
-    r = p - q
-    a = np.einsum("ij,ij->i", d1, d1)
-    e = np.einsum("ij,ij->i", d2, d2)
-    f = np.einsum("ij,ij->i", d2, r)
-    c = np.einsum("ij,ij->i", d1, r)
-    b = np.einsum("ij,ij->i", d1, d2)
-    denom = a * e - b * b
-    with np.errstate(divide="ignore", invalid="ignore"):
-        sc = np.where(denom > 1e-18, np.clip((b * f - c * e) / denom, 0.0, 1.0), 0.0)
-        tc = (b * sc + f) / np.where(e > 1e-18, e, 1.0)
-    # Clamp t, then recompute s for the clamped t (the standard closest-point-of-two-segments).
-    tc_clamped = np.clip(tc, 0.0, 1.0)
-    sc = np.where(tc != tc_clamped, np.clip((b * tc_clamped - c) / np.where(a > 1e-18, a, 1.0), 0.0, 1.0), sc)
-    closest = (p + sc[:, None] * d1) - (q + tc_clamped[:, None] * d2)
-    return np.linalg.norm(closest, axis=1)
+    i, j = np.triu_indices(len(a0), k=max(1, int(skip)))
+    if closed:
+        keep = len(a0) - (j - i) >= int(skip)
+        i, j = i[keep], j[keep]
+    return segment_segment(a0, a1, a0, a1)[i, j]
 
 
-def self_clearance(positions: np.ndarray, radius: float, *, skip: int | None = None) -> float:
+def self_clearance(positions: np.ndarray, radius: float, *, skip: int | None = None, closed: bool = False) -> float:
     """The closest two non-neighbouring segments come, axis to axis, less the rod's diameter [m].
 
     Positive is a gap between the two surfaces; zero is touching; negative is one
@@ -144,16 +136,24 @@ def self_clearance(positions: np.ndarray, radius: float, *, skip: int | None = N
         positions: ``[n, 3]`` nodes in order [m].
         radius: The rod's radius [m].
         skip: Segments this many apart or more are compared; ``None`` derives it.
+        closed: A loop (``RodSpec.closed``, a band): its closing segment is measured too, and
+            neighbours are counted the shorter way round, across the seam. A repeated first node
+            at the end (a band's seam particle) is the same loop.
     """
     points = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+    if closed:
+        if len(points) > 1 and np.array_equal(points[0], points[-1]):
+            points = points[:-1]
+        points = np.vstack([points, points[:1]])  # the closing segment last
     if len(points) < 4:
         return math.inf
     if skip is None:
         spacing = float(np.median(np.linalg.norm(np.diff(points, axis=0), axis=1)))
         skip = max(2, int(math.ceil(3.0 * radius / max(spacing, 1e-9))) + 1)
-    if len(points) - 1 <= skip:
+    pairs = _segment_distances(points, skip, closed=closed)
+    if not len(pairs):
         return math.inf
-    return float(_segment_distances(points, skip).min() - 2.0 * radius)
+    return float(pairs.min() - 2.0 * radius)
 
 
 def _crossing_pairs(points: np.ndarray) -> list[tuple[int, int]]:

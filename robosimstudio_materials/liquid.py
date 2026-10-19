@@ -65,6 +65,7 @@ edge went through the bench in seven pours.
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -207,8 +208,18 @@ def cup(
             trimesh.creation.box((ix, t, iz)).apply_translation((0.0, -0.5 * (iy + t), t + 0.5 * iz)),
             trimesh.creation.box((ix, t, iz)).apply_translation((0.0, 0.5 * (iy + t), t + 0.5 * iz)),
         ]
+        # Written beside the final name and renamed onto it, so a second
+        # process building the same cup reads the whole file or none of it.
         path.parent.mkdir(parents=True, exist_ok=True)
-        trimesh.util.concatenate(slabs).export(path)
+        fd, tmp = tempfile.mkstemp(prefix=f".{path.stem}.", suffix=".obj", dir=path.parent)
+        os.close(fd)
+        try:
+            os.chmod(tmp, 0o644)  # mkstemp's 0600 would keep the cache to its writer
+            trimesh.util.concatenate(slabs).export(tmp)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
     return body(
         name=name,
         asset=AssetSpec(path=str(path)),

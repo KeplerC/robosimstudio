@@ -80,6 +80,26 @@ class TestTheKnotMeasures(unittest.TestCase):
         b = np.stack([np.zeros(26), np.linspace(0.1, -0.1, 26), np.full(26, RADIUS + 0.015)], axis=1)
         self.assertAlmostEqual(0.015 - 2 * RADIUS, self_clearance(np.vstack([a, far, b]), RADIUS), delta=1e-6)
 
+    def test_a_zero_length_leg_is_measured_from_its_point(self) -> None:
+        """Two coincident nodes make a leg that is a point: 12 mm over the middle of a run, it is 12 mm from it."""
+        from robosimstudio_materials.rod.knot import _segment_distances
+
+        rope = np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.1, 0.012, 0.0], [0.05, 0.012, 0.0], [0.05, 0.012, 0.0]])
+        self.assertAlmostEqual(0.012, float(_segment_distances(rope, 3)[0]), places=12)  # the first leg and the point
+
+    def test_a_loop_is_measured_round_its_seam(self) -> None:
+        """A band's closing segment meets its first at node 0: neighbours there, not a strand through another."""
+        from robosimstudio_materials.rod.band import band
+        from robosimstudio_materials.rod.knot import self_clearance
+
+        spec = band(diameter=0.06, segments=32)
+        ring, cord = np.asarray(spec.nodes), spec.radius
+        seam = np.vstack([ring, ring[:1]])  # as a band's particles read, node 0 drawn twice
+        self.assertAlmostEqual(-2 * cord, self_clearance(seam, cord), places=12, msg="read open, its two ends touch")
+        across = 2 * 0.03 * math.sin(math.pi / 16) - 2 * cord  # three segments apart: two legs of chord between
+        for points in (seam, ring, np.roll(ring, 7, axis=0)):
+            self.assertAlmostEqual(across, self_clearance(points, cord, closed=True), places=12)
+
     def test_the_rope_in_the_knot_is_between_its_first_and_last_crossing(self) -> None:
         from robosimstudio_materials.rod.knot import knot_length
 
@@ -93,6 +113,25 @@ class TestTheKnotMeasures(unittest.TestCase):
 
         atom = get_atom("crossings")
         self.assertEqual(("crossings", "knot_length"), tuple(atom.returns))
+
+
+class TestTheRopesSelfContact(unittest.TestCase):
+    """What SuperDex is told: a declared ``sim`` first, as a bag and a cloth read it, else the spec's field."""
+
+    def test_a_declared_sim_turns_it_on_and_off_whatever_the_spec_says(self) -> None:
+        from robosimstudio.specs.physics import SimRequirements
+        from robosimstudio_materials.rod import RodSpec
+        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
+
+        for field in (True, False):
+            with self.subTest(spec=field):
+                rope = EntityRodSuperdex(RodSpec(name="rope", nodes=tuple(map(tuple, _knot())), self_contact=field))
+                self.assertIs(field, rope.host_actor().params["self_contact"])
+            for declared in (True, False):
+                with self.subTest(spec=field, declared=declared):
+                    sim = SimRequirements(domain="rod", self_contact=declared)
+                    spec = RodSpec(name="rope", nodes=tuple(map(tuple, _knot())), self_contact=field, sim=sim)
+                    self.assertIs(declared, EntityRodSuperdex(spec).host_actor().params["self_contact"])
 
 
 if __name__ == "__main__":

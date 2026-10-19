@@ -12,6 +12,7 @@ and the arrays their solvers read, is ``tests/test_material_sliders``.
 
 from __future__ import annotations
 
+import math
 import unittest
 from types import SimpleNamespace
 
@@ -20,8 +21,10 @@ import numpy as np
 from robosimstudio.core.tuning import Tunable
 from robosimstudio.scene.tuning import LiveMaterial, locate_cloth
 from robosimstudio.specs import ArrangementSpec, backend
+from robosimstudio.specs.params import iter_params
 from robosimstudio_materials.cloth import ClothMaterialSpec
 from robosimstudio_materials.paper import PaperMaterialSpec
+from robosimstudio_materials.tape import PAPER_LABEL, TapeMaterialSpec
 from tests.fixtures.viser_stubs import _StubGui
 
 TIER = "fast"
@@ -127,6 +130,35 @@ class TestTheContactTrio(unittest.TestCase):
         self.assertEqual(1, sheet.env.pipeline.invalidated)
 
 
+class TestAPresetIsOneTheSheetCanWear(unittest.TestCase):
+    """A tape's spec refuses a material with no adhesive: a towel preset adopted onto the label moved its
+    sliders, and the rebuild then raised in ``TapeSpec.__post_init__``."""
+
+    def test_each_sheet_is_offered_its_own_material_classs_presets(self) -> None:
+        from robosimstudio_materials.tape import PAPER_LABEL
+
+        panel, gui, _ = _page(_sheet("label", PAPER_LABEL), _sheet("towel", ClothMaterialSpec()))
+        preset = gui.find("Preset")
+        self.assertEqual(("(as built)", "paper_label"), preset.options)
+        gui.find("Cloth").fire("towel")
+        panel.drain()
+        self.assertIn("terry_towelling", preset.options)
+        for other in ("paper_label", "paper", "cardboard"):
+            self.assertNotIn(other, preset.options, "a towel shows a cloth's fields, not a label's or paper's")
+        for other in ("rice", "soft_foam", "nylon_bristle"):
+            self.assertNotIn(other, preset.options, "no sheet is made of that")
+        self.assertEqual("(as built)", preset.value)
+
+    def test_adopting_a_preset_of_another_class_is_refused(self) -> None:
+        from robosimstudio_materials.tape import PAPER_LABEL
+
+        panel, _, _ = _page(_sheet("label", PAPER_LABEL))
+        with self.assertRaisesRegex(ValueError, "TapeMaterialSpec"):
+            panel.tuner.adopt("terry_towelling")
+        panel.tuner.adopt("paper_label")
+        self.assertIs(PAPER_LABEL, panel.tuner.material)
+
+
 class TestWhatCannotMoveIsNotOffered(unittest.TestCase):
     def test_a_kind_whose_engine_copied_its_material_is_not_on_the_folder(self) -> None:
         panel, gui, _ = _page(_sheet("bag", ClothMaterialSpec(), offers=False))
@@ -138,6 +170,67 @@ class TestWhatCannotMoveIsNotOffered(unittest.TestCase):
         for name in ("core_shear_modulus", "core_lame_lambda", "core_damping"):
             self.assertTrue(_slider(gui, name).disabled, name)
         self.assertFalse(_slider(gui, "tri_ke").disabled)
+
+
+def _on_show(gui) -> dict[str, object]:
+    """The controls a browser shows, by field name: every widget no hidden folder holds."""
+
+    def shown(folder) -> bool:
+        while folder is not None:
+            if not folder.visible:
+                return False
+            folder = folder.parent
+        return True
+
+    return {label.split(" ")[0]: w for label, w in gui.widgets if shown(w.parent)}
+
+
+class TestEachSheetShowsItsOwnClasssFields(unittest.TestCase):
+    """The folder built one set of sliders from the first sheet's material class and re-pointed it at the next.
+
+    With the label first, the towel showed ``tack`` and ``break_opening``, and moving ``tack`` raised a
+    ``TypeError`` out of the drain, ``replace(ClothMaterialSpec, tack=...)``; with the towel first, the
+    label showed no adhesive at all.
+    """
+
+    def _fields(self, spec) -> set[str]:
+        return {f.name for f, _ in iter_params(spec)}
+
+    def _check(self, gui, spec) -> None:
+        every = self._fields(TapeMaterialSpec)
+        self.assertEqual(self._fields(spec), every & set(_on_show(gui)), type(spec).__name__)
+
+    def test_a_towel_after_a_label(self) -> None:
+        label, towel = PAPER_LABEL, ClothMaterialSpec()
+        panel, gui, _ = _page(_sheet("label", label), _sheet("towel", towel))
+        self._check(gui, label)
+        gui.find("Cloth").fire("towel")
+        panel.drain()
+        self._check(gui, towel)
+        _on_show(gui)["tri_ke"].fire(3.0)  # a log slider: 1000
+        panel.drain()
+        self.assertAlmostEqual(1000.0, panel.tuner.working["towel"].tri_ke, places=6)
+        self.assertEqual(label.tri_ke, panel.tuner.working["label"].tri_ke, "the label is not the sheet picked")
+
+    def test_a_label_after_a_towel(self) -> None:
+        label, towel = PAPER_LABEL, ClothMaterialSpec()
+        panel, gui, _ = _page(_sheet("towel", towel), _sheet("label", label))
+        self._check(gui, towel)
+        gui.find("Cloth").fire("label")
+        panel.drain()
+        self._check(gui, label)
+        self.assertAlmostEqual(math.log10(label.tack), _on_show(gui)["tack"].value, msg="at the label's own tack")
+        _on_show(gui)["tack"].fire(7.0)
+        panel.drain()
+        self.assertAlmostEqual(1.0e7, panel.tuner.working["label"].tack, delta=1.0)
+        self.assertIs(towel, panel.tuner.working["towel"], "the towel is not the sheet picked")
+        gui.find("Cloth").fire("towel")
+        panel.drain()
+        self._check(gui, towel)
+        _on_show(gui)["tri_ke"].fire(3.0)
+        panel.drain()
+        self.assertAlmostEqual(1000.0, panel.tuner.working["towel"].tri_ke, places=6)
+        self.assertAlmostEqual(1.0e7, panel.tuner.working["label"].tack, delta=1.0, msg="and the label kept its edit")
 
 
 if __name__ == "__main__":

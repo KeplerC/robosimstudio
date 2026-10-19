@@ -60,12 +60,28 @@ class TestTheBandConstructor(unittest.TestCase):
         np.testing.assert_allclose(nodes[:, 2], RUBBER.cord_radius, atol=1e-12)
         self.assertEqual(RUBBER.cord_radius, spec.radius)
 
+    def test_a_flat_band_is_lifted_by_the_radius_it_is_given(self) -> None:
+        """A ``radius`` passed through is the rod's, so it is the lift too: the cord lies on the bench."""
+        from robosimstudio_materials.rod.band import RUBBER, band
+
+        spec = band(diameter=0.06, radius=0.004)
+        self.assertNotEqual(RUBBER.cord_radius, spec.radius)
+        np.testing.assert_allclose(np.asarray(spec.nodes)[:, 2], spec.radius, atol=1e-12)
+
     def test_a_standing_band_stands_in_the_plane_normal_to_its_axis(self) -> None:
         from robosimstudio_materials.rod.band import band
 
         nodes = np.asarray(band(diameter=0.08, at=(0.0, 0.0, 0.2), normal=(1.0, 0.0, 0.0)).nodes)
         np.testing.assert_allclose(nodes[:, 0], 0.0, atol=1e-12)
         np.testing.assert_allclose(np.linalg.norm(nodes[:, 1:] - (0.0, 0.2), axis=1), 0.04, atol=1e-12)
+
+    def test_the_loop_it_sets_is_refused_by_name(self) -> None:
+        """``nodes`` and ``closed`` are the band's own: passed, they are named, not a duplicate keyword."""
+        from robosimstudio_materials.rod.band import band
+
+        for key, value in (("nodes", ((0.0, 0.0, 0.0), (0.1, 0.0, 0.0), (0.0, 0.1, 0.0))), ("closed", True)):
+            with self.subTest(stated=key), self.assertRaisesRegex(TypeError, f"band 'loop'.* no {key};"):
+                band(name="loop", **{key: value})
 
     def test_the_material_reaches_the_spec_the_way_the_rod_reads_it(self) -> None:
         """The rod reads friction as sqrt(mu_cable), so the band passes the square."""
@@ -125,6 +141,57 @@ class TestTheLoopMeasures(unittest.TestCase):
         self.assertFalse(encircles(hung, *peg, 0.03), "in front of the tip of a 30 mm peg, round only its line")
         self.assertTrue(encircles(hung, *peg), "with no length, the line is enough")
         self.assertFalse(encircles(hung + np.array([0.0, 0.2, 0.0]), *peg, 0.08), "beside the peg")
+
+    def test_on_a_post_is_counted_by_height_along_it_not_by_how_near_the_loop_lies(self) -> None:
+        """A band dropped slack over a post is on it however wide it is; held over its top or slid off, it is not."""
+        from robosimstudio_materials.rod.band import _encircles_rod, encircles, loop_winding
+
+        slack = _circle(32, 0.03, (0.1, 0.0, 0.002))  # a 60 mm band flat on the bench round a 12 mm post
+        post = ((0.1, 0.0, 0.0), (0.0, 0.0, 1.0))
+        self.assertTrue(encircles(slack, *post, 0.06), "lying round a 60 mm post, touching nothing")
+        feature = {"axis": [[0.1, 0.0, 0.0], [0.1, 0.0, 0.06]], "radius": 0.006}
+        self.assertTrue(_encircles_rod(slack, feature)["encircles"])
+        self.assertFalse(encircles(slack + np.array([0.0, 0.0, 0.07]), *post, 0.06), "held 10 mm over its top")
+        self.assertFalse(encircles(slack + np.array([0.08, 0.0, 0.0]), *post, 0.06), "beside it")
+        tipped = slack.copy()
+        tipped[:, 2] = 0.5 * (slack[:, 0] - 0.1) + 0.06  # tipped 27 degrees about y, its middle at the post's top
+        self.assertAlmostEqual(1.0, abs(loop_winding(tipped, *post)), places=6)
+        down, up = np.array([0.0, 0.0, -0.01]), np.array([0.0, 0.0, 0.01])
+        self.assertTrue(encircles(tipped + down, *post, 0.06), "270 degrees of its turn below the top")
+        self.assertFalse(encircles(tipped + up, *post, 0.06), "90 degrees below it")
+
+    def test_an_x_y_origin_names_a_vertical_line_and_no_other(self) -> None:
+        """Along any other direction a 2-D origin is refused, the same way by both measures and the axis feature."""
+        from robosimstudio_materials.rod.band import _encircles_axis, encircles, loop_winding
+
+        standing = _circle(32, 0.03)[:, [2, 0, 1]] + np.array([0.0, 0.0, 0.2])  # round the x axis at 200 mm
+        self.assertAlmostEqual(1.0, abs(loop_winding(standing, (0.0, 0.0, 0.2), (1.0, 0.0, 0.0))), places=9)
+        self.assertAlmostEqual(1.0, abs(loop_winding(_circle(32), (0.0, 0.0), (0.0, 0.0, -1.0))), places=9)
+        for direction in ((1.0, 0.0, 0.0), (0.0, 0.6, 0.8)):
+            with self.subTest(direction=direction):
+                with self.assertRaisesRegex(ValueError, "vertical"):
+                    loop_winding(standing, (0.0, 0.0), direction)
+                with self.assertRaisesRegex(ValueError, "vertical"):
+                    encircles(standing, (0.0, 0.0), direction)
+                with self.assertRaisesRegex(ValueError, "vertical"):
+                    _encircles_axis(standing, {"origin": (0.0, 0.0), "direction": direction})
+        with self.assertRaisesRegex(ValueError, "origin"):
+            loop_winding(standing, (0.0,))
+
+    def test_x_y_names_a_vertical_line_but_a_peg_with_a_length_needs_its_root_height(self) -> None:
+        """Round the peg or beside it, a 2-D origin with a length is refused the same way, the axis feature too."""
+        from robosimstudio_materials.rod.band import _encircles_axis, encircles
+
+        loop = _circle(32, 0.015, (0.1, 0.0, 0.02))  # snug on the peg, within the default reach
+        self.assertTrue(encircles(loop, (0.1, 0.0), (0.0, 0.0, 1.0)), "(x, y) names a vertical line")
+        self.assertTrue(_encircles_axis(loop, {"origin": (0.1, 0.0)})["encircles"])
+        self.assertTrue(encircles(loop, (0.1, 0.0, 0.0), (0.0, 0.0, 1.0), 0.05), "a 50 mm peg rooted at z = 0")
+        for shift in ((0.0, 0.0, 0.0), (0.3, 0.0, 0.0)):
+            with self.subTest(shift=shift):
+                with self.assertRaisesRegex(ValueError, "height"):
+                    encircles(loop + shift, (0.1, 0.0), (0.0, 0.0, 1.0), 0.05)
+                with self.assertRaisesRegex(ValueError, "height"):
+                    _encircles_axis(loop + shift, {"origin": (0.1, 0.0), "length": 0.05})
 
     def test_a_peg_declared_as_a_rod_feature_is_held_to_its_two_ends(self) -> None:
         """The goal's form: a ``rod`` feature's two ends in world, as the task's posts declare them."""
