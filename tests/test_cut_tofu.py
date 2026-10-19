@@ -6,9 +6,10 @@ arm panel through :mod:`tests.fixtures.grasp` -- the cursor the gizmo writes, th
 button writes -- and reads what the page's **Tofu** folder reads. The right hand is put down on the
 knife's handle, closes, lifts the knife 70 mm out of its rest, carries it over the tofu and pushes it
 down in 4 mm steps until the edge meets the board. Nothing pins the knife to the hand: the pads
-squeeze its handle. Two controls ride on the same drive: over the tofu, and stopped 15 mm over the
-board, the tofu is still one piece. A second drive does the same with **Dull blade** ticked, a blade
-a thousand times duller: the arm stalls on the tofu and it does not part.
+squeeze its handle. Two controls ride on the same drive: over the tofu, and held 15 mm higher on the
+way down, the tofu is still one piece. A second drive does the same with **Dull blade** ticked, a
+blade a thousand times duller: the arm stalls with the edge a few millimetres into the tofu, read
+off the knife's pose, and it does not part.
 """
 
 from __future__ import annotations
@@ -38,11 +39,17 @@ LIFT = 0.07
 """How far the hand lifts the knife out of its rest [m]: the edge clears the 52 mm tofu top by 18 mm."""
 
 
-def cut(session, tofu, knife, *, stop_over: float = 0.0) -> dict:
-    """Down onto the handle, **Close**, up, across, then down in 4 mm steps to ``stop_over`` above the board.
+def cut(session, tofu, knife, *, pause_over: float | None = None) -> dict:
+    """Down onto the handle, **Close**, up, across, then down in 4 mm steps until the edge meets the board.
 
-    ``slip`` is how far the knife has moved from where it sat in the hand when the pads closed [m].
+    With ``pause_over`` the hand holds that much higher on the way down for 100 steps, and what the tofu
+    reads there is ``out["stopped"]``. ``pushes`` is the push on the edge every control step from the
+    first step down, what the page's readout shows [N]; ``push_held`` its mean over the 100 steps held
+    at the bottom. ``slip`` is how far the knife has moved from where it sat in the hand when the pads
+    closed [m], and ``tilt`` how far its edge leans from level [deg].
     """
+    from robosimstudio_materials.cutting.entity import knife_edge
+
     arm = session.arms["right"]
 
     def hand() -> np.ndarray:
@@ -50,6 +57,9 @@ def cut(session, tofu, knife, *, stop_over: float = 0.0) -> dict:
 
     def where() -> np.ndarray:
         return np.asarray(knife.position, dtype=np.float64)
+
+    def readings() -> dict:
+        return {"pieces": tofu.pieces(), "fraction": tofu.cut_fraction(), "edge_depth": tofu.edge_depth()}
 
     handle = where()
     out: dict = {"home_to_handle": float(np.linalg.norm(arm.ik.home_pose[0][:2] - handle[:2]))}
@@ -62,22 +72,27 @@ def cut(session, tofu, knife, *, stop_over: float = 0.0) -> dict:
     go(session, "right", up, speed=0.04)
     over = np.array([up[0], WORK[1] + TOFU_Y, up[2]])
     go(session, "right", over, speed=0.05)
-    out["over"] = {"pieces": tofu.pieces(), "fraction": tofu.cut_fraction()}
-    cursor, pushes = over.copy(), []
-    bottom = WORK[2] + BOARD_TOP + EDGE - 0.005 + stop_over
+    out["over"] = readings()
+    pushes: list[float] = []
+    session.each_step(lambda: pushes.append(tofu.push))
+    cursor, bottom = over.copy(), WORK[2] + BOARD_TOP + EDGE - 0.005
     t, steps = time.perf_counter(), session.env.step_count
     for z in np.arange(over[2], bottom - 1.0e-9, -0.004):
         cursor[2] = z
         go(session, "right", cursor.copy(), speed=0.02, steps=20)
-        pushes.append(tofu.push)
+        if pause_over is not None and "stopped" not in out and z - 0.004 < bottom + pause_over - 1.0e-9:
+            go(session, "right", cursor.copy(), steps=100)
+            out["stopped"] = readings()
     go(session, "right", cursor.copy(), steps=100)
     out["drive_ms"] = 1e3 * (time.perf_counter() - t) / max(session.env.step_count - steps, 1)
+    e0, e1, _ = knife_edge(tofu.spec.knife, session.env.state.body_q.numpy()[tofu.knife_body])
     out.update(
-        pieces=tofu.pieces(),
-        fraction=tofu.cut_fraction(),
+        readings(),
         depth=tofu.cut_depth(),
-        pushes=pushes,
-        edge=float(where()[2] - WORK[2] - EDGE),
+        cuts=tofu.cuts(),
+        pushes=list(pushes),
+        push_held=float(np.mean(pushes[-100:])),
+        tilt=float(np.degrees(np.arcsin(abs(e1[2] - e0[2]) / np.linalg.norm(e1 - e0)))),
         slip=float(np.linalg.norm(where() - hand() - offset)),
         finite=bool(session.env.state_is_finite()),
     )
@@ -85,7 +100,7 @@ def cut(session, tofu, knife, *, stop_over: float = 0.0) -> dict:
 
 
 def _drive(port: int, *, dull: bool) -> dict:
-    """Build the example, drive its page through the cut, stopping 15 mm over the board on the way."""
+    """Build the example and drive its page through the cut, holding 15 mm over the board on the way down."""
     sim, kwargs = _run("20_cutting/00_cut_tofu.py")
     tofu, knife = sim["tofu"].entity, sim["knife"]
     session = open_session(sim, port, kwargs.get("page"))
@@ -93,22 +108,7 @@ def _drive(port: int, *, dull: bool) -> dict:
         if dull:
             tofu.set_sharpness(0.001)  # what the page's Dull blade box writes
         tick(session, 30)
-        got = cut(session, tofu, knife, stop_over=0.015)
-        got["stopped"] = {"pieces": got["pieces"], "fraction": got["fraction"], "edge": got["edge"]}
-        if not dull:
-            arm = session.arms["right"]
-            cursor = np.array(arm.cursor_pos, dtype=np.float64)
-            for z in np.arange(cursor[2] - 0.004, WORK[2] + BOARD_TOP + EDGE - 0.005 - 1.0e-9, -0.004):
-                cursor[2] = z
-                go(session, "right", cursor.copy(), speed=0.02, steps=20)
-            go(session, "right", cursor.copy(), steps=100)
-            got.update(
-                pieces=tofu.pieces(),
-                fraction=tofu.cut_fraction(),
-                edge=float(np.asarray(knife.position)[2] - WORK[2] - EDGE),
-                cuts=tofu.cuts(),
-                finite=bool(sim.state_is_finite()),
-            )
+        got = cut(session, tofu, knife, pause_over=0.015)
         got["tick_ms"] = tofu.timing.get("total_ms", 0.0)
     finally:
         session.teardown()
@@ -136,12 +136,12 @@ class TestTheHandCutsTheTofu(unittest.TestCase):
 
     def test_stopped_short_of_the_board_the_tofu_is_still_one_piece(self) -> None:
         stopped = self.got["stopped"]
-        self.assertEqual(1, stopped["pieces"], f"edge {stopped['edge'] * 1e3:.1f} mm over the bench")
+        self.assertEqual(1, stopped["pieces"], f"edge {stopped['edge_depth'] * 1e3:.1f} mm into the tofu")
         self.assertGreater(stopped["fraction"], 0.5, "the cut ran part way")
         self.assertLess(stopped["fraction"], 1.0)
 
     def test_down_to_the_board_the_tofu_parts_in_two(self) -> None:
-        self.assertEqual(2, self.got["pieces"], f"edge {self.got['edge'] * 1e3:.1f} mm over the bench")
+        self.assertEqual(2, self.got["pieces"], f"edge {self.got['edge_depth'] * 1e3:.1f} mm into the tofu")
         self.assertEqual(1.0, self.got["fraction"])
         self.assertEqual(1, self.got["cuts"])
         self.assertTrue(self.got["finite"])
@@ -167,9 +167,13 @@ class TestADullBladeDoesNotPartIt(unittest.TestCase):
         self.assertEqual(0.0, self.got["fraction"])
 
     def test_the_tofu_pushes_the_knife_back_short_of_the_board(self) -> None:
-        # The threshold, 3000 N/m over the edge, is far past what the pads and the arm push.
-        self.assertGreater(max(self.got["pushes"]), 5.0, f"pushes {np.round(self.got['pushes'], 2)}")
-        self.assertGreater(self.got["edge"], BOARD_TOP + 0.01, f"edge {self.got['edge'] * 1e3:.1f} mm over the bench")
+        # The threshold, 3000 N/m over the edge, is far past what the pads and the arm push: the edge
+        # stops 6-7 mm into the 40 mm block, the knife tipped 13-16 degrees in the pads.
+        got = self.got
+        self.assertGreater(max(got["pushes"]), 5.0, f"pushes peak {max(got['pushes']):.2f} N")
+        depth = f"edge {got['edge_depth'] * 1e3:.1f} mm into the tofu, tilted {got['tilt']:.1f} deg"
+        self.assertGreater(got["edge_depth"], 0.002, depth)
+        self.assertLess(got["edge_depth"], 0.010, depth)
 
 
 if __name__ == "__main__":

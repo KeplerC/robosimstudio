@@ -25,9 +25,11 @@ The tofu is a cage on the vendored walk-on-spheres cutter, its base held by the 
 in the blade's plane, runs where the edge pushes past the blade's threshold (0.18 N across 60 mm of
 tofu), and the knife feels that push. In three drives through the arm panel (`tests/test_cut_tofu`)
 the tofu read 2 `pieces` with the edge on the board, and 1 piece, cut 88% through, with the hand
-stopped 15 mm higher. Tick **Dull blade**, a blade a thousand times duller: the push climbs to 10.7 N,
-the arm stalls with the edge 12 mm into the tofu and it stays whole. 13 ms a control step cutting
-through the page, 9 ms idle (RTX PRO 6000).
+stopped 15 mm higher. Tick **Dull blade**, a blade a thousand times duller, and push the same way: the
+push swings from step to step, up to 17-20 N on the way down and 9-16 N with the hand held low; the
+knife tips 13-16 degrees in the pads and the arm stalls with the edge's lowest point 6-7 mm into the
+tofu, which stays whole (the test's drive and one without its pause, twice each). 13 ms a control
+step cutting through the page, 9 ms idle (RTX PRO 6000).
 
 ```bash
 uv run examples/20_cutting/00_cut_tofu.py

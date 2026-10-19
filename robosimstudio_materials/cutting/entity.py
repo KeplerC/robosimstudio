@@ -130,6 +130,7 @@ class EntityCuttable(Entity):
         self._t_contact = 0.0
         self._fraction = 0.0
         self._depth = 0.0
+        self._edge_depth = 0.0
         self._cuts = 0
         self._feed: Any = None
         self._wrench: Any = None
@@ -205,7 +206,7 @@ class EntityCuttable(Entity):
 
         self.body = make_body(self.spec, self.block, dt=self._dt)
         self._plane = None
-        self._fraction = self._depth = self.push = 0.0
+        self._fraction = self._depth = self._edge_depth = self.push = 0.0
         self._cuts = 0
         self._armed = True
         self._pieces_version = -1
@@ -220,7 +221,7 @@ class EntityCuttable(Entity):
             return
         self.body.reset()
         self._plane = None
-        self._fraction = self._depth = self.push = 0.0
+        self._fraction = self._depth = self._edge_depth = self.push = 0.0
         self._cuts = 0
         self._armed = True
         self._pieces_version = -1
@@ -257,9 +258,10 @@ class EntityCuttable(Entity):
         e0, e1 = frame.to_block(e0_world), frame.to_block(e1_world)
         edgeward = frame.vector_to_block(edgeward_world)
         contact = edge_contact(e0, e1, size)
-        self.push = 0.0
+        self.push = self._edge_depth = 0.0
         if contact.length <= 0.0 or not len(contact.points):
             return None, None, None
+        self._edge_depth = max(float(size[2]) - float(contact.points[:, 2].min()), 0.0)
         cutter = body.cutter
         if self._plane is not None and cutter.active:
             p1, _, _, normal = self._plane
@@ -449,6 +451,14 @@ class EntityCuttable(Entity):
     def cut_depth(self) -> float:
         """How far the last cut's front has run from where the edge met the block [m]."""
         return float(self._depth)
+
+    def edge_depth(self) -> float:
+        """How far the edge's lowest point over the block is under its top, at the last step [m].
+
+        Read off the knife's pose, so it counts a knife tipped in the hand; 0 with the edge above the
+        block or off its footprint.
+        """
+        return float(self._edge_depth)
 
     def cuts(self) -> int:
         """How many cuts have gone right through."""

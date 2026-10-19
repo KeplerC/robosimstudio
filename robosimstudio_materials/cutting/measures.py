@@ -44,8 +44,8 @@ register_atom(
         calibration=AtomCalibration(
             positives=("examples/20_cutting/00_cut_tofu, the knife taken and pushed down through the tofu: 2.",),
             negatives=(
-                "The same drive with the knife stopped 10 mm over the board: 1. A blade a thousand times duller "
-                "pushed the same way: 1.",
+                "The same drive with the hand held 15 mm higher, the edge 2.1 mm over the board: 1. A blade a "
+                "thousand times duller pushed the same way: 1.",
             ),
             gate=None,
             bench=_BENCH,
