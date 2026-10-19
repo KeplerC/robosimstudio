@@ -146,6 +146,28 @@ class TestTheExamplesRun(unittest.TestCase):
         self.assertEqual("vbd", physics.backend_for("soft").solver)
 
 
+WATER = dedent(
+    """
+    import json, runpy, sys
+    import robosimstudio as rss
+
+    opened = []
+    rss.view = lambda sim, **kwargs: opened.append(sim)
+    runpy.run_path(sys.argv[1], run_name="__main__")
+    (sim,) = opened
+    physics = sim.request.physics
+    sim.run(20).sync()
+    print(json.dumps({
+        "water": physics.backend_for("water").solver,
+        "rigid": physics.backend_for("rigid").solver,
+        "particles": len(sim["water"].particles),
+        "finite": bool(sim.state_is_finite()),
+    }))
+    """
+).strip()
+"""The water example run by path in a process of its own, as :data:`ALONE` runs one with a kind left out."""
+
+
 class TestTheMultiEngineDemos(unittest.TestCase):
     """The scripts that are the whole multi-engine claim, and were in no test.
 
@@ -194,17 +216,28 @@ class TestTheMultiEngineDemos(unittest.TestCase):
         """The water's scene: it builds, it steps, the water is Genesis's and the cup the arm's island's.
 
         Skips where Genesis is absent, which is the checkout's own environment: the
-        extra lives in a virtual environment of its own (``examples/21_water``)."""
+        extra lives in a virtual environment of its own (``examples/21_water``). In a
+        process of its own, because Genesis is initialised once per process: built
+        here, the water's float32 was what ``tests/test_genesis``, after this module in
+        a tier run, weighed its cloth at, where its IPC harvest asks for float64."""
         import importlib.util
 
         if importlib.util.find_spec("genesis") is None:
             self.skipTest("[genesis] is not installed here; it lives in a virtual environment of its own")
-        sim, _ = _run("21_water/00_pour_water.py")
-        self.assertEqual("genesis", sim.request.physics.backend_for("water").solver)
-        self.assertEqual("mujoco", sim.request.physics.backend_for("rigid").solver)
-        self.assertEqual(1728, len(sim["water"].particles))
-        sim.run(20).sync()
-        self.assertTrue(sim.state_is_finite(), "examples/21_water/00_pour_water.py diverged in twenty steps")
+        proc = subprocess.run(
+            [sys.executable, "-c", WATER, str(EXAMPLES / "21_water/00_pour_water.py")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=900,
+            check=False,
+        )
+        self.assertEqual(0, proc.returncode, proc.stderr[-3000:])
+        got = json.loads([line for line in proc.stdout.splitlines() if line.startswith("{")][-1])
+        self.assertEqual("genesis", got["water"])
+        self.assertEqual("mujoco", got["rigid"])
+        self.assertEqual(1728, got["particles"])
+        self.assertTrue(got["finite"], "examples/21_water/00_pour_water.py diverged in twenty steps")
 
     def test_each_demo_stages_its_engine_for_the_domain_it_is_about(self) -> None:
         """Static, so it holds whichever wheels are present: the arrangement is data."""
