@@ -273,8 +273,8 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
 
 class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
     """``gs.init`` runs once a process: an IPC island refused after it still set float64 for every later island, and a
-    water island built next ran 8x slower than it asked (``g1_order.py``). Each refusal the model and the recipe can
-    make comes first; the mass check alone reads Genesis's own entity, and so follows the build."""
+    water island built next stepped at 64 where it asked for 32, warned 8x slower (``g1_order.py``). Each refusal the
+    model and the recipe can make comes first; the mass check alone reads Genesis's own entity, and follows the build."""
 
     BENCH = (0.3, 0.65, 0.375), (0.6, 0.0, 0.375, 0.0, 0.0, 0.0, 1.0)
     """bench_075's top as a world-fixed box: half extents, and its pose, its top face at 0.75 m."""
