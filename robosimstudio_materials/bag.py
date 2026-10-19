@@ -16,7 +16,7 @@ import newton
 import numpy as np
 import warp as wp
 
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
 from robosimstudio.assetlib.sim import contacts_with
@@ -369,16 +369,6 @@ def bag(
     return BagSpec(name=name, size=size, cells=cells, pose=at, **extra, **kwargs)
 
 
-@dataclass(frozen=True)
-class _Spec:
-    """A build factory returning one spec, as a value, so two declarations of one type compare equal."""
-
-    spec: Any
-
-    def __call__(self) -> Any:
-        return self.spec
-
-
 class Bag:
     """A bag as a task document's type: ``register_asset(Bag.from_spec(rss.bag(...), name="canvas_bag"))``."""
 
@@ -401,7 +391,7 @@ class Bag:
                 contacts=contacts_with("surface", "fixtures", "objects", "hands"),
                 self_contact=bool(spec.self_contact),
             ),
-            build=_Spec(spec),
+            build=SpecFactory(spec),
         )
 
 
