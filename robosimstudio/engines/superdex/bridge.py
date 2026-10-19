@@ -138,6 +138,20 @@ def _root_reader(actor):
     return read
 
 
+def _named(enum: Any, name: str, option: str) -> Any:
+    """The member of one of the engine's enums that ``name`` spells, in any case.
+
+    An unknown name is refused with the names there are, not a bare
+    ``AttributeError`` from deep inside the build. ``COUNT`` is the enum's own
+    sentinel, not an option.
+    """
+    members = {key: value for key, value in enum.__members__.items() if key != "COUNT"}
+    member = members.get(str(name).upper())
+    if member is None:
+        raise ValueError(f"superdex {option} {name!r} is not one of {', '.join(k.lower() for k in members)}")
+    return member
+
+
 def _contact_params(physics, params: dict, *, penalty: float, friction: float, padding: float) -> Any:
     """One actor's SuperDex ``ContactParams`` from its host params.
 
@@ -461,12 +475,12 @@ class SuperdexBridge:
             return
         params = scene.get_solver_params()
         if integration is not None:
-            params.integration_method = getattr(self.physics.IntegrationMethod, str(integration).upper())
+            params.integration_method = _named(self.physics.IntegrationMethod, integration, "integration")
         if linear is not None:
-            params.linear_solver.solver_type = getattr(self.physics.LinearSolverType, str(linear).upper())
+            params.linear_solver.solver_type = _named(self.physics.LinearSolverType, linear, "linear_solver")
         if preconditioner is not None:
-            params.linear_solver.preconditioner_type = getattr(
-                self.physics.PreconditionerType, str(preconditioner).upper()
+            params.linear_solver.preconditioner_type = _named(
+                self.physics.PreconditionerType, preconditioner, "preconditioner"
             )
         if iterations is not None:
             params.non_linear_solver.max_iter = int(iterations)
