@@ -57,7 +57,7 @@ from typing import Any, ClassVar
 import newton
 import numpy as np
 
-from robosimstudio.assetlib.record import AssetRecord
+from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
 from robosimstudio.assetlib.vocabulary.regions import region_bounds
@@ -388,16 +388,6 @@ TOUCHES = ("surface", "fixtures", "objects")
 and a mirror of each finger mesh would be a signed-distance field the water never meets."""
 
 
-@dataclass(frozen=True)
-class _Spec:
-    """A build factory returning one spec, as a value, so two declarations of one type compare equal."""
-
-    spec: Any
-
-    def __call__(self) -> Any:
-        return self.spec
-
-
 class Water:
     """Water as a task document's type: ``register_asset(Water.from_spec(rss.water(...), name="cup_of_water"))``."""
 
@@ -414,7 +404,7 @@ class Water:
             summary=summary or f"water, {spec.particle_count} particles, {1e3 * spec.mass:.0f} g",
             tags=("water",),
             sim=SimRequirements(domain="water", contacts=contacts_with(*TOUCHES)),
-            build=_Spec(spec),
+            build=SpecFactory(spec),
         )
 
 
