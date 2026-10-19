@@ -18,7 +18,7 @@ from robosimstudio.assetlib.semantics.features import FeatureSpec
 from robosimstudio.specs import ObjectSpec
 from robosimstudio.specs.asset import ShapeSpec
 from robosimstudio.specs.base import Quat, Vec3
-from robosimstudio.specs.params import LIVE, REBUILD, ui
+from robosimstudio.specs.params import REBUILD, ui
 
 __all__ = [
     "CAKE",
@@ -45,7 +45,9 @@ class CuttableMaterialSpec:
         toughness: The push per metre of edge a sharp blade needs before the block parts [N/m],
             the material's cutting toughness (a wire-cutting ``G_c`` is this number in J/m^2).
             The knife's :attr:`KnifeSpec.sharpness` divides it: the blade's threshold is
-            ``toughness / sharpness`` per metre of edge in the block.
+            ``toughness / sharpness`` per metre of edge in the block. REBUILD: the block offers no
+            tunable, so a new toughness comes with a new spec; the knife's sharpness is the live
+            knob (``EntityCuttable.set_sharpness``).
         color: Display RGB, the block's skin and its cut faces alike.
     """
 
@@ -59,7 +61,7 @@ class CuttableMaterialSpec:
     toughness: float = field(
         default=3.0,
         metadata=ui(
-            tier=LIVE,
+            tier=REBUILD,
             unit="N/m",
             log=True,
             range=(0.1, 1.0e4),

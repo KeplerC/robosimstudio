@@ -129,6 +129,23 @@ class TestTheKnifeAndTheBlockAsBuilt(unittest.TestCase):
         self.assertNotIn(int(newton.JointType.FREE), [int(t) for t in builder.joint_type])
         self.assertEqual(2, sum(int(b) == knife.body for b in builder.shape_body), "the handle and the blade")
 
+    def test_every_live_field_of_the_block_has_a_writer(self) -> None:
+        """A LIVE field promises a write lands on the next step, which needs a tunable to carry it."""
+        from dataclasses import fields
+
+        import robosimstudio as rss
+        from robosimstudio.specs.params import LIVE, param_ui
+        from robosimstudio_materials.cutting.entity import EntityCuttable
+        from robosimstudio_materials.cutting.spec import CuttableMaterialSpec
+
+        tiers = {
+            f.name: getattr(param_ui(CuttableMaterialSpec, f.name), "tier", "") for f in fields(CuttableMaterialSpec)
+        }
+        live = {name for name, tier in tiers.items() if tier == LIVE}
+        block = EntityCuttable(rss.cuttable(name="tofu", knife=rss.knife(name="knife")))
+        offered = {f.name for t in block.tunables() for f in fields(t.spec)}
+        self.assertEqual(set(), live - offered, "LIVE on the spec, and nothing on the block writes it")
+
 
 if __name__ == "__main__":
     unittest.main()
