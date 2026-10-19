@@ -1994,6 +1994,55 @@ ROBOT_CONTACT = (
     ),
 )
 
+# The cutting kind: the right hand takes the knife off its rest by its handle, by contact, and pushes
+# it down through the tofu until the edge meets the board, the drive tests/test_cut_tofu runs through
+# the same arm panel.
+KNIFE_HANDLE = 0.04
+"""The knife's handle middle over the bench, standing on its edge in the rest [m]."""
+KNIFE_EDGE = 0.04
+"""How far the edge is under the handle's middle [m]."""
+BOARD_TOP = 0.012
+"""The cutting board's top over the bench [m]."""
+
+
+def _parted(film) -> tuple[bool, str]:
+    """``00_cut_tofu``'s readouts: the tofu's pieces and how far the cut ran."""
+    tofu = film.sim["tofu"].entity
+    pieces, fraction = tofu.pieces(), tofu.cut_fraction()
+    return pieces == 2, f"the tofu is in {pieces} pieces, the cut {100.0 * fraction:.0f}% through (the test asks 2)"
+
+
+ROBOT_CUTTING = (
+    Take(
+        "examples/20_cutting/00_cut_tofu.py",
+        # From the front-right, 0.95 m off: the knife rest, the board and the hand in one frame.
+        camera=Orbit(Bench(0.03, -0.22, 0.04), distance=0.95, azimuth=48.0, elevation=30.0, fov=37.0),
+        warmup=0.5,
+        layout=Layout(collapse=("Simulation", "Arm: left"), expand=("Tofu",)),
+        budget=1_200_000,
+        beats=(
+            Wait(seconds=0.4, label="a knife standing in its rest under the right hand, a block of tofu on a board"),
+            Drag("right", "z", to=Bench(z=KNIFE_HANDLE), seconds=1.2, label="drag the hand down onto the handle"),
+            Wait(seconds=0.3),
+            Press(text="Close", within=RIGHT, label="Close: the pads squeeze the handle"),
+            Wait(seconds=0.8, mark="closed"),
+            Drag(
+                "right", "z", to=Bench(z=KNIFE_HANDLE + 0.07), seconds=1.2, label="up 70 mm: the blade leaves its rest"
+            ),
+            Drag("right", "y", to=Bench(y=-0.16), seconds=1.5, label="across to the tofu"),
+            Drag(
+                "right",
+                "z",
+                to=Bench(z=BOARD_TOP + KNIFE_EDGE - 0.005),
+                seconds=3.0,
+                label="down through the tofu until the edge meets the board",
+            ),
+            Wait(seconds=1.6, mark="cut", label="the edge is on the board: the tofu is in two pieces"),
+        ),
+        expect=(Check(_parted, needs=("tofu",)), Held("knife", since="closed", at="cut", tolerance=0.005)),
+    ),
+)
+
 TAKES: tuple[Take, ...] = (
     *FINAL,
     *DRAFTS,
@@ -2003,6 +2052,7 @@ TAKES: tuple[Take, ...] = (
     *ROBOT_SUCTION,
     *ROBOT_TAPE,
     *ROBOT_CONTACT,
+    *ROBOT_CUTTING,
 )
 
 KEPT: dict[str, str] = {
@@ -2012,6 +2062,7 @@ KEPT: dict[str, str] = {
     "14_brush/01_scrub_scored": "the same brush, handle and square as 00_scrub_the_bench with a goal beside them; its clip is that one's",
     "15_suction/01_pick_scored": "the same plate, cup and square as 00_pick_a_plate with a goal beside them; its clip is that one's",
     "19_tape/01_peel_a_label_scored": "the same box, label and peel as 00_peel_a_label with a goal beside them; its clip is that one's",
+    "20_cutting/01_cut_tofu_scored": "the same knife, board, tofu and cut as 00_cut_tofu with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

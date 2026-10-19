@@ -209,6 +209,8 @@ registries = ["../open-robot-skills"]
 cache-dir = ".cache/ruff"
 line-length = 120
 indent-width = 4
+# Vendored as it was released (MIT, tabs and all): the walk-on-spheres cage cutter the cutting kind drives.
+extend-exclude = ["robosimstudio_materials/cutting/cagecut"]
 
 [tool.ruff.lint]
 select = [
