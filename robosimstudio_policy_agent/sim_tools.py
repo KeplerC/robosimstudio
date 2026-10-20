@@ -38,6 +38,7 @@ from robosimstudio.core.bus import Bus
 from robosimstudio.core.math import quat_to_mat, transform_matrix
 from robosimstudio.core.render.visual import shape_meshes
 from robosimstudio.robots.embodiments import top_down_grasp_site_quat
+from robosimstudio.sim.sim import scene_deformables
 from robosimstudio.solvers import grasp_from_obb, top_down_grasp_quat
 from robosimstudio_bench.goals.goal import about_key, leaves, placements
 
@@ -115,15 +116,44 @@ def register_attachment(registry, env, bus: Bus) -> ClothAttachment | None:
 
 
 def _deformables(env) -> dict[str, Any]:
-    """The scene's things carrying a particle probe, by name: what ``Sim.deformables`` answers.
+    """The scene's deformables, by :func:`~robosimstudio.sim.sim.scene_deformables`: what ``Sim.deformables`` answers.
 
-    Not every particle carrier: a cuttable owns eight particles, the corners its cage
-    writes back for a page to draw the cut by, with no probe to summarise them and
-    nothing a pin on them moves, and picked first, ``get_particle_state`` raised
-    ``AttributeError`` on its ``.probe``. Asked of the scene rather than of ``env``,
-    which may be one world of a fleet (a ``WorldView``, with no ``deformables``).
+    Asked of the scene rather than of ``env``, which may be one world of a fleet (a
+    ``WorldView``, with no ``deformables``). Every tool here that lists, defaults or
+    looks one up goes through this, so registering ``sim.attach``, its default target
+    and ``get_particle_state`` agree on what a deformable is.
     """
-    return {n: e for n, e in getattr(env.scene, "by_name", {}).items() if getattr(e, "probe", None) is not None}
+    return scene_deformables(getattr(env, "scene", None))
+
+
+def _deformable(env, name: str) -> tuple[str, Any]:
+    """The deformable called ``name``, or the first one for ``""``; refused when there is none.
+
+    The refusal is ``get_rgbd``'s for a camera it does not have: the name asked for and the ones
+    there are. A name off the list -- a cuttable, a capsule-chain rope, a typo -- raised a bare
+    ``KeyError`` out of ``get_particle_state``, which a graph cannot route on.
+    """
+    deformables = _deformables(env)
+    if not deformables:
+        raise ToolRefusal("this scene has no deformables")
+    name = name or next(iter(deformables))
+    if name not in deformables:
+        raise ToolRefusal(f"no deformable {name!r}; have {sorted(deformables)}")
+    return name, deformables[name]
+
+
+def _probe(entity, env) -> Any:
+    """``entity``'s particle probe for the world ``env`` is: a fleet ``WorldView`` carries its ``world``, an ``Env`` is 0.
+
+    ``entity.probe`` alone is world 0's, so a graph driving world 3 of a wave read world 0's
+    particles back from ``get_particle_state`` -- a centroid, a height band, a footprint, all of
+    the wrong towel, with nothing to say so. Each probe-per-world thing opens one per world
+    (``ParticleMixin.bind``) and the fleet refreshes each one as it scores that world
+    (``FleetEnv._particles``); a thing holding one probe is kept out of a wave by
+    ``scoring_refusal``, and keeps its one here.
+    """
+    probe_for = getattr(entity, "probe_for", None)
+    return probe_for(int(getattr(env, "world", 0) or 0)) if callable(probe_for) else entity.probe
 
 
 def register_vacuum(registry, env, bus: Bus) -> Vacuum | None:
@@ -500,11 +530,8 @@ class SimTools:
         }
 
     def get_particle_state(self, cloth: str = "", particle_set: str = "") -> dict[str, Any]:
-        deformables = _deformables(self.env)
-        if not deformables:
-            raise ToolRefusal("this scene has no deformables")
-        name = cloth or next(iter(deformables))
-        probe = deformables[name].probe
+        name, entity = _deformable(self.env, cloth)
+        probe = _probe(entity, self.env)
         key = f"{name}/{particle_set}" if particle_set else name
         return {"cloth": name, "set": key, **self.bus.call(probe.summary, key)}
 
@@ -1015,8 +1042,11 @@ class ClothAttachment:
         """Seize a deformable's declared feature at one hand and carry it.
 
         Args:
-            entity: Which deformable. Empty takes the task's first, which is the
-                only one in every scene that ships today.
+            entity: Which deformable, of the ones ``get_particle_state`` lists
+                (:func:`_deformables`). Empty takes the first of them. It took the
+                task's first ``deformables``-stage spec, and a cuttable is staged
+                there: a tofu declared before a towel had the hand pin the eight
+                corners of its cage and report ``attached`` while it held nothing.
             arm: Which hand. Empty takes the work arm -- *not* the first arm
                 declared, since the two YAM cells list theirs in opposite orders
                 and declaration order names the idle hand on one of them.
@@ -1041,8 +1071,7 @@ class ClothAttachment:
             from robosimstudio.core.draggers import ParticleDragger
 
             env = self.env
-            name = entity or env.task.deformables[0].name
-            body = env.scene.by_name[name]
+            name, body = _deformable(env, entity)
             arm_name = arm or env.handles.work_arm or next(iter(env.handles.arms))
             if arm_name not in env.handles.arms:
                 raise ToolRefusal(f"no arm {arm_name!r}; have {sorted(env.handles.arms)}")

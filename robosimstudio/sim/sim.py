@@ -41,7 +41,7 @@ from robosimstudio.solvers.render import backend_class as _backend_class
 from robosimstudio.solvers.render import create_renderer
 from robosimstudio.specs import ActionSpec, CameraSpec, replace
 
-__all__ = ["Sim"]
+__all__ = ["Sim", "scene_deformables"]
 
 
 class Sim(EnvBase):
@@ -770,16 +770,8 @@ class Sim(EnvBase):
         return float(self.sim_time)
 
     def deformables(self) -> dict[str, Any]:
-        """Every entity carrying a particle probe, by name.
-
-        The deformables bin **and** the extras one, because which of the two a
-        thing lands in is decided by its spec's ``stage`` -- a build-order
-        statement -- and not by whether it has particles. A rope is the case
-        that separates them: as a capsule chain it is an ``extras`` entity with
-        no particles at all, and as a centerline it is an ``extras`` entity with
-        nothing but.
-        """
-        return {n: e for n, e in self.scene.by_name.items() if getattr(e, "probe", None) is not None}
+        """Every entity carrying a particle probe, by name: :func:`scene_deformables` of this scene."""
+        return scene_deformables(self.scene)
 
     def particle_probes(self) -> dict[str, Any]:
         """Those entities' probes, which is what a measure is handed."""
@@ -1052,6 +1044,27 @@ class Sim(EnvBase):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({getattr(self.request, 'full_name', '?')!r}, {len(self.names())} things, t={self.time:.3f}s)"
+
+
+def scene_deformables(scene: Any) -> dict[str, Any]:
+    """Every entity of ``scene`` carrying a particle probe, by name, in build order: what "a deformable" means.
+
+    The one rule, asked of the scene so that whatever holds one shares it: :meth:`Sim.deformables`,
+    the privileged ``sim.get_particle_state`` and ``sim.attach`` (which reach it through one world
+    of a fleet, a ``WorldView`` with no ``deformables`` of its own), and every studio panel that
+    lists, pins, settles or reads one. Three copies of it disagreed: ``sim.attach`` with no entity
+    took the task's first ``deformables``-stage spec, and a cuttable is staged there, so a tofu
+    declared before a towel had the hand pin the eight corners of its cage and report ``attached``
+    while it held nothing.
+
+    The deformables bin **and** the extras one, because which of the two a thing lands in is decided
+    by its spec's ``stage`` -- a build-order statement -- and not by whether it has particles. A rope
+    is the case that separates them: as a capsule chain it is an ``extras`` entity with no particles
+    at all, and as a centerline it is an ``extras`` entity with nothing but. And not every particle
+    carrier: a cuttable owns eight particles, the corners its cage writes back for a page to draw the
+    cut by, with no probe to summarise them and nothing a pin on them moves.
+    """
+    return {n: e for n, e in getattr(scene, "by_name", {}).items() if getattr(e, "probe", None) is not None}
 
 
 def _ref_for(scene: Any, name: str) -> Ref | None:
