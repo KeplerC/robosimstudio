@@ -3,13 +3,14 @@
 
 ``HostActor.lumping`` is ``"grid"`` (``add_cloth_grid``) or ``"mesh"`` (``add_cloth_mesh``), and the Genesis
 bridge weighs a sheet Newton masses only in part by it (``robosimstudio.engines.genesis.bridge._weighed_share``).
-Two ways it went quiet, each here on the CPU with no engine:
+Three ways it went quiet, each here on the CPU with no engine:
 
 * **A word it does not know.** ``"Mesh"`` was declared as readily as ``"mesh"``, and the bridge, reading it as
   saying nothing, let a record of twice the built density through: it is refused at the declaration now.
 * **A record that says nothing**, the composer's default for an entity declaring no actor and a record replayed
   from before records stated it: the sheet was not weighed and only a debug line said so. A warning says so now,
   once an actor a build.
+* **A bag**, read as a shell from its name, range and params alone: its ``"mesh"`` reached no reader.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import unittest
 import numpy as np
 
 TIER = "fast"
-"""Specs, two Newton models on the CPU and the Genesis bridge's checks before ``gs.init``, under a second."""
+"""Specs, three Newton models on the CPU and the Genesis bridge's checks before ``gs.init``, under a second."""
 
 BRIDGE = "robosimstudio.engines.genesis.bridge"
 """The logger the bridge's mass check speaks on."""
@@ -127,6 +128,31 @@ class TestASheetNotWeighedIsWarnedOf(unittest.TestCase):
             _open(model, [{**record, "params": {"areal_density": 0.3}}])
         with self.assertRaisesRegex(ValueError, "ratio 2.000"):
             _open(model, [{**record, "params": {"areal_density": 0.6}}])
+
+
+class TestABagsLumpingReachesItsReader(unittest.TestCase):
+    def test_a_built_bag_reads_as_the_mesh_it_was_massed_as(self) -> None:
+        """``EntityBag.build`` masses it with ``add_cloth_mesh`` and its record says ``"mesh"``; read back through the
+        ``bag`` kind's reader it said ``None``."""
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio.engines.geometry import actor_geometry
+        from robosimstudio_materials.bag import EntityBagSuperdex
+
+        entity = EntityBagSuperdex(rss.bag(name="pouch", size=(0.08, 0.06), cells=(8, 6)))
+        builder = newton.ModelBuilder()
+        entity.build_into(builder, None)
+        model = builder.finalize(device="cpu")
+        particles = entity.owned_particles()
+        record = entity.host_actor().record(
+            name="pouch", particle_start=int(particles[0]), particle_count=len(particles)
+        )
+        self.assertEqual(("bag", "mesh"), (record["kind"], record["lumping"]))
+        geometry = actor_geometry(model, record)
+        self.assertEqual("mesh", geometry.lumping)
+        self.assertGreater(len(geometry.tris), 0, "still read as a shell: its triangles")
+        self.assertIsNone(actor_geometry(model, {k: v for k, v in record.items() if k != "lumping"}).lumping)
 
 
 if __name__ == "__main__":
