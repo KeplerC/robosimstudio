@@ -117,6 +117,12 @@ device runs on the CPU by itself.
 | Granular, liquid, dough | `rss.heap`, `rss.liquid`, `rss.dough` | Refused: Newton's implicit MPM |
 | Water | `rss.water` | Refused: Genesis's SPH |
 
+Each material's script in [`03_materials`](03_materials/README.md) and each
+scored variant in [`06_tasks`](06_tasks/README.md) runs or is refused as its
+kind's row says. The knot and the band are rope on SuperDex. The suction cup
+(`04_extending/02_suction`, `06_tasks/05_suction_scored`) runs on MuJoCo's C
+library, where it seals by weld and carries the plate into the square.
+
 A scene holding a refused kind is refused as it starts to build, before anything
 in it is built, with one sentence per thing naming it, its kind, the solver it is
 on and why that solver has no CPU path, rather than by a failure inside a solver. VBD and the
