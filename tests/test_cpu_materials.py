@@ -23,16 +23,14 @@ through the examples a reader runs; this module holds the rest:
   refuses those arrangements too.
 * **What a served kind cannot bring along, refused by name.** A cloth's contact
   forces are VBD's, so reading them on a CPU, where the cloth is on SuperDex,
-  says it needs a GPU rather than falling through to MuJoCo's solver. The two
-  rope examples that show the capsule chain's own physics -- its Dahl memory, its
-  twist joint and a pinned capsule -- build with ``device="cuda"``, since a CPU's
-  rope is SuperDex's Cosserat rod, and a machine without one refuses them by the
-  device's name as they build.
+  says it needs a GPU rather than falling through to MuJoCo's solver.
 
 Built from the library's constructors rather than the example scripts, so the
-scenes say what they are without depending on where an example lives. Run by
-hand on a GPU box without the runner, the module sets ``ROBOSIMSTUDIO_DEVICE=cpu``
-for itself, as :mod:`tests.test_cpu_scenes` does.
+scenes say what they are without depending on where an example lives; each
+material's example and scored variant, the two capsule-chain rope examples that
+build with ``device="cuda"`` among them, is :mod:`tests.test_cpu_examples`'s. Run
+by hand on a GPU box without the runner, the module sets
+``ROBOSIMSTUDIO_DEVICE=cpu`` for itself, as :mod:`tests.test_cpu_scenes` does.
 """
 
 from __future__ import annotations
@@ -246,29 +244,6 @@ class TestAClothsContactForcesOnACpu(unittest.TestCase):
                 self.assertTrue(message.endswith("Build it on a GPU."), message)
         finally:
             sim.close()
-
-
-CAPSULE_CHAIN_EXAMPLES = ("03_materials/01_rope_memory.py", "03_materials/02_twist.py")
-"""The rope examples whose physics is the capsule chain's on VBD, under ``examples/``; they move with the examples."""
-
-
-def _cuda_visible() -> bool:
-    import warp as wp
-
-    return bool(wp.is_cuda_available())
-
-
-@unittest.skipIf(_cuda_visible(), "a device named in code wins over ROBOSIMSTUDIO_DEVICE: hide the GPUs to run this")
-class TestTheCapsuleChainExamplesOnACpu(unittest.TestCase):
-    """Each builds with ``device="cuda"``, so a machine without one refuses it as it builds, naming the device."""
-
-    def test_each_is_refused_for_want_of_cuda(self) -> None:
-        from tests.fixtures.examples import _run
-
-        for rel in CAPSULE_CHAIN_EXAMPLES:
-            with self.subTest(example=rel), self.assertRaises(ValueError) as caught:
-                _run(rel)
-            self.assertIn("device='cuda' (there is no CUDA device here)", str(caught.exception))
 
 
 @unittest.skipUnless(HAS_SUPERDEX, NO_SUPERDEX)
