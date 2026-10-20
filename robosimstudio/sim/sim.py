@@ -705,19 +705,20 @@ class Sim(EnvBase):
         wp.copy(self.pipeline.state_1.joint_q, state.joint_q)
         self.pipeline.mark_dirty()
 
-    def _refuse_layout(self, episode) -> None:
+    def _refuse_layout(self, episode, scene=None) -> None:
         """Refuse ``episode`` if it stands a static object anywhere but where this model holds it.
 
         Every entity is asked (:meth:`~robosimstudio.domains.rigid.entity.EntityRigid.move_refusal`)
         before anything moves. :meth:`reset_scene` placed entity by entity and a static object's own
         reset refused only when its turn came, so a free cube declared before a static block had gone
         to the refused episode's x = 0.70 when the block said no (``e3_partial_reset.py``).
-        ``Env.reset`` asks this too, before it takes the episode up.
+        ``Env.reset`` asks this too, before it takes the episode up, of the new ``scene`` it built
+        for the episode when that needs another model (this one's when omitted).
 
         Raises:
             ValueError: The first object the layout moves, where, and the way out.
         """
-        for entity in self.scene.entities:
+        for entity in (self.scene if scene is None else scene).entities:
             ask = getattr(entity, "move_refusal", None)
             refusal = ask(episode) if callable(ask) else ""
             if refusal:
