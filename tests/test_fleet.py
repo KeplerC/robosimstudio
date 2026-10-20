@@ -430,6 +430,29 @@ class TestTheEmptyContextIsCoveredByTheRefusal(unittest.TestCase):
         self.assertIn("contribute_hooks", source)
         self.assertNotIn("base.deformables", source)
 
+    def test_a_cutting_block_is_refused_for_what_its_goal_reads(self):
+        """The cutter's published ``pieces``, not the eight corners its block is drawn at.
+
+        Asked of the particles first, a one-world wave of
+        ``examples/06_tasks/09_cutting_scored`` was refused for the corners, with
+        "the physics replicates correctly", and the cutter's does not: at two
+        worlds the compiler refuses its one-world substep hooks.
+        """
+        from tests.fixtures.packs import has_pack
+
+        if not has_pack("cutting"):
+            self.skipTest("the cutting pack is not installed")
+        import robosimstudio as rss
+        from robosimstudio_bench.envs.fleet import scoring_refusal
+        from robosimstudio_materials.cutting.entity import EntityCuttable
+
+        tofu = EntityCuttable(rss.cuttable(name="tofu", knife=rss.knife(name="knife"), size=(0.06, 0.1, 0.04)))
+        tofu.range.particles = (0, 8)  # the corners, as its build adds them
+        self.assertTrue(tofu.carries_particles)
+        refusal = scoring_refusal(SimpleNamespace(by_name={"tofu": tofu}))
+        self.assertIn("publishing states (tofu)", refusal)
+        self.assertNotIn("replicates correctly", refusal)
+
     def test_the_context_says_what_must_land_with_a_per_world_probe(self):
         """If someone fills `particles` here, this points at `entities` too."""
         import inspect

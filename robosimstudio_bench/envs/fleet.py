@@ -76,6 +76,34 @@ def scoring_refusal(scene) -> str:
     giving :meth:`FleetEnv.context` a per-world :class:`ParticleProbe` and a
     per-world view of each extra entity, **both**, not the probe alone.
     """
+    # "Does this publish", not "which view holds it". The old test was
+    # ``scene.extras``, which is a build-order bin: a publisher that happened to
+    # own a handle sat in ``objects`` and slipped through, and one that published
+    # nothing sat in ``extras`` and was refused for it.
+    #
+    # A publisher that has declared itself world aware is *not* refused. It reads
+    # ``WorldState.world`` and answers off that world's rows, which is the whole
+    # of what was missing -- and :meth:`FleetEnv.context` now hands it the world
+    # and hands the goal language the entity objects to ask.
+    #
+    # Asked before the particles, because what an entity publishes is what a
+    # goal reads off it. A cutting block publishes its cutter's ``pieces``, and
+    # its eight particles are only the corners it is drawn at. Asked second, a
+    # one-world wave of the cutting task was refused for the corners, saying the
+    # physics replicates, which the cutter's does not: at two worlds the compiler
+    # refuses its one-world substep hooks (``e9_cut_fleet.py``).
+    publishers = sorted(
+        name
+        for name, entity in scene.by_name.items()
+        if type(entity).published_states is not Entity.published_states
+        and not getattr(type(entity), "world_aware", False)
+    )
+    if publishers:
+        return (
+            f"the scene has entities publishing states ({', '.join(publishers)}) that a wave cannot read "
+            "per world. Each one needs a world axis over whatever it publishes from and "
+            "`world_aware = True` to say so"
+        )
     # An entity that opened a probe per world is not refused: a wave hands a
     # goal that world's probe, over that world's block of the particle array.
     # One that did not would answer every world with the first world's
@@ -89,27 +117,6 @@ def scoring_refusal(scene) -> str:
             f"the scene has entities made of particles ({', '.join(particled)}) and a wave has no per-world "
             "particle probe for them, so their success would be scored from one world's particles. The "
             "physics replicates correctly -- only the scoring is missing"
-        )
-    # "Does this publish", not "which view holds it". The old test was
-    # ``scene.extras``, which is a build-order bin: a publisher that happened to
-    # own a handle sat in ``objects`` and slipped through, and one that published
-    # nothing sat in ``extras`` and was refused for it.
-    #
-    # A publisher that has declared itself world aware is *not* refused. It reads
-    # ``WorldState.world`` and answers off that world's rows, which is the whole
-    # of what was missing -- and :meth:`FleetEnv.context` now hands it the world
-    # and hands the goal language the entity objects to ask.
-    publishers = sorted(
-        name
-        for name, entity in scene.by_name.items()
-        if type(entity).published_states is not Entity.published_states
-        and not getattr(type(entity), "world_aware", False)
-    )
-    if publishers:
-        return (
-            f"the scene has entities publishing states ({', '.join(publishers)}) that a wave cannot read "
-            "per world. Each one needs a world axis over whatever it publishes from and "
-            "`world_aware = True` to say so"
         )
     return ""
 
