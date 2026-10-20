@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A tape reads its own sheet: its own radii once a reset, and a sheet with no bond laid where it rests.
+"""A tape reads its own sheet: its own radii once a reset, a sheet with no bond laid where it rests, and its handlers
+refuse what is not a tape.
 
 No GPU: labels built on the CPU, one stepped 8 substeps by VBD. ``tests/test_tape_kind.py`` holds where a stuck
 sheet is laid; here, what that laying reads and what it does with a sheet stuck by no bond:
@@ -9,6 +10,7 @@ sheet is laid; here, what that laying reads and what it does with a sheet stuck 
   for its life. A label built after 500 other particles reads its own 180 radii once a reset, and lays itself, its
   bonds and their anchors as the whole array laid them.
 * **A sheet with no bond** is laid by its radius change as a bonded one is: it rests on the face, stuck to nothing.
+* **The handlers** ask for a tape, not for something offering ``peeled()`` or ``bonded()``.
 """
 
 from __future__ import annotations
@@ -146,6 +148,21 @@ class TestASheetWithNoBondRestsWhereItsContactRestsIt(unittest.TestCase):
             top = float(s0.body_q.numpy()[label.body][2]) + 0.025
             gap = s0.particle_q.numpy()[label.particles][face, 2] - top - radius
             self.assertLess(float(np.abs(gap).max()), 5.0e-4, "the face row stays where the contact rests it")
+
+
+class TestTheHandlersAskForATape(unittest.TestCase):
+    def test_an_entity_offering_peeled_and_bonded_is_not_a_tape(self) -> None:
+        """Offering ``peeled()`` and ``bonded()`` and none of a tape's own reads, it raised AttributeError
+        (``_let_go``, ``_holding``), not the KeyError each handler says."""
+        from types import SimpleNamespace
+
+        from robosimstudio_materials.tape import _bonded_fraction, _peeled_fraction
+
+        lookalike = SimpleNamespace(peeled=lambda: 0.5, bonded=lambda: 0.5)
+        snapshot = SimpleNamespace(entities={"label": lookalike})
+        for handler in (_peeled_fraction, _bonded_fraction):
+            with self.subTest(handler.__name__), self.assertRaisesRegex(KeyError, "not a tape"):
+                handler(snapshot, "label")
 
 
 if __name__ == "__main__":

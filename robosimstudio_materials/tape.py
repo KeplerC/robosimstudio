@@ -1929,7 +1929,7 @@ register_atom(
 def _peeled_fraction(snapshot, tape: str) -> dict[str, float]:
     entities = getattr(snapshot, "entities", None) or {}
     entity = entities.get(tape) if hasattr(entities, "get") else None
-    if entity is None or not hasattr(entity, "peeled"):
+    if not isinstance(entity, EntityTape):  # its private reads, which an entity offering peeled() lacks
         raise KeyError(f"{tape!r} is not a tape the scene carries an entity for")
     gone = entity._let_go()  # once, for the share and the front both
     fraction = entity._peeled_of(gone)
@@ -1976,7 +1976,7 @@ register_atom(
 def _bonded_fraction(snapshot, tape: str) -> dict[str, float]:
     entities = getattr(snapshot, "entities", None) or {}
     entity = entities.get(tape) if hasattr(entities, "get") else None
-    if entity is None or not hasattr(entity, "bonded"):
+    if not isinstance(entity, EntityTape):  # its private reads, which an entity offering bonded() lacks
         raise KeyError(f"{tape!r} is not a tape the scene carries an entity for")
     holding = entity._holding()  # once, for the share and the count both
     fraction = entity._bonded_of(holding)
