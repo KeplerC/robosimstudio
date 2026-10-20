@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A sheet's actor states how Newton massed it in a word the Genesis mass check reads.
+"""A sheet's actor states how Newton massed it, and the Genesis mass check is never silent about one that does not.
 
 ``HostActor.lumping`` is ``"grid"`` (``add_cloth_grid``) or ``"mesh"`` (``add_cloth_mesh``), and the Genesis
 bridge weighs a sheet Newton masses only in part by it (``robosimstudio.engines.genesis.bridge._weighed_share``).
-A way it went quiet, here on the CPU with no engine:
+Two ways it went quiet, each here on the CPU with no engine:
 
 * **A word it does not know.** ``"Mesh"`` was declared as readily as ``"mesh"``, and the bridge, reading it as
   saying nothing, let a record of twice the built density through: it is refused at the declaration now.
+* **A record that says nothing**, the composer's default for an entity declaring no actor and a record replayed
+  from before records stated it: the sheet was not weighed and only a debug line said so. A warning says so now,
+  once an actor a build.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import unittest
 import numpy as np
 
 TIER = "fast"
-"""Specs, a Newton model on the CPU and the Genesis bridge's checks before ``gs.init``, under a second."""
+"""Specs, two Newton models on the CPU and the Genesis bridge's checks before ``gs.init``, under a second."""
 
 BRIDGE = "robosimstudio.engines.genesis.bridge"
 """The logger the bridge's mass check speaks on."""
@@ -79,13 +82,51 @@ class TestALumpingIsAWordTheReaderKnows(unittest.TestCase):
         twice = {**record, "params": {"areal_density": 0.6}}
         with self.assertRaisesRegex(ValueError, "ratio 2.000"):
             _open(model, [{**twice, "lumping": "mesh"}])
-        with self.assertRaisesRegex(LookupError, "asked for the engine"):
+        with self.assertRaisesRegex(LookupError, "asked for the engine"), self.assertLogs(BRIDGE, "WARNING"):
             _open(model, [{**twice, "lumping": "Mesh"}])
         for word in ("Mesh", "cloth_mesh", "", "grid "):
             with self.subTest(lumping=word):
                 with self.assertRaises(ValueError) as caught:
                     HostActor(kind="shell", lumping=word)
                 self.assertIn(repr(word), str(caught.exception))
+
+
+class TestASheetNotWeighedIsWarnedOf(unittest.TestCase):
+    def test_once_an_actor_a_build_at_warning(self) -> None:
+        """Two sheets whose records state no lumping, one at twice its density: neither weighed, each named once at
+        WARNING, and once again when the island is built again. It was a debug line, which no default log shows."""
+        model = _rim_held_mesh()
+        record = {"kind": "shell", "particle_start": 0, "particle_count": 121}
+        records = [
+            {**record, "name": "sheet", "params": {"areal_density": 0.3}},
+            {**record, "name": "twice", "params": {"areal_density": 0.6}},
+        ]
+        for build in range(2):
+            with self.subTest(build=build):
+                with self.assertLogs(BRIDGE, "WARNING") as said:
+                    with self.assertRaisesRegex(LookupError, "asked for the engine"):
+                        _open(model, records)
+                self.assertEqual(2, len(said.records))
+                for line, name in zip(said.output, ("'sheet'", "'twice'"), strict=True):
+                    for word in (name, "not weighed", "81 of its 121 particles", "no lumping (None)"):
+                        self.assertIn(word, line)
+
+    def test_a_sheet_newton_weighs_whole_is_weighed_without_one(self) -> None:
+        """Every particle massed, the share is 1 whatever the builder: weighed, refused at twice, and nothing warned."""
+        import newton
+        import warp as wp
+
+        builder = newton.ModelBuilder()
+        builder.add_cloth_grid(
+            pos=wp.vec3(0.0), rot=wp.quat_identity(), vel=wp.vec3(0.0), dim_x=4, dim_y=4, cell_x=0.05, cell_y=0.05,
+            mass=0.3 * 0.04 / 25,
+        )  # fmt: skip
+        model = builder.finalize(device="cpu")
+        record = {"kind": "shell", "name": "sheet", "particle_start": 0, "particle_count": 25}
+        with self.assertNoLogs(BRIDGE, "WARNING"), self.assertRaisesRegex(LookupError, "asked for the engine"):
+            _open(model, [{**record, "params": {"areal_density": 0.3}}])
+        with self.assertRaisesRegex(ValueError, "ratio 2.000"):
+            _open(model, [{**record, "params": {"areal_density": 0.6}}])
 
 
 if __name__ == "__main__":
