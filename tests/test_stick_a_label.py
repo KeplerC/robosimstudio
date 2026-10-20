@@ -64,7 +64,9 @@ Over 28 drives of this drive the peak was 2.16-2.51 N, median 2.29 N, 16 alone o
 second drive on the same GPU at 69-70 ms a step against 35 ms, which moved it nowhere (mean 2.30 N against
 2.31 N). Seven earlier drives of the same tree read 2.28-2.45 N but one, run among other tests' load, at 4.37 N,
 and seven of the tree before it 2.23-2.68 N but one at 3.54 N. 4.0 N failed the 4.37 N drive (``trace.py``,
-``sweep.sh``)."""
+``sweep.sh``). 24 more, three at once on one GPU beside a fourth process looping ``test_peel_a_label``, at
+137-140 ms a step, read 2.17-2.55 N, median 2.27 N, none over 3.0 N, each peaking 101-127 steps into the
+206-step draw: that load did not bring the 4.37 N back (``r5/drive.py``, ``r5/sweep.sh``)."""
 
 
 def column(label, state, c: int, along: float) -> np.ndarray:
