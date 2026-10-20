@@ -1638,7 +1638,7 @@ class EntityTape(EntityCloth):
         other half that much over the thickness each of its bonds is seated at. A sheet laid on the face with
         no bond, held only by its tab, is laid so too: stuck to nothing, it still rests where the contact
         rests it. A tabbed label with no bonded row on a cylinder, its radius written from 0.5 to 1.5 mm and
-        the scene reset, kept its face row within 0.13 mm of that over 32 substeps; left where it was built,
+        the scene reset, kept its face row within 0.21 mm of that over 32 substeps; left where it was built,
         as a reset left it while the radius was held per bond, the row started 1 mm inside the contact and
         was thrown 2.3 mm past it by the eighth (``f6_probe.py``, VBD on the CPU).
         """

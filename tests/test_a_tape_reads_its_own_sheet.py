@@ -117,9 +117,9 @@ class TestASheetWithNoBondRestsWhereItsContactRestsIt(unittest.TestCase):
 
     def test_a_reset_lays_it_by_its_radius_change_and_it_stays_there(self) -> None:
         """Written from 0.5 to 1.5 mm and reset: laid 1 mm further, the tab's end not, and over 8 substeps of VBD the
-        face row stays within 0.5 mm of where the contact rests it (0.13 mm over 32, ``f6_probe.py``). Left where it was
-        built, as a reset left it while the radius was held per bond, the row started 1 mm inside the contact and was
-        thrown 1.4 mm past it by the fourth substep and 2.3 mm by the eighth."""
+        face row stays within 0.5 mm of where the contact rests it (0.13 mm, and 0.21 mm over 32, ``f6_probe.py``).
+        Left where it was built, as a reset left it while the radius was held per bond, the row started 1 mm inside
+        the contact and was thrown 1.4 mm past it by the fourth substep and 2.3 mm by the eighth."""
         import newton
 
         from robosimstudio_materials.tape import PAPER_LABEL
