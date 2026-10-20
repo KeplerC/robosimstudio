@@ -302,6 +302,9 @@ _WARP_CELL_LOOKUP = fem.Nanogrid.make_filtered_cell_lookup
 _FAULTY_LINES = ("packed_uvw = uvw + vec3_type(env_offset)", "wp.vec3i(uvw - offset * scales) + env_offset")
 """The two lines of Warp 1.18's environment lookup that the module docstring describes."""
 
+_FAULTY_WARPS = ("1.18.",)
+"""The Warp releases the workaround was written against: a lookup there without both lines is said by name."""
+
 
 def _environment_cell_lookup(grid_geo, filter_func: wp.Function = None):
     """``NanogridBase.make_filtered_cell_lookup`` with the environment lookup floored before it packs.
@@ -388,15 +391,40 @@ def _install_environment_cell_lookup() -> bool:
     line keeps its own lookup. At import, which is before any solver here bins a
     particle: Warp caches the functions a lookup is built into under the grid's
     name, so one built before this would be reused.
+
+    Standing down is said, by name, when it may leave a fault in place: one of
+    the two lines there without the other (the lookup changed around it), or
+    neither found on a Warp the workaround was written for (:data:`_FAULTY_WARPS`).
+    A later Warp with neither line has fixed both, and is quiet.
     """
+    import warnings
+
     try:
         source = inspect.getsource(_WARP_CELL_LOOKUP)
     except (OSError, TypeError):
-        return False
-    if not all(line in source for line in _FAULTY_LINES):
-        return False
-    fem.Nanogrid.make_filtered_cell_lookup = _environment_cell_lookup
-    return True
+        source = ""
+    found = [line in source for line in _FAULTY_LINES]
+    if all(found):
+        fem.Nanogrid.make_filtered_cell_lookup = _environment_cell_lookup
+        return True
+    version = str(wp.config.version)
+    where = "Warp's Nanogrid environment cell lookup (warp.fem NanogridBase.make_filtered_cell_lookup)"
+    if any(found):
+        kept, gone = _FAULTY_LINES if found[0] else _FAULTY_LINES[::-1]
+        warnings.warn(
+            f"Warp {version}: {where} still has {kept!r} but not {gone!r}, so it changed around the rounding "
+            "faults robosimstudio corrects there; the correction is not installed, and separate MPM worlds bin "
+            "their particles through Warp's own lookup",
+            stacklevel=2,
+        )
+    elif version.startswith(_FAULTY_WARPS):
+        warnings.warn(
+            f"Warp {version}: neither faulty line robosimstudio corrects in {where} is in its source, on a "
+            "release the correction was written for; it is not installed, and separate MPM worlds bin their "
+            "particles through Warp's own lookup",
+            stacklevel=2,
+        )
+    return False
 
 
 ENVIRONMENT_LOOKUP_CORRECTED = _install_environment_cell_lookup()
