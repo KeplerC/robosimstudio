@@ -106,9 +106,9 @@ def _garment(name: str, **handle):
 
 
 TOWEL = {"triangles": np.array([[0, 1, 2], [1, 3, 2]])}
-ROPE = {"tube_radius": 0.004}  # a SuperDex centerline, as tests/scenes/02_superdex hands it
-HONEY = {"point_radius": 0.003}  # an MPM body, as 03_materials/12_liquid does
-TOFU = {"point_radius": 1.0e-3}  # a cuttable's corners and its surface mesh
+ROPE = {"tube_radius": 0.004}  # a centerline, tests/scenes/02_superdex's cable: a tube radius, no triangles
+HONEY = {"point_radius": 0.003}  # a particle body, 03_materials/12_liquid's honey: points, no triangles
+TOFU = {"point_radius": 1.0e-3}  # a cuttable: its corners as points, and its surface mesh
 
 
 class TestTheClothLookIsOfferedForACloth(unittest.TestCase):

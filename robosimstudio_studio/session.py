@@ -1167,7 +1167,7 @@ class StudioSession:
             scenery.on_update(_scenery)
             # Only over a sheet, the one thing a garment style changes the draw of: a rope's tube and a
             # particle body's points or surface are drawn alike in every style. Gated on the things
-            # carrying a particle probe, a SuperDex rope's page and a water page offered a look that
+            # carrying a particle probe, a SuperDex rope's page and an MPM liquid's offered a look that
             # changed nothing; a cuttable's eight corners are points too.
             if self.viewer.has_sheets:
                 look = gui.add_dropdown("Cloth look", options=GARMENT_STYLES, initial_value=self.viewer.garment_style)
