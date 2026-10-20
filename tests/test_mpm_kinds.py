@@ -6,6 +6,8 @@ scenes, each item on the smallest scene that shows it:
 
 * a heap alone on ``void`` under ``GENERIC`` falls, rests on the surface, is
   reset with the MPM's history, and replicates to two worlds;
+* two worlds of four particles, one a float ulp under a cell face, take one
+  identical step;
 * a heap, the robot and a free paddle under ``GRANULAR_60HZ`` compose as two
   islands with the MPM entry in place and no main collision pipeline, capture,
   take a hand into the heap, answer the five measures, and take a live material
@@ -117,6 +119,62 @@ class TestAHeapAlone(unittest.TestCase):
                 self.assertLess(float(block[:, 2].min()), 0.005, f"world {world} is not resting on the ground")
         finally:
             sim.close()
+
+
+class TestTwoWorldsBinAlike(unittest.TestCase):
+    """Two identical worlds take one identical step, with a particle a hair under a cell face.
+
+    The smallest case of the fault ``robosimstudio.engines.newton.mpm`` works around: world 1 packs
+    its cells 34 along x, so a particle at local index -2.0000007 floors to cell -3 when the grid is
+    built and rounds to -2 when it is looked up (``-2.0000007 + 34`` is 32.0 in float32); Warp 1.18's
+    fallback search then leaves cell -3 out and bins it into cell (-2, 5, 2), 0.42 of a cell away.
+    The moving fourth particle makes the misbinning show in one step: with Warp's own lookup world 1
+    ended up to 28.3 mm from world 0, 5 runs in 5; with the workaround within 1e-6 m, 5 in 5.
+    """
+
+    def test_world_one_steps_as_world_zero_does(self) -> None:
+        import newton
+        from newton.solvers import SolverImplicitMPM
+
+        from robosimstudio.engines.newton import MPM
+        from robosimstudio.engines.newton.mpm import SolverMPM
+
+        voxel = float(dict(MPM.defaults)["voxel_size"])
+        self.assertEqual(0.004, voxel, "the positions below are in 4 mm cells")
+        points = [
+            (-0.040, 0.0, 0.0),  # cell x -10 and ...
+            (0.040, 0.0, 0.0),  # ... x +10: world 0's tile spans 21 cells and 3 of guard, so world 1 packs at +34
+            (-0.010000002570450306, 0.01632, 0.00888),  # local index (-2.0000007, 4.58, 2.72): cell (-3, 4, 2)
+            (-0.008, 0.020, 0.008),  # the middle of cell (-2, 5, 2), the one the faulty search picks
+        ]
+        # The fourth moves, so a node's velocity is a mass-weighted mean worth getting right: under
+        # gravity alone every node falls alike, whatever mass the binning gave it.
+        velocities = [(0.0, 0.0, 0.0)] * 3 + [(1.0, 0.0, 0.0)]
+        template = newton.ModelBuilder()
+        SolverImplicitMPM.register_custom_attributes(template)
+        template.add_particles(
+            pos=points,
+            vel=velocities,
+            mass=[1500.0 * voxel**3] * len(points),
+            radius=[0.5 * voxel] * len(points),
+            flags=[int(newton.ParticleFlags.ACTIVE)] * len(points),
+        )
+        builder = newton.ModelBuilder()
+        SolverImplicitMPM.register_custom_attributes(builder)
+        builder.replicate(template, 2)
+        model = builder.finalize()
+        solver = SolverMPM(model, **dict(MPM.defaults))
+        self.assertTrue(solver._separate_worlds)
+        state_in, state_out = model.state(), model.state()
+        solver.step(state_in, state_out, model.control(), None, 1.0 / float(solver.step_hz))
+        q = state_out.particle_q.numpy()
+        self.assertTrue(
+            np.isfinite(q).all(),
+            f"non-finite particles per world: {(~np.isfinite(q)).any(axis=1).reshape(2, -1).sum(axis=1)}",
+        )
+        np.testing.assert_allclose(
+            q[len(points) :], q[: len(points)], atol=1.0e-6, err_msg="world 1 stepped unlike world 0"
+        )
 
 
 class TestTheHeapBesideTheRobot(unittest.TestCase):
