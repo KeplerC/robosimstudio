@@ -232,6 +232,44 @@ class TestARefusedWaveKeepsNothing(unittest.TestCase):
         self._refused([STAYS, STAYS], [TaskSpec(name="another_model"), None])
 
 
+class TestARefusedResetMovesNothing(unittest.TestCase):
+    """``Sim.reset_scene`` asks every entity before it moves anything.
+
+    It placed entity by entity, and a static object's reset refused only when its turn came: a
+    free cube declared before a static block had gone to the refused episode's x = 0.70 when the
+    block said no, with ``env.episode`` already the refused one (``e3_partial_reset.py``).
+    ``tests/test_a_static_box_stays_put.py`` runs a real ``Env`` through it on a GPU.
+    """
+
+    def test_a_free_cube_before_a_moved_static_box_stays_where_it_was(self) -> None:
+        from robosimstudio.sim import Sim
+
+        cube = EntityRigid(ObjectSpec(name="cube", shape=ShapeSpec(half_extents=(0.02,) * 3), pose=(0.0, 0.2, 0.02)))
+        box = EntityRigid(ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=True))
+        builder = newton.ModelBuilder()
+        for entity in (cube, box):
+            entity.build_into(builder, episode=None)
+        model = builder.finalize(device="cpu")
+        solved: list[dict] = []
+        pipeline = SimpleNamespace(
+            state_0=model.state(),
+            state_1=model.state(),
+            reset_solvers=lambda **flags: solved.append(flags),
+            mark_dirty=lambda: None,
+        )
+        sim = Sim.__new__(Sim)
+        # A start articulation unlike the state's, so that writing it is seen as well as the cube's reset.
+        sim.pipeline, sim.model, sim._start_joint_q = pipeline, model, np.zeros(model.joint_coord_count, np.float32)
+        sim.scene = SimpleNamespace(entities=[cube, box])
+        sim.episode = {"object_poses": {"cube": (0.1, 0.2, 0.02, 0.0), **MOVED["object_poses"]}}
+        before = [state.joint_q.numpy().copy() for state in (pipeline.state_0, pipeline.state_1)]
+        with self.assertRaisesRegex(ValueError, "'box' is static"):
+            sim.reset_scene()
+        for state, was in zip((pipeline.state_0, pipeline.state_1), before, strict=True):
+            np.testing.assert_array_equal(was, state.joint_q.numpy(), "the cube went to the refused layout")
+        self.assertEqual([], solved, "the solvers were reset for a layout that was refused")
+
+
 class TestADocumentStatesAStaticWhereItsBaseDoes(unittest.TestCase):
     """A superset's instance runs on its base's model, so its own start pose for a static must be the base's.
 

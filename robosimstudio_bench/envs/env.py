@@ -246,6 +246,12 @@ class Env(Sim):
             new_episode = make_episode(self.task, episode_id)
             if new_episode.model_key != self.episode.model_key:
                 self._rebuild(new_episode)
+            else:
+                # Before the episode and its evaluator are taken up, and before
+                # the reset below retires a policy's hooks or moves anything: a
+                # layout this model cannot stand is refused with the env still at
+                # the episode it was at, every pose where it was.
+                self._refuse_layout(new_episode)
             if new_episode.active != self.episode.active:
                 # The active set is state, not model -- the scene is re-posed
                 # and the rest parked -- but the goal tree was masked to the

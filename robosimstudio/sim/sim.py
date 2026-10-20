@@ -657,6 +657,7 @@ class Sim(EnvBase):
         """
         import newton
 
+        self._refuse_layout(self.episode)
         if self._start_joint_q is not None:
             self.pipeline.state_0.joint_q.assign(self._start_joint_q)
             self.pipeline.state_1.joint_q.assign(self._start_joint_q)
@@ -703,6 +704,24 @@ class Sim(EnvBase):
         wp.copy(self.pipeline.state_1.body_qd, state.body_qd)
         wp.copy(self.pipeline.state_1.joint_q, state.joint_q)
         self.pipeline.mark_dirty()
+
+    def _refuse_layout(self, episode) -> None:
+        """Refuse ``episode`` if it stands a static object anywhere but where this model holds it.
+
+        Every entity is asked (:meth:`~robosimstudio.domains.rigid.entity.EntityRigid.move_refusal`)
+        before anything moves. :meth:`reset_scene` placed entity by entity and a static object's own
+        reset refused only when its turn came, so a free cube declared before a static block had gone
+        to the refused episode's x = 0.70 when the block said no (``e3_partial_reset.py``).
+        ``Env.reset`` asks this too, before it takes the episode up.
+
+        Raises:
+            ValueError: The first object the layout moves, where, and the way out.
+        """
+        for entity in self.scene.entities:
+            ask = getattr(entity, "move_refusal", None)
+            refusal = ask(episode) if callable(ask) else ""
+            if refusal:
+                raise ValueError(f"{refusal}. {entity.move_remedy}")
 
     def reset(self) -> tuple[dict[str, Any], dict[str, Any]]:
         """Restore the start state, then record what "start" turned out to be.
