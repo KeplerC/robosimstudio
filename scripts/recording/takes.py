@@ -1905,6 +1905,18 @@ def _fold_sweep(arm: str):
     return script
 
 
+def _fold_gizmos(film, scale: float = 0.07) -> None:
+    """Each arm's gizmo drawn at half the page's 0.14 m, where the drive moves it from: at full size its rings
+    lay over up to 19% of the folded sheet in the clip. The page's own size is unchanged."""
+    for arm, panel in film.session.arms.items():
+        if panel.gizmo is None:
+            continue
+        old = panel.gizmo
+        panel.gizmo = film.session.server.scene.add_transform_controls(
+            f"/studio/{arm}/cursor", scale=scale, line_width=3.0, position=old.position, wxyz=old.wxyz
+        )
+
+
 def _paper_folded(film) -> tuple[bool, str]:
     """Folded in half and creased: the edges laid within 10 mm of each other, the fold line keeping 2.2 rad."""
     import numpy as np
@@ -2035,10 +2047,10 @@ def _stain_wiped(film) -> tuple[bool, str]:
 ROBOT_CONTACT = (
     Take(
         FOLD,
-        # From beyond the bench, to the robot's left and up: both hands, the box and the sheet across a
-        # third of the view, the matched arcs of the carry and the sweep along the fold, the Crease
-        # readouts beside them.
-        camera=Orbit(Bench(0.10, 0.0, 0.10), distance=0.95, azimuth=40.0, elevation=38.0, fov=38.0),
+        # From beyond the bench, a little to the robot's left and up, 0.95 m off: both hands, the box,
+        # the matched arcs of the carry and the sweep along the fold, the sheet across 31 to 36% of the
+        # view's width, folded or flat (from 1.10 m and 35 degrees round, the folded sheet took 26%).
+        camera=Orbit(Bench(0.08, 0.0, 0.12), distance=0.95, azimuth=20.0, elevation=40.0, fov=38.0),
         warmup=0.5,
         fps=8,
         speed=2.0,  # a minute of scene: a reach, a carry and two sweeps
@@ -2047,12 +2059,13 @@ ROBOT_CONTACT = (
         beats=(
             Fold(title="Simulation", open=False),
             Fold(title="How to drive this", open=False),
+            Do(fn=_fold_gizmos, label=""),
             Wait(seconds=0.4, label="an A4 sheet on a box, its near edge 35 mm over the box's edge"),
             _per_step(_fold_reach, "both hands out past their corners, then in along the edge: the pads straddle it"),
             _per_step(_fold_pinch, "Grip amount 0.986 on both: the pads stop on the sheet"),
             Scroll(pixels=-600, seconds=0.4),  # back to the top: the Crease readouts lead the panel
             Wait(seconds=0.4, mark="pinched"),
-            _per_step(_fold_carry, "up and over together, each hand turning 90 degrees, each on its own side"),
+            _per_step(_fold_carry, "up and over together, each hand turning 88 degrees, each on its own side"),
             _per_step(_fold_let_go, "let go 30 mm over the far edge, and out to each hand's own side"),
             _per_step(_fold_sweep("right"), "the right fingertip runs along the fold, from the middle out"),
             _per_step(_fold_sweep("left"), "the left fingertip runs along the fold, from the middle out"),
