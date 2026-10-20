@@ -12,8 +12,10 @@ let go, the tab stayed within 3.4 mm of where the pads took it and the free box 
 ``peel_close.py``, the round-3 review). Tick **Never let go** and no bond lets go: the pull drags the
 box until the tab slides out of the pads (10 drives of 24), or, where the pads hold, drags the whole
 box 46 mm by its label (14 of 24). The tab is rigid, because the pads cannot hold a cloth tab under
-the coupling the attachments need, and weighs 30 g, squeezed with 12 N
-(``robosimstudio_materials/tape.py``). The **Label** folder reads ``peeled_fraction`` and the peel
+the coupling the attachments need, and weighs 30 g (``robosimstudio_materials/tape.py``). Each finger
+is capped at 12 N, and only Close's first push meets the cap: 1500 times the 47.5 mm to go, about
+71 N. The pads then stall on the tab 3.8 mm short of shut and hold it with about 5.8 N through the
+peel (``g2_close.py``, ``g2_grip.py``). The **Label** folder reads ``peeled_fraction`` and the peel
 front. 38 ms a control step through the page (RTX PRO 6000).
 """
 
