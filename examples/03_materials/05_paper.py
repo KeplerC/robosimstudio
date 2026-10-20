@@ -1,17 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Paper: fold a sheet
 
-Bring each hand in along the edge of the A4 sheet that runs past the box, from its own corner, with **Grip amount** 0.79, and press **Close**: the fingers stall on the sheet at their 20 N cap. Carry the edge up to upright, each hand turning with the flap to 88 degrees and no further, lay it on the far half and open 40 mm over it. Then close each hand and run its fingertip along its half of the fold, out and back, pressing about 13 N: the sheet stays folded in half.
+Bring each hand in along the edge of the A4 sheet that runs past the box, from its own corner, with **Grip amount** 0.79, and press **Close**: the fingers stall on the sheet at the grip's 10 N cap. Carry the edge up and over, each hand turning with the flap to 88 degrees and no further, and press **Open** 100 mm over the far half: the flap falls onto it. Then, at **Grip amount** 0.6, run each hand's lower finger along its half of the fold, the sheet pushing it up its slide against the same 10 N cap: the sheet stays folded in half.
 
-In eight drives of the take's path (``tests/test_fold_paper_robot``, GPUs 3 and 5) the arms, which collide,
-came no closer than 79.7 mm and kept 2.2 mm on their own sides of the middle; each hand turned 88.3 degrees
-holding the edge, its grip servo at the cap, pad friction 0.78 and nubs' 0.95, and only the box and one
-fingertip touched the sheet as it was creased. The edges ended 0.5 to 1.1 mm apart and the fold kept 2.80
-to 2.83 rad once the hands had gone, unchanged 3 s later, ``fold_extent`` 0.55 to 0.59; the far half moved
-9.3 mm at most. The cap bounds the squeeze, not every push: at the 95th percentile one finger of a pair read
-17.7 N holding and the creasing fingertip 24 to 33 N. Laid but not creased, the fold keeps 2.23 to 2.30
-rad. At PAPER's own ``yield_angle`` 0.35 the sheet's bend over the pads pried the capped jaws open in the lay
-and it ended flat, ``fold_extent`` 1.01 (2 of 2 drives). The **Crease** folder reads ``crease_angle``.
+In 8 drives of the take's path (``probe2.py``, GPUs 3 and 5) the arms, which collide, came no closer than 79.3 mm
+and kept 9.0 mm on their own sides; each hand turned 88.2 degrees holding the edge, its pads 5.0 mm apart at most,
+and a finger pushed 7.4 N holding and 13.1 N pressing (95th percentile), over 15 N for a step at a touch in 3. The
+edges ended 2.4 mm apart on average (6.0 at the worst corner) and the fold kept 2.89 to 2.90 rad once the hands had
+gone, unchanged 3 s later, ``fold_extent`` 0.50. The **Crease** folder reads ``crease_angle``.
 """
 
 import numpy as np
@@ -29,16 +25,20 @@ def main():
     corner = (-0.05, -0.105, 0.085)  # the sheet's near corner (bench frame), across the middle, on the box
     overhang = 0.035  # how far the near edge runs past the box: the pads close on it from either corner
     nubs = 3.0  # the grip nubs' friction: the asset's 4.0 holds paper's 0.3 at 1.10, 3.0 at 0.95
-    sheet = rss.replace(PAPER, yield_angle=0.2)  # a hinge bent 0.2 rad past its rest keeps the rest
-
-    # The sheet's push fed back along each finger's slide: a hand closes until it pushes back with the
-    # grip cap. VBD friction that slips at 1 mm/s, not 10, keeps a 5 g sheet where it lies.
+    # Copy paper at 20 VBD iterations: 6.1 cm bending length on the drape bench (PAPER's 30 reads 9.7 here), and
+    # a hinge bent 0.2 rad past its rest keeps the rest, so a fold pressed flat keeps up to 2.94 rad.
+    sheet = rss.replace(PAPER, edge_ke=6.0, yield_angle=0.2)
+    # The sheet's push fed back along each finger's slide: a hand closes until it pushes back with its cap.
+    # 20 iterations, not 5: at 5 a resting sheet pressed the box with 11 N, friction on that held it like glue
+    # and lifting it pried the capped jaws; at 20, 2.6 N. The two halves of a fold lie 1 mm apart, not 2.
     coupling = rss.coupler("one_way", contact_forces=True, slide_feedback=True)
     physics = rss.replace(rss.GENERIC, coupling=coupling, collision=rss.CollisionSpec(full_surface_contact=True))
-    physics = physics.with_backend("*", rss.backend("vbd", friction_epsilon=1.0e-3, rigid_body_contact_buffer_size=256))
-    # The arms collide. Each hand's servo stalls on a sheet at its 20 N cap (10 N a finger), closing at 0.1 m/s.
+    vbd = {"iterations": 20, "friction_epsilon": 1.0e-3, "rigid_body_contact_buffer_size": 256}
+    layers = {"particle_self_contact_radius": 1.0e-3, "particle_self_contact_margin": 1.0e-3}
+    physics = physics.with_backend("*", rss.backend("vbd", **vbd, **layers))
+    # The arms collide. One motor drives a hand's two fingers, capped at 10 N: the most either finger pushes.
     yam = rss.replace(get_embodiment("yam_bimanual"), cross_arm_collisions=True)
-    hands = rss.ActuationSpec(target_ke=1.0e5, target_kd=20.0, effort_limit=20.0, joint_damping=200.0)
+    hands = rss.ActuationSpec(target_ke=1.0e5, target_kd=20.0, effort_limit=10.0, joint_damping=200.0)
 
     scene = rss.Scene(cell="bench_0728", physics=physics, name="paper")
     scene.add(rss.robot(yam, gripper=hands))
