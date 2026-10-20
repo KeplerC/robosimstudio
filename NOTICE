@@ -3,10 +3,8 @@ Copyright 2026 Kaiyuan Chen
 
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-This distribution includes third-party robot models, code and an image. Each
-keeps its own licence, named in its entry; its text is in a LICENSE file
-beside the files it covers or, for an Apache License 2.0 entry with no such
-file, in LICENSE:
+This distribution includes third-party robot models. Each keeps its own
+licence, in a LICENSE file beside the files it covers:
 
 assets/embodiments/panda/
     Franka Emika Panda arm and hand, from robosuite 1.4.0
@@ -51,25 +49,6 @@ robosimstudio_materials/cutting/cagecut/
     74190cf. MIT License (robosimstudio_materials/cutting/cagecut/LICENSE).
     Copyright (c) 2026 Hossam Mohamed Saeed. What was changed is recorded in
     that folder's __init__.py.
-
-robosimstudio_materials/tape.py
-    adhesion_pull, adhesion_stiffness, stiction_mollifier and
-    contact_stiffness are translated from the IPC Toolkit v1.6.0
-    (https://github.com/ipc-sim/ipc-toolkit), src/ipc/adhesion/adhesion.cpp
-    and src/ipc/potentials/normal_adhesion_potential.cpp: the contact
-    adhesion law of Fang, Li et al., "Augmented Incremental Potential Contact
-    for Sticky Interactions" (IEEE TVCG 30(8), 2024), rewritten as Warp
-    functions as tape.py records. MIT License
-    (robosimstudio_materials/LICENSE.ipc-toolkit). Copyright (c) 2020-2025
-    Zachary Ferguson.
-
-robosimstudio/engines/newton/mpm.py
-    _environment_cell_lookup is adapted from
-    NanogridBase.make_filtered_cell_lookup in NVIDIA Warp 1.18.0
-    (https://github.com/NVIDIA/warp), warp/_src/fem/geometry/nanogrid.py,
-    changed to floor a cell before it packs it and to floor its search
-    window, as mpm.py records. Apache License 2.0 (LICENSE). Copyright (c)
-    2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 
 .github/media/logo.png
     The sponge emoji (U+1F9FD) from Noto Emoji

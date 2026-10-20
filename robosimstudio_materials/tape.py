@@ -565,10 +565,10 @@ def _break_kernel(
 # 2024, doi:10.1109/TVCG.2023.3295656): ``src/ipc/adhesion/adhesion.cpp`` and the argument shift in
 # ``src/ipc/potentials/normal_adhesion_potential.cpp``, translated below into warp functions and, on the
 # host, into :func:`contact_stiffness`. That code is ipc-toolkit's under the MIT License, Copyright (c)
-# 2020-2025 Zachary Ferguson; its licence is in ``robosimstudio_materials/LICENSE.ipc-toolkit``. ipc-toolkit
-# evaluates its potential on the squared distance less ``dmin^2``; the pull here is that potential's
-# derivative along the distance itself, so it peaks at ``strength`` (``Y * eps_c``) per unit area when
-# the gap reaches ``peak``, and is zero at contact and past ``reach``. Section 1 says how it is applied.
+# 2020-2025 Zachary Ferguson. ipc-toolkit evaluates its potential on the squared distance less
+# ``dmin^2``; the pull here is that potential's derivative along the distance itself, so it peaks at
+# ``strength`` (``Y * eps_c``) per unit area when the gap reaches ``peak``, and is zero at contact and
+# past ``reach``. Section 1 says how it is applied.
 
 
 @wp.func
