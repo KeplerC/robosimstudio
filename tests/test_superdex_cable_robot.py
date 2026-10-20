@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The SuperDex cable lifted by the robot's own hand, through the arm panel.
 
-``examples/03_rope/02_superdex`` says the right hand can be dragged down onto a
+``tests/scenes/02_superdex`` says the right hand can be dragged down onto a
 Cosserat cable on SuperDex, closed on it with **Grip amount** and lifted. Its old
 clip lifted it with a click handle, which is graphics, not a robot. This drives
 the arm panel the way the gizmo and the slider write it
@@ -35,7 +35,7 @@ PORTS = (9781, 9782)
 GRIP_AMOUNT = 0.80
 """What the example tells a person to slide **Grip amount** to: 0.20 of the jaws' 94 mm is 19 mm."""
 CLOSE_AT = (0.550, -0.011, 0.771)
-"""Where the tool centre closes [m, world]: 10 mm over the axis of the cable's middle, as in ``00_cable``;
+"""Where the tool centre closes [m, world]: 10 mm over the axis of the cable's middle, as in ``03_materials/00_rope``;
 the fingertips then stop about 4 mm over the bench beside an 11 mm-radius cable."""
 LIFT = 0.12
 """How far the hand is dragged up once the jaws are on it [m]."""
@@ -46,7 +46,7 @@ def _drive(grip: float, port: int, *, ramp: float = 0.8) -> dict:
     from tests.fixtures.examples import _run
     from tests.fixtures.grasp import go, open_session, tick
 
-    sim, kwargs = _run("03_rope/02_superdex.py")
+    sim, kwargs = _run("tests/scenes/02_superdex.py")
     cable = sim["cable"]
     session = open_session(sim, port, kwargs.get("page"))
     arm = session.arms["right"]

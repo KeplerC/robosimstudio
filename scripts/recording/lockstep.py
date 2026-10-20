@@ -40,6 +40,15 @@ from typing import Any
 STAMP = "/rss_record/stamp"
 """The node whose x is the index of the frame the server last presented."""
 
+VEIL_GREY = 90.0
+"""The grey [0-255] a take's 3D view is veiled over: its median frame's darkest 1% of the left half.
+
+A page drawn under a white veil keeps every check that reads the scene and shows it washed out: one
+run in three of ``04_extending/02_suction`` did, mean brightness 197 against 161. Its darkest 1% read
+113 to 116 grey on every frame, its clean runs' 27 to 31, and the median frame of every clip under
+``examples/`` 2 to 49 (68 for the 640-px render; 82 the most in any one frame). Over the left half,
+because the sidebar is on the right and the veil leaves it alone."""
+
 
 def install(film: Callable[[Any], None], *, port: int, out: str, overrides: dict[str, Any]) -> None:
     """Make every ``StudioSession`` this process opens a filmed one.
@@ -160,6 +169,47 @@ def wait_for(check: Callable[[], bool], timeout: float, poll: float = 0.002) -> 
 # =============================================================================
 # A take, filmed
 # =============================================================================
+
+
+def veil(frames) -> tuple[bool, str]:
+    """Whether a take was filmed bare, not under a veil: ``(passed, reading)``, as an expectation judges.
+
+    Read off each frame's left half, the 3D view, as the darkest 1% of its grey: a veil lifts the
+    darkest thing in view, the bench's shadow and the robot's black links, toward white.
+    """
+    import numpy as np
+
+    if not frames:
+        return True, "no frames to read"
+    luma = np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    darkest = []
+    for frame in frames:
+        rgb = np.asarray(frame, dtype=np.float32)[..., :3]
+        darkest.append(float(np.percentile(rgb[:, : rgb.shape[1] // 2] @ luma, 1.0)))
+    grey = float(np.median(darkest))
+    return grey <= VEIL_GREY, (
+        f"the 3D view's darkest 1% at grey {grey:.0f} in the median frame "
+        f"(need {VEIL_GREY:.0f} or under; a veiled page read 113 to 116)"
+    )
+
+
+def _shape_reach(shape, d) -> float:
+    """How far a primitive reaches from its centre along the unit direction ``d`` of its own frame [m].
+
+    A capsule, cylinder or cone has its axis along its own z; a cone's apex is at ``+half_height``.
+    """
+    dx, dy, dz = (float(v) for v in d)
+    if shape.kind == "box":
+        return sum(abs(u) * float(h) for u, h in zip((dx, dy, dz), shape.half_extents, strict=True))
+    radius = float(shape.radius)
+    if shape.kind == "sphere":
+        return radius
+    along, across = float(shape.half_height) * dz, radius * math.hypot(dx, dy)
+    if shape.kind == "capsule":
+        return abs(along) + radius
+    if shape.kind == "cylinder":
+        return abs(along) + across
+    return max(along, across - along)  # a cone: its apex, or the rim of its base
 
 
 class Film:
@@ -377,24 +427,39 @@ class Film:
         """A body's origin, or a deformable's centroid [m]."""
         return tuple(float(v) for v in self._points(name).mean(axis=0))
 
-    def _half_height(self, name: str) -> float:
-        spec = self.sim[name].spec
+    def _reach(self, name: str) -> tuple[float, float]:
+        """How far one body stands under and over its origin along world z [m].
+
+        A primitive (``rss.box``, ``sphere``, ``capsule``, ``cylinder``) carries its size only in
+        ``spec.shape``: its reach is that shape's, seen along world z as the body is turned now,
+        3 mm each way for a 6 mm plate lying flat.
+        """
+        from robosimstudio.core.math import quat_to_mat
+        from robosimstudio.specs.asset import ShapeSpec
+
+        ref = self.sim[name]
+        spec = ref.spec
         half = getattr(spec, "half", None)
         if half is not None:
-            return float(half[2])
-        return float(getattr(spec, "radius", 0.0) or 0.0) + float(getattr(spec, "half_height", 0.0) or 0.0)
+            return float(half[2]), float(half[2])
+        shape = getattr(spec, "shape", None)
+        if getattr(shape, "kind", "") in ShapeSpec.KINDS:
+            up = quat_to_mat(ref.pose[3:7])[2]  # world z in the body's frame
+            return _shape_reach(shape, -up), _shape_reach(shape, up)
+        reach = float(getattr(spec, "radius", 0.0) or 0.0) + float(getattr(spec, "half_height", 0.0) or 0.0)
+        return reach, reach
 
     def top(self, name: str) -> float:
         points = self._points(name)
         if len(points) > 1:
             return float(points[:, 2].max())
-        return float(points[0, 2]) + self._half_height(name)
+        return float(points[0, 2]) + self._reach(name)[1]
 
     def height(self, name: str) -> float:
         points = self._points(name)
         if len(points) > 1:
             return float(points[:, 2].max() - points[:, 2].min())
-        return 2.0 * self._half_height(name)
+        return sum(self._reach(name))
 
     def highest(self, name: str) -> tuple[float, float, float]:
         points = self._points(name)
@@ -562,4 +627,6 @@ class Film:
             except KeyError as exc:
                 passed, reading = False, f"no mark {exc} to judge {type(expectation).__name__} at"
             out.append({"expect": type(expectation).__name__, "passed": bool(passed), "reading": reading})
+        passed, reading = veil(self.frames)
+        out.append({"expect": "Unveiled", "passed": passed, "reading": reading})
         return out

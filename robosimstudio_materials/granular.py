@@ -2,7 +2,7 @@
 """The ``granular`` kind: a heap of grains -- rice, sand, beans, flour -- on Newton's implicit MPM.
 
 This file is what ``rss.heap`` builds, imported as ``robosimstudio_materials.granular``.
-Run ``examples/10_granular/00_sweep_rice.py`` first. The implementation is shared
+Run ``examples/03_materials/11_granular.py`` first. The implementation is shared
 with the liquid and dough kinds in :mod:`robosimstudio_materials.mpm`; this module
 is the domain, the entity that names it, the constructor and the presets.
 

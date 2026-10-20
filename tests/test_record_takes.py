@@ -75,6 +75,16 @@ class TestTheTakeTable(unittest.TestCase):
             with self.subTest(kept=name):
                 self.assertGreater(len(reason.split()), 4, "a reason is a sentence")
 
+    def test_every_kept_clip_is_on_disk(self) -> None:
+        """A kept clip is one no take can film, whose file stands: kept is no reason for a script to show nothing.
+
+        The eight scored scripts in ``06_tasks`` were kept as "its clip is that one's", their material's,
+        and their index rows showed no clip at all."""
+        for name in KEPT:
+            folder, stem = name.rsplit("/", 1)
+            with self.subTest(kept=name):
+                self.assertTrue((REPO / "examples" / folder / "media" / f"{stem}.webp").is_file(), "no such clip")
+
     def test_every_script_has_a_take_or_a_reason(self) -> None:
         owed = {take.key for take in TAKES} | set(KEPT)
         for script in scripts():
@@ -90,6 +100,44 @@ class TestTheTakeTable(unittest.TestCase):
         for clip in clips:
             with self.subTest(clip=str(clip.relative_to(REPO))):
                 self.assertTrue(key(clip) in owed, f"{key(clip)}: no take films this clip and no reason keeps it")
+
+    def test_every_scored_script_is_filmed_with_its_material_drive(self) -> None:
+        """A scored script is its material's scene as a task: its take plays that drive and ends on the goal.
+
+        Beat for beat after what stands in for the material take's opening pause, the same checks and
+        one more, the goal met; the Goal folder open, and the view the material take films from once
+        the hand is over its work."""
+        from recording import takes
+
+        scored = {
+            "03_granular_scored": "03_materials/11_granular",
+            "04_brush_scored": "03_materials/07_brush",
+            "05_suction_scored": "04_extending/02_suction",
+            "06_bag_scored": "03_materials/06_bag",
+            "07_band_scored": "03_materials/04_band",
+            "08_tape_scored": "03_materials/08_tape",
+            "09_cutting_scored": "03_materials/10_cutting",
+            "10_water_scored": "03_materials/14_water",
+        }
+        on_disk = {p.stem for p in (REPO / "examples" / "06_tasks").glob("[0-9][0-9]_*_scored.py")}
+        self.assertEqual(set(scored), on_disk, "a scored script with no material drive here")
+        for stem, of in scored.items():
+            with self.subTest(scored=stem):
+                take, material = takes.find(f"06_tasks/{stem}"), takes.find(of)
+                drive = material.beats[1:]
+                at = next(i for i in range(len(take.beats)) if take.beats[i : i + len(drive)] == drive)
+                self.assertEqual(len(take.beats) - 2, at + len(drive), "the drive, and then the goal")
+                self.assertIs(take.beats[-2].until, takes._goal_reads_true)
+                self.assertEqual("goal", take.beats[-1].mark)
+                self.assertEqual((*material.expect, takes.Check(takes._goal_met)), take.expect)
+                self.assertEqual(("Goal",), take.layout.expand)
+                if at == 1:
+                    self.assertEqual(material.beats[0], take.beats[0], "no stand-in: the same opening")
+                    self.assertEqual(material.camera, take.camera)
+                else:
+                    self.assertEqual(
+                        material.camera, take.beats[at - 1].fn.args[0], "the view closes in to the material's"
+                    )
 
     def test_every_take_of_a_superdex_script_says_it_needs_the_extra(self) -> None:
         """A script whose docstring says it needs ``[superdex]`` is listed with it: ``--list`` prints ``needs``."""

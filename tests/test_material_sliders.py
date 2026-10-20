@@ -99,13 +99,13 @@ def _cloth_readers(view, target):
 
 
 class TestTheFoldPagesMaterialFolder(unittest.TestCase):
-    """``examples/13_paper/00_fold_paper``'s own panels: every enabled slider, through the folder."""
+    """``examples/03_materials/05_paper``'s own panels: every enabled slider, through the folder."""
 
     @classmethod
     def setUpClass(cls) -> None:
         from robosimstudio.scene.tuning import locate_cloth
 
-        cls.sim, cls.session = _open("13_paper/00_fold_paper.py", PORT)
+        cls.sim, cls.session = _open("03_materials/05_paper.py", PORT)
         paper = cls.sim["paper"].entity
         cls.paper = paper
         view = cls.sim.scene.program.view_for("paper")
@@ -149,13 +149,13 @@ class TestTheFoldPagesMaterialFolder(unittest.TestCase):
 
 
 class TestTheTapeOnAnIslandWithItsOwnCopy(unittest.TestCase):
-    """``examples/19_tape/00_peel_a_label``: the label's VBD island keeps its own copy of the cloth arrays."""
+    """``examples/03_materials/08_tape``: the label's VBD island keeps its own copy of the cloth arrays."""
 
     @classmethod
     def setUpClass(cls) -> None:
         from robosimstudio.scene.tuning import locate_cloth
 
-        cls.sim, cls.session = _open("19_tape/00_peel_a_label.py", PORT + 1, ("inspector", "cloth", "tune"))
+        cls.sim, cls.session = _open("03_materials/08_tape.py", PORT + 1, ("inspector", "cloth", "tune"))
         cls.label = cls.sim["label"].entity
         cls.view = cls.sim.scene.program.view_for("label")
         cls.readers = _cloth_readers(cls.view, locate_cloth(cls.sim.model, cls.label))
@@ -218,11 +218,11 @@ class TestTheTapeOnAnIslandWithItsOwnCopy(unittest.TestCase):
 
 
 class TestTheStuckLabelsContactAdhesive(unittest.TestCase):
-    """``examples/19_tape/02_stick_a_label``: the contact law's fields reach the array its kernels read."""
+    """``examples/03_materials/09_adhesion``: the contact law's fields reach the array its kernels read."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, cls.session = _open("19_tape/02_stick_a_label.py", PORT + 4, ("inspector", "cloth", "tune"))
+        cls.sim, cls.session = _open("03_materials/09_adhesion.py", PORT + 4, ("inspector", "cloth", "tune"))
         cls.label = cls.sim["label"].entity
         cls.binder = _tune(cls.session).binder
 
@@ -250,11 +250,11 @@ class TestTheStuckLabelsContactAdhesive(unittest.TestCase):
 
 
 class TestTheRodsDahlPair(unittest.TestCase):
-    """``examples/03_rope/03_cable_memory``: the Dahl pair is per cable joint, and VBD reads its own copy."""
+    """``examples/03_materials/01_rope_memory``: the Dahl pair is per cable joint, and VBD reads its own copy."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, cls.session = _open("03_rope/03_cable_memory.py", PORT + 2, ("inspector",))
+        cls.sim, cls.session = _open("03_materials/01_rope_memory.py", PORT + 2, ("inspector",))
         cls.rod = cls.sim["cable"].entity
         cls.drive = next(t for t in cls.rod.tunables(cls.sim.pipeline) if t.name == "drive")
         cls.view = cls.sim.scene.program.view_for("cable")
@@ -273,11 +273,11 @@ class TestTheRodsDahlPair(unittest.TestCase):
 
 
 class TestABagOffersNothingItCannotMove(unittest.TestCase):
-    """``examples/16_bags/00_open_a_bag``: SuperDex copies the shell's material when it builds it."""
+    """``examples/03_materials/06_bag``: SuperDex copies the shell's material when it builds it."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, cls.session = _open("16_bags/00_open_a_bag.py", PORT + 3, ("inspector", "cloth", "tune"))
+        cls.sim, cls.session = _open("03_materials/06_bag.py", PORT + 3, ("inspector", "cloth", "tune"))
 
     @classmethod
     def tearDownClass(cls) -> None:

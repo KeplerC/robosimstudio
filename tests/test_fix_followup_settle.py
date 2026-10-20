@@ -122,7 +122,7 @@ class TestStudioResettle(unittest.TestCase):
 
     def test_a_thing_that_does_not_settle_is_rebaselined_where_it_lies(self) -> None:
         """A SuperDex rope joins the record without a run and has no ``settle``: the button raised
-        ``AttributeError`` out of the page loop, measured on ``examples/03_rope/02_superdex`` and, for
+        ``AttributeError`` out of the page loop, measured on ``tests/scenes/02_superdex`` and, for
         the same reason, ``examples/01_cloth/04_your_own_cloth``."""
         log: list[str] = []
         rope = self._rope(log)

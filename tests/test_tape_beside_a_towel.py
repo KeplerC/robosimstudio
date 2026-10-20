@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """A label on a box beside a towel, the YAM over both: it stays stuck at rest, and a bond that let go stays gone.
 
-``examples/19_tape/00_peel_a_label`` has nothing else made of particles in it. Here a towel is, and
+``examples/03_materials/08_tape`` has nothing else made of particles in it. Here a towel is, and
 two things the label's own example cannot show are held:
 
 * **Another thing's settle.** A towel settles for 60 frames, stepping the whole scene, label and box

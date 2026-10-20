@@ -2,7 +2,7 @@
 """The ``dough`` kind: a plastic solid -- dough, plasticine, clay, butter -- on Newton's implicit MPM.
 
 This file is what ``rss.dough`` builds, imported as ``robosimstudio_materials.dough``.
-Run ``examples/12_dough/00_roll_dough.py`` first. The implementation is shared
+Run ``examples/03_materials/13_dough.py`` first. The implementation is shared
 with the granular and liquid kinds in :mod:`robosimstudio_materials.mpm`; this
 module is the domain, the entity that names it, the constructor and the presets,
 and :func:`roller`, a rigid tool the YAM can roll a lump flat with.

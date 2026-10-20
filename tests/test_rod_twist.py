@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The twist example's page does what its docstring says: a turn at the tip reaches the middle, and only the stiff cable lets it go.
 
-``examples/03_rope/04_twist.py`` holds each cable's free end in a hard latch
+``examples/03_materials/02_twist.py`` holds each cable's free end in a hard latch
 and rolls it with a slider; this runs the example's own ``main()`` and drives
 its page the way a hand does -- the slider dragged across in steps of at most
 15 degrees of roll, the readouts read, the **hold** box unticked -- with the
@@ -83,7 +83,7 @@ class _Page:
 class TestTheTwistPage(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, kwargs = _run("03_rope/04_twist.py")
+        cls.sim, kwargs = _run("03_materials/02_twist.py")
         cls.page = _Page()
         kwargs["page"](cls.page)
         cls.widgets = cls.page.gui.widgets

@@ -2,7 +2,7 @@
 """Paper in one file: a sheet whose folds stay, from its spec to its registration.
 
 This file is what ``rss.paper`` builds, imported as ``robosimstudio_materials.paper``. It is cloth
-(``cloth.py``) plus one thing: a bending hinge that yields. Run ``examples/13_paper/00_fold_paper.py``
+(``cloth.py``) plus one thing: a bending hinge that yields. Run ``examples/03_materials/05_paper.py``
 first.
 """
 

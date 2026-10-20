@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The scored bag example: the same gesture on the task's page, and the task says the goal is met.
 
-``examples/16_bags/01_open_a_bag_scored`` is ``00_open_a_bag`` as a task document with a goal,
+``examples/06_tasks/06_bag_scored`` is ``03_materials/06_bag`` as a task document with a goal,
 ``(>= (mouth_opening bag) 0.03)``. The task's hands start at the YAM's own home, pointing ahead,
 so a person first turns the right gizmo to point down; this writes that turn into the arm panel's
 cursor, then drives it through :mod:`tests.fixtures.grasp` as ``tests/test_open_a_bag`` does:
@@ -39,7 +39,7 @@ class TestTheTaskGoalTurnsTrue(unittest.TestCase):
     def setUpClass(cls) -> None:
         from robosimstudio_materials.bag import layer_gap, mouth_opening
 
-        cls.env, kwargs = _run("16_bags/01_open_a_bag_scored.py")
+        cls.env, kwargs = _run("06_tasks/06_bag_scored.py")
         sim = getattr(cls.env, "sim", cls.env)
         bag = sim["bag"]
         points = lambda: np.asarray(bag.particle_q, dtype=np.float64)  # noqa: E731

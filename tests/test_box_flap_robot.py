@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The box flap example's headline task, done by the robot's hand the way its page asks.
 
-``examples/13_paper/01_box_flap`` promises a gesture and a number. This drives the
+``tests/scenes/01_box_flap`` promises a gesture and a number. This drives the
 example's own arm panel through :mod:`tests.fixtures.grasp` -- the cursor the
 gizmo writes, the grip the **Close** button writes, the session's own setpoint
 law -- and reads the same ``crease_angle`` the page shows. No handle is put down
@@ -58,7 +58,7 @@ class TestTheHandClosesTheFlap(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, kwargs = _run("13_paper/01_box_flap.py")
+        cls.sim, kwargs = _run("tests/scenes/01_box_flap.py")
         sim = cls.sim
         sim.run(10).sync()
         t = time.perf_counter()

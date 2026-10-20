@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """A rubber band hooked from one peg onto a second by the robot's shut jaws, through the arm panel.
 
-``examples/18_bands/00_band_on_pegs`` says a person can press **Close**, drag the
+``examples/03_materials/04_band`` says a person can press **Close**, drag the
 right hand's shut jaws into a band hanging on the upper peg of a pegboard, down
 past the lower peg, in under it, up and back out, and leave the band stretched
 round both. This drives that through the arm panel (:mod:`tests.fixtures.grasp`):
@@ -56,7 +56,7 @@ def _drive(port: int, *, cut: bool = False) -> dict:
     from tests.fixtures.examples import _load, _run
     from tests.fixtures.grasp import go, open_session, tick
 
-    module = _load("18_bands/00_band_on_pegs.py")
+    module = _load("03_materials/04_band.py")
     real = module.band
 
     def band(**kwargs):
@@ -66,7 +66,7 @@ def _drive(port: int, *, cut: bool = False) -> dict:
         return rss.replace(spec, closed=False, nodes=(*spec.nodes, spec.nodes[0])) if cut else spec
 
     with mock.patch.object(module, "band", band):
-        sim, kwargs = _run("18_bands/00_band_on_pegs.py")
+        sim, kwargs = _run("03_materials/04_band.py")
     loop = sim["band"]
     rest = float(loop.entity.spec.length)
     session = open_session(sim, port, kwargs.get("page"))
@@ -142,7 +142,7 @@ class TestTheHandHooksTheBandOnBothPegs(unittest.TestCase):
 
 @unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing steps the band")
 class TestTheScoredTaskTurnsTrue(unittest.TestCase):
-    """``01_band_on_pegs_scored``: the same gesture on the task's page, from the YAM's own home, and the goal.
+    """``06_tasks/07_band_scored``: the same gesture on the task's page, from the YAM's own home, and the goal.
 
     The task's pegs are the example's cylinder posts with a ``rod`` feature (their two ends), so
     ``encircles`` holds the band to each peg's length, not to the line through it.
@@ -153,7 +153,7 @@ class TestTheScoredTaskTurnsTrue(unittest.TestCase):
         from tests.fixtures.examples import _run
         from tests.fixtures.grasp import go, open_session, tick
 
-        cls.env, kwargs = _run("18_bands/01_band_on_pegs_scored.py")
+        cls.env, kwargs = _run("06_tasks/07_band_scored.py")
         sim = getattr(cls.env, "sim", cls.env)
         session = open_session(cls.env, PORTS[2], kwargs.get("page"))
         arm = session.arms["right"]

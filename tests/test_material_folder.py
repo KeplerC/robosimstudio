@@ -451,7 +451,7 @@ class TestAnInspectorEditIsTheFoldersEditToo(unittest.TestCase):
     stand-ins: a towel's ``tri_ke`` set to 1000 on the inspector held in the model while the working spec and
     the folder's slider stayed at 10000, so a rebuild built it at 10000 again; ``areal_density`` moved there
     was never pending; the folder's ``edge_ke`` set to 10 left the inspector showing 0.1. The same on
-    ``19_tape/00_peel_a_label``'s page: the inspector's ``tack`` at 2e6 reached the bonds while the working
+    ``03_materials/08_tape``'s page: the inspector's ``tack`` at 2e6 reached the bonds while the working
     spec stayed at 4e6, its ``thickness`` was never pending, and after Revert it still showed 2e6."""
 
     def test_a_live_edit_survives_apply_and_rebuild(self) -> None:

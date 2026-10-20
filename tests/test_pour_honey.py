@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The pour example's gesture, made through its arm panel: the hand carries the cup and pours the honey into the bowl.
 
-``examples/11_liquid/00_pour_honey`` promises that the hand, dragged down over
+``examples/03_materials/12_liquid`` promises that the hand, dragged down over
 the cup and closed, lifts it, carries it over the bowl and pours it when the
 gizmo is turned. This drives the example's own page the way
 :mod:`tests.fixtures.grasp` does -- the cursor the gizmo writes, the grip the
@@ -138,7 +138,7 @@ class TestTheHandPoursTheHoney(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, kwargs = _run("11_liquid/00_pour_honey.py")
+        cls.sim, kwargs = _run("03_materials/12_liquid.py")
         cls.sim.run(20).sync()
         t = time.perf_counter()
         cls.sim.run(100).sync()

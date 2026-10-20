@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """What lets the paper fold be carried by contact, read off the example's source without building it.
 
-``examples/13_paper/00_fold_paper`` used to carry the sheet's edge on a labelled
+``examples/03_materials/05_paper`` used to carry the sheet's edge on a labelled
 attachment, because a parallel jaw cannot get a pad under a sheet lying flat on a
 bench: seven top-down pinches raised it 0 mm (``pinch_top.py``). The example now
 lays the sheet's near edge over the bench's right edge, where the lower pad goes
@@ -22,7 +22,7 @@ from tests.fixtures.examples import EXAMPLES
 TIER = "fast"
 """Parses one file and reads one cell's numbers; builds nothing."""
 
-FOLD = EXAMPLES / "13_paper" / "00_fold_paper.py"
+FOLD = EXAMPLES / "03_materials" / "05_paper.py"
 
 
 def _locals() -> dict:

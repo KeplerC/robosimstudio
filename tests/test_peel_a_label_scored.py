@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The scored tape example: the same peel on the task's page, and the task says the goal is met.
 
-``examples/19_tape/01_peel_a_label_scored`` is ``00_peel_a_label`` as a task document with a goal,
+``examples/06_tasks/08_tape_scored`` is ``03_materials/08_tape`` as a task document with a goal,
 ``(>= (peeled_fraction label) 0.8)``. The task's hands start at the YAM's own home, pointing ahead,
 so a person first turns the right gizmo to point down; this writes that turn into the arm panel's
 cursor, takes the right hand over the tab, then drives the peel ``tests/test_peel_a_label`` drives:
@@ -32,7 +32,7 @@ class TestTheTaskGoalTurnsTrue(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.env, kwargs = _run("19_tape/01_peel_a_label_scored.py")
+        cls.env, kwargs = _run("06_tasks/08_tape_scored.py")
         sim = getattr(cls.env, "sim", cls.env)
         label = sim["label"].entity
         cls.session = session = open_session(cls.env, PORT, kwargs.get("page"))

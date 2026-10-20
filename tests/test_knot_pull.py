@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """A loose overhand knot pulled tight by both of the robot's hands, through the arm panels.
 
-``examples/17_knots/00_pull_knot_tight`` says a person can drag each hand down
+``examples/03_materials/03_knot`` says a person can drag each hand down
 onto a tail of a knotted rope, slide its **Grip amount** to close on it, drag
 both hands up and then out, and that the knot draws up and stays a knot. This
 drives exactly that through the two arm panels (:mod:`tests.fixtures.grasp`),
@@ -55,7 +55,7 @@ def _drive(port: int, *, self_contact: bool = True) -> dict:
         return real(**{**kwargs, "self_contact": self_contact})
 
     with mock.patch.object(rss, "rod", rod):
-        sim, kwargs = _run("17_knots/00_pull_knot_tight.py")
+        sim, kwargs = _run("03_materials/03_knot.py")
     rope = sim["rope"]
     session = open_session(sim, port, kwargs.get("page"))
     arms = session.arms

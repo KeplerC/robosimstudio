@@ -221,7 +221,7 @@ class CuttableSpec:
         color: Display RGB; ``None`` draws the block in its material's colour.
         walks: Walk-on-spheres walks per point, the cutter's Monte Carlo budget: 1,024, the paper's.
         quad_points: Interior quadrature points the elastic solve integrates over: 800 asked, 785
-            sampled (seeded, so every build) in ``00_cut_tofu``'s 60 x 100 x 40 mm block.
+            sampled (seeded, so every build) in ``03_materials/10_cutting``'s 60 x 100 x 40 mm block.
         mesh_cell: The drawn skin's triangle size [m]: 994 skin points at 5 mm on that block.
         push: The edge law's stiffness as a multiple of ``E`` per metre of edge in the block (see
             ``law.py``).

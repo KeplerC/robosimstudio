@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The rope examples' memory and twist, done by the robot's own hands through the arm panel.
 
-``examples/03_rope/03_cable_memory`` says the right hand can carry a cable's end
-round a post and leave it wrapped; ``04_twist`` says the two hands can turn two
+``examples/03_materials/01_rope_memory`` says the right hand can carry a cable's end
+round a post and leave it wrapped; ``03_materials/02_twist`` says the two hands can turn two
 hanging tips and that, let go, the stiff cable unwinds while the soft one keeps
 the turn. Both pages also have a graphics path (a click handle, a slider's
 kinematic hold) that would pass the same numbers without a robot, so this drives
@@ -146,7 +146,7 @@ class _Memory:
             return real(**kwargs)
 
         with mock.patch.object(rss, "rod", rod):
-            cls.sim, kwargs = _run("03_rope/03_cable_memory.py")
+            cls.sim, kwargs = _run("03_materials/01_rope_memory.py")
         cls.ms_per_step = _ms_per_step(cls.sim)
         cls.session = open_session(cls.sim, PORTS[cls.KIND], kwargs.get("page"))
         cls.cable = cls.sim["cable"]
@@ -202,7 +202,7 @@ class TestTheHandsTwistTheCables(unittest.TestCase):
         from robosimstudio.core.math import quat_multiply, quat_to_mat
         from robosimstudio_materials.rod.measures import twist_turns
 
-        cls.sim, kwargs = _run("03_rope/04_twist.py")
+        cls.sim, kwargs = _run("03_materials/02_twist.py")
         cls.ms_per_step = _ms_per_step(cls.sim)
         sim = cls.sim
         session = cls.session = open_session(sim, PORTS["twist"], kwargs.get("page"))
