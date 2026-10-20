@@ -5,10 +5,12 @@ The same box and label as a task document, with a goal on the share of the label
 
 The label is a ``Tape.from_spec`` record and the box a ``Body.from_spec`` one, placed by the
 document under the names the label's ``on`` and the goal use, and the physics is
-``rss.TAPE_60HZ`` under a task-language name. The staging states the stiffer finger servo the
-pinch needs. The hands start at the YAM's home, pointing ahead, so turn the right gizmo down
-first. ``tests/test_peel_a_label_scored`` drives the right hand through the page and ``evaluate``
-says success.
+``rss.TAPE_60HZ`` under a task-language name. The staging states the finger servo of
+``03_materials/08_tape``: stiffer than the YAM's own, damped, and capped at 12 N a finger. Neither
+page reaches the cap: the pads stall on the tab 3.8 mm short of shut and squeeze it with 5.8 N
+through the peel (``g2_grip.py``). The hands start at the YAM's home, pointing ahead, so turn the
+right gizmo down first. ``tests/test_peel_a_label_scored`` drives the right hand through the page
+and ``evaluate`` says success.
 """
 
 import robosimstudio as rss
@@ -21,7 +23,7 @@ TASK = """
 (define (problem peel_a_label)
   (:language peel the label off the box)
   (:staging (:scene bench_0728) (:embodiment yam_bimanual) (:physics tape_60hz@v1)
-            (:gripper-actuation (:ke 1500) (:kd 240)))
+            (:gripper-actuation (:ke 1500) (:kd 240) (:effort-limit 12)))
   (:objects box - parcel label - paper_label)
   (:goal (>= (peeled_fraction label) 0.8)))
 """
