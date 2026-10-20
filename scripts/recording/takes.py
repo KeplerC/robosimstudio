@@ -2304,7 +2304,9 @@ def _goal_met(film) -> tuple[bool, str]:
 def _material(example: str) -> Take:
     """The take that films ``example``'s own clip."""
     found = [t for t in (*DRAFTS, *ROBOT_PARTICLES, *ROBOT_BAGS, *ROBOT_BRUSH) if t.example == example and not t.name]
-    found += [t for t in (*ROBOT_SUCTION, *ROBOT_TAPE, *ROBOT_WATER, *ROBOT_CUTTING) if t.example == example]
+    found += [
+        t for t in (*ROBOT_SUCTION, *ROBOT_TAPE, *ROBOT_WATER, *ROBOT_CUTTING) if t.example == example and not t.name
+    ]
     (take,) = found
     return take
 
@@ -2328,10 +2330,19 @@ def scored(example: str, of: str, *, over: Any = None, turn: bool = False, what:
     over ``what``, turns it to point down if ``turn``, and closes in to the material take's view in
     place of that take's opening pause. The sidebar opens the Goal folder and closes what the
     material take closes; a folder only the material script's page adds is not there to open.
+    With ``over``, ``of``'s take must open on a :class:`Wait`, the pause this stands in for; a
+    take that opens on anything else is refused, since dropping its first beat drops a step of
+    the drive.
     """
     material = _material(of)
     start: tuple[Beat, ...] = ()
     if over is not None:
+        opening = material.beats[0] if material.beats else None
+        if not isinstance(opening, Wait):
+            raise ValueError(
+                f"{of}'s take opens on {type(opening).__name__}, not a Wait: the drag over {what or 'the work'} "
+                "stands in for an opening pause, and dropping this beat would drop a step of the drive"
+            )
         start = (
             Wait(seconds=0.5, label=f"the right hand at the YAM's home, pointing ahead; {what}"),
             DragTo("right", over, seconds_per_m=4.5, label=f"drag the hand over {what}"),
@@ -2401,6 +2412,11 @@ SCORED = (
         budget=1_300_000,  # 20 s with the carry over from the YAM's home: 1,232 KB at quality 46, over the default 900
     ),
     scored("examples/06_tasks/07_band_scored.py", "examples/03_materials/04_band.py"),
+    # Filmed 4 times with the page's (:effort-limit 12), the material page's ceiling: passed 4 of 4,
+    # and 03_materials/08_tape 4 of 4. PR #9's filming without the clause passed 3 of 4. On every page
+    # the pads stall 3.84 mm short of shut and hold the tab at 5.8 N; the clause caps only Close's
+    # first push (71 N uncapped). After the last bonds let go, the tab fell from the jaws in 3 of the
+    # scored films and 2 of the material ones, once the goal had turned: the drive, not the grip.
     scored(
         "examples/06_tasks/08_tape_scored.py",
         "examples/03_materials/08_tape.py",

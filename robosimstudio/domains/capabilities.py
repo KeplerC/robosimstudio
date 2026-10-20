@@ -127,6 +127,12 @@ class ParticleMixin:
     its triangles. A centerline owns no triangle, so without it the path tracer
     drew a simulated, measured curve as nothing at all."""
 
+    settle_run: tuple[int, int] | None = None
+    """The run this thing joined the scene's settle with (:meth:`join_settle`), ``None`` for none.
+
+    What the studio's **Re-settle** runs again, so that it settles each thing as the build did
+    rather than as its spec's fields suggest it might have."""
+
     def bind(self, model: newton.Model) -> None:
         """Take this thing's particle range off the model and open a probe per world.
 
@@ -225,8 +231,10 @@ class ParticleMixin:
         pipeline, ``particle_settles``: a *run* (``(frames, substeps)``) one of
         them already ran is not run again, and each that has snapshotted
         snapshots again after one that is. ``run=None`` joins without settling,
-        as a kind that does not settle does.
+        as a kind that does not settle does. The run is kept as :attr:`settle_run`,
+        which the studio's **Re-settle** runs again.
         """
+        self.settle_run = run
         settles = getattr(pipeline, "particle_settles", None)
         if settles is None:
             settles = pipeline.particle_settles = {"runs": set(), "things": []}

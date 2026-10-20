@@ -255,5 +255,87 @@ class TestTheHarvestCoversTheStepTaken(unittest.TestCase):
         self.assertEqual([0.0] * 15 + [1.0] * 17 + [0.0] * 15 + [1.0], [round(v, 6) for v in read])
 
 
+class TestTheCellLookupWorkaroundSaysWhenItStandsDown(unittest.TestCase):
+    """Warp's environment cell lookup is replaced only while both of its faulty lines are there.
+
+    It stood down without a word otherwise, so a Warp that had changed one line, or a Warp 1.18
+    whose lookup read differently, ran separate MPM worlds through the faulty lookup with nothing
+    to say so. Asked of patched source strings: both lines, one, and neither on a version the
+    workaround was written for (it warns) or on a later one (a release that fixed both, quiet).
+    """
+
+    def _install(self, source: str | Exception, version: str = "1.18.0") -> tuple[bool, list[str], object]:
+        """Install against ``source`` as the lookup's source, or with ``getsource`` raising it."""
+        import warnings
+        from unittest import mock
+
+        import warp.fem as fem
+
+        from robosimstudio.engines.newton import mpm
+
+        def getsource(_f) -> str:
+            if isinstance(source, Exception):
+                raise source
+            return source
+
+        with (
+            mock.patch.object(mpm.inspect, "getsource", getsource),
+            mock.patch.object(mpm.wp.config, "version", version),
+            mock.patch.object(fem.Nanogrid, "make_filtered_cell_lookup", mpm._WARP_CELL_LOOKUP),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            installed = mpm._install_environment_cell_lookup()
+            lookup = fem.Nanogrid.make_filtered_cell_lookup
+        return installed, [str(w.message) for w in caught], lookup
+
+    def _lines(self, *lines: str) -> str:
+        return "def make_filtered_cell_lookup(...):\n" + "".join(f"    {line}\n" for line in lines)
+
+    def test_both_faulty_lines_install_it_quietly(self) -> None:
+        from robosimstudio.engines.newton import mpm
+
+        installed, said, lookup = self._install(self._lines(*mpm._FAULTY_LINES))
+        self.assertTrue(installed)
+        self.assertEqual([], said)
+        self.assertIs(mpm._environment_cell_lookup, lookup)
+
+    def test_one_faulty_line_alone_is_said_by_name(self) -> None:
+        from robosimstudio.engines.newton import mpm
+
+        for kept, gone in (mpm._FAULTY_LINES, mpm._FAULTY_LINES[::-1]):
+            with self.subTest(kept=kept):
+                installed, said, lookup = self._install(self._lines(kept), version="1.19.0")
+                self.assertFalse(installed)
+                self.assertIs(mpm._WARP_CELL_LOOKUP, lookup)
+                self.assertEqual(1, len(said), said)
+                self.assertIn(kept, said[0])
+                self.assertIn(gone, said[0])
+
+    def test_neither_on_a_version_it_was_written_for_is_said(self) -> None:
+        installed, said, _lookup = self._install(self._lines("packed = _floor3(uvw) + env_offset"))
+        self.assertFalse(installed)
+        self.assertEqual(1, len(said), said)
+        self.assertRegex(said[0], r"Warp 1\.18\.0.*neither")
+
+    def test_neither_on_a_later_warp_is_quiet(self) -> None:
+        installed, said, _lookup = self._install(self._lines("packed = _floor3(uvw) + env_offset"), version="1.19.0")
+        self.assertFalse(installed)
+        self.assertEqual([], said)
+
+    def test_a_source_that_cannot_be_read_is_said_as_that(self) -> None:
+        """It was read as empty, and on Warp 1.18 the warning said neither faulty line is in its source."""
+        from robosimstudio.engines.newton import mpm
+
+        for version in ("1.18.0", "1.19.0"):
+            with self.subTest(version=version):
+                installed, said, lookup = self._install(OSError("could not get source code"), version=version)
+                self.assertFalse(installed)
+                self.assertIs(mpm._WARP_CELL_LOOKUP, lookup)
+                self.assertEqual(1, len(said), said)
+                self.assertRegex(said[0], rf"^Warp {version}: the source of .* cannot be read \(could not get source")
+                self.assertNotIn("neither", said[0])
+
+
 if __name__ == "__main__":
     unittest.main()

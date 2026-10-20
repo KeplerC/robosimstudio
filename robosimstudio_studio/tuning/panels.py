@@ -447,14 +447,32 @@ class PanelReadings(Panel):
                 # a run -- is re-baselined where it lies (asked to settle, it raised
                 # ``AttributeError`` out of the page loop). Settling the first thing
                 # alone skipped a towel or a sponge on the record behind a rope.
-                settled, lying = [], []
+                #
+                # Each distinct run once, as ``join_settle`` runs them at the build:
+                # a settle steps the whole particle array, so two like sheets on
+                # ``(60, 10)`` stepped the scene twice: 120 steps and 2.53 s of
+                # blocked page loop where the build took 60 (1.26 s), and a drape
+                # 3.5 mm off the build's where one run leaves it 0.3 mm off,
+                # measured on ``tests.test_fix_examples_soft_cloth``'s two sheets
+                # pressed from a reset. Named as
+                # re-settled only where the run stepped: a tape label's
+                # ``settle_frames`` of 0 beside a towel was "re-settled towel, label".
+                #
+                # The run each thing joined with, as ``join_settle`` kept it
+                # (``settle_run``), not one worked out again from its spec: a kind
+                # that joins with no run, or with a run of its own, settled on its
+                # spec's fields here and on its own at the build.
+                settled, lying, ran = [], [], set()
                 for thing in things:
                     settle = getattr(thing, "settle", None)
-                    if callable(settle):
-                        settle(pipeline)
-                        settled.append(thing.name)
-                    else:
+                    run = getattr(thing, "settle_run", None)
+                    if run is None or not callable(settle):
                         lying.append(thing.name)
+                        continue
+                    if run not in ran:
+                        ran.add(run)
+                        settle(pipeline)
+                    (settled if run[0] > 0 else lying).append(thing.name)
                 # The settles stepped the whole particle array, so every thing that
                 # shares it takes its baseline again, after the last of them.
                 for thing in things:

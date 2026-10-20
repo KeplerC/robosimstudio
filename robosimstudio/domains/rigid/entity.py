@@ -85,8 +85,17 @@ class EntityRigid(Entity):
         self.coord_start: int = -1
         self.dof_start: int = -1
         self.weld_joint: int = -1
-        """The fixed joint from the world that holds a static object, ``-1`` for a free one."""
-        self._welded_at: np.ndarray | None = None
+        """The fixed joint :func:`weld_to_world` built to hold a static object, ``-1`` for any other body."""
+        self.held_in_scene = False
+        """A static the arena declares whose body no FREE joint moves (the arena's own fixed joint holds it).
+
+        :meth:`find_in_scene` only locates such a body, so it has no :attr:`weld_joint`, and a mass
+        written there moves nothing, as on a welded one. An arena static on a free joint is dynamic."""
+        self.held_at: np.ndarray | None = None
+        """Where a static object stands for its model's whole life (world, xyz + xyzw), ``None`` for a free one.
+
+        Its weld's pose, or where the scene's arena stood it for :meth:`find_in_scene`.
+        Nothing writes either again, so :meth:`move_refusal` measures each layout against it."""
         self.shapes: np.ndarray = np.zeros(0, dtype=np.int32)
         self.obb: ObbGrasp | None = None
         self.init_pose = np.asarray(spec.pose, dtype=np.float64)
@@ -457,37 +466,64 @@ class EntityRigid(Entity):
         ``tests/test_a_static_box_stays_put.py`` measures.
         """
         body, self.weld_joint = weld_to_world(builder, xform, label=self.spec.name)
-        self._welded_at = np.asarray(builder.body_q[body], dtype=np.float64)
+        self.held_at = np.asarray(builder.body_q[body], dtype=np.float64)
         return body
 
-    def move_refusal(self, pose) -> str:
-        """Why this object cannot stand at ``pose`` (world, xyz + xyzw) in the model it was built into, or ``""``.
+    def move_refusal(self, episode, *, base: np.ndarray | None = None) -> str:
+        """Why this object cannot stand where ``episode`` puts it in the model it was built into, or ``""``.
 
-        Only a static object has a reason. It stands where its model welded it,
-        and nothing writes the weld again: the joint has no coordinates for
-        :meth:`reset` to write, and neither this entity nor a fleet's wave places
-        a world's copy of it. So an episode that put it anywhere else used to run
-        with it where the build's episode stood it, and say nothing.
+        Only a static object has a reason. It stands at :attr:`held_at`, and
+        nothing moves it from there: a weld has no coordinates for :meth:`reset`
+        to write, an arena's body is where its import put it, and neither this
+        entity nor a fleet's wave places a world's copy of either. So an episode
+        that put it anywhere else used to run with it where the build stood it,
+        and say nothing.
+
+        A welded object is asked of the whole layout, ``base`` and then the
+        episode, as :meth:`episode_start_q` composes it: its build welded it at
+        its declared pose. An arena's is asked only of what the episode names,
+        since its spec's pose places nothing in any model, the lowering's
+        default origin included.
 
         Placing it per episode through the mocap channel
         (:meth:`~robosimstudio.domains.static.welded.WeldedFixture.place_welded`)
         is not done. That channel is MuJoCo's, and a static the coupled solver
         mirrors into a deformable's island takes its proxy when the island is
         built, before any reset (:class:`~robosimstudio.domains.static.entity.PlacedAtBuild`).
+
+        Args:
+            episode: The episode whose layout to ask of.
+            base: The declared pose ``episode`` is laid on, as for
+                :meth:`episode_start_q`; the entity's own when omitted.
         """
-        if self._welded_at is None:
+        at = self.held_at
+        if at is None:
             return ""
-        pose = np.asarray(pose, dtype=np.float64).reshape(-1)[:7]
-        at = self._welded_at
-        turned = min(np.abs(pose[3:] - at[3:]).max(), np.abs(pose[3:] + at[3:]).max())
+        welded = self.weld_joint >= 0
+        pose = self.episode_start_q(episode, base=base if welded else at)
+        turned = min(np.abs(pose[3:7] - at[3:]).max(), np.abs(pose[3:7] + at[3:]).max())
         if np.abs(pose[:3] - at[:3]).max() <= WELD_TOLERANCE and turned <= WELD_TOLERANCE:
             return ""
         where = ", ".join(f"{v:.4f}" for v in at[:3])
         asked = ", ".join(f"{v:.4f}" for v in pose[:3])
+        held = "welded where its model was built" if welded else "where the scene's arena stood it"
         return (
-            f"object {self.spec.name!r} is static, welded where its model was built, at ({where}) "
-            f"facing {tuple(round(float(v), 4) for v in at[3:])}, and this episode stands it at ({asked}) "
-            f"facing {tuple(round(float(v), 4) for v in pose[3:])}"
+            f"object {self.spec.name!r} is static, {held}, at ({where}) "
+            f"facing {tuple(round(float(v), 4) for v in at[3:])}, and this layout stands it at ({asked}) "
+            f"facing {tuple(round(float(v), 4) for v in pose[3:7])}"
+        )
+
+    @property
+    def move_remedy(self) -> str:
+        """What lets a layout move this static object, for whoever refuses one (:meth:`move_refusal`)."""
+        if self.weld_joint < 0:
+            return (
+                "Nothing places a static object the arena declares, in any model, so leave it out of the "
+                "sampler's object_poses and object_xforms, or move it in the arena"
+            )
+        return (
+            "A weld has no coordinates to write, so a layout that moves a static object needs a model of its "
+            "own: name object_poses (or object_xforms) in the sampler's (:model-key-fields ...), or drop static=True"
         )
 
     def _add_primitive(self, builder: newton.ModelBuilder, pose) -> None:
@@ -604,11 +640,19 @@ class EntityRigid(Entity):
         """Locate an object the scene asset already declared.
 
         Called by the compiler after the statics have built, since the object
-        only exists once its arena has been imported.
+        only exists once its arena has been imported. A static one is held where
+        the import stood it (:attr:`held_at`), whatever its spec's pose says.
         """
         body_name = self.spec.body_name or self.spec.name
         self.body = label_index(builder.body_label, body_name)
-        if not self.spec.static:
+        if self.spec.static:
+            self.held_at = np.asarray(builder.body_q[self.body], dtype=np.float64)
+            try:
+                j = self._free_joint(builder)
+            except KeyError:  # no joint by its name, and none FREE with it as the child
+                j = -1
+            self.held_in_scene = j < 0 or newton.JointType(builder.joint_type[j]) is not newton.JointType.FREE
+        else:
             j = self._free_joint(builder)
             if newton.JointType(builder.joint_type[j]) is not newton.JointType.FREE:
                 raise ValueError(f"object {self.spec.name!r}: expected a FREE joint, got {builder.joint_type[j]}")
@@ -1110,20 +1154,14 @@ class EntityRigid(Entity):
         disturbs another or the arm.
 
         A static object has none, and an episode that moves it is refused by name
-        (:meth:`move_refusal`): the model it would run in welded it elsewhere.
+        (:meth:`move_refusal`): the model it would run in holds it elsewhere.
 
         Raises:
             ValueError: When this episode moves a static object.
         """
-        if self.weld_joint >= 0:
-            refusal = self.move_refusal(self._placed(self._episode_pose(episode)))
-            if refusal:
-                raise ValueError(
-                    f"{refusal}. A weld has no coordinates for a reset to write, so a layout that moves a static "
-                    "object needs a model of its own: name object_poses (or object_xforms) in the sampler's "
-                    "(:model-key-fields ...), or drop static=True"
-                )
-            return
+        refusal = self.move_refusal(episode)
+        if refusal:
+            raise ValueError(f"{refusal}. {self.move_remedy}")
         if self.coord_start < 0:
             return
         # The remembered start pose stays in the frame the *spec* stated it in,
@@ -1141,7 +1179,7 @@ class EntityRigid(Entity):
 
     # ---------------------------------------------------------------- tuning
     def tunables(self, pipeline=None):
-        """Contact material over this object's shapes, and its mass unless it is static.
+        """Contact material over this object's shapes, and its mass unless it is welded.
 
         Over ``self.shapes`` rather than ``range.shape_indices``: a
         scene-declared object does not *build* its shapes -- :meth:`find_in_scene`
@@ -1151,9 +1189,12 @@ class EntityRigid(Entity):
         range here would have offered a working panel that wrote into no shapes
         at all, on the majority of objects in the benchmark's corpus.
 
-        No mass on a static object, as :meth:`EntityStatic.tunables
+        No mass on a body :func:`weld_to_world` built, as :meth:`EntityStatic.tunables
         <robosimstudio.domains.static.entity.EntityStatic.tunables>` offers none:
-        its body is welded and kinematic, and a mass written there moves nothing.
+        it is welded and kinematic, and a mass written there moves nothing. Nor on
+        a static the arena declares and holds with a joint of its own
+        (:attr:`held_in_scene`). One the arena puts on a FREE joint keeps its panel:
+        :meth:`find_in_scene` only locates its body, and that body is dynamic.
         """
         from robosimstudio.core.tuning import BodyWriter, ShapeWriter, Tunable
         from robosimstudio.specs import BodySpec, ContactMaterialSpec
@@ -1171,7 +1212,7 @@ class EntityRigid(Entity):
                     summary=f"What {self.name}'s {len(self.shapes)} shape(s) feel on contact.",
                 )
             )
-        if self.body >= 0 and not self.spec.static:
+        if self.body >= 0 and self.weld_joint < 0 and not self.held_in_scene:
             bodies = BodyWriter(self.model, [self.body], pipeline)
             out.append(
                 Tunable(

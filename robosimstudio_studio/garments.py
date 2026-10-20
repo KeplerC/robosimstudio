@@ -733,6 +733,16 @@ class ViewerStudio(newton.viewer.ViewerViser):
     def garment_style(self) -> str:
         return self._garment_style
 
+    @property
+    def has_sheets(self) -> bool:
+        """Whether a declared garment is a sheet: what :meth:`set_garment_style` changes the draw of.
+
+        A centerline's tube and a particle body's points or surface are drawn alike in every style
+        (:meth:`_log_triangles`), and with no sheet every style draws flat, so a page holding only
+        those has no cloth look to choose. Read after :meth:`set_garments`.
+        """
+        return bool(self._sheets)
+
     # -------------------------------------------------------------- lifecycle
     def clear_model(self):
         """Reset model-dependent state; the garments are that state too."""

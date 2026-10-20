@@ -31,7 +31,11 @@ uv run --group media python scripts/record_examples.py --list                 # 
 CUDA_VISIBLE_DEVICES=1 uv run --group media python scripts/record_examples.py 00_hello_world      # one take, by any part of its name
 CUDA_VISIBLE_DEVICES=1 uv run --group media python scripts/record_examples.py drag_cube --probe   # frame it: probe.png, no beats
 uv run --group media python scripts/record_examples.py --final --gpus 1,2 -j 4   # every finished take, two at a time per card
+uv run --group media python scripts/record_examples.py --gpus 5 -j 4 --port 9104 tape   # beside it, on ports 9104-9107
 ```
+
+A recorder serves its pages on `--port` to `--port + j - 1` (inside 9100-9199) and locks them
+while it runs, so a second recorder whose ports meet the first's is refused, naming the port.
 
 A pending take (a draft on physics still being changed) is filmed into
 `outputs/record/` only. `--no-install` keeps any take out of `examples/`.

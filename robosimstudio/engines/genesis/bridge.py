@@ -469,7 +469,10 @@ class GenesisBridge:
         massless around its rim was counted 81/121 of its area where it holds
         81/100, and a record stating its built density read 0.826, refused. A
         record that does not say how, over a sheet Newton weighs only in part,
-        is not weighed at all, and a debug line says so.
+        is not weighed at all, and a warning says so, once an actor a build: the
+        composer's default for an entity declaring no actor states none, as does
+        a record replayed from before records stated it. Said at debug, the check
+        went quiet for each of them with nothing in the log.
 
         A volume is not compared. ``FEM.Elastic`` masses it at ``rho * volume``
         of the lattice it is handed: a 100 x 70 x 35 mm sponge at 110 kg/m^3
@@ -494,7 +497,7 @@ class GenesisBridge:
             # The area the particles Newton weighs hold, so both sides are the same particles.
             share = _weighed_share(masses, geom.tris, areas, geom.lumping)
             if share is None:
-                log.debug(
+                log.warning(
                     "genesis actor %r: not weighed; Newton weighs %d of its %d particles and its record states "
                     "no lumping (%r), so the area they hold is not known",
                     geom.name,

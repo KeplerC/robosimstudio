@@ -22,21 +22,26 @@ Usage, from the repository root::
     CUDA_VISIBLE_DEVICES=1 uv run --group media python scripts/record_examples.py 00_hello_world
     CUDA_VISIBLE_DEVICES=1 uv run --group media python scripts/record_examples.py drag_cube --probe
     uv run --group media python scripts/record_examples.py --gpus 1,2 -j 4      # every take
+    uv run --group media python scripts/record_examples.py --gpus 5 -j 4 --port 9104 tape   # beside it
 
 A name is matched as a substring of ``<folder>/<clip>``. ``--probe`` opens the
 page, frames it and writes ``probe.png`` without playing a beat: for placing a
 camera. One process per take; ``CUDA_VISIBLE_DEVICES`` (or ``--gpus``) picks the
-card for the simulation and the browser both.
+card for the simulation and the browser both. A recorder serves its pages on
+``--port`` to ``--port + j - 1``; recorders side by side take blocks that do not
+meet, and one whose block meets another's is refused, naming the port.
 """
 
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import runpy
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -53,21 +58,124 @@ CHILD_TIMEOUT_S = 1800
 
 
 PORTS = range(9100, 9200)
-"""Where the pages serve. Each child is handed its own by the parent: a child that looked
-for a free one would look long before viser binds it, and two started together would both
-find the same."""
+"""Where the pages serve. A recorder serves on a block of these, ``--port`` to ``--port + j - 1``,
+a port for each take running at once, and hands each child the lowest one no running child holds:
+a child that looked for a free one would look long before viser binds it, and two started together
+would both find the same. The block is locked for as long as the recorder runs, so a second
+recorder whose block meets it is refused, naming the port."""
+
+LOCKS = Path(os.environ.get("ROBOSIMSTUDIO_RECORD_LOCKS") or "/tmp/robosimstudio-record-ports")
+"""Where every recorder on the machine locks its block, a file a port: one path whatever ``TMPDIR`` says,
+because the ports are the machine's. Under ``tempfile.gettempdir()`` two recorders started with
+different ``TMPDIR`` values locked in two directories, each blind to the other's locks. Opened to every
+user, as ``/tmp`` is, so another user's recorder locks beside this one's. ``ROBOSIMSTUDIO_RECORD_LOCKS``
+names another, for a test: recorders meet only where they name the same one."""
 
 
-def free_port(start: int = PORTS.start) -> int:
-    """The first port from ``start`` that nothing is listening on."""
-    for port in range(start, PORTS.stop):
-        with socket.socket() as s:
+def page_ports(port: int, jobs: int) -> range:
+    """The block a recorder started at ``--port`` with ``jobs`` takes at once serves its pages on."""
+    last = port + jobs - 1
+    if port not in PORTS:
+        raise ValueError(f"--port {port} is outside {PORTS.start}-{PORTS.stop - 1}, where the pages serve")
+    if last not in PORTS:
+        raise ValueError(
+            f"--port {port} with -j {jobs} serves on {port}-{last}, past {PORTS.stop - 1}: "
+            f"start it at {PORTS.stop - jobs} or lower"
+        )
+    return range(port, last + 1)
+
+
+def port_free(port: int) -> bool:
+    """Nothing listens on ``port``. Bound as viser binds, over the connections a closed page left waiting."""
+    with socket.socket() as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+        return True
+
+
+def _open_shared(path: Path) -> int:
+    """``path`` opened for reading and appending, made 0o666 if it is not there: a lock file, whoever made it.
+
+    Opened without ``O_CREAT`` when it is there. :data:`LOCKS` is sticky and writable by all, and there
+    ``fs.protected_regular`` refuses an ``O_CREAT`` open of another user's file, 0o666 or not, unless the
+    directory is the opener's: one ``O_CREAT`` open locked a user out of every port another user's
+    recorder had once locked, since a lock file is never removed. Made ``O_EXCL``, so a recorder that
+    makes it an instant after another opens the other's. This user's own, made under an older recorder
+    or another umask, is opened to every user here."""
+    for _ in range(3):
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_APPEND)
+        except FileNotFoundError:
             try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
+                fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_EXCL, 0o666)
+            except FileExistsError:  # another recorder made it between the two
                 continue
-            return port
-    raise RuntimeError(f"no free port in {PORTS.start}-{PORTS.stop - 1}")
+            os.fchmod(fd, 0o666)  # whatever the umask took off
+            return fd
+        st = os.fstat(fd)
+        if st.st_uid == os.geteuid() and stat.S_IMODE(st.st_mode) & 0o666 != 0o666:
+            os.fchmod(fd, 0o666)
+        return fd
+    raise FileNotFoundError(f"{path} was made and removed three times while this recorder opened it")
+
+
+def _open_lock(port: int):
+    """``port``'s lock file, open; a lock this user may not open is refused by name, its owner said."""
+    path = LOCKS / f"{port}.lock"
+    try:
+        LOCKS.mkdir(parents=True, exist_ok=True)
+        st = LOCKS.stat()
+        if st.st_uid == os.geteuid() and stat.S_IMODE(st.st_mode) & 0o1777 != 0o1777:
+            LOCKS.chmod(0o1777)  # this user's, whichever recorder made it: opened to every user, as /tmp is
+        fd = _open_shared(path)
+        return os.fdopen(fd, "a+")  # held until the recorder exits
+    except PermissionError as exc:
+        import pwd
+
+        there = next((p for p in (path, LOCKS) if p.exists()), LOCKS)
+        try:
+            owner = f"user {pwd.getpwuid(there.stat().st_uid).pw_name}"
+        except (KeyError, OSError):
+            owner = "another user"
+        raise ValueError(
+            f"port {port}'s lock {path} cannot be opened ({exc.strerror}); {there} is owned by {owner}: "
+            f"run as them, or remove {LOCKS} once no recorder of theirs is running"
+        ) from None
+
+
+def claim(block: range) -> list:
+    """Lock ``block``'s ports for this recorder until it exits: the open lock files, to keep.
+
+    A port another recorder has locked, that something else listens on, or whose lock this user may
+    not open, is refused by name, and nothing of the block stays locked."""
+    held = []
+    try:
+        for port in block:
+            lock = _open_lock(port)
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                lock.seek(0)
+                holder = lock.read().strip() or "another recorder"
+                lock.close()
+                raise ValueError(
+                    f"port {port} is a page port of {holder}: recorders side by side take blocks "
+                    "(--port to --port + j - 1) that do not meet"
+                ) from None
+            held.append(lock)
+            lock.truncate(0)
+            lock.write(f"the recorder of pid {os.getpid()}, ports {block.start}-{block[-1]}")
+            lock.flush()
+            if not port_free(port):
+                raise ValueError(f"port {port} is in use by something that is not a recorder: pick another --port")
+    except BaseException:
+        for lock in held:
+            lock.close()
+        raise
+    return held
 
 
 # =============================================================================
@@ -88,7 +196,9 @@ def film_one(
     def log(message: str) -> None:
         print(f"[{take.key} {time.perf_counter() - t0:6.1f}s] {message}", flush=True)
 
-    port = free_port(port)
+    if not port_free(port):
+        log(f"port {port} is in use: a take serves only on the port its recorder hands it")
+        return 1
     film = lockstep.Film(take, port=port, scratch=out_root, software=software, probe=probe, log=log)
     lockstep.install(film, port=port, out=str(out / "studio"), overrides=dict(take.config))
     script = REPO / take.example
@@ -180,11 +290,25 @@ def gpus(spec: str) -> list[str]:
 
 
 def run_all(chosen: list[Take], args) -> int:
-    """A child process per take, at most ``-j`` at once, dealt across the GPUs."""
+    """A child process per take, at most ``-j`` at once, dealt across the GPUs and the block's ports."""
     cards = gpus(args.gpus)
     jobs = max(1, args.jobs or len(cards))
+    try:
+        block = page_ports(args.port, jobs)
+        locks = claim(block)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    try:
+        return _deal(chosen, args, cards, jobs, block)
+    finally:
+        for lock in locks:
+            lock.close()
+
+
+def _deal(chosen: list[Take], args, cards: list[str], jobs: int, block: range) -> int:
     queue = list(chosen)
-    running: list[tuple[subprocess.Popen, Take, float, str]] = []
+    running: list[tuple[subprocess.Popen, Take, float, str, int]] = []
     failed: list[str] = []
     dealt = 0
     while queue or running:
@@ -195,7 +319,8 @@ def run_all(chosen: list[Take], args) -> int:
             out = args.out / take.key
             out.mkdir(parents=True, exist_ok=True)
             cmd = [sys.executable, str(Path(__file__).resolve()), "--child", take.key, "--out", str(args.out)]
-            cmd += ["--port", str(PORTS.start + (args.port - PORTS.start + dealt - 1) % len(PORTS))]
+            port = min(set(block) - {item[4] for item in running})
+            cmd += ["--port", str(port)]
             cmd += ["--kmax", str(args.kmax)]
             flags = {
                 "--software": args.software,
@@ -207,11 +332,11 @@ def run_all(chosen: list[Take], args) -> int:
             env = {**os.environ, "CUDA_VISIBLE_DEVICES": card}
             with open(out / "log.txt", "w") as sink:
                 proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=sink, stderr=subprocess.STDOUT)
-            running.append((proc, take, time.perf_counter(), card))
-            print(f"{take.key}: started on GPU {card} (log {out / 'log.txt'})", flush=True)
+            running.append((proc, take, time.perf_counter(), card, port))
+            print(f"{take.key}: started on GPU {card}, port {port} (log {out / 'log.txt'})", flush=True)
         time.sleep(1.0)
         for item in list(running):
-            proc, take, started, card = item
+            proc, take, started, card, _port = item
             if proc.poll() is None and time.perf_counter() - started < CHILD_TIMEOUT_S:
                 continue
             if proc.poll() is None:
@@ -278,8 +403,8 @@ def main(argv: list[str] | None = None) -> int:
         "--port",
         type=int,
         default=PORTS.start,
-        help=f"where the first take's page serves, the next one up from it ({PORTS.start}-{PORTS.stop - 1}): "
-        "recorders run side by side each from its own",
+        help=f"the first of the -j ports the pages serve on ({PORTS.start}-{PORTS.stop - 1}); recorders side by "
+        "side take blocks that do not meet, and one that meets another's is refused",
     )
     args = parser.parse_args(argv)
     args.out = args.out.resolve()

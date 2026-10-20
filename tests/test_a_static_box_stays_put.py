@@ -87,6 +87,25 @@ def _moves_the_block(task, episode_id, rng) -> dict:
     return {"object_poses": {"block": (MOVES[episode_id % 2], -0.1, 0.02, 0.0)}}
 
 
+CUBE_MOVES = (-0.1, 0.1)
+"""Where the two episodes of :data:`CUBE_AND_BLOCK_TASK` stand the free cube in x [m]."""
+
+CUBE_AND_BLOCK_TASK = """
+(define (problem static_block_after_a_cube)
+  (:staging (:scene bench_075) (:embodiment panda) (:physics mujoco_500hz@v1) (:max-steps 50)
+            (:episodes (:count 2) (:sampler static_block_and_cube_move)))
+  (:objects cube - free_cube_40mm block - static_block_40mm)
+  (:goal (<= (speed block) 0.02)))
+"""
+"""A free cube declared before the static block, both moved by each episode."""
+
+
+def _moves_the_cube_and_the_block(task, episode_id, rng) -> dict:
+    del task, rng
+    k = episode_id % 2
+    return {"object_poses": {"cube": (CUBE_MOVES[k], 0.1, 0.02, 0.0), "block": (MOVES[k], -0.1, 0.02, 0.0)}}
+
+
 def _held_x(sim, entity, world: int = 0) -> float:
     """Where MuJoCo holds a static body in x, in one world: its mocap position [m]."""
     solver = sim.pipeline.program.mujoco_solver
@@ -237,8 +256,11 @@ class TestAnEpisodeThatMovesAStaticBox(unittest.TestCase):
         from robosimstudio_bench.taskbuild.lower import register_sampler
 
         register_sampler("static_block_moves", _moves_the_block)
+        register_sampler("static_block_and_cube_move", _moves_the_cube_and_the_block)
         block = rss.box(name="block", half=(0.02,) * 3, at=(0.0, -0.1, 0.02), static=True)
         register_asset(Body.from_spec(block, name="static_block_40mm"))
+        cube = rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.1, 0.02))
+        register_asset(Body.from_spec(cube, name="free_cube_40mm"))
 
     @staticmethod
     def _task(name: str, sampler: str = "static_block_moves", keys: str = ""):
@@ -259,6 +281,30 @@ class TestAnEpisodeThatMovesAStaticBox(unittest.TestCase):
             self._quiet(lambda: env.reset(0))
             with self.assertRaisesRegex(ValueError, "'block' is static.*model-key-fields"):
                 self._quiet(lambda: env.reset(1))
+        finally:
+            env.close()
+
+    def test_a_refused_reset_leaves_every_pose_its_episode_and_its_evaluator(self) -> None:
+        """The free cube is reset before the block refuses: it was left at episode 1's x = 0.70, ``env.episode`` 1."""
+        import robosimstudio_bench as bench
+
+        env = self._quiet(lambda: bench.Env(bench.task(CUBE_AND_BLOCK_TASK)))
+        try:
+            self._quiet(lambda: env.reset(0))
+            env.run(5)
+            states = (env.pipeline.state_0, env.pipeline.state_1)
+            fields = ("joint_q", "joint_qd", "body_q", "body_qd")
+            before = [getattr(state, f).numpy().copy() for state in states for f in fields]
+            episode, evaluator, clock = env.episode, env.evaluator, (env.step_count, env.pipeline.sim_time)
+            with self.assertRaisesRegex(ValueError, "'block' is static.*model-key-fields"):
+                self._quiet(lambda: env.reset(1))
+            after = [getattr(state, f).numpy() for state in states for f in fields]
+            for name, was, now in zip([f"state_{i}.{f}" for i in (0, 1) for f in fields], before, after, strict=True):
+                np.testing.assert_array_equal(was, now, f"{name} moved")
+            self.assertAlmostEqual(SURFACE[0] + CUBE_MOVES[0], float(env["cube"].position[0]), places=2)
+            self.assertIs(episode, env.episode)
+            self.assertIs(evaluator, env.evaluator)
+            self.assertEqual(clock, (env.step_count, env.pipeline.sim_time))
         finally:
             env.close()
 
@@ -301,6 +347,93 @@ class TestAnEpisodeThatMovesAStaticBox(unittest.TestCase):
                 self.assertAlmostEqual(SURFACE[0], _held_x(fleet, entity, world), places=5)
         finally:
             fleet.close()
+
+
+ARENA_BIN = (0.6, 0.4, 0.77)
+"""Where :data:`ARENA_BIN_TASK`'s arena stands its ``bin``, on ``bench_075``'s top, in world [m]."""
+
+ARENA_BIN_TASK = """
+(define (problem arena_bin_on_another_model)
+  (:staging (:scene bench_075_arena_bin) (:embodiment panda) (:physics mujoco_500hz@v1) (:max-steps 50)
+            (:episodes (:count 2) (:sampler arena_bin_moves) (:model-key-fields layout)))
+  (:fixtures bin - bin)
+  (:goal (<= (speed bin) 0.02)))
+"""
+"""A ``bin`` the scene's arena declares, over two episodes each on a model of its own."""
+
+
+def _moves_the_arena_bin(task, episode_id, rng) -> dict:
+    """Episode 1 is another model's, runs another active set, and names the arena's ``bin`` 50 mm along x."""
+    del task, rng
+    if episode_id % 2 == 0:
+        return {"layout": 0}
+    moved = (ARENA_BIN[0] + 0.05, *ARENA_BIN[1:], 0.0, 0.0, 0.0, 1.0)
+    return {"layout": 1, "active": ("bin",), "object_xforms": {"bin": moved}}
+
+
+class TestAnEpisodeOfAnotherModelThatMovesAnArenaStatic(unittest.TestCase):
+    """A reset refused on the way to another model leaves the env on the one it had.
+
+    Only a reset that kept its model asked the layout before taking it up. One that rebuilt closed the
+    renderers, compiled the new model and took up the episode and its evaluator, and only then was it
+    refused: the env was left on a fresh model it had never reset, at the episode it refused, with its
+    renderers closed.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import tempfile
+        from pathlib import Path
+
+        from robosimstudio.scene.builtin.benches import BENCH_075
+        from robosimstudio.scene.registry import register_cell
+        from robosimstudio.specs import AssetSpec, StaticSpec, replace
+        from robosimstudio_bench.taskbuild.lower import register_sampler
+
+        cls._dir = tempfile.TemporaryDirectory()
+        arena = Path(cls._dir.name) / "arena.xml"
+        x, y, z = ARENA_BIN
+        arena.write_text(
+            f'<mujoco><worldbody><body name="bin" pos="{x} {y} {z}"><freejoint/>'
+            '<geom type="box" size="0.02 0.02 0.02" mass="0.1"/></body></worldbody></mujoco>'
+        )
+        statics = (*BENCH_075.statics, StaticSpec(name="arena", asset=AssetSpec(path=str(arena))))
+        register_cell(replace(BENCH_075, name="bench_075_arena_bin", statics=statics))
+        register_sampler("arena_bin_moves", _moves_the_arena_bin)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._dir.cleanup()
+
+    def test_it_keeps_its_scene_model_renderers_episode_and_evaluator(self) -> None:
+        import robosimstudio_bench as bench
+
+        class Renderer:
+            closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+            def render(self, state) -> dict:
+                return {}
+
+        env = TestAnEpisodeThatMovesAStaticBox._quiet(lambda: bench.Env(bench.task(ARENA_BIN_TASK)))
+        try:
+            TestAnEpisodeThatMovesAStaticBox._quiet(lambda: env.reset(0))
+            env.renderer, env.obs_renderer = Renderer(), Renderer()
+            names = ("scene", "model", "pipeline", "renderer", "obs_renderer", "episode", "evaluator")
+            before = {name: getattr(env, name) for name in names}
+            with self.assertRaisesRegex(ValueError, "'bin' is static, where the scene's arena stood it"):
+                TestAnEpisodeThatMovesAStaticBox._quiet(lambda: env.reset(1))
+            self.assertEqual([], [name for name in names if getattr(env, name) is not before[name]], "replaced")
+            self.assertEqual([], [name for name in names[3:5] if before[name].closed], "closed")
+            TestAnEpisodeThatMovesAStaticBox._quiet(lambda: env.reset(0))
+            env.run(5)
+            self.assertTrue(env.state_is_finite())
+            np.testing.assert_allclose(ARENA_BIN, env["bin"].position, atol=1.0e-3)
+        finally:
+            env.renderer = env.obs_renderer = None
+            env.close()
 
 
 if __name__ == "__main__":

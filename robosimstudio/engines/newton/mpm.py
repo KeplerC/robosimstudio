@@ -48,15 +48,41 @@ the failure is Newton's and immediate.
 (a 60 mm column in a thick tank is 34% of its volume after 2 s), so a measure
 of a liquid counts particles in a region rather than reading a height.
 Recorded here because the kinds built over this solver inherit the limit.
+
+**Separate worlds bin their particles through a corrected cell lookup.** With
+``separate_worlds`` each world's cells are packed into one grid at an offset
+along x, and Warp 1.18's environment lookup (``NanogridBase.
+make_filtered_cell_lookup``) has two faults, both in rounding. It adds the
+offset to the particle's float grid coordinate before flooring, where the grid
+was built from the floored coordinate plus the offset in integers, so a
+particle within a float ulp under a cell face asks for the next cell; and the
+search it falls back on spans ``vec3i(uvw -+ 0.5)``, which truncates toward
+zero, so for a negative coordinate the window sits one cell high and leaves
+out the cell the particle is in. Together they bin the particle into a
+neighbour up to half a cell away, its shape weights go negative, and so can a
+node's mass. Measured on ``TestAHeapAlone.test_two_worlds_isolate``'s two
+worlds (2 x 1,350 particles, RTX PRO 6000, Newton 1.7.0, Warp 1.18.0): world 1,
+packed at +34, went non-finite in 12 of 245 trials (captured and eager, with
+and without its one stray particle), always at the same control step, never
+world 0 (+10, a finer ulp) and never in 50 trials of three worlds. In the
+failing step a particle at local index (-2.0000007, 4.58, 2.72) went into cell
+(-2, 5, 2) at y = -0.42, one node's inverse mass came out -0.016, three strain
+nodes' Delassus blocks went NaN and the Gauss-Seidel solve carried it through
+world 1's heap. Replaying that step's input went NaN 100 times in 100; with
+:func:`_environment_cell_lookup` installed, 0 in 100 eager and 0 in 100
+captured, and 0 in 360 trials (``probe3``, ``replay1``). It floors before
+packing and floors the window, and is installed on Warp's ``Nanogrid`` at
+import only while Warp's own lookup still has the faulty lines;
+``tests/test_mpm_kinds``' ``TestTwoWorldsBinAlike`` is the four-particle case.
 """
 
-from __future__ import annotations
-
 import dataclasses
+import inspect
 from typing import Any
 
 import newton
 import warp as wp
+import warp.fem as fem
 from newton.solvers import SolverImplicitMPM
 
 __all__ = ["SolverMPM"]
@@ -257,3 +283,156 @@ class SolverMPM(SolverImplicitMPM):
         self._harvested_at[out_body_f.ptr] = self._steps
         super().coupling_harvest_proxy_wrenches(body_local_to_proxy_global, out_body_f, dt=self._step_dt, **kwargs)
         wp.copy(held, out_body_f)
+
+
+# ------------------------------------------------------------ cell lookup
+# Module scope and no ``from __future__ import annotations`` in this file: Warp
+# reads a function's annotations as objects, and the nested functions below
+# annotate with their closure's types.
+
+
+@wp.func
+def _floor3(v: Any):
+    return wp.vec3i(int(wp.floor(v[0])), int(wp.floor(v[1])), int(wp.floor(v[2])))
+
+
+_WARP_CELL_LOOKUP = fem.Nanogrid.make_filtered_cell_lookup
+"""Warp's own factory, which still answers for a grid of one environment."""
+
+_FAULTY_LINES = ("packed_uvw = uvw + vec3_type(env_offset)", "wp.vec3i(uvw - offset * scales) + env_offset")
+"""The two lines of Warp 1.18's environment lookup that the module docstring describes."""
+
+_FAULTY_WARPS = ("1.18.",)
+"""The Warp releases the workaround was written against: a lookup there without both lines is said by name."""
+
+
+def _environment_cell_lookup(grid_geo, filter_func: wp.Function = None):
+    """``NanogridBase.make_filtered_cell_lookup`` with the environment lookup floored before it packs.
+
+    Warp 1.18's, line for line, but for the two rounding faults in the module
+    docstring: the cell is ``floor(uvw) + env_offset`` in integers, as the grid
+    was built, and the fallback window is floored rather than truncated. A grid
+    of one environment keeps Warp's own lookup.
+    """
+    if grid_geo.environment_count() <= 1:
+        return _WARP_CELL_LOOKUP(grid_geo, filter_func)
+    suffix = (f"{grid_geo.name}{filter_func.key if filter_func is not None else ''}", "floored")
+    scalar = grid_geo.scalar_type
+    vec3_type = wp.vec3d if scalar == wp.float64 else wp.vec3
+    CoordsType = grid_geo.coords_type
+
+    @fem.cache.dynamic_func(suffix=(suffix, "env"))
+    def cell_lookup_env(
+        args: grid_geo.CellArg, pos: vec3_type, max_dist: float, filter_data: Any, filter_target: Any, env_index: int
+    ):
+        grid = args.cell_grid
+        uvw = wp.volume_world_to_index(grid, pos) + vec3_type(scalar(0.5))
+        env_offset = args.env_offsets[env_index]
+        packed = _floor3(uvw) + env_offset
+        cell_index = grid_geo._lookup_cell_index(args, packed[0], packed[1], packed[2])
+        if cell_index != -1:
+            if args.cell_env[cell_index] == env_index:
+                coords = grid_geo._cell_coordinates_local(args, cell_index, uvw)
+                if wp.static(filter_func is None):
+                    return fem.make_free_sample(cell_index, coords)
+                else:
+                    if filter_func(filter_data, cell_index) == filter_target:
+                        return fem.make_free_sample(cell_index, coords)
+
+        cell_size = vec3_type(
+            wp.length(wp.volume_index_to_world_dir(grid, vec3_type(scalar(1.0), scalar(0.0), scalar(0.0)))),
+            wp.length(wp.volume_index_to_world_dir(grid, vec3_type(scalar(0.0), scalar(1.0), scalar(0.0)))),
+            wp.length(wp.volume_index_to_world_dir(grid, vec3_type(scalar(0.0), scalar(0.0), scalar(1.0)))),
+        )
+        offset = scalar(0.5)
+        min_cell_size = wp.min(cell_size)
+        max_offset = wp.ceil(max_dist / min_cell_size)
+        scales = wp.cw_div(vec3_type(min_cell_size), vec3_type(cell_size))
+        closest_cell = int(fem.NULL_ELEMENT_INDEX)
+        closest_coords = CoordsType()
+        while closest_cell == fem.NULL_ELEMENT_INDEX:
+            uvw_min = _floor3(uvw - offset * scales) + env_offset
+            uvw_max = _floor3(uvw + offset * scales) + wp.vec3i(1) + env_offset
+            closest_dist = min_cell_size * min_cell_size * scalar(offset * offset)
+            for i in range(uvw_min[0], uvw_max[0]):
+                for j in range(uvw_min[1], uvw_max[1]):
+                    for k in range(uvw_min[2], uvw_max[2]):
+                        cell_index = grid_geo._lookup_cell_index(args, i, j, k)
+                        if cell_index == -1:
+                            continue
+                        if args.cell_env[cell_index] != env_index:
+                            continue
+                        if wp.static(filter_func is not None):
+                            if filter_func(filter_data, cell_index) != filter_target:
+                                continue
+                        dist, coords = grid_geo._cell_closest_point_local(args, cell_index, uvw)
+                        if dist <= closest_dist:
+                            closest_dist = dist
+                            closest_coords = coords
+                            closest_cell = cell_index
+            if offset >= max_offset:
+                break
+            offset = wp.min(scalar(3.0) * offset, max_offset)
+        return fem.make_free_sample(closest_cell, closest_coords)
+
+    @fem.cache.dynamic_func(suffix=suffix, allow_overloads=True)
+    def cell_lookup(
+        args: grid_geo.CellArg, pos: vec3_type, max_dist: float, filter_data: Any, filter_target: Any, env_index: int
+    ):
+        return cell_lookup_env(args, pos, max_dist, filter_data, filter_target, env_index)
+
+    return cell_lookup
+
+
+def _install_environment_cell_lookup() -> bool:
+    """Put :func:`_environment_cell_lookup` on Warp's ``Nanogrid`` while Warp's own has the faults; whether it did.
+
+    Checked against the installed Warp's source, so a Warp that has fixed either
+    line keeps its own lookup. At import, which is before any solver here bins a
+    particle: Warp caches the functions a lookup is built into under the grid's
+    name, so one built before this would be reused.
+
+    Standing down is said, by name, when it may leave a fault in place: one of
+    the two lines there without the other (the lookup changed around it), or
+    neither found on a Warp the workaround was written for (:data:`_FAULTY_WARPS`).
+    A later Warp with neither line has fixed both, and is quiet. A source that
+    cannot be read says so on any Warp, since nothing then says which it is.
+    """
+    import warnings
+
+    version = str(wp.config.version)
+    where = "Warp's Nanogrid environment cell lookup (warp.fem NanogridBase.make_filtered_cell_lookup)"
+    try:
+        source = inspect.getsource(_WARP_CELL_LOOKUP)
+    except (OSError, TypeError) as exc:
+        warnings.warn(
+            f"Warp {version}: the source of {where} cannot be read ({exc}), so whether it has the rounding faults "
+            "robosimstudio corrects there is unknown; the correction is not installed, and separate MPM worlds bin "
+            "their particles through Warp's own lookup",
+            stacklevel=2,
+        )
+        return False
+    found = [line in source for line in _FAULTY_LINES]
+    if all(found):
+        fem.Nanogrid.make_filtered_cell_lookup = _environment_cell_lookup
+        return True
+    if any(found):
+        kept, gone = _FAULTY_LINES if found[0] else _FAULTY_LINES[::-1]
+        warnings.warn(
+            f"Warp {version}: {where} still has {kept!r} but not {gone!r}, so it changed around the rounding "
+            "faults robosimstudio corrects there; the correction is not installed, and separate MPM worlds bin "
+            "their particles through Warp's own lookup",
+            stacklevel=2,
+        )
+    elif version.startswith(_FAULTY_WARPS):
+        warnings.warn(
+            f"Warp {version}: neither faulty line robosimstudio corrects in {where} is in its source, on a "
+            "release the correction was written for; it is not installed, and separate MPM worlds bin their "
+            "particles through Warp's own lookup",
+            stacklevel=2,
+        )
+    return False
+
+
+ENVIRONMENT_LOOKUP_CORRECTED = _install_environment_cell_lookup()
+"""Whether this module replaced Warp's environment cell lookup (Warp 1.18.0 has both faults)."""

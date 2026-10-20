@@ -244,8 +244,15 @@ class Env(Sim):
         """Start an episode, rebuilding the scene only if the model changed."""
         if episode_id is not None:
             new_episode = make_episode(self.task, episode_id)
+            # Before the episode and its evaluator are taken up, and before the
+            # reset below retires a policy's hooks or moves anything: a layout
+            # the model it runs in cannot stand is refused with the env still at
+            # the episode it was at, every pose where it was. A new model is
+            # asked as soon as it is built, before this one is let go.
             if new_episode.model_key != self.episode.model_key:
                 self._rebuild(new_episode)
+            else:
+                self._refuse_layout(new_episode)
             if new_episode.active != self.episode.active:
                 # The active set is state, not model -- the scene is re-posed
                 # and the rest parked -- but the goal tree was masked to the
@@ -280,15 +287,23 @@ class Env(Sim):
         return obs, info
 
     def _rebuild(self, episode: Episode) -> None:
-        """Recompile for an episode that needs a different model."""
+        """Recompile for an episode that needs a different model.
+
+        The new model is asked whether it can stand the episode's layout
+        (:meth:`_refuse_layout`) before anything of this one is let go, since
+        where an arena stands a static is the new model's to say. Refused, the
+        env keeps its scene, model, renderers, episode and evaluator.
+        """
+        scene = compile_scene(
+            self.task, episode, device=self.device, use_cuda_graph=self._use_cuda_graph, verbose=self.verbose
+        )
+        self._refuse_layout(episode, scene)
         if self.obs_renderer is not None:
             self.obs_renderer.close()
             self.obs_renderer = None
         if self.renderer is not None:
             self.renderer.close()
-        self.scene = compile_scene(
-            self.task, episode, device=self.device, use_cuda_graph=self._use_cuda_graph, verbose=self.verbose
-        )
+        self.scene = scene
         self.pipeline = self.scene.pipeline
         self.model = self.pipeline.model
         # Every ref resolves through the scene it is bound to, so one handed out
