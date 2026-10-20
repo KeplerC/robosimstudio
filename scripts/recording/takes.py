@@ -2401,6 +2401,11 @@ SCORED = (
         budget=1_300_000,  # 20 s with the carry over from the YAM's home: 1,232 KB at quality 46, over the default 900
     ),
     scored("examples/06_tasks/07_band_scored.py", "examples/03_materials/04_band.py"),
+    # Filmed 4 times with the page's (:effort-limit 12), the material page's ceiling: passed 4 of 4,
+    # and 03_materials/08_tape 4 of 4. PR #9's filming without the clause passed 3 of 4. On every page
+    # the pads stall 3.84 mm short of shut and hold the tab at 5.8 N; the clause caps only Close's
+    # first push (71 N uncapped). After the last bonds let go, the tab fell from the jaws in 3 of the
+    # scored films and 2 of the material ones, once the goal had turned: the drive, not the grip.
     scored(
         "examples/06_tasks/08_tape_scored.py",
         "examples/03_materials/08_tape.py",
