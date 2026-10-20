@@ -32,7 +32,7 @@ import unittest
 import unittest.mock
 
 TIER = "cpu"
-"""No GPU, real scenes; the SuperDex ones need the ``[cpu]`` extra. About 45 s warm, 26 of it the two cutting builds."""
+"""No GPU, real scenes; the SuperDex ones need the ``[cpu]`` extra. About 30 s warm, 26 of it the two cutting builds."""
 
 HAS_SUPERDEX = importlib.util.find_spec("superdex") is not None
 

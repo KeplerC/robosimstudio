@@ -19,8 +19,9 @@ The suite splits by what a test *needs*, not by what it is about:
 ``cpu``
     No GPU, and real scenes: built and stepped on Warp's CPU device with MuJoCo's
     C library and SuperDex, the way ``robosimstudio[cpu]`` runs them. Needs the
-    ``[cpu]`` extra; under two minutes, a fifth of it Warp compiling its kernels
-    for the CPU the first time and a third the cutting kind's walks. Run with
+    ``[cpu]`` extra; about two minutes warm and two and a half the first time,
+    while Warp compiles its kernels for the CPU, and two fifths of it the cutting
+    kind: its walks and the two cutting examples' builds. Run with
     every GPU hidden, like ``fast``, so a GPU machine proves what a machine
     without one does; CI runs it.
 
