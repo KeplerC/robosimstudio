@@ -1036,6 +1036,24 @@ def _finish(
     return scene
 
 
+def _finalize(builder: newton.ModelBuilder) -> newton.Model:
+    """``builder.finalize()``, its ``joint_dof_dim`` two-dimensional when the model has no joint.
+
+    Newton 1.7 builds it as ``wp.array(np.array([]), ndim=2)``, which warp makes a
+    one-dimensional empty array, and VBD's ``reset`` hands it to ``reset_rigid_state``
+    whenever the model has a body to integrate. A body with no joint (a bare ``add_link``)
+    beside a sheet with no robot failed at the first reset -- "argument 'joint_dof_dim'
+    expects an array with 2 dimension(s)" -- with the sheet on VBD or on SuperDex alike, and
+    a free box (a FREE joint) built (``c5b_joints.py``). A static box was such a body until
+    it was welded to the world (``robosimstudio.domains.static.welded.weld_to_world``); any
+    other model with a body and no joint still meets it here.
+    """
+    model = builder.finalize()
+    if model.joint_dof_dim is not None and model.joint_dof_dim.ndim != 2 and not model.joint_count:
+        model.joint_dof_dim = wp.zeros((0, 2), dtype=wp.int32, device=model.device)
+    return model
+
+
 def _compile(
     request: SceneRequest,
     episode: Episode,
@@ -1047,7 +1065,7 @@ def _compile(
 ) -> CompiledScene:
     """One world: build it, finalize it, bind to it, step it."""
     base = _build_base(request, episode)
-    model = base.builder.finalize()
+    model = _finalize(base.builder)
 
     lifecycle = _lifecycle(base.entities)
     for step in lifecycle.steps("bind"):
@@ -1258,8 +1276,8 @@ def _compile_multi(
     fleet.gravity = base.builder.gravity
     fleet.replicate(base.builder, num_worlds, spacing=(0.0, 0.0, 0.0))
 
-    template_model = base.builder.finalize()
-    model = fleet.finalize()
+    template_model = _finalize(base.builder)
+    model = _finalize(fleet)
     worlds = WorldMap.of(template_model, model, num_worlds)
 
     # Before ``bind``, because ``bind`` is where an entity allocates its device

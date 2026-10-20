@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The stick-a-label example's task, done by the robot's hand the way its page asks.
 
-``examples/19_tape/02_stick_a_label`` promises a gesture and a number. This drives the example's own
+``examples/03_materials/09_adhesion`` promises a gesture and a number. This drives the example's own
 arm panel through :mod:`tests.fixtures.grasp` -- the cursor the gizmo writes, the grip the **Close**
 button and the **Grip amount** slider write, the session's own setpoint law -- and reads what the
 page's **Label** folder reads. The right hand takes the pull tab of a loose label off the bench,
@@ -178,7 +178,7 @@ def pull(session, label) -> dict:
 
 def _drive(port: int, *, adhesive: bool) -> dict:
     """Build the example, lay and rub the label through its page, then pull it by the tab."""
-    sim, kwargs = _run("19_tape/02_stick_a_label.py")
+    sim, kwargs = _run("03_materials/09_adhesion.py")
     label = sim["label"].entity
     out: dict = {"bonds": len(label.bonds), "before": label.bonded()}
     session = open_session(sim, port, kwargs.get("page"))

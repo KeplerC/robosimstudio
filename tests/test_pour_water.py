@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The water example's gesture, made through its arm panel: the hand pours the water into the glass past its line.
 
-``examples/21_water/00_pour_water`` promises that the hand, dragged down over the
+``examples/03_materials/14_water`` promises that the hand, dragged down over the
 cup and closed, lifts it, carries it over the glass and pours it when the gizmo is
 turned. This drives the example's own page the way :mod:`tests.fixtures.grasp`
 does -- the cursor the gizmo writes, the grip the Close button writes, the
@@ -156,7 +156,7 @@ def _pour(sim, session, *, tilt: float = TILT, aside: float = 0.0) -> dict:
     return out
 
 
-def _drive(port: int, example: str = "21_water/00_pour_water.py", **kw) -> tuple:
+def _drive(port: int, example: str = "03_materials/14_water.py", **kw) -> tuple:
     """Build ``example``, time its step, open its page and pour. Returns ``(opened, ms, result)``.
 
     ``opened`` is what the example handed the studio: a ``Sim``, or the scored example's ``Env``.
@@ -278,11 +278,11 @@ class TestPouringAsideSpillsIt(unittest.TestCase):
 
 @unittest.skipUnless(HAS_GENESIS, "the [genesis] extra is not installed")
 class TestTheTaskGoalTurnsTrue(unittest.TestCase):
-    """``01_pour_water_scored``: the same pour on the task's page, from the YAM's home, and ``evaluate`` says success."""
+    """``06_tasks/10_water_scored``: the same pour on the task's page, from the YAM's home, and ``evaluate`` says success."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.env, cls.ms_per_step, cls.result = _drive(9674, "21_water/01_pour_water_scored.py")
+        cls.env, cls.ms_per_step, cls.result = _drive(9674, "06_tasks/10_water_scored.py")
 
     def test_the_goal_is_met(self) -> None:
         _, _, info = self.env.evaluate()

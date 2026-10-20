@@ -195,7 +195,7 @@ def run_all(chosen: list[Take], args) -> int:
             out = args.out / take.key
             out.mkdir(parents=True, exist_ok=True)
             cmd = [sys.executable, str(Path(__file__).resolve()), "--child", take.key, "--out", str(args.out)]
-            cmd += ["--port", str(PORTS.start + (dealt - 1) % len(PORTS))]
+            cmd += ["--port", str(PORTS.start + (args.port - PORTS.start + dealt - 1) % len(PORTS))]
             cmd += ["--kmax", str(args.kmax)]
             flags = {
                 "--software": args.software,
@@ -274,7 +274,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kmax", type=int, default=9, help="most frames between WebP key frames")
     parser.add_argument("--frames", action="store_true", help="also keep every frame as a PNG under the take's frames/")
     parser.add_argument("--child", default="", help=argparse.SUPPRESS)
-    parser.add_argument("--port", type=int, default=PORTS.start, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=PORTS.start,
+        help=f"where the first take's page serves, the next one up from it ({PORTS.start}-{PORTS.stop - 1}): "
+        "recorders run side by side each from its own",
+    )
     args = parser.parse_args(argv)
     args.out = args.out.resolve()
 

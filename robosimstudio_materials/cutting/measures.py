@@ -26,7 +26,7 @@ def _block(snapshot, name: str):
     return entity
 
 
-_BENCH = "examples/20_cutting/00_cut_tofu driven through its right arm panel, tests/test_cut_tofu.py"
+_BENCH = "examples/03_materials/10_cutting driven through its right arm panel, tests/test_cut_tofu.py"
 
 register_atom(
     AtomSpec(
@@ -42,7 +42,7 @@ register_atom(
             "connected components of the cage, a cavity shell counted with the solid round it."
         ),
         calibration=AtomCalibration(
-            positives=("examples/20_cutting/00_cut_tofu, the knife taken and pushed down through the tofu: 2.",),
+            positives=("examples/03_materials/10_cutting, the knife taken and pushed down through the tofu: 2.",),
             negatives=(
                 "The same drive with the hand held 15 mm higher, the edge 2.1 mm over the board: 1. A blade a "
                 "thousand times duller pushed the same way: 1.",
@@ -65,7 +65,7 @@ register_atom(
         reads_scene=True,
         provenance="The cutter's sweep time at the front, from first contact to the cage's farthest corner.",
         calibration=AtomCalibration(
-            positives=("examples/20_cutting/00_cut_tofu cut through: 1.0.",),
+            positives=("examples/03_materials/10_cutting cut through: 1.0.",),
             negatives=("The knife held over the block: 0.",),
             gate=None,
             bench=_BENCH,

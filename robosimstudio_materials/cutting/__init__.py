@@ -2,7 +2,7 @@
 """The ``cutting`` kind: a block a knife parts, on the walk-on-spheres cage cutter.
 
 This package is what ``rss.cuttable`` and ``rss.knife`` build, imported as
-``robosimstudio_materials.cutting``. Run ``examples/20_cutting/00_cut_tofu.py`` first.
+``robosimstudio_materials.cutting``. Run ``examples/03_materials/10_cutting.py`` first.
 
 **The solver is vendored, not written here.** ``cagecut/`` is the code of "Fast Cutting of Cage Based
 Deformation with Walk on Spheres" (Saeed et al., SIGGRAPH 2026; MIT, its licence and provenance in

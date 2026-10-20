@@ -83,6 +83,7 @@ class TestALostMaterialFieldIsLoud(unittest.TestCase):
         entity_side = [m for m in messages if "edge_ke" in m and "tri_ke" in m]
         self.assertTrue(entity_side, f"no entity-side warning named the stated fields; got {messages}")
         self.assertIn("shell_young", entity_side[0], "the message should say which knob does reach the engine")
+        self.assertIn("stated material field(s)", entity_side[0], "the message names the record the fields are on")
 
     def test_a_field_left_at_its_default_is_not_nagged_about(self) -> None:
         """Only what was *stated* is lost; defaults were never a decision."""
@@ -96,7 +97,7 @@ class TestALostMaterialFieldIsLoud(unittest.TestCase):
         get_backend("superdex")  # loads the engine bundle, which registers its builders
         self.assertNotEqual(engine_consumes("superdex"), (), "superdex declares, per builder")
         self.assertIn("friction", actor_consumes("superdex", "tet"))
-        self.assertNotIn("friction", actor_consumes("superdex", "shell"), "the shell builder never reads it")
+        self.assertIn("friction", actor_consumes("superdex", "shell"), "the shell builder states it in the contact")
         self.assertEqual(get_backend("vbd").consumes, (), "a Newton solver reads the model, not the actor")
 
     def test_a_kind_s_own_builder_sharpens_the_engine_s_declaration(self) -> None:

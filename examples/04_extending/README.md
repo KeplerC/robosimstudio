@@ -1,6 +1,13 @@
 # Extending
 
 Adding a robot, or a new kind of simulated thing, without editing the library.
+`02_suction.py` is a hand of another sort: a vacuum cup,
+[`robosimstudio/robots/grippers/suction.py`](../../robosimstudio/robots/grippers/suction.py),
+that bolts to any imported wrist and seals and holds by
+[`robosimstudio/core/suction.py`](../../robosimstudio/core/suction.py). The cup
+seals when its face is within 2 mm of a flat face of the part and square to it
+within 15 degrees. It holds by a MuJoCo weld when the part shares the arm's
+solver, and otherwise by a spring that lets go past the vacuum's pull.
 
 <!-- examples:start: written by scripts/example_readmes.py from each script's docstring -->
 
@@ -37,6 +44,36 @@ uv run examples/04_extending/01_new_kind.py
 ```
 
 Source: [`01_new_kind.py`](01_new_kind.py)
+
+## Pick up a plate
+
+![Pick up a plate](media/02_suction.webp)
+
+A plate lying flat under the right hand's suction cup and a square 200 mm toward the middle of the bench: drag the hand down onto the plate, tick **Vacuum** in the right arm's panel, lift, carry it over the square and untick.
+
+The plate is 150 by 150 by 6 mm and 0.3 kg, flat on the bench, so a parallel
+jaw has nothing to close across; `yam_bimanual_suction` carries a vacuum cup
+on its right arm instead, its face 100 mm over the plate and pointing down at
+home, and keeps the left hand's jaws. The cup seals when its face is within
+2 mm of the plate and square to it within 15 degrees, and the arm's **Seal**
+readout says sealed or not, the gap and the mass held. A hand dragged down
+trails the gizmo by a few millimetres, and the panel puts the gizmo back on the
+hand when a drag ends that close to it, so put the gizmo a little into the
+plate. Tick **Vacuum** once the face is down: ticked on the way down, the cup
+seals as soon as the face is within 2 mm and carries the plate about that far
+under it.
+The arm and the plate share one MuJoCo solver (`rss.MUJOCO_500HZ`), so the
+seal is a weld switched on inside the captured graph and the arm carries the
+plate's weight. Driven through the panel, the plate rides 198 mm with the cup
+less than 1 mm off where it sealed and rests in the square with its top 6 mm
+over the bench, at 3.5 ms per control step (`tests/test_suction_pick`, RTX
+PRO 6000, GPU 5).
+
+```bash
+uv run examples/04_extending/02_suction.py
+```
+
+Source: [`02_suction.py`](02_suction.py)
 
 <!-- examples:end -->
 

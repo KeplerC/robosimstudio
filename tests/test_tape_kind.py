@@ -1,15 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """``robosimstudio_materials/tape.py``: the sheet a tape is built as, what it bonds, and what it declares.
 
-No GPU: nothing is built or stepped. The tape's physics -- a hand peeling a label off a box by its
-pull tab, and a label that never lets go staying stuck -- is driven through the example's page by
-``tests/test_peel_a_label.py``. Here:
+No GPU: a label is built on the CPU, and stepped there by VBD only to show its bonds hold at rest.
+The tape's physics -- a hand peeling a label off a box by its pull tab, and a label that never lets
+go staying stuck -- is driven through the example's page by ``tests/test_peel_a_label.py``. Here:
 
 * **The surface.** The sheet's first ``tab`` metres stand straight up at the fold, the rest lies
   flat; the bonded vertices are the flat ones past the fold row, the clamped ones the upper half of
   the turned-up end, and the two never overlap.
 * **The break law**, on positions written by hand: only lifting off the face opens a bond; sliding
   along it and pressing into it do not.
+* **Where a stuck sheet lies**: the box's margin past a particle radius off the face, at the build,
+  at a reset after the margin or the radius moved and at the next control step after a live write,
+  so every bond holds at rest over a 2 mm margin and through a 1 mm write; and bonded only over a
+  face of the box, none past its edge, stuck at the build or pressed, by the same rule in numpy and
+  in warp.
 * **The declarations**: the spec refuses what cannot be built, the presets carry the adhesive and
   stay soft enough for a tab to pull them, the contact presets share one sheet and rank by strength,
   ``TAPE_60HZ`` puts every free body on the tape's solver with compliant ALM, the flat names resolve,
@@ -25,7 +30,7 @@ import unittest
 import numpy as np
 
 TIER = "fast"
-"""Numpy and the spec classes only."""
+"""Numpy, the spec classes and warp on the CPU: four labels stepped 40 substeps, two 80 and two 32, about 7 s."""
 
 
 class TestTheSurface(unittest.TestCase):
@@ -240,8 +245,8 @@ class TestThePressThatMakesABond(unittest.TestCase):
         }
         label._rows, label._particle, label.broken = one(0, wp.int32), one(0, wp.int32), one(0, wp.int32)
         params = [8.0e3 if f == "press" else float(getattr(LABEL, f)) for f in CONTACT_FIELDS]
+        label._model = model
         label._contact = {
-            "model": model,
             "boxes": one(0, wp.int32),
             "area": one(2.5e-5, float),
             "normal": one(wp.vec3(0.0, 0.0, 1.0), wp.vec3),
@@ -319,33 +324,6 @@ class TestAContactBondsSpring(unittest.TestCase):
         np.testing.assert_allclose(thick, label._contact["dmin"].numpy(), rtol=1e-6)
         np.testing.assert_allclose(seated, model.attachment_particle_body_stiffness.numpy()[label.bonds], rtol=1e-5)
 
-    def test_a_stuck_bond_is_anchored_where_the_margin_rests_its_particle(self) -> None:
-        """Built a radius off the face, a stuck label is rested a margin further out by VBD's contact: each
-        bond is anchored there, built over a box with a margin or reset after one moved live, so it starts
-        at no lift rather than the margin into it. At 1.5 mm that is past ``reach``: every bond let go at
-        rest. Stepped by VBD on the CPU, a 0.8 mm margin let all 180 go within two substeps."""
-        from robosimstudio_materials.tape import LABEL
-
-        margin, up = 1.5e-3, np.array([0.0, 0.0, 1.0])
-        for when in ("bind", "reset"):
-            with self.subTest(when=when):
-                label, model = self._label(margin if when == "bind" else 0.0, stuck=True)
-                if when == "reset":
-                    model.shape_margin.assign(np.full(model.shape_count, margin, dtype=np.float32))
-                    label._reset_bonds()
-                np.testing.assert_allclose(
-                    model.attachment_particle_body_body_point.numpy()[label.bonds],
-                    label.anchors + margin * up,
-                    atol=1e-6,
-                )
-                state = model.state()
-                rested = state.particle_q.numpy()
-                rested[label.bond_particles] += margin * up
-                state.particle_q.assign(rested)
-                label._stick(state, 1.0 / 960.0)
-                self.assertGreater(margin, LABEL.reach)
-                self.assertEqual(len(label.bonds), label.held(), "every bond holds at rest")
-
     def test_a_reset_puts_back_the_spring_a_bond_starts_at(self) -> None:
         """Not the secant the last episode's lift left, under the law as the kernels hold it now, in the
         island's copy and the model's alike."""
@@ -371,6 +349,552 @@ class TestAContactBondsSpring(unittest.TestCase):
             self.assertTrue(array.numpy()[label.bonds].all(), "a stuck label is stuck again")
         np.testing.assert_allclose(label._contact["dmin"].numpy(), np.full(n, LABEL.particle_radius), rtol=1e-6)
         self.assertFalse(label.broken.numpy().any())
+
+
+class TestAStuckSheetIsLaidWhereTheContactRestsIt(unittest.TestCase):
+    """Placed a particle radius off the face, a stuck sheet is built, reset and anchored the box's margin
+    further out, where VBD's contact rests it, so every bond starts at no lift whatever the margin.
+
+    Built a radius off the face, the contact pushed it out through the margin and it overshot: stepped
+    by VBD on the CPU, 178 of :data:`LABEL`'s 180 bonds held at a 0.8 mm margin and none 2-5 substeps in
+    at 1 mm and up, and :data:`PAPER_LABEL`'s rested 0.47 mm lifted at 0.5 mm and all broke on the
+    first substep at 1.2 mm (``z2b.py``, ``z2_opening.py``); reset after the margin moved live, the same
+    (``z2_reset.py``)."""
+
+    def _label(self, material, margin: float):
+        """A label stuck on a 100 x 120 x 50 mm box resting on the ground, the box's shape at ``margin`` [m],
+        built, bound, snapshotted as the scene would and ready to reset, on the CPU."""
+        from types import SimpleNamespace
+
+        import newton
+        import warp as wp
+
+        from robosimstudio_materials.tape import EntityTape, tape
+
+        builder = newton.ModelBuilder()
+        builder.add_ground_plane()
+        box = builder.add_body(xform=wp.transform((0.0, 0.0, 0.025), wp.quat_identity()), label="box")
+        cfg = builder.default_shape_cfg.copy()
+        cfg.margin = margin
+        self.box_shape = builder.add_shape_box(box, hx=0.05, hy=0.06, hz=0.025, cfg=cfg)
+        label = EntityTape(tape(name="label", on="box", at=(-0.02, -0.05, 0.0505), material=material))
+        label.build(builder, None)
+        builder.color()
+        model = builder.finalize(device="cpu")
+        label._bind_bonds(SimpleNamespace(model=model))
+        label.particles = np.arange(label.surface_count)  # what the bind takes off the thing's range
+        label.built = model.particle_q.numpy()[label.particles].copy()  # as on_scene_ready takes it
+        state_0, state_1 = model.state(), model.state()
+        label.rest = {"particle_q": state_0.particle_q.numpy().copy(), "particle_qd": state_0.particle_qd.numpy()}
+        return label, model, SimpleNamespace(model=model, state_0=state_0, state_1=state_1)
+
+    def _margin(self, model, margin: float) -> None:
+        """The box's margin written live, as its contact tunable's ``thickness`` writes it."""
+        margins = model.shape_margin.numpy().copy()
+        margins[self.box_shape] = margin
+        model.shape_margin.assign(margins)
+
+    def _lift(self, label, state) -> np.ndarray:
+        """Each bond's particle past its anchor, off the box's top [m]: the box is not turned."""
+        anchors = label._arrays["body_point"][0].numpy()[label.bonds] + state.body_q.numpy()[label.body][:3]
+        return (state.particle_q.numpy()[label.bond_particles] - anchors)[:, 2]
+
+    def test_built_over_a_margin_the_sheet_and_its_tab_lie_that_much_further_off(self) -> None:
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                flat, flat_model, _ = self._label(material, 0.0)
+                label, model, pipeline = self._label(material, 0.002)
+                up = np.array([0.0, 0.0, 0.002])
+                np.testing.assert_allclose(label.built, flat.built + up, atol=1e-6)
+                np.testing.assert_allclose(
+                    model.body_q.numpy()[label.tab_body][:3],
+                    flat_model.body_q.numpy()[flat.tab_body][:3] + up,
+                    atol=1e-6,
+                )
+                self.assertAlmostEqual(0.002, label.lift)
+                np.testing.assert_allclose(self._lift(label, pipeline.state_0), 0.0, atol=1e-6)
+                if label.contact:
+                    np.testing.assert_allclose(label._contact["dmin"].numpy(), material.particle_radius + 0.002)
+
+    def test_a_reset_lays_it_at_the_margin_the_box_holds_now(self) -> None:
+        """Built at none, the margin written to 2 mm and back: each reset lays the sheet, its tab and every
+        anchor where the margin is now, and the opening bonds' break kernel measures from there."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                built, tab = label.built.copy(), label.tab_q0.copy()
+                for margin in (0.002, 0.0):
+                    self._margin(model, margin)
+                    label.reset(pipeline, None)
+                    up = np.array([0.0, 0.0, margin])
+                    for state in (pipeline.state_0, pipeline.state_1):
+                        np.testing.assert_allclose(state.particle_q.numpy()[label.particles], built + up, atol=1e-6)
+                        c = label.coord_start
+                        np.testing.assert_allclose(state.joint_q.numpy()[c : c + 3], tab[:3] + up, atol=1e-6)
+                    np.testing.assert_allclose(self._lift(label, pipeline.state_0), 0.0, atol=1e-6)
+                    if not label.contact:
+                        np.testing.assert_allclose(label._anchor.numpy(), label.anchors + up, atol=1e-6)
+
+    def test_every_bond_holds_at_rest_over_a_2_mm_margin(self) -> None:
+        """Stepped by VBD on the CPU as the probes step it, built over the margin or reset after it moved: 40
+        substeps, where before the fix :data:`LABEL`'s 144 had let go by the second and :data:`PAPER_LABEL`'s
+        broke on the first."""
+        import newton
+
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            for when in ("build", "reset"):
+                with self.subTest(adhesion=material.adhesion, when=when):
+                    label, model, pipeline = self._label(material, 0.002 if when == "build" else 0.0)
+                    s0, s1 = pipeline.state_0, pipeline.state_1
+                    if when == "reset":
+                        self._margin(model, 0.002)
+                        label.reset(pipeline, None)
+                        for state in (s0, s1):
+                            newton.eval_fk(model, state.joint_q, state.joint_qd, state)
+                    solver = newton.solvers.SolverVBD(model, iterations=10, rigid_compliant_alm=True)
+                    collide = newton.CollisionPipeline(model, soft_contact_gap=0.005)
+                    contacts, control, dt = collide.contacts(), model.control(), 1.0 / 960.0
+                    for _ in range(40):
+                        collide.collide(s0, contacts)
+                        s0.clear_forces()
+                        solver.step(s0, s1, control, contacts, dt)
+                        (label._stick if label.contact else label._break)(s1, dt)
+                        s0, s1 = s1, s0
+                    self.assertEqual(len(label.bonds), label.held(), "every bond holds at rest")
+                    self.assertEqual(0.0, label.peeled())
+                    # Within 0.11 mm of its anchor, the tab's weight on the fold; the reach and the break are 1 mm.
+                    self.assertLess(float(np.abs(self._lift(label, s0)).max()), 2.0e-4)
+
+    def test_a_live_margin_write_lays_the_held_bonds_again_where_the_contact_rests_them(self) -> None:
+        """The margin written live, no reset: the relay, once a control step before its substeps, moves every
+        held bond's particle and anchor 1 mm off the face, once, and the break kernel's anchors with them; a
+        bond let go stays where it was."""
+        from robosimstudio.core.schedule import SubstepHooks
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                hooks = SubstepHooks()
+                label.contribute_hooks(hooks)
+                self.assertIn(("before", "relay:label"), hooks.schedule.names())
+                state, rows = pipeline.state_0, label.bonds
+                gone = np.arange(len(rows)) < 9  # the row by the fold, let go
+                for array in label._arrays["enabled"]:
+                    array.assign(np.where(np.isin(np.arange(len(array)), rows[gone]), False, array.numpy()))
+
+                def points(label=label, state=state):
+                    return state.particle_q.numpy()[label.bond_particles]
+
+                def anchors(label=label):
+                    return label._arrays["body_point"][0].numpy()[label.bonds]
+
+                q0, a0 = points(), anchors()
+                self._margin(model, 0.001)
+                label._relay(state, 1.0 / 60.0)
+                up = np.array([0.0, 0.0, 0.001])
+                np.testing.assert_allclose(points()[~gone] - q0[~gone], np.tile(up, (len(rows) - 9, 1)), atol=1e-7)
+                np.testing.assert_allclose(anchors()[~gone] - a0[~gone], np.tile(up, (len(rows) - 9, 1)), atol=1e-7)
+                np.testing.assert_array_equal(q0[gone], points()[gone])
+                np.testing.assert_array_equal(a0[gone], anchors()[gone])
+                if label.contact:
+                    np.testing.assert_allclose(label._contact["dmin"].numpy()[~gone], material.particle_radius + 0.001)
+                else:
+                    np.testing.assert_array_equal(anchors(), label._anchor.numpy())
+                q1 = points()
+                label._relay(state, 1.0 / 60.0)
+                np.testing.assert_array_equal(q1, points(), "once: the margin has not moved since")
+
+    def test_every_bond_holds_through_a_live_margin_write(self) -> None:
+        """Stepped by VBD on the CPU in control steps of 16 substeps, the relay at the start of each, the margin
+        written to 1 mm between two and no reset: all 144 of either law's bonds hold. Without the relay
+        :data:`PAPER_LABEL` kept 2 and :data:`LABEL` none (``a2_cpu2.py``)."""
+        import newton
+
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                s0, s1 = pipeline.state_0, pipeline.state_1
+                solver = newton.solvers.SolverVBD(model, iterations=10, rigid_compliant_alm=True)
+                collide = newton.CollisionPipeline(model, soft_contact_gap=0.005)
+                contacts, control, dt = collide.contacts(), model.control(), 1.0 / 960.0
+                for step in range(5):
+                    if step == 2:
+                        self._margin(model, 0.001)
+                    label._relay(s0, 16 * dt)
+                    for _ in range(16):
+                        collide.collide(s0, contacts)
+                        s0.clear_forces()
+                        solver.step(s0, s1, control, contacts, dt)
+                        (label._stick if label.contact else label._break)(s1, dt)
+                        s0, s1 = s1, s0
+                self.assertEqual(len(label.bonds), label.held(), "every bond holds through the write")
+                self.assertLess(float(np.abs(self._lift(label, s0)).max()), 5.0e-4)
+
+    def _radius(self, label, model, radius: float) -> None:
+        """The sheet's particle radius written live, as its material's ``particle_radius`` writes it."""
+        radii = model.particle_radius.numpy().copy()
+        radii[label.particles] = radius
+        model.particle_radius.assign(radii)
+
+    def test_a_reset_lays_it_at_the_radius_the_sheet_holds_now(self) -> None:
+        """Written from 0.5 to 1.5 mm and reset: the sheet and every anchor 1 mm further off the face, the tab and the
+        end it clamps not, each bond laid at the thickness the relay reads, so the relay moves nothing after. Reset at
+        the radius it was built at, a contact bond was seated 1 mm over its particle, and the relay, finding it already
+        laid there, left the contact to push the sheet out through it on the first substep."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                built, tab, now = label.built.copy(), label.tab_q0.copy(), material.particle_radius + 0.001
+                self._radius(label, model, now)
+                label.reset(pipeline, None)
+                np.testing.assert_allclose(label.radius_moved(), 0.001, atol=1e-7)
+                clamped = np.isin(label.particles, label.clamp_particles)
+                up = np.where(clamped[:, None], 0.0, np.array([[0.0, 0.0, 0.001]]))
+                for state in (pipeline.state_0, pipeline.state_1):
+                    np.testing.assert_allclose(state.particle_q.numpy()[label.particles], built + up, atol=1e-6)
+                    c = label.coord_start
+                    np.testing.assert_allclose(state.joint_q.numpy()[c : c + 7], tab, atol=1e-6)
+                np.testing.assert_allclose(self._lift(label, pipeline.state_0), 0.0, atol=1e-6)
+                laid = label._contact["dmin"] if label.contact else label._laid
+                np.testing.assert_allclose(laid.numpy(), now, atol=1e-7)
+                q = pipeline.state_0.particle_q.numpy().copy()
+                label._relay(pipeline.state_0, 1.0 / 60.0)
+                np.testing.assert_array_equal(q, pipeline.state_0.particle_q.numpy(), "laid where the relay lays it")
+
+    def test_every_bond_holds_through_a_live_radius_write_and_a_reset(self) -> None:
+        """The radius written to 1.5 mm, the scene reset, then two control steps of VBD on the CPU: all 144 of either
+        law's bonds hold. Reset at the radius it was built at, :data:`LABEL` kept 8 (``r2_probe.py``)."""
+        import newton
+
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                s0, s1 = pipeline.state_0, pipeline.state_1
+                solver = newton.solvers.SolverVBD(model, iterations=10, rigid_compliant_alm=True)
+                collide = newton.CollisionPipeline(model, soft_contact_gap=0.005)
+                contacts, control, dt = collide.contacts(), model.control(), 1.0 / 960.0
+                self._radius(label, model, material.particle_radius + 0.001)
+                label.reset(pipeline, None)
+                for state in (s0, s1):
+                    newton.eval_fk(model, state.joint_q, state.joint_qd, state)
+                for _ in range(2):
+                    label._relay(s0, 16 * dt)
+                    for _ in range(16):
+                        collide.collide(s0, contacts)
+                        s0.clear_forces()
+                        solver.step(s0, s1, control, contacts, dt)
+                        (label._stick if label.contact else label._break)(s1, dt)
+                        s0, s1 = s1, s0
+                self.assertEqual(len(label.bonds), label.held(), "every bond holds through the write and the reset")
+                self.assertLess(float(np.abs(self._lift(label, s0)).max()), 5.0e-4)
+
+    def test_every_bond_holds_through_a_radius_written_to_half_the_sheet_and_a_reset(self) -> None:
+        """The radius written to 1.5 mm over the half of the sheet past its middle, the scene reset, then two control
+        steps of VBD on the CPU: each particle laid by its own radius's change, so all 144 of either law's bonds hold.
+        Lifted by the largest change, the half left at 0.5 mm was laid 1 mm over the thickness each bond is seated at."""
+        import newton
+
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model, pipeline = self._label(material, 0.0)
+                s0, s1 = pipeline.state_0, pipeline.state_1
+                built, along = label.built.copy(), label.built[:, 1]
+                far = along > 0.5 * (along.min() + along.max())
+                radii = model.particle_radius.numpy().copy()
+                radii[label.particles[far]] += 0.001
+                model.particle_radius.assign(radii)
+                label.reset(pipeline, None)
+                clamped = np.isin(label.particles, label.clamp_particles)
+                up = np.where((far & ~clamped)[:, None], np.array([[0.0, 0.0, 0.001]]), 0.0)
+                np.testing.assert_allclose(s0.particle_q.numpy()[label.particles], built + up, atol=1e-6)
+                np.testing.assert_allclose(self._lift(label, s0), 0.0, atol=1e-6)
+                for state in (s0, s1):
+                    newton.eval_fk(model, state.joint_q, state.joint_qd, state)
+                solver = newton.solvers.SolverVBD(model, iterations=10, rigid_compliant_alm=True)
+                collide = newton.CollisionPipeline(model, soft_contact_gap=0.005)
+                contacts, control, dt = collide.contacts(), model.control(), 1.0 / 960.0
+                for _ in range(2):
+                    label._relay(s0, 16 * dt)
+                    for _ in range(16):
+                        collide.collide(s0, contacts)
+                        s0.clear_forces()
+                        solver.step(s0, s1, control, contacts, dt)
+                        (label._stick if label.contact else label._break)(s1, dt)
+                        s0, s1 = s1, s0
+                self.assertEqual(len(label.bonds), label.held(), "every bond holds through the half write and reset")
+                self.assertLess(float(np.abs(self._lift(label, s0)).max()), 5.0e-4)
+
+
+class TestNothingUnderItMakesNoBond(unittest.TestCase):
+    """A vertex past the box's edge has nothing under it: stuck at the build or pressed, it is not bonded."""
+
+    HALF = (0.05, 0.06, 0.025)
+    """The example's 100 x 120 x 50 mm box, its centre 25 mm up."""
+
+    def _label(self, material, *, stuck: bool, at: tuple[float, float, float], centre=(0.0, 0.0, 0.025), **kwargs):
+        """A label without a tab, 40 x 95 mm unless ``kwargs`` say otherwise, its corner at ``at``, over the box
+        centred at ``centre``, built and bound on the CPU."""
+        from types import SimpleNamespace
+
+        import newton
+        import warp as wp
+
+        from robosimstudio_materials.tape import EntityTape, tape
+
+        builder = newton.ModelBuilder()
+        box = builder.add_body(xform=wp.transform(centre, wp.quat_identity()), label="box")
+        builder.add_shape_box(box, hx=self.HALF[0], hy=self.HALF[1], hz=self.HALF[2])
+        label = EntityTape(tape(name="label", on="box", at=at, material=material, stuck=stuck, tab=0.0, **kwargs))
+        label.build(builder, None)
+        model = builder.finalize(device="cpu")
+        label._bind_bonds(SimpleNamespace(model=model))
+        return label, model
+
+    def test_over_a_face_is_within_its_extent(self) -> None:
+        from robosimstudio_materials.tape import over_a_face
+
+        points = [
+            (0.0, 0.0, 0.0255),  # over the top
+            (0.049, 0.059, 0.0255),  # over the top, by its corner
+            (0.055, 0.0, 0.0255),  # 5 mm past the top's +x edge
+            (0.055, 0.065, 0.0255),  # past its corner
+            (0.0505, 0.0, 0.01),  # over the +x side, below the top
+            (0.0, 0.0, 0.02),  # inside, under the top
+            (0.05 + 1.0e-8, 0.06 + 1.0e-8, 0.0255),  # on the top's corner, a float32 rounding past it
+            (0.05002, 0.0, 0.0255),  # 0.02 mm past the +x edge
+        ]
+        over, box = over_a_face(points, [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)], [self.HALF], [0.0])
+        np.testing.assert_array_equal([True, True, False, False, True, True, True, False], over)
+        np.testing.assert_array_equal(np.zeros(8), box)
+        over, box = over_a_face(points[:1], np.zeros((0, 7)), np.zeros((0, 3)), np.zeros(0))
+        self.assertFalse(over[0], "no box: nothing is under it")
+        self.assertEqual(-1, box[0])
+
+    def test_the_builds_rule_is_the_kernels(self) -> None:
+        """:func:`over_a_face` is numpy and the stick kernel's :func:`_seat_on` warp: the same box and the same
+        answer on the edge cases, on the example's box, one turned and off its body's origin, and two boxes
+        with margins, whichever is nearest. No box, neither has one under any point."""
+        import warp as wp
+
+        from robosimstudio.core.math import quat_to_mat
+        from robosimstudio_materials.tape import _FLUSH, _seat_on, over_a_face
+
+        @wp.kernel
+        def seats(
+            points: wp.array(dtype=wp.vec3),
+            boxes: wp.array(dtype=wp.int32),
+            shape_transform: wp.array(dtype=wp.transform),
+            shape_scale: wp.array(dtype=wp.vec3),
+            shape_margin: wp.array(dtype=float),
+            over: wp.array(dtype=wp.bool),
+            shape: wp.array(dtype=wp.int32),
+        ):
+            i = wp.tid()
+            seat = _seat_on(points[i], 0.0, boxes, shape_transform, shape_scale, shape_margin)
+            over[i] = seat.over
+            shape[i] = seat.shape
+
+        def kernel(points, transforms, halves, margins):
+            cpu, n = "cpu", len(margins)
+            over = wp.zeros(len(points), dtype=wp.bool, device=cpu)
+            shape = wp.zeros(len(points), dtype=wp.int32, device=cpu)
+            inputs = [
+                wp.array(np.asarray(points, dtype=np.float32), dtype=wp.vec3, device=cpu),
+                wp.array(np.arange(n, dtype=np.int32), dtype=wp.int32, device=cpu),
+                wp.array(np.asarray(transforms, dtype=np.float32).reshape(-1, 7), dtype=wp.transform, device=cpu),
+                wp.array(np.asarray(halves, dtype=np.float32).reshape(-1, 3), dtype=wp.vec3, device=cpu),
+                wp.array(np.asarray(margins, dtype=np.float32), dtype=float, device=cpu),
+            ]
+            wp.launch(seats, dim=len(points), inputs=inputs, outputs=[over, shape], device=cpu)
+            return over.numpy().astype(bool), shape.numpy().astype(np.int64)
+
+        h, f = np.array(self.HALF), float(_FLUSH)
+        local = np.array(
+            [
+                (0.0, 0.0, h[2] + 5e-4),  # over the top
+                (h[0] - 1e-3, h[1] - 1e-3, h[2] + 5e-4),  # by its corner
+                (h[0] + 0.5 * f, 0.0, h[2] + 5e-4),  # half the allowance past an edge: on it
+                (h[0] + 2.0 * f, 0.0, h[2] + 5e-4),  # twice it: past
+                (h[0] + 0.5 * f, h[1] + 0.5 * f, h[2] + 5e-4),  # on the corner
+                (h[0] + 2.0 * f, h[1] + 0.5 * f, h[2] + 5e-4),  # past one edge, on the other: over neither face
+                (h[0] + 2.0 * f, h[1] + 2.0 * f, h[2] + 5e-4),  # past the corner
+                (h[0] + 5e-4, 0.0, 0.0),  # over the +x side
+                (h[0] + 5e-4, 0.0, h[2] + 5e-4),  # past the top's edge, over the side's: past two
+                (0.0, 0.0, 0.5 * h[2]),  # inside
+            ]
+        )
+        turn = np.array([0.0, 0.0, np.sin(0.2), np.cos(0.2)])  # 23 degrees about z
+        # A second box 4 mm past the first's +x side, with a 2 mm margin: a point 1.5 mm off the first's side
+        # is 2.5 mm off the second's, 0.5 mm past its margin, so the second is the nearer, and it lies over
+        # that one's -x side.
+        beside = 2 * h[0] + 0.004
+        cases = {
+            "the example's box": (local, [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)], [h], [0.0]),
+            "turned, off the origin": (
+                local @ quat_to_mat(turn).T + (0.41, -0.083, 0.025),
+                [(0.41, -0.083, 0.025, *turn)],
+                [h],
+                [0.001],
+            ),
+            "two boxes with margins": (
+                np.array([*local, *(local + np.array([beside, 0.0, 0.0])), (h[0] + 0.0015, 0.0, 0.0)]),
+                [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0), (beside, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)],
+                [h, h],
+                [0.0, 0.002],
+            ),
+            "no box": (local, np.zeros((0, 7)), np.zeros((0, 3)), np.zeros(0)),
+        }
+        for name, (points, transforms, halves, margins) in cases.items():
+            with self.subTest(name):
+                over, box = over_a_face(points, transforms, halves, margins)
+                want_over, want_box = kernel(points, transforms, halves, margins)
+                np.testing.assert_array_equal(want_box, box)
+                np.testing.assert_array_equal(want_over, over)
+                if name == "the example's box":
+                    np.testing.assert_array_equal([1, 1, 1, 0, 1, 0, 0, 1, 0, 1], over)
+                if name == "two boxes with margins":
+                    np.testing.assert_array_equal([0] * len(local) + [1] * len(local), box[:-1])
+                    self.assertEqual((True, 1), (bool(over[-1]), int(box[-1])), "the nearer counting its margin")
+                if name == "no box":
+                    self.assertFalse(over.any())
+
+    def test_the_build_launches_no_kernel(self) -> None:
+        """A stuck sheet's bonds are found in numpy at the build: through the warp function on the CPU, the build
+        compiled the tape's kernels for the CPU inside a GPU process, 1.8 s on a cold kernel cache, where it
+        takes 8 ms now (``a4_build_time.py``)."""
+        from unittest import mock
+
+        import newton
+        import warp as wp
+
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL, EntityTape, tape
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                builder = newton.ModelBuilder()
+                box = builder.add_body(xform=wp.transform((0.0, 0.0, 0.025), wp.quat_identity()), label="box")
+                builder.add_shape_box(box, hx=self.HALF[0], hy=self.HALF[1], hz=self.HALF[2])
+                label = EntityTape(tape(name="label", on="box", at=(0.03, -0.05, 0.0505), material=material, tab=0.0))
+                with mock.patch.object(wp, "launch", side_effect=AssertionError("a kernel launched at the build")):
+                    label.build(builder, None)
+                self.assertEqual(100, int(label.made.sum()), "the bonds over the top, none past its edge")
+
+    def test_a_stuck_label_over_the_edge_bonds_only_over_the_face(self) -> None:
+        """Half over the +x edge: four of its nine columns, 80 vertices, past it. Bonded there, a contact bond
+        was seated on the edge along ``(0.995, 0, 0.1)`` and let go on the first substep, reading 44% peeled
+        untouched, and an opening bond held the overhang level in the air, 18 mm over where it hangs free
+        (``t2_overhang.py``, CPU VBD)."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model = self._label(material, stuck=True, at=(0.03, -0.05, 0.0505))
+                q = model.particle_q.numpy()[label.bond_particles]
+                enabled = model.attachment_particle_body_enabled.numpy()[label.bonds]
+                over = q[:, 0] <= self.HALF[0] + 1.0e-6
+                if material.adhesion == "opening":
+                    self.assertEqual(100, len(label.bonds), "a vertex with nothing under it gets no bond")
+                else:
+                    self.assertEqual(180, len(label.bonds), "each still bonds where it is pressed onto a face")
+                np.testing.assert_array_equal(over, enabled)
+                np.testing.assert_array_equal(over, label.made)
+                self.assertEqual(100, label.held())
+                label.broken.fill_(1)
+                label._reset_bonds()
+                np.testing.assert_array_equal(over, model.attachment_particle_body_enabled.numpy()[label.bonds])
+                self.assertEqual(0.0, label.peeled())
+
+    def test_both_laws_read_a_stuck_label_over_the_edge_by_the_bonds_made_at_the_build(self) -> None:
+        """Untouched it reads 1.0 bonded and 0.0 peeled, and lifted 2 mm, past the break and the reach, 0.0 and
+        1.0, under either law. Counted over every bond, contact adhesion's 80 left unmade past the edge read it
+        100/180 bonded untouched and 100/180 peeled at most, where opening adhesion, which builds none there,
+        read 1.0 and 0.0."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            with self.subTest(adhesion=material.adhesion):
+                label, model = self._label(material, stuck=True, at=(0.03, -0.05, 0.0505))
+                self.assertEqual((1.0, 0.0), (label.bonded(), label.peeled()))
+                state = model.state()
+                state.particle_q.assign(state.particle_q.numpy() + np.array([0.0, 0.0, 0.002], dtype=np.float32))
+                (label._stick if label.contact else label._break)(state, 1.0 / 960.0)
+                self.assertEqual(0, label.held())
+                self.assertEqual((0.0, 1.0), (label.bonded(), label.peeled()))
+
+    def test_a_stuck_labels_overhang_pressed_onto_the_side_is_counted_once_made(self) -> None:
+        """Contact adhesion leaves the 80 vertices past the +x edge unmade at the build, and makes them where they
+        are pressed onto the box's side: wrapped down it 0.1 mm into the contact, all 180 hold and it reads 1.0 and
+        0.0; the build's 100 then lifted 2 mm, past the reach, 80/180 and 100/180, one less the other. Counted over
+        the build's bonds alone, the wrap read nothing: 0.0 bonded with all 80 holding."""
+        from robosimstudio_materials.tape import LABEL
+
+        label, model = self._label(LABEL, stuck=True, at=(0.03, -0.05, 0.0505))
+        past, p = ~label.made, label.bond_particles
+        self.assertEqual(80, int(past.sum()))
+        state = model.state()
+        q = state.particle_q.numpy().copy()
+        beyond = q[p[past], 0] - self.HALF[0]  # how far past the edge each lies along the top [m]
+        q[p[past], 0] = self.HALF[0] + LABEL.particle_radius - 1.0e-4
+        q[p[past], 2] = 2.0 * self.HALF[2] - beyond
+        state.particle_q.assign(q)
+        label._stick(state, 1.0 / 960.0)
+        self.assertEqual(180, label.held())
+        self.assertEqual((1.0, 0.0), (label.bonded(), label.peeled()))
+        q[p[label.made], 2] += 0.002
+        state.particle_q.assign(q)
+        label._stick(state, 1.0 / 960.0)
+        self.assertEqual(80, label.held())
+        self.assertAlmostEqual(80 / 180, label.bonded(), places=6)
+        self.assertAlmostEqual(100 / 180, label.peeled(), places=6)
+
+    def test_a_label_laid_flush_with_the_edges_bonds_on_them(self) -> None:
+        """Covering the box's top exactly: its edge vertices lie on the edges, up to float32's rounding past them,
+        and every one bonds, as on the example's box and on one off the origin. Tested past the extent with no
+        allowance, a row of 11 went unbonded on the example's box, a row and a column (23) on the other
+        (``flush.py``, ``flush_step.py``); bonded, all 143 held 60 substeps of CPU VBD."""
+        from robosimstudio_materials.tape import LABEL, PAPER_LABEL
+
+        for material in (PAPER_LABEL, LABEL):
+            for centre in ((0.0, -0.08, 0.025), (0.41, -0.083, 0.025)):
+                with self.subTest(adhesion=material.adhesion, centre=centre):
+                    corner = (centre[0] - self.HALF[0], centre[1] - self.HALF[1], centre[2] + self.HALF[2] + 0.0005)
+                    size = (2 * self.HALF[0], 2 * self.HALF[1])
+                    label, model = self._label(
+                        material, stuck=True, at=corner, centre=centre, size=size, cells=(10, 12)
+                    )
+                    self.assertEqual(143, len(label.bonds))
+                    self.assertTrue(label.made.all(), f"{int((~label.made).sum())} vertices on an edge went unbonded")
+                    self.assertTrue(model.attachment_particle_body_enabled.numpy()[label.bonds].all())
+
+    def test_a_label_pressed_past_the_edge_bonds_only_over_the_face(self) -> None:
+        """Pressed 0.1 mm into the top, its last column 0.1 mm past the edge: the 20 vertices there bonded to
+        the edge along ``(0.243, 0, 0.970)``, 0.4 mm into the contact (``t2_stick.py``)."""
+        from robosimstudio_materials.tape import LABEL
+
+        label, model = self._label(LABEL, stuck=False, at=(0.0101, -0.05, 0.0504))
+        label._stick(model.state(), 1.0 / 960.0)
+        made = model.attachment_particle_body_enabled.numpy()[label.bonds]
+        past = model.particle_q.numpy()[label.bond_particles][:, 0] > self.HALF[0]
+        self.assertEqual(20, int(past.sum()))
+        self.assertTrue(made[~past].all(), "pressed over the face, every vertex bonds")
+        self.assertFalse(made[past].any(), "past the edge, none does")
+        self.assertAlmostEqual(160 / 180, label.bonded(), msg="a loose label counts every bond", places=6)
+        np.testing.assert_allclose(label._contact["normal"].numpy()[made], np.tile([0.0, 0.0, 1.0], (160, 1)))
 
 
 class TestThePresets(unittest.TestCase):
@@ -489,14 +1013,41 @@ class TestTheDeclarations(unittest.TestCase):
         self.assertEqual([], spec.problems())
         self.assertEqual("bonded_fraction", dispatch("bonded_fraction", ("",), ("tape",)).atom)
 
+    @staticmethod
+    def _flagged(holding, gone, along=(0.0, 0.0, 0.0, 0.0)):
+        """A label stuck by four bonds, all made at the build, its solver's flags ``holding`` and ``gone``: device
+        arrays whose copies to the host are counted, ``copies["holding"]`` and ``copies["gone"]``."""
+        import warp as wp
+
+        from robosimstudio_materials.tape import EntityTape, tape
+
+        copies = {"holding": 0, "gone": 0}
+
+        class Counted:
+            def __init__(self, name, values, dtype) -> None:
+                self.name, self.array = name, wp.array(values, dtype=dtype, device="cpu")
+
+            def numpy(self):
+                copies[self.name] += 1
+                return self.array.numpy()
+
+        entity = EntityTape(tape(name="label", on="box"))
+        entity.bonds, entity.made, entity.along = np.arange(4, dtype=np.int32), np.ones(4, dtype=bool), np.array(along)
+        entity._arrays = {"enabled": [Counted("holding", holding, wp.bool)]}
+        entity.broken = Counted("gone", gone, wp.int32)
+        return entity, copies
+
     def test_the_bonded_handler_reads_the_bonds_holding(self) -> None:
+        """Its share and its count off one copy of each flag, the share as :meth:`bonded` reads it."""
         from types import SimpleNamespace
 
         from robosimstudio_materials.tape import _bonded_fraction
 
-        entity = SimpleNamespace(bonded=lambda: 0.75, held=lambda: 3)
+        entity, copies = self._flagged([True, True, True, False], [0, 0, 0, 1])
         got = _bonded_fraction(SimpleNamespace(entities={"label": entity}), "label")
         self.assertEqual({"fraction": 0.75, "held": 3.0, "label/bonded_fraction": 0.75}, got)
+        self.assertEqual({"holding": 1, "gone": 1}, copies, "each flag copied once")
+        self.assertEqual((0.75, 3), (entity.bonded(), entity.held()))
         with self.assertRaises(KeyError):
             _bonded_fraction(SimpleNamespace(entities={}), "label")
 
@@ -533,15 +1084,28 @@ class TestTheDeclarations(unittest.TestCase):
                 self.assertTrue(material.write("tri_ke", 500.0), "the cloth's own fields still land")
 
     def test_the_handler_reads_the_entitys_bonds(self) -> None:
+        """Its share and its front off one copy of each flag, as :meth:`peeled` and :meth:`peel_front` read them."""
         from types import SimpleNamespace
 
         from robosimstudio_materials.tape import _peeled_fraction
 
-        entity = SimpleNamespace(peeled=lambda: 0.25, peel_front=lambda: 0.02)
+        entity, copies = self._flagged([False, True, True, True], [1, 0, 0, 0], along=(0.02, 0.01, 0.0, 0.03))
         got = _peeled_fraction(SimpleNamespace(entities={"label": entity}), "label")
         self.assertEqual({"fraction": 0.25, "front": 0.02, "label/peeled_fraction": 0.25}, got)
+        self.assertEqual({"holding": 1, "gone": 1}, copies, "each flag copied once")
+        self.assertEqual((0.25, 0.02), (entity.peeled(), entity.peel_front()))
         with self.assertRaises(KeyError):
             _peeled_fraction(SimpleNamespace(entities={}), "label")
+
+    def test_a_loose_strips_shares_copy_one_flag_each(self) -> None:
+        """Counting every bond, a loose strip's :meth:`peeled` copies only the let-go flags off the device, and its
+        :meth:`bonded` and :meth:`held` only the holding ones."""
+        for call, want, copied in (("peeled", 0.25, (0, 1)), ("bonded", 0.75, (1, 0)), ("held", 3, (1, 0))):
+            with self.subTest(call):
+                entity, copies = self._flagged([False, True, True, True], [1, 0, 0, 0])
+                entity.made = np.zeros(4, dtype=bool)
+                self.assertEqual(want, getattr(entity, call)())
+                self.assertEqual(copied, (copies["holding"], copies["gone"]))
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 """The ``liquid`` kind: a pool of water, honey or ketchup on Newton's implicit MPM.
 
 This file is what ``rss.liquid`` builds, imported as ``robosimstudio_materials.liquid``.
-Run ``examples/11_liquid/00_pour_honey.py`` first. The implementation is shared
+Run ``examples/03_materials/12_liquid.py`` first. The implementation is shared
 with the granular and dough kinds in :mod:`robosimstudio_materials.mpm`; this
 module is the domain, the entity that names it, the constructor and the presets.
 

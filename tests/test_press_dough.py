@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The dough example's gesture, made the way its page makes it, leaves a dent the puck keeps.
 
-``examples/12_dough/01_press_dough`` promises that a closed hand dragged down
+``examples/03_materials/13_dough`` promises that a closed hand dragged down
 into the puck and lifted away leaves it lower, and its page reads the puck's
 height as a share of the height it settled at. This drives the example's own
 arm panel through :mod:`tests.fixtures.grasp` -- the grip the Close button
@@ -37,7 +37,7 @@ class TestThePressByHand(unittest.TestCase):
     def setUpClass(cls) -> None:
         from robosimstudio_materials.mpm.measures import heap_height
 
-        cls.sim, kwargs = _run("12_dough/01_press_dough.py")
+        cls.sim, kwargs = _run("03_materials/13_dough.py")
         cls.sim.run(20).sync()
         t = time.perf_counter()
         cls.sim.run(100).sync()

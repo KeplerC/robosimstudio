@@ -40,10 +40,10 @@ class TestTheChainDampsOnlyItsLinks(unittest.TestCase):
 
 
 class TestTheCableKeepsItsOwnSpacingRule(unittest.TestCase):
-    """``03_rope/00_cable``: "their spacing must stay above twice the radius"."""
+    """``03_materials/00_rope``: "their spacing must stay above twice the radius"."""
 
     def test_spacing_is_above_twice_the_radius(self) -> None:
-        tree = ast.parse((EXAMPLES / "03_rope/00_cable.py").read_text())
+        tree = ast.parse((EXAMPLES / "03_materials/00_rope.py").read_text())
         main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
         values = {
             n.targets[0].id: ast.literal_eval(n.value)

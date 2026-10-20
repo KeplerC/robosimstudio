@@ -152,9 +152,9 @@ def reach_island_copies(pipeline: Any, *attrs: str) -> int:
 
     Newton 1.7's coupled solver gives an island a ``ModelView`` that may keep its own, compacted copy
     of a model array, and the island's solver reads that copy. Measured with ``views.py`` (fix round
-    3, GPU 1): the VBD island of ``examples/19_tape/00_peel_a_label`` and of
+    3, GPU 1): the VBD island of ``examples/03_materials/08_tape`` and of
     ``examples/01_cloth/02_engines`` holds its own ``tri_materials``, ``edge_bending_properties`` and
-    ``particle_radius``, and the one of ``examples/03_rope/03_cable_memory`` its own
+    ``particle_radius``, and the one of ``examples/03_materials/01_rope_memory`` its own
     ``vbd.dahl_eps_max`` and ``vbd.dahl_tau``, 18 rows of the model's 34. A write into the model alone
     then moves a slider and nothing else. ``notify`` refreshes the copies of what its flags name;
     nothing names particle, triangle or edge arrays, so a live write calls this instead. The copy is

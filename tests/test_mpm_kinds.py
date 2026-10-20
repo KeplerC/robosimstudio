@@ -343,12 +343,12 @@ class TestTheExamplesLoad(unittest.TestCase):
     """Each numbered script under the stub studio: it builds, opens one page and steps finite."""
 
     SCRIPTS = (
-        "10_granular/00_sweep_rice.py",
-        "10_granular/01_sweep_rice_scored.py",
-        "11_liquid/00_pour_honey.py",
-        "11_liquid/01_wipe_spill.py",
-        "12_dough/00_roll_dough.py",
-        "12_dough/01_press_dough.py",
+        "03_materials/11_granular.py",
+        "06_tasks/03_granular_scored.py",
+        "03_materials/12_liquid.py",
+        "tests/scenes/01_wipe_spill.py",
+        "tests/scenes/00_roll_dough.py",
+        "03_materials/13_dough.py",
     )
 
     def test_each_example_builds_and_steps(self) -> None:

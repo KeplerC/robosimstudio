@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """The granular examples' headline task, done the way their pages ask: the hand sweeps the rice into the tray.
 
-``examples/10_granular`` promises a gesture -- turn the hand down, drag it onto
-the pusher, close, sweep -- and a number, the share of the rice in the tray. This
-drives the arm panel through that gesture with no browser on it
-(:mod:`tests.fixtures.grasp`) and holds the two scripts to the number: the page's
-readout passes half, and the task document's goal turns true. Nothing is pinned
-and no joint target is written, so what reaches the tray was pushed there by a
-pusher the fingers closed on.
+``examples/03_materials/11_granular`` and ``06_tasks/03_granular_scored`` promise
+a gesture -- turn the hand down, drag it onto the pusher, close, sweep -- and a
+number, the share of the rice in the tray. This drives the arm panel through that
+gesture with no browser on it (:mod:`tests.fixtures.grasp`) and holds the two
+scripts to the number: the page's readout passes half, and the task document's
+goal turns true. Nothing is pinned and no joint target is written, so what
+reaches the tray was pushed there by a pusher the fingers closed on.
 
 Two things the sweep also has to show, because each was once the failure: the
 rice stays on the bench (rice dropped or squeezed at 60 Hz used to fall through
@@ -160,16 +160,16 @@ class _Sweep:
 
 
 class TestThePageSweepsTheRice(_Sweep, unittest.TestCase):
-    """``00_sweep_rice``: the page's readout passes half once the hand has swept."""
+    """``03_materials/11_granular``: the page's readout passes half once the hand has swept."""
 
-    EXAMPLE = "10_granular/00_sweep_rice.py"
+    EXAMPLE = "03_materials/11_granular.py"
     PORT = 9620
 
 
 class TestTheTaskGoalTurnsTrue(_Sweep, unittest.TestCase):
-    """``01_sweep_rice_scored``: the same sweep on the task's page, and ``evaluate`` says success."""
+    """``06_tasks/03_granular_scored``: the same sweep on the task's page, and ``evaluate`` says success."""
 
-    EXAMPLE = "10_granular/01_sweep_rice_scored.py"
+    EXAMPLE = "06_tasks/03_granular_scored.py"
     PORT = 9621
 
     def test_the_goal_is_met(self) -> None:

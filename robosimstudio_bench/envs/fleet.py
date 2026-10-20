@@ -702,6 +702,7 @@ class FleetEnv:
         self.episodes = list(episodes)
         self.documents = list(documents) if documents is not None else [None] * self.num_worlds
         self._check_documents()
+        self._check_statics()
         # A document's active set decides what a world parks, so a table
         # restricted under the last wave's documents is not this wave's.
         self._restricted.clear()
@@ -1035,6 +1036,40 @@ class FleetEnv:
                 f"({base!r}) is {mine}. A superset base may size the constraint buffers for the "
                 "union and may not change the integration"
             )
+
+    def _check_statics(self) -> None:
+        """Refuse a wave that would stand a static object anywhere but where the model welded it.
+
+        A static object (``ObjectSpec.static``) is welded to the world at build,
+        at the template episode's pose, and nothing in a wave writes the weld
+        again: :meth:`_write_wave` writes coordinates and the weld has none,
+        :meth:`_place_documents` asks only an entity that offers
+        ``place_from_document``, and :meth:`_reset_entities` only a world-aware
+        one. So every world stood the object at the template's pose, whatever its
+        own episode or document said, and was scored as though it stood where
+        asked. Asked here of each world's pose as :meth:`_write_wave` composes an
+        object's (:meth:`_declared_for`, then the episode), and refused by name
+        rather than placed: see :meth:`~robosimstudio.domains.rigid.entity.EntityRigid.move_refusal`.
+
+        Raises:
+            CannotReplicate: Naming the world, its document and the object.
+        """
+        for world, episode in enumerate(self.episodes):
+            if episode is None:
+                continue
+            document = self.world_document(world)
+            declared = self._declared_for(document)
+            for name, entity in self.scene.objects.items():
+                refusal = getattr(entity, "move_refusal", None)
+                if refusal is None or name not in declared:
+                    continue
+                why = refusal(entity.episode_start_q(episode, base=declared[name]))
+                if why:
+                    raise CannotReplicate(
+                        f"world {world} runs {document.full_name!r}, and {why}. A wave is copies of one model and "
+                        "places no world's copy of a static object; run it at one world, with object_poses (or "
+                        "object_xforms) in the sampler's (:model-key-fields ...), or drop static=True"
+                    )
 
     # ------------------------------------------------------------------ parking
     def _active_for(self, episode: Episode | None, world: int = 0) -> frozenset[str] | None:

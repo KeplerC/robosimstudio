@@ -52,13 +52,17 @@ def _physics():
     )
 
 
-def _skip_after_a_liquid() -> None:
-    """Skip where a liquid island initialised Genesis at float32 earlier in this process: an IPC island is refused."""
+def _skip_after_float32() -> None:
+    """Skip where an island initialised Genesis at float32 earlier in this process: an IPC island is refused there.
+
+    Named by the coupler that asked, as the refusal names it: a liquid's, or an IPC island's that asked for 32.
+    """
     from robosimstudio.engines.genesis.runtime import _ENGINE
 
     if _ENGINE["precision"] == "32":
+        earlier = "a liquid island" if _ENGINE["coupler"] == "legacy" else "an IPC island that asked for 32"
         raise unittest.SkipTest(
-            "a liquid island initialised Genesis at precision 32 earlier in this process, where an IPC island is "
+            f"{earlier} initialised Genesis at precision 32 earlier in this process, where an IPC island is "
             "refused (its harvest would read zero); run this module in a process of its own"
         )
 
@@ -85,7 +89,7 @@ class TestClothOnGenesis(unittest.TestCase):
     def setUpClass(cls):
         import robosimstudio as rss
 
-        _skip_after_a_liquid()
+        _skip_after_float32()
         scene = rss.Scene(cell="bench_075", physics=_physics())
         cls.towel = scene.add(
             rss.sheet(name="towel", size=(0.2, 0.2), cells=(10, 10), at=(-0.1, -0.1, 0.04), settle_frames=0)
@@ -134,7 +138,7 @@ class TestTheReactionIsTheClothsWeight(unittest.TestCase):
     def setUpClass(cls):
         import robosimstudio as rss
 
-        _skip_after_a_liquid()
+        _skip_after_float32()
         scene = rss.Scene(cell="bench_075", physics=_physics())
         cls.plate = scene.add(rss.box(name="plate", half=(0.14, 0.14, 0.005), at=(0.0, 0.0, 0.10)))
         cls.towel = scene.add(
@@ -163,7 +167,8 @@ class TestTheReactionIsTheClothsWeight(unittest.TestCase):
 
     def test_the_plate_feels_exactly_the_cloth(self):
         """At float64, the precision the IPC harvest needs, where it read 1.000 of the cloth's weight and 1.029 at
-        float32. A liquid island built earlier in the process leaves Genesis at float32, and the class skips there."""
+        float32. A liquid island, or an IPC island at 32, built earlier in the process leaves Genesis at float32, and
+        the class skips there."""
         count = int(self.towel.particle_q.shape[0])
         weight = float(self.sim.scene.model.particle_mass.numpy()[:count].sum()) * 9.81
         measured = float(self.bridge._acc.ema[0, 2])

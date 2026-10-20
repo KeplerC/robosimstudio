@@ -54,6 +54,164 @@ uv run examples/06_tasks/02_episodes.py
 
 Source: [`02_episodes.py`](02_episodes.py)
 
+## Sweep rice, scored
+
+![Sweep rice, scored](media/03_granular_scored.webp)
+
+The same rice, pusher and tray as a task document, with a goal on the share of rice in the tray: sweep, and the goal turns true at half.
+
+The heap is a `Heap.from_spec` record the document places under its own name,
+the tray walls are `Body.from_spec` fixtures, and the physics is the granular
+arrangement under a task-language name. The region is the tray's inside;
+`(:z-range -0.005 0.03)` is the walls' height, starting 5 mm under the bench
+top because the bottom layer of a pushed heap rests at the top to within a
+rounding, and a region's default window is 150 mm, which would count rice
+carried over the tray. `tests/test_sweep_rice` drives the hand through the
+sweep and the goal turns true, at 93%; 16.5 ms per control step on an RTX PRO
+6000, GPU 3, graph-captured.
+
+```bash
+uv run examples/06_tasks/03_granular_scored.py
+```
+
+Source: [`03_granular_scored.py`](03_granular_scored.py)
+
+## Scrub a patch, scored
+
+![Scrub a patch, scored](media/04_brush_scored.webp)
+
+The same brush, handle and square as a task document, with a goal on the share of the square the bristle tips have scrubbed: turn the hand to point down, close on the handle, scrub, and the goal turns true at half.
+
+The brush is a `Brush.from_spec` record and its handle a `Body.from_spec`
+one, placed by the document under the names the brush's `handle` and the
+goal use, and the physics is the brush arrangement under a task-language name.
+The region is the square, and `scrubbed` reads its 5 mm cells off the
+lattice the brush keeps on the device; a reset clears it. `tests/test_scrub_bench`
+drives the hand through the same three strokes from the robot's own home and
+the goal turns true, at 1.0 (22.3 ms per control step, GPU 3).
+
+```bash
+uv run examples/06_tasks/04_brush_scored.py
+```
+
+Source: [`04_brush_scored.py`](04_brush_scored.py)
+
+## Pick up a plate, scored
+
+![Pick up a plate, scored](media/05_suction_scored.webp)
+
+The same plate, cup and square as a task document, with a goal on the plate resting in the square: carry it over, untick **Vacuum**, lift the hand away, and the goal turns true.
+
+The plate is a `Body.from_spec` record the document places under its own
+name, the robot is `yam_bimanual_suction` and the physics the one MuJoCo
+island under its task-language name, `mujoco_500hz@v1`. The square's height
+window, `(:z-range 0.0 0.01)`, counts the plate's centre only within 10 mm of
+the bench, so a plate carried over the square does not count, and
+`hands-clear` asks every tool centre to be 40 mm from the plate's, so a plate
+still held down on the square does not either. `tests/test_suction_pick`
+drives the hand through the pick and the goal turns true.
+
+```bash
+uv run examples/06_tasks/05_suction_scored.py
+```
+
+Source: [`05_suction_scored.py`](05_suction_scored.py)
+
+## Open a bag, scored
+
+![Open a bag, scored](media/06_bag_scored.webp)
+
+The same bag and hand as a task document, with a goal on how far the mouth stands open: turn the right hand to point down, open the bag as in `03_materials/06_bag`, and the goal turns true at 30 mm.
+
+The bag is a `Bag.from_spec` record the document places under its own name, the physics is
+`rss.BAG_60HZ` under a task-language name, and the staging states the stiffer finger servo the
+pinch needs. The hands start at the YAM's home, pointing ahead, so turn the right gizmo down
+first. `tests/test_open_a_bag_scored` drives the right hand through the page and `evaluate`
+says success, the mouth 75 mm open; 12 ms per control step at rest through the page on an
+RTX PRO 6000, GPU 3. Needs the `[superdex]` extra (Python 3.12).
+
+```bash
+uv run --extra superdex examples/06_tasks/06_bag_scored.py
+```
+
+Source: [`06_bag_scored.py`](06_bag_scored.py)
+
+## Hook a band, scored
+
+![Hook a band, scored](media/07_band_scored.webp)
+
+The same pegboard and band as a task document, with a goal that the band encircles both pegs: hook it from the upper peg onto the lower, and the goal turns true.
+
+The pegs are the example's posts declared with a `rod` feature, their two
+ends, so `encircles` holds the band to each peg's length: hanging in front of a
+peg's tip, round only the line through it, does not count. The embodiment is the
+YAM with `03_materials/04_band`'s right-arm home, the hand in front of the band, and
+`tests/test_band_on_pegs` drives the hook there: the goal turns true. Needs `[superdex]`.
+
+```bash
+uv run --extra superdex examples/06_tasks/07_band_scored.py
+```
+
+Source: [`07_band_scored.py`](07_band_scored.py)
+
+## Peel a label, scored
+
+![Peel a label, scored](media/08_tape_scored.webp)
+
+The same box and label as a task document, with a goal on the share of the label's bonds that have let go: turn the right hand to point down, take the tab and peel as in `03_materials/08_tape`, and the goal turns true at 80%.
+
+The label is a `Tape.from_spec` record and the box a `Body.from_spec` one, placed by the
+document under the names the label's `on` and the goal use, and the physics is
+`rss.TAPE_60HZ` under a task-language name. The staging states the stiffer finger servo the
+pinch needs. The hands start at the YAM's home, pointing ahead, so turn the right gizmo down
+first. `tests/test_peel_a_label_scored` drives the right hand through the page and `evaluate`
+says success.
+
+```bash
+uv run examples/06_tasks/08_tape_scored.py
+```
+
+Source: [`08_tape_scored.py`](08_tape_scored.py)
+
+## Cut tofu, scored
+
+![Cut tofu, scored](media/09_cutting_scored.webp)
+
+The same knife, rest, board and tofu as a task document, with a goal that the tofu is in two pieces: take the knife and push it down through the tofu as in `03_materials/10_cutting`, and the goal turns true.
+
+The tofu is a `Cuttable.from_spec` record, the knife a `Cuttable.knife` one carrying its edge as a
+`blade` feature, and the rest and the board are fixtures. The embodiment is the YAM with
+`03_materials/10_cutting`'s right-arm home, the hand over the handle, and the physics `rss.CUTTING_50HZ`
+under a task-language name. Before the hand comes the goal is unmet; `tests/test_cut_tofu_scored`
+drives the cut through the page and `evaluate` reads `pieces` 2 and says success.
+
+```bash
+uv run examples/06_tasks/09_cutting_scored.py
+```
+
+Source: [`09_cutting_scored.py`](09_cutting_scored.py)
+
+## Pour water, scored
+
+![Pour water, scored](media/10_water_scored.webp)
+
+The same cup, water and glass as a task document, with a goal on the water's level in the glass: pour as in `03_materials/14_water`, and the goal turns true at the 25 mm line.
+
+The water is a `Water.from_spec` record the document places under its own name, the cup a
+`Body.from_spec` object, the glass's walls and its painted line `Body.from_spec` fixtures, and
+the physics `rss.WATER_60HZ` under a task-language name. The region is the glass's inside, from
+the bench top to its 55 mm rim, and `fill_level` reads the height the water stands there. The
+hands start at the YAM's home, pointing ahead. `tests/test_pour_water` drives the same pour
+through the right arm's panel and `evaluate` says success, the water 29.5 mm deep in both of two
+drives, 99.3 and 99.7% of it in the glass; 25 ms per control step on an RTX PRO 6000, GPUs 1 and 3.
+The `[genesis]` extra lives in a virtual environment of its own (`examples/03_materials/README.md`).
+
+```bash
+uv run examples/06_tasks/10_water_scored.py
+```
+
+Source: [`10_water_scored.py`](10_water_scored.py)
+
 <!-- examples:end -->
 
 ## The document

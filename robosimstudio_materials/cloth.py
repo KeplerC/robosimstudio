@@ -242,6 +242,13 @@ class ClothMaterialSpec:
     )
     """Poisson ratio to go with :attr:`shell_young`, or ``None`` for the island's."""
 
+    actor_names: ClassVar[dict[str, str]] = {"shell_young": "young", "shell_poisson": "poisson"}
+    """The host actor's name for a field that crosses under another: a membrane's modulus is the
+    shell's ``young``/``poisson`` (:meth:`EntityCloth.host_actor`, the bag's too), the names both
+    engines' shell builders read. The composer's lost-field check looks a field up by it: without
+    it a towel stating ``shell_young=1e6`` on SuperDex was told the field never reached the engine,
+    which built the shell at 1e6 (``c3_entity_side.py``)."""
+
     def __post_init__(self) -> None:
         if self.shell not in ("membrane", "slab"):
             raise ValueError(f"cloth shell must be 'membrane' or 'slab', got {self.shell!r}")
@@ -567,6 +574,10 @@ class EntityCloth(ParticleMixin, Entity):
         self.surface_count: int = 0
         """Vertices in the mid-surface: every particle of a membrane, half the particles of a slab.
         :meth:`mid_surface_positions` pairs a slab's faces by it. The model does not hold it."""
+        self.lumping: str | None = None
+        """How the build shared the sheet's mass among its particles: ``"grid"`` (``add_cloth_grid``, every
+        particle alike) or ``"mesh"`` (``add_cloth_mesh``, a third of each triangle's), for the shell actor to
+        state (:meth:`host_actor`); ``None`` before the build and for a slab. The model's masses cannot say it."""
 
     # -------------------------------------------------------------- phase 1
     def surface(self) -> tuple[np.ndarray, np.ndarray]:
@@ -598,6 +609,7 @@ class EntityCloth(ParticleMixin, Entity):
             length, width = (float(v) for v in spec.size)
             cells_x, cells_y = (int(v) for v in spec.cells)
             self.surface_count = (cells_x + 1) * (cells_y + 1)
+            self.lumping = "grid"
             particle_mass = material.areal_density * (length * width) / self.surface_count
             builder.add_cloth_grid(
                 pos=pos,
@@ -620,6 +632,7 @@ class EntityCloth(ParticleMixin, Entity):
             # Through ``surface``, so ``simplify_faces`` holds here too. Already scaled.
             vertices, faces = self.surface()
             self.surface_count = len(vertices)
+            self.lumping = "mesh"
             builder.add_cloth_mesh(
                 pos=pos,
                 rot=rot,
@@ -677,7 +690,8 @@ class EntityCloth(ParticleMixin, Entity):
         """What a foreign engine needs of this sheet beyond the model arrays.
 
         Read only when ``cloth`` is routed to a host engine such as SuperDex or Genesis. A membrane
-        is a ``shell`` actor. A slab is a ``tet`` actor, its Lamé pair read off ``tet_materials``.
+        is a ``shell`` actor, stating how its build massed it (:attr:`lumping`). A slab is a ``tet``
+        actor, its Lamé pair read off ``tet_materials``.
         """
         material = self.spec.material
         thickness = float(material.thickness) if material.thickness > 0 else 2.0 * float(material.particle_radius)
@@ -694,7 +708,7 @@ class EntityCloth(ParticleMixin, Entity):
             shell["young"] = float(material.shell_young)
         if material.shell_poisson is not None:
             shell["poisson"] = float(material.shell_poisson)
-        return HostActor(kind="shell", params=shell)
+        return HostActor(kind="shell", params=shell, lumping=self.lumping)
 
     def apply_material(self, model: newton.Model) -> None:
         """Write the contact parameters onto the finalized model, before the solvers are built."""

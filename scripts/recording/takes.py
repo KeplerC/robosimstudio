@@ -18,7 +18,8 @@ Dataclasses only, and no import of the library or a browser:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -36,8 +37,10 @@ from .beats import (
     Expectation,
     Fold,
     Grasp,
+    Hand,
     Held,
     Highest,
+    Laid,
     Layout,
     Mid,
     Nearest,
@@ -50,7 +53,6 @@ from .beats import (
     Run,
     Sank,
     Scroll,
-    Segment,
     Select,
     Slider,
     Squashed,
@@ -58,6 +60,7 @@ from .beats import (
     Top,
     Turn,
     Wait,
+    laid,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -187,40 +190,19 @@ def _kept_bend(film) -> tuple[bool, str]:
     return measured < 0.9, f"straightness {measured:.3f} after release (need under 0.9)"
 
 
-def _rolled_flat(film) -> tuple[bool, str]:
-    """The roll example's own readouts: the footprint 1.2 times the block's or more, the height 60% of it or less."""
-    import numpy as np
+def _peg(film, name: str) -> tuple[tuple[float, float, float], tuple[float, float, float], float]:
+    """A peg of ``03_materials/04_band`` as the example lays it: its root on the board [world], the way out, its length.
 
-    from robosimstudio_materials.mpm.measures import heap_height, spread
-
-    ref = film.sim["dough"]
-    rest = ref.entity.rest["particle_q"][ref.particles]
-    points = np.asarray(ref.particle_q, dtype=np.float64)
-    floor = float(ref.entity.floor_z)
-    footprint, before, after = spread(points, rest), heap_height(rest, floor), heap_height(points, floor)
-    return footprint >= 1.2 and after <= 0.6 * before, (
-        f"footprint {footprint:.2f} of the block's (need 1.2), height {before * 1000:.1f} -> {after * 1000:.1f} mm "
-        f"(need {0.6 * before * 1000:.1f})"
-    )
-
-
-def _flap_shut(film) -> tuple[bool, str]:
-    """The box flap's hinge kept 1.8 rad once the hand had gone, and its free edge rests no higher than the rim."""
-    import numpy as np
-
-    from robosimstudio.assetlib.semantics.snapshot import Snapshot
-    from robosimstudio_materials.paper import crease_angle
-
-    sim, flap = film.sim, film.sim["flap"]
-    line = {"crease": {"axis": 2, "at": 0.103 + 0.02 * math.cos(math.radians(15.0))}}  # the example's hinge rows
-    flap.entity.update_probe(sim.state, sim.step_count)
-    angle = float(crease_angle(Snapshot(sim.make_context()), "flap", line)["angle"])
-    rest = np.asarray(flap.entity.rest["particle_q"], dtype=np.float64)[flap.particles]
-    edge = np.asarray(flap.particle_q, dtype=np.float64)[rest[:, 2] > rest[:, 2].max() - 0.003].mean(axis=0)
-    above = float(edge[2]) - film.bench((0.0, 0.0, 0.10))[2]  # the box's rim, 100 mm over whatever bench
-    return angle >= 1.8 and above < 0.015, (
-        f"the hinge kept {angle:.2f} rad (need 1.8) and the free edge is {above * 1000:+.0f} mm off the rim (need under 15)"
-    )
+    A post's middle and half-length off its spec, turned with it: the example turns each post's
+    axis from z onto x, so its +z end is the root, on the board's face at bench x 0.10, and it
+    points out along -x; the upper is 80 mm long at 260 mm up, the lower 50 at 135.
+    """
+    spec = film.sim[name].spec
+    qx, qy, qz, qw = (float(v) for v in spec.xform[3:7])
+    axis = (2.0 * (qx * qz + qw * qy), 2.0 * (qy * qz - qw * qx), 1.0 - 2.0 * (qx * qx + qy * qy))
+    half = float(spec.shape.half_height)
+    root = film.bench(tuple(p + half * a for p, a in zip(laid(film, name), axis, strict=True)))
+    return root, tuple(-a for a in axis), 2.0 * half
 
 
 def _band_on_both(film) -> tuple[bool, str]:
@@ -231,8 +213,7 @@ def _band_on_both(film) -> tuple[bool, str]:
 
     ref = film.sim["band"]
     points = np.asarray(ref.particle_q, dtype=np.float64)
-    pegs = {"upper": (0.26, 0.08), "lower": (0.135, 0.05)}  # the example's heights and lengths [m]
-    on = {n: encircles(points, (0.7, -0.2, 0.75 + z), (-1.0, 0.0, 0.0), length) for n, (z, length) in pegs.items()}
+    on = {n: encircles(points, *_peg(film, n)) for n in ("upper", "lower")}
     stretch = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum()) / float(ref.entity.spec.length)
     return all(on.values()) and stretch > 1.1, f"round {on}, stretch {stretch:.3f} (need both, over 1.1)"
 
@@ -241,10 +222,11 @@ def _knot_tight(film) -> tuple[bool, str]:
     """The knot kept its three crossings, gave back rope, and both tails are still in their hands."""
     import numpy as np
 
-    from robosimstudio_materials.rod.knot import crossings, knot_length, overhand
+    from robosimstudio_materials.rod.knot import crossings, knot_length
 
-    points = np.asarray(film.sim["rope"].particle_q, dtype=np.float64)
-    built = knot_length(overhand(at=(0.03, 0.0), size=0.10, radius=0.006, tail=0.12, spacing=0.008))
+    rope = film.sim["rope"]
+    points = np.asarray(rope.particle_q, dtype=np.float64)
+    built = knot_length(np.asarray(rope.spec.nodes, dtype=np.float64))  # the knot as the example tied it
     now, cross = knot_length(points), crossings(points)
     hand = {a: film.sim.arm(a).ee_pose(film.sim.state)[0] for a in ("left", "right")}  # the page is shut by now
     held = max(float(np.linalg.norm(points[i] - hand[a])) for i, a in ((0, "right"), (-1, "left")))
@@ -255,11 +237,13 @@ def _knot_tight(film) -> tuple[bool, str]:
     )
 
 
-def _sprang_back(film) -> tuple[bool, str]:
-    """The span's middle is back where it hung before the hand took it."""
-    key = str(Segment("cable", 0.5))
-    off = abs(film.marks["end"]["things"][key][2] - film.marks["start"]["things"][key][2])
-    return off < 0.002, f"the middle ended {off * 1000:.1f} mm from where it hung (need under 2)"
+def _wrap_post(film) -> tuple[tuple[float, float, float], float]:
+    """``03_materials/01_rope_memory``'s post as the example stands it, on the bench [world], and its radius plus the cable's [m].
+
+    Bench (0, -86) mm, and 20 + 11 mm: what a radian of wrap lays on the post.
+    """
+    post = film.bench((*laid(film, "post")[:2], 0.0))
+    return post, float(film.sim["post"].spec.shape.radius) + float(film.sim["cable"].spec.radius)
 
 
 def _round_the_post(film) -> dict:
@@ -267,21 +251,22 @@ def _round_the_post(film) -> dict:
 
     What the gizmo's arrows and ring write, a film frame at a time: no beat drags
     an arc or turns a ring. The path is ``tests/test_cable_robot``'s, at 50 mm/s,
-    shrinking by what the wrap lays on the post; the capsule's distance from the
-    hand at the end is kept for :func:`_carried_round`.
+    about the post where the example stands it, shrinking by what the wrap lays on
+    it: the post's radius plus the cable's, 31 mm a radian. The capsule's distance
+    from the hand at the end is kept for :func:`_carried_round`.
     """
     import numpy as np
 
     from robosimstudio.core.math import quat_multiply
 
     arm, wrap = film.session.arms["right"], math.radians(120.0)
-    post = film.bench((0.0, -0.086, 0.0))
+    post, lays = _wrap_post(film)
     x0, y0, z = (float(v) for v in arm.cursor_pos)
     start = (x0 - post[0], y0 - post[1])
     rho = math.hypot(*start)
     frames = round(rho * wrap / 0.05 * film.take.fps)
     for i in range(1, frames + 1):
-        a, shrink = wrap * i / frames, 1.0 - wrap * 0.031 / rho * i / frames
+        a, shrink = wrap * i / frames, 1.0 - wrap * lays / rho * i / frames
         x = (math.cos(a) * start[0] - math.sin(a) * start[1]) * shrink
         y = (math.sin(a) * start[0] + math.cos(a) * start[1]) * shrink
         quat = quat_multiply(np.array([0.0, 0.0, math.sin(a / 2), math.cos(a / 2)]), np.array([0.0, 1.0, 0.0, 0.0]))
@@ -368,14 +353,25 @@ def _succeeded(film) -> tuple[bool, str]:
     return bool(result["success"]), f"the task says success={result['success']}"
 
 
+def _walled(film, walls: str, floor: float) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """The inside of four slabs as the example lays them, bench frame [m]: between their faces, ``floor`` to their top.
+
+    ``<walls>_near`` and ``_far`` close it in x, ``_right`` and ``_left`` in y. ``03_materials/12_liquid``'s
+    bowl is 140 mm square about bench (0.12, -0.16) and 40 mm tall; ``03_materials/14_water``'s glass 60 mm
+    square about (0.12, -0.13) and 55 mm tall.
+    """
+    near, far = laid(film, f"{walls}_near", (1, 0, 1)), laid(film, f"{walls}_far", (-1, 0, 0))
+    right, left = laid(film, f"{walls}_right", (0, 1, 0)), laid(film, f"{walls}_left", (0, -1, 0))
+    return (near[0], right[1], floor), (far[0], left[1], near[2])
+
+
 def _poured(film) -> tuple[bool, str]:
     """The pour example's readout at the end: the share of the honey inside the bowl, 90% or more."""
     import numpy as np
 
     from robosimstudio_materials.mpm.measures import fill_fraction
 
-    # The bowl's inside as the example states it: 140 mm square about bench (0.12, -0.16), from 5 mm under the top.
-    lo, hi = np.array(film.bench((0.05, -0.23, -0.005))), np.array(film.bench((0.19, -0.09, 0.04)))
+    lo, hi = (np.array(film.bench(p)) for p in _walled(film, "bowl", -0.005))
     share = fill_fraction(np.asarray(film.sim["honey"].particle_q, dtype=np.float64), lo, hi)
     return share >= 0.9, f"{share:.3f} of the honey in the bowl (need 0.9)"
 
@@ -386,8 +382,7 @@ def _water_in_glass(film) -> tuple[bool, str]:
 
     from robosimstudio_materials.water import fill_level
 
-    # The glass's inside as the example states it: 60 mm square about bench (0.12, -0.13), 55 mm tall.
-    lo, hi = np.array(film.bench((0.09, -0.16, 0.0))), np.array(film.bench((0.15, -0.10, 0.055)))
+    lo, hi = (np.array(film.bench(p)) for p in _walled(film, "glass", 0.0))
     filled = fill_level(np.asarray(film.sim["water"].particle_q, dtype=np.float64), lo, hi, 0.004)
     ok = filled["fraction"] >= 0.9 and filled["height"] >= 0.025
     return (
@@ -525,25 +520,6 @@ FINAL = (
             Wait(seconds=1.8, label="it drapes again"),
         ),
         expect=(Check(_stiffened, needs=("tape",)),),
-    ),
-    Take(
-        "examples/03_rope/01_between_posts.py",
-        camera=Orbit(At("cable", dz=0.08), distance=1.0, azimuth=-30.0, elevation=30.0, fov=50.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        beats=(
-            Wait(seconds=0.5, label="the right hand pointing at the span's middle"),
-            # The hand leans 40 degrees, so its z arrow is the hand's own axis: 80 mm down it is the cable.
-            Drag("right", "z", -0.08, seconds=1.2, label="drag the gizmo down onto the cable"),
-            Press(text="Close", within=RIGHT, label="Close"),
-            Wait(seconds=0.8, mark="closed"),
-            Drag("right", "z", 0.03, seconds=1.0, label="pull it back up"),
-            Wait(seconds=0.8, mark="pulled", label="the span hangs from the hand"),
-            Press(text="Open", within=RIGHT, label="Open"),
-            Drag("right", "z", 0.05, seconds=0.8, label="and away"),
-            Wait(seconds=1.5, label="it springs back between the posts"),
-        ),
-        expect=(Rose(Segment("cable", 0.5), 0.008, at="pulled"), Check(_sprang_back, needs=(Segment("cable", 0.5),))),
     ),
     lift("examples/00_getting_started/00_hello_world.py"),
     lift("examples/00_getting_started/01_core_concepts.py"),
@@ -839,26 +815,6 @@ DRAFTS = (
         lift=0.12,
         radius=0.012,  # the one link the handle took: the links are loose, and the rest stay in the heap
     ),
-    # The hand, closed and pointing down, pushes the standing flap over and presses it into the box;
-    # tests/test_box_flap_robot.py drives the same path through the panel.
-    Take(
-        "examples/13_paper/01_box_flap.py",
-        camera=Orbit(Bench(-0.06, 0.05, 0.12), distance=1.05, azimuth=35.0, elevation=32.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: right")),
-        beats=(
-            Wait(seconds=0.5, label="the flap stands open, the left hand beside it"),
-            Press(text="Close", within="Arm: left", label="Close"),
-            Wait(seconds=0.6),
-            Drag("left", "z", to=Bench(z=0.162), seconds=0.8, label="down, level with the flap"),
-            Drag("left", "y", to=Bench(y=-0.01), seconds=1.8, label="across: the hand pushes it over"),
-            Drag("left", "z", to=Bench(z=0.062), seconds=1.2, label="down: it presses the flap into the box"),
-            Wait(seconds=0.5, mark="pressed"),
-            Drag("left", "z", to=Bench(z=0.162), seconds=1.0, label="up: the hand leaves"),
-            Wait(seconds=2.5, label="the flap stays shut"),
-        ),
-        expect=(Check(_flap_shut, needs=("flap",)),),
-    ),
     Take(
         "examples/09_teleop/01_force_feedback.py",
         argv=("--simulate",),
@@ -870,7 +826,7 @@ DRAFTS = (
     grasp("examples/06_tasks/01_goals_and_rewards.py", "cube", camera=TASK_VIEW),
     grasp("examples/06_tasks/02_episodes.py", "cube", camera=TASK_VIEW),
     Take(
-        "examples/03_rope/00_cable.py",
+        "examples/03_materials/00_rope.py",
         camera=Orbit(Bench(-0.10, -0.08, 0.10), distance=0.9, azimuth=-30.0, elevation=30.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left")),
@@ -890,7 +846,7 @@ DRAFTS = (
         expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.771)), 0.06, at="lifted"),),
     ),
     Take(
-        "examples/03_rope/03_cable_memory.py",
+        "examples/03_materials/01_rope_memory.py",
         camera=Orbit(Bench(-0.04, -0.13, 0.05), distance=0.95, azimuth=-30.0, elevation=38.0, fov=50.0),
         warmup=1.0,
         budget=1_400_000,  # the whole arm in view: 1.2 MB held it only at quality 46
@@ -913,7 +869,7 @@ DRAFTS = (
         expect=(Check(_carried_round), Check(_kept_bend, needs=("cable",))),
     ),
     Take(
-        "examples/03_rope/04_twist.py",
+        "examples/03_materials/02_twist.py",
         camera=Orbit(Bench(0.02, 0.0, 0.17), distance=0.95, azimuth=12.0, elevation=34.0, fov=50.0),
         budget=1_500_000,  # two hands turning and two gizmos for 15 s
         warmup=1.0,
@@ -936,27 +892,7 @@ DRAFTS = (
         expect=(Check(_twisted, needs=("soft_twist", "stiff_twist")),),
     ),
     Take(
-        "examples/03_rope/02_superdex.py",
-        needs=("superdex",),
-        camera=Orbit(Bench(-0.10, -0.06, 0.10), distance=1.25, azimuth=-30.0, elevation=30.0, fov=40.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        beats=(
-            Wait(seconds=0.5, label="the right hand over the SuperDex cable's middle"),
-            # The cable's axis lies 11.2 mm up; the tool centre closes 10 mm over it, as in 00_cable.
-            Drag("right", "z", to=(0.550, -0.011, 0.771), seconds=1.2, label="drag the gizmo down onto it"),
-            Wait(seconds=0.3),
-            # Close would shut the jaws through it: SuperDex's push on the fingers is not fed back.
-            Slider(text="Grip amount", value=0.80, seconds=0.8, within=RIGHT, label="Grip amount 0.80: jaws on it"),
-            Wait(seconds=1.0, mark="closed"),
-            Drag("right", "z", to=(0.550, -0.011, 0.891), seconds=1.8, label="drag it up, slowly"),
-            Wait(seconds=2.0, mark="lifted", label="held by friction, nothing pinned"),
-        ),
-        # The node in the jaws. Measured 113 mm in tests/test_superdex_cable_robot.
-        expect=(Rose(Patch("cable", near=(0.550, -0.011, 0.761)), 0.08, at="lifted"),),
-    ),
-    Take(
-        "examples/17_knots/00_pull_knot_tight.py",
+        "examples/03_materials/03_knot.py",
         needs=("superdex",),
         budget=1_800_000,  # 24 s, both arms in view: 1.4 MB at quality 46
         camera=Orbit(Bench(0.0, 0.0, 0.08), distance=1.3, azimuth=-15.0, elevation=30.0, fov=40.0),
@@ -980,7 +916,7 @@ DRAFTS = (
         expect=(Check(_knot_tight, needs=("rope",)),),
     ),
     Take(
-        "examples/18_bands/00_band_on_pegs.py",
+        "examples/03_materials/04_band.py",
         needs=("superdex",),
         budget=1_300_000,  # 17 s with the whole arm in view: 966 KB at quality 46 at the default
         camera=Orbit(Bench(0.03, -0.20, 0.17), distance=1.0, azimuth=-62.0, elevation=28.0, fov=40.0),
@@ -990,16 +926,17 @@ DRAFTS = (
             Wait(seconds=0.5, label="a band on the upper peg, the right hand in front of it"),
             Press(text="Close", within=RIGHT, label="Close: the shut jaws are the hook"),
             Wait(seconds=0.6),
-            # tests/test_band_on_pegs's path, at about its 50 mm/s: through the loop, down past the
-            # lower peg, in under it to 1 mm off the board, up, and back out along the jaws.
-            Drag("right", "x", to=Bench(0.030, -0.20, 0.201), seconds=1.2, label="into the loop"),
-            Drag("right", "z", to=Bench(0.030, -0.20, 0.105), seconds=2.2, label="down past the lower peg"),
-            Drag("right", "x", to=Bench(0.082, -0.20, 0.105), seconds=1.2, label="in under it"),
-            Drag("right", "z", to=Bench(0.082, -0.20, 0.120), seconds=0.5, label="up"),
-            Drag("right", "x", to=Bench(-0.025, -0.20, 0.120), seconds=2.3, label="back out"),
+            # tests/test_band_on_pegs's path, at about its 50 mm/s: through the loop, 5 mm short of the
+            # band as hung, down to 30 mm under the lower peg, in under it to 18 mm off the board's face
+            # (the fingertips 1 mm off it), up to 15 mm under the peg, and back out 60 mm short of the band.
+            Drag("right", "x", to=Laid("band", dx=-0.005), seconds=1.2, label="into the loop"),
+            Drag("right", "z", to=Laid("lower", dz=-0.03), seconds=2.2, label="down past the lower peg"),
+            Drag("right", "x", to=Laid("board", face=(-1, 0, 0), dx=-0.018), seconds=1.2, label="in under it"),
+            Drag("right", "z", to=Laid("lower", dz=-0.015), seconds=0.5, label="up"),
+            Drag("right", "x", to=Laid("band", dx=-0.06), seconds=2.3, label="back out"),
             # The gizmo's arrows and arcs reach 0.14 m along +x from the hand: from 25 mm off they sat over
             # the lower peg and hid the band on it, so the hand goes on back until they end short of its tip.
-            Drag("right", "x", to=Bench(-0.13, -0.20, 0.120), seconds=1.2, label="and clear of the pegs"),
+            Drag("right", "x", to=Bench(x=-0.13), seconds=1.2, label="and clear of the pegs"),
             Wait(seconds=2.0, label="stretched round both pegs"),
         ),
         expect=(Check(_band_on_both, needs=("band",)),),
@@ -1028,7 +965,7 @@ DRAFTS = (
 # Each take is the gesture its example's medium test drives through the arm panel,
 # played on the page at the test's speeds: the right arm's gizmo dragged or turned,
 # Close pressed. Nothing is clicked onto a handle, so what moves the rice, the
-# ketchup, the honey, the dough and the roller is the hand.
+# honey and the dough is the hand.
 
 TOOL_DOWN = (0.0, 1.0, 0.0, 0.0)
 """The YAM's tool pointing down, its jaws closing along world y (xyzw). Its home points the tool along +x."""
@@ -1068,26 +1005,27 @@ def _dolly(camera: Orbit | Camera, seconds: float, label: str) -> Do:
 
     For a take whose first drag needs the hand in view at its home, far over
     what it then works on: the page opens wide and closes in once the hand is down.
+    The beat's ``fn`` is a partial over ``camera``, so a test can read where it ends.
     """
+    return Do(fn=partial(_dolly_to, camera, seconds), label=label)
 
-    def dolly(film):
-        from .page import ease
 
-        eye1, at1, fov1 = camera.resolve(film)
-        now = film.page.js("camera")
-        eye0, at0, fov0 = now["eye"], now["at"], float(now["fov"])
-        frames = max(1, round(seconds * film.take.fps))
-        for k in range(1, frames + 1):
-            t = ease(k / frames)
-            film.aim(
-                [a + (b - a) * t for a, b in zip(eye0, eye1, strict=True)],
-                [a + (b - a) * t for a, b in zip(at0, at1, strict=True)],
-                fov0 + (fov1 - fov0) * t,
-            )
-            film.advance()
-        return {"camera_to": {"eye": [round(v, 3) for v in eye1], "at": [round(v, 3) for v in at1]}}
+def _dolly_to(camera: Orbit | Camera, seconds: float, film) -> dict:
+    from .page import ease
 
-    return Do(fn=dolly, label=label)
+    eye1, at1, fov1 = camera.resolve(film)
+    now = film.page.js("camera")
+    eye0, at0, fov0 = now["eye"], now["at"], float(now["fov"])
+    frames = max(1, round(seconds * film.take.fps))
+    for k in range(1, frames + 1):
+        t = ease(k / frames)
+        film.aim(
+            [a + (b - a) * t for a, b in zip(eye0, eye1, strict=True)],
+            [a + (b - a) * t for a, b in zip(at0, at1, strict=True)],
+            fov0 + (fov1 - fov0) * t,
+        )
+        film.advance()
+    return {"camera_to": {"eye": [round(v, 3) for v in eye1], "at": [round(v, 3) for v in at1]}}
 
 
 def _note(key: str, read, label: str) -> Do:
@@ -1134,33 +1072,30 @@ def _carried(name: str, along_y: float, *, upright: float, at: str = "end"):
     return check
 
 
+def _tray(film) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """``03_materials/11_granular``'s tray inside as the example lays its walls, bench frame [m], 5 mm under the bench to the top.
+
+    Between the side walls' inner faces, from their open ends to the back wall's face: 280 by 200 mm
+    from bench (-0.14, -0.22), 30 mm tall.
+    """
+    left, right = laid(film, "wall_left", (1, -1, 0)), laid(film, "wall_right", (-1, 0, 0))
+    back = laid(film, "wall_back", (0, -1, 1))
+    return (left[0], left[1], -0.005), (right[0], back[1], back[2])
+
+
 def _rice_in_tray(film) -> tuple[bool, str]:
-    """``00_sweep_rice``'s readout: the share of the rice inside the tray, boxed as the example boxes it."""
+    """``03_materials/11_granular``'s readout: the share of the rice inside the tray, boxed as the example boxes it."""
     import numpy as np
 
     from robosimstudio_materials.mpm.measures import fill_fraction
 
-    lo, hi = np.asarray(film.bench((-0.14, -0.22, -0.005))), np.asarray(film.bench((0.14, -0.02, 0.03)))
+    lo, hi = (np.asarray(film.bench(p)) for p in _tray(film))
     fill = fill_fraction(np.asarray(film.sim["rice"].particle_q, dtype=np.float64), lo, hi)
     return fill >= 0.5, f"{100.0 * fill:.1f}% of the rice is in the tray (tests/test_sweep_rice asks half)"
 
 
-def _ketchup_off(film) -> tuple[bool, str]:
-    """``01_wipe_spill``'s readout: the share of the ketchup off the patch it settled on, at any height."""
-    import numpy as np
-
-    from robosimstudio_materials.mpm.measures import spill_fraction
-
-    sauce = film.sim["ketchup"]
-    rest = sauce.entity.rest["particle_q"][sauce.particles]
-    pad = 0.5 * float(sauce.spec.particle_spacing)
-    lo, hi = rest.min(axis=0) - np.array((pad, pad, 0.0)), rest.max(axis=0) + np.array((pad, pad, 0.03))
-    off = spill_fraction(np.asarray(sauce.particle_q, dtype=np.float64), lo, hi)
-    return off >= 0.5, f"{100.0 * off:.1f}% of the ketchup is off its patch (tests/test_wipe_spill asks half)"
-
-
 def _dough_height(film) -> float:
-    """``01_press_dough``'s readout: the puck's height as a share of the height it settled at [%]."""
+    """``03_materials/13_dough``'s readout: the puck's height as a share of the height it settled at [%]."""
     from robosimstudio_materials.mpm.measures import heap_height
 
     lump = film.sim["dough"]
@@ -1180,7 +1115,7 @@ def _dent_kept(film) -> tuple[bool, str]:
 
 ROBOT_PARTICLES = (
     Take(
-        "examples/10_granular/00_sweep_rice.py",
+        "examples/03_materials/11_granular.py",
         # From the front and the tray's side: the heap comes toward the lens into the tray, and the arm stays behind it.
         camera=Orbit(Bench(0.0, -0.29, 0.08), distance=1.1, azimuth=40.0, elevation=35.0, fov=42.0),
         warmup=1.0,  # the heap settles before the first frame
@@ -1188,14 +1123,21 @@ ROBOT_PARTICLES = (
         budget=1_800_000,  # nine gestures and a sweep: 18 s of clip
         beats=(
             Wait(seconds=0.5, label="the right hand over the heap, pointing forward"),
-            DragTo("right", Bench(0.0, -0.45, 0.12), seconds_per_m=4.5, label="over the pusher"),
+            DragTo("right", Laid("pusher", dz=0.10), seconds_per_m=4.5, label="over the pusher"),
             _turn("right", TOOL_DOWN, 1.0, "turn the gizmo: the hand points down"),
             Drag("right", "z", to=At("pusher"), seconds=1.6, label="down onto the pusher"),
             Press(text="Close", within=RIGHT, label="Close: the jaws take its 20 mm faces"),
             Wait(seconds=1.0, mark="closed"),
             _note("jaws_mm", _jaws, "the jaw opening"),
-            # tests/test_sweep_rice walks the hand at 0.15 m/s; eased over 3 s, these 290 mm peak at 0.145.
-            Drag("right", "y", to=Bench(0.0, -0.16, 0.02), seconds=3.0, label="sweep into the tray at a walking pace"),
+            # tests/test_sweep_rice walks the hand at 0.15 m/s; eased over 3 s, these 290 mm peak at 0.145. It
+            # stops the tool centre 140 mm short of the back wall's face, the pusher's own face 130 (its SWEEP_END).
+            Drag(
+                "right",
+                "y",
+                to=Laid("wall_back", face=(0, -1, 0), dy=-0.14),
+                seconds=3.0,
+                label="sweep into the tray at a walking pace",
+            ),
             Wait(seconds=1.5, mark="swept", label="the panel reads the share in the tray"),
             Press(text="Open", within=RIGHT, label="Open"),
             Drag("right", "z", 0.10, seconds=1.0, label="lift away"),
@@ -1211,36 +1153,7 @@ ROBOT_PARTICLES = (
         ),
     ),
     Take(
-        "examples/11_liquid/01_wipe_spill.py",
-        # From the front and the bench's middle: the push runs left to right toward the lens, the ridge forms on the
-        # wiper's face this view looks at, and the arm stays side-on as the hand backs away at the end.
-        camera=Orbit(Bench(0.0, -0.22, 0.09), distance=1.05, azimuth=50.0, elevation=36.0, fov=42.0),
-        warmup=1.0,  # the puddle settles before the first frame
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        budget=1_200_000,
-        beats=(
-            Wait(seconds=0.5, label="the right hand over the wiper, pointing down"),
-            # The pads' tips on the bench, where tests/test_wipe_spill closes: the tool centre 16.5 mm up.
-            Drag("right", "z", to=At("wiper", dz=0.0015), seconds=1.4, label="drag the gizmo down onto the wiper"),
-            Press(text="Close", within=RIGHT, label="Close: the jaws take its 20 mm faces"),
-            Wait(seconds=0.8, mark="closed"),
-            _note("jaws_mm", _jaws, "the jaw opening"),
-            # The test walks the cursor at 0.09 m/s; eased over 3 s, these 180 mm peak at 0.09.
-            Drag("right", "y", 0.18, seconds=3.0, label="push the puddle toward the middle of the bench"),
-            Wait(seconds=0.8, mark="pushed", label="the ketchup is off its patch"),
-            Press(text="Open", within=RIGHT, label="Open"),
-            Drag("right", "z", 0.08, seconds=1.0, label="lift away"),
-            Drag("right", "x", -0.10, seconds=1.0, label="and back: the ridge stays where the wiper left it"),
-            Wait(seconds=1.0),
-        ),
-        expect=(
-            Check(_jaws_on(20.0, 3.0)),
-            Check(_carried("wiper", 0.15, upright=0.01, at="pushed"), needs=("wiper",)),
-            Check(_ketchup_off),
-        ),
-    ),
-    Take(
-        "examples/12_dough/01_press_dough.py",
+        "examples/03_materials/13_dough.py",
         # From the front and the arm's outside: the hand at its home, 330 mm over the puck, and the puck both in view.
         # The particles are drawn unlit, so a dent shows only as a notch in the outline, seen along the blade.
         camera=Orbit(Bench(0.0, -0.31, 0.14), distance=1.0, azimuth=-35.0, elevation=28.0, fov=40.0),
@@ -1270,7 +1183,7 @@ ROBOT_PARTICLES = (
         expect=(Check(_dent_kept), Squashed("dough", 0.002, at="pressed")),
     ),
     Take(
-        "examples/11_liquid/00_pour_honey.py",
+        "examples/03_materials/12_liquid.py",
         camera=Orbit(Bench(0.09, -0.24, 0.13), distance=1.1, azimuth=-30.0, elevation=30.0, fov=40.0),
         warmup=1.0,
         layout=Layout(collapse=("Simulation", "Arm: left")),
@@ -1302,35 +1215,6 @@ ROBOT_PARTICLES = (
         ),
         budget=1_300_000,  # 19 s of a moving arm: 1,008 KB at the ladder's last quality, over the default 900
     ),
-    Take(
-        "examples/12_dough/00_roll_dough.py",
-        camera=Orbit(Bench(-0.03, -0.31, 0.10), distance=1.0, azimuth=-40.0, elevation=32.0, fov=40.0),
-        warmup=1.0,
-        layout=Layout(collapse=("Simulation", "Arm: left")),
-        # 1.5 s of scene a second: the three passes are 2.4 s of scene each at the test's pace, and at
-        # real time the clip ran 22 s and 1255 KB at the bottom of the quality ladder.
-        speed=1.5,
-        budget=1_200_000,  # nine drags and a press, the hand in the middle of the frame throughout
-        beats=(
-            Wait(seconds=0.4, label="the right hand over the roller's handle"),
-            Drag("right", "z", to=(0.460, -0.310, 0.820), seconds=1.0, label="drag the gizmo down onto the handle"),
-            Wait(seconds=0.2),
-            Press(text="Close", within=RIGHT, label="Close: the jaws on the handle"),
-            Wait(seconds=0.5, mark="closed"),
-            Drag("right", "z", to=(0.460, -0.310, 0.850), seconds=0.6, label="lift it out of its rest"),
-            Drag("right", "x", to=(0.515, -0.310, 0.850), seconds=0.6, label="over the near edge of the block"),
-            # The cursor 88 mm over the bench: the drum's underside runs about 11 mm over it (tests/test_roll_dough).
-            Drag("right", "z", to=(0.515, -0.310, 0.838), seconds=0.4, label="down onto the dough"),
-            # 160 mm in 2.4 s of scene, eased: under 0.11 m/s, a third of what the MPM's grid allows a tool.
-            Drag("right", "x", to=(0.675, -0.310, 0.838), seconds=1.6, label="roll it across"),
-            Drag("right", "x", to=(0.515, -0.310, 0.838), seconds=1.6, label="back"),
-            Drag("right", "x", to=(0.675, -0.310, 0.838), seconds=1.6, label="and across again"),
-            Wait(seconds=0.3, mark="rolled"),
-            Drag("right", "z", to=(0.675, -0.310, 0.890), seconds=0.7, label="lift away: the dough stays flat"),
-            Wait(seconds=0.7),
-        ),
-        expect=(Held("roller", since="closed", at="rolled"), Check(_rolled_flat, needs=("dough",))),
-    ),
 )
 
 ROBOT_BAGS: tuple[Take, ...] = (
@@ -1338,7 +1222,7 @@ ROBOT_BAGS: tuple[Take, ...] = (
     # down; tests/test_open_a_bag.py drives the same path through the panel. Seen from the mouth's side and
     # a little in front, so the opening shows under the hand: the gizmo's arrows and arcs point +x, +y, +z.
     Take(
-        "examples/16_bags/00_open_a_bag.py",
+        "examples/03_materials/06_bag.py",
         needs=("superdex",),
         camera=Orbit(Bench(0.0, -0.10, 0.04), distance=0.95, azimuth=-80.0, elevation=25.0, fov=38.0),
         warmup=0.5,
@@ -1381,15 +1265,19 @@ def _over_the_sole(film) -> tuple[float, float, float]:
 
 
 def _scrubbed(film) -> tuple[bool, str]:
-    """``00_scrub_the_bench``'s readout: the share of the square's 5 mm cells a bristle tip touched while down."""
-    lo, hi = film.bench((-0.025, -0.27, 0.0))[:2], film.bench((0.075, -0.17, 0.0))[:2]
+    """``03_materials/07_brush``'s readout: the share of the square's 5 mm cells a bristle tip touched while down.
+
+    The square is the example's ``patch`` region as the scene built it: bench (-25, -270) to (75, -170) mm.
+    """
+    x0, y0, x1, y1 = (float(v) for v in film.sim.handles.regions["patch"].xy_ranges)
+    lo, hi = film.bench((x0, y0, 0.0))[:2], film.bench((x1, y1, 0.0))[:2]
     share = float(film.sim["brush"].entity.scrubbed(lo, hi))
     return share >= 0.5, f"{100.0 * share:.1f}% of the square scrubbed (tests/test_scrub_bench asks half)"
 
 
 ROBOT_BRUSH = (
     Take(
-        "examples/14_brush/00_scrub_the_bench.py",
+        "examples/03_materials/07_brush.py",
         # From in front of the bench, 1.15 m off, the brush end on: its bristles show under the fingers,
         # the strokes run left to right across the drawn square, and no link is near enough to loom.
         camera=Orbit(Bench(0.03, -0.25, 0.06), distance=1.15, azimuth=-20.0, elevation=32.0, fov=30.0),
@@ -1427,17 +1315,28 @@ ROBOT_BRUSH = (
 
 # The suction hand: down onto the plate, the right arm's Vacuum box ticked, lift, carry, down, unticked.
 # The gestures are tests/test_suction_pick's, through the same arm panel, with the gizmo put 3 mm into the
-# plate rather than 4 and a lowering aimed to stop the held plate 2 mm over the bench (it stops 2.8 mm
-# over and drops that far when the box is unticked). What holds the plate is the vacuum: the Seal readout
-# on the panel says sealed and the mass it holds.
-PLATE_HALF = 0.003
-"""The plate's half-thickness [m]: 6 mm thick."""
+# plate rather than 4 and a lowering aimed to stop the held plate's lowest corner 2 mm over the bench: it
+# hangs 1.7 degrees off level, so that corner stops 2.2 mm over and its middle 4.5 mm, and it drops that
+# far when the box is unticked. What holds the plate is the vacuum: the Seal readout on the panel says
+# sealed and the mass it holds.
 INTO_PLATE = 0.003
-"""How far under the plate's top the gizmo is put [m]. The cup stops on the plate with its face 0.1 to 0.2 mm
-over it (the Seal readout's gap once ticked, inside the seal's 2 mm), and the panel reads the hand 6 mm behind
-the gizmo: too far to put the gizmo back on the hand, so the arm keeps the face down on the plate."""
-SQUARE = (-0.11, -0.22, 0.11, 0.0)
-"""``00_pick_a_plate``'s square in the bench frame [m]: x0, y0, x1, y1."""
+"""How far under the plate's top the gizmo is put [m]. The cup stops on the plate 3 mm short of the gizmo,
+inside the panel's 4 mm tolerance, so the panel puts the gizmo back on the hand (its EE readout says on
+target) and the face rests on the plate: the Seal readout's gap is 0.0 mm before the box is ticked and once
+it seals, inside the seal's 2 mm."""
+
+
+def _plate_half(film) -> float:
+    """Half the plate's height along world z as it is turned now [m]: 3 mm for ``04_extending/02_suction``'s, flat."""
+    return film.height("plate") / 2.0
+
+
+def _square(film) -> tuple[float, float, float, float]:
+    """``04_extending/02_suction``'s square as the scene built its region, bench frame [m]: x0, y0, x1, y1.
+
+    (-110, -220) to (110, 0) mm: 220 mm across, its centre 200 mm from the plate's.
+    """
+    return tuple(float(v) for v in film.sim.handles.regions["square"].xy_ranges)
 
 
 def _seal(film) -> str:
@@ -1446,11 +1345,11 @@ def _seal(film) -> str:
 
 
 def _plate_over_bench(clearance: float):
-    """Where the gizmo goes for the held plate's underside to stop ``clearance`` [m] over the bench."""
+    """Where the gizmo goes for the held plate's lowest corner to stop ``clearance`` [m] over the bench."""
 
     def there(film) -> tuple[float, float, float]:
         cursor = film.where(film.gizmo("right"))
-        underside = film.position("plate")[2] - PLATE_HALF
+        underside = film.position("plate")[2] - _plate_half(film)
         bench = film.bench((0.0, 0.0, 0.0))[2]
         return (cursor[0], cursor[1], cursor[2] - (underside - bench - clearance))
 
@@ -1470,9 +1369,10 @@ def _landed(film) -> tuple[bool, str]:
     import numpy as np
 
     plate = np.asarray(film.position("plate"))
-    lo, hi = np.asarray(film.bench((*SQUARE[:2], 0.0))[:2]), np.asarray(film.bench((*SQUARE[2:], 0.0))[:2])
+    x0, y0, x1, y1 = _square(film)
+    lo, hi = np.asarray(film.bench((x0, y0, 0.0))[:2]), np.asarray(film.bench((x1, y1, 0.0))[:2])
     inside = bool(np.all(plate[:2] >= lo) and np.all(plate[:2] <= hi))
-    top = 1000.0 * (plate[2] + PLATE_HALF - film.bench((0.0, 0.0, 0.0))[2])
+    top = 1000.0 * (plate[2] + _plate_half(film) - film.bench((0.0, 0.0, 0.0))[2])
     body = int(film.sim.scene.by_name["plate"].body)
     w = abs(float(film.sim.state.body_q.numpy()[body][6]))
     tilt = m.degrees(2.0 * m.acos(min(1.0, w)))
@@ -1487,7 +1387,7 @@ def _landed(film) -> tuple[bool, str]:
 
 ROBOT_SUCTION = (
     Take(
-        "examples/15_suction/00_pick_a_plate.py",
+        "examples/04_extending/02_suction.py",
         # From in front of the bench, 1.2 m off: the plate, the drawn square and the carry between them.
         camera=Orbit(Bench(0.0, -0.18, 0.06), distance=1.2, azimuth=25.0, elevation=32.0, fov=36.0),
         warmup=1.0,  # the plate settles flat before the first frame
@@ -1525,14 +1425,36 @@ ROBOT_SUCTION = (
 # The tape: the right hand takes the label's pull tab by contact and peels the label off the box, the
 # staircase tests/test_peel_a_label drives through the same arm panel: up 30 mm, then seven times back
 # 20 mm toward the right arm and up 10 mm.
-TAPE_TOP = 0.05
-"""The example's box top over the bench [m]."""
-TAPE_CLOSE = TAPE_TOP + 0.0125 + 0.004
-"""Where the tool centre closes: 4 mm over the middle of the 24 mm tab, the pads clear of the box top."""
+
+
+def _tab(film) -> tuple[float, float, float]:
+    """The label's pull tab's middle where the scene built it, bench frame [m].
+
+    It stands on the label's fold, half its 24 mm over the label's corner, which the example lays
+    0.5 mm over the box's top: (0, -40, 62.5) mm in ``03_materials/08_tape``.
+    """
+    built, origin = film.sim["label"].entity.tab_q0[:3], film.bench((0.0, 0.0, 0.0))
+    return tuple(float(b) - float(o) for b, o in zip(built, origin, strict=True))
+
+
+def _over_the_tab(film) -> tuple[float, float, float]:
+    """Where the tool centre closes: 4 mm over the tab's middle, the pads clear of the box top (the test's CLOSE)."""
+    x, y, z = _tab(film)
+    return film.bench((x, y, z + 0.004))
+
+
+def _peel_stair(back: float, up: float):
+    """A corner of the peel's staircase: ``back`` [m] toward the right arm from the tab, ``up`` [m] over the box top."""
+
+    def there(film) -> tuple[float, float, float]:
+        x, y, _ = _tab(film)
+        return film.bench((x, y - back, laid(film, "box", (0, 0, 1))[2] + up))
+
+    return there
 
 
 def _peeled(film) -> tuple[bool, str]:
-    """``00_peel_a_label``'s readout: the share of the label's bonds that have let go."""
+    """``03_materials/08_tape``'s readout: the share of the label's bonds that have let go."""
     label = film.sim["label"].entity
     share = float(label.peeled())
     front = 1000.0 * float(label.peel_front())
@@ -1541,7 +1463,7 @@ def _peeled(film) -> tuple[bool, str]:
 
 ROBOT_TAPE = (
     Take(
-        "examples/19_tape/00_peel_a_label.py",
+        "examples/03_materials/08_tape.py",
         # From in front of the bench, the label running left to right across the frame, so its lift shows.
         camera=Orbit(Bench(0.0, -0.10, 0.06), distance=0.9, azimuth=15.0, elevation=38.0, fov=36.0),
         warmup=0.5,
@@ -1554,16 +1476,12 @@ ROBOT_TAPE = (
         budget=1_200_000,
         beats=(
             Wait(seconds=0.4, label="a paper label on a box, its end in a blue pull tab under the right hand"),
-            Drag(
-                "right", "z", to=Bench(z=TAPE_CLOSE), seconds=1.2, label="drag the hand down: its jaws straddle the tab"
-            ),
+            Drag("right", "z", to=_over_the_tab, seconds=1.2, label="drag the hand down: its jaws straddle the tab"),
             Wait(seconds=0.3),
             Press(text="Close", within=RIGHT, label="Close: the pads squeeze the tab"),
             Rest(seconds=0.4),  # off the button: left there, Close sat lit as hovered while the jaws shut
             Wait(seconds=0.4, mark="closed"),
-            Drag(
-                "right", "z", to=Bench(z=TAPE_TOP + 0.03), seconds=1.0, label="drag it up 30 mm: the first rows let go"
-            ),
+            Drag("right", "z", to=_peel_stair(0.0, 0.03), seconds=1.0, label="drag it up 30 mm: the first rows let go"),
             *(
                 beat
                 for k in range(1, 8)
@@ -1571,7 +1489,7 @@ ROBOT_TAPE = (
                     Drag(
                         "right",
                         "y",
-                        to=Bench(y=-0.04 - 0.02 * k),
+                        to=_peel_stair(0.02 * k, 0.03 + 0.01 * (k - 1)),
                         seconds=0.5,
                         approach=0.3,
                         label="back 20 mm toward the arm",
@@ -1579,7 +1497,7 @@ ROBOT_TAPE = (
                     Drag(
                         "right",
                         "z",
-                        to=Bench(z=TAPE_TOP + 0.03 + 0.01 * k),
+                        to=_peel_stair(0.02 * k, 0.03 + 0.01 * k),
                         seconds=0.3,
                         approach=0.3,
                         label="and up 10 mm",
@@ -1599,12 +1517,30 @@ ROBOT_TAPE = (
 # coupler reads with ``contact_forces``. The fold is carried by contact alone; the scrub's readout
 # is that force. tests/test_fold_paper_robot.py and tests/test_scrub_a_stain.py drive the same paths.
 
-FOLD = "examples/13_paper/00_fold_paper.py"
-FOLD_EDGE = -0.435
-"""The sheet's near edge in the bench frame [m]: 35 mm past the bench's right edge."""
-FOLD_CREASE = FOLD_EDGE + 0.297 / 3
-FOLD_PINCH = (-0.02, FOLD_EDGE + 0.0135)
-"""Where the jaws' middle closes on the overhang, bench frame [m]: 35 mm in from the corner, 13.5 in from the edge."""
+FOLD = "examples/03_materials/05_paper.py"
+
+
+def _sheet(film) -> dict:
+    """Where the fold works on the sheet as ``03_materials/05_paper`` lays it, bench frame [m], off its spec.
+
+    The example lays the A4 sheet's near corner at (-55, -435) mm, 35 mm past the bench's right
+    edge. ``edge`` is its near edge; ``crease`` the fold line a third of the way along its 297 mm,
+    where the example reads the fold; ``pinch`` where the jaws' middle closes on the overhang, 35 mm
+    in from the corner and 13.5 in from the edge; ``short`` the x the jaws come in from, 60 mm short
+    of the corner; ``hold`` where the left hand holds the far end down, across the sheet's middle
+    and 35 mm in from its far edge; ``stamps`` the x of the left hand's three stamps, 55 mm apart
+    from 55 mm in. The offsets are tests/test_fold_paper_robot's.
+    """
+    x, y, _ = laid(film, "paper")
+    width, length = (float(v) for v in film.sim["paper"].spec.size)
+    return {
+        "edge": y,
+        "crease": y + length / 3,
+        "pinch": (x + 0.035, y + 0.0135),
+        "short": x - 0.06,
+        "hold": (x + width / 2, y + length - 0.035),
+        "stamps": (x + 0.055, x + 0.11, x + 0.165),
+    }
 
 
 def _q(a, b):
@@ -1759,11 +1695,20 @@ def _wait(n: int):
         yield
 
 
+def _bench_edge(film) -> float:
+    """The bench's right edge, the -y side of its cell's table [world y, m]: -0.40 on ``bench_0728``."""
+    from robosimstudio.scene.registry import get_cell
+
+    cell = get_cell(film.sim.handles.scene_name)
+    return float(cell.center[1]) - float(cell.half[1])
+
+
 def _fold_surface(film) -> float:
+    """The overhang's height as it hangs now [world z, m]: the median of the sheet's particles past the bench."""
     import numpy as np
 
     rest = np.asarray(film.sim["paper"].particle_q, dtype=np.float64)
-    return float(np.median(rest[rest[:, 1] < film.bench((0.0, -0.40, 0.0))[1]][:, 2]))
+    return float(np.median(rest[rest[:, 1] < _bench_edge(film)][:, 2]))
 
 
 FOLD_STAMP = _q(_about((0, 0, 1), -30.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)))
@@ -1772,7 +1717,7 @@ FOLD_STAMP = _q(_about((0, 0, 1), -30.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0
 
 def _fold_hold(film):
     """The left hand onto the far end, its flat underside 3 mm into the bench."""
-    hold = film.bench((0.05, FOLD_EDGE + 0.262, 0.003))
+    hold = film.bench((*_sheet(film)["hold"], 0.003))
     yield from _go(film, "left", (hold[0], hold[1], 0.80), 0.15, steps=600, tolerance=0.004)
     yield from _go(film, "left", hold, 0.06, steps=60, tolerance=0.004)
 
@@ -1782,7 +1727,8 @@ def _fold_in(film):
     film.surface = _fold_surface(film)
     panel = film.session.arms["right"]
     yield from _go(film, "right", panel.ik.ee_pose(film.sim.state)[0], 0.05, steps=600, tolerance=0.004, quat=FOLD_JAWS)
-    corner, pinch = film.bench((-0.055 - 0.06, FOLD_PINCH[1], 0.0)), film.bench((*FOLD_PINCH, 0.0))
+    sheet = _sheet(film)
+    corner, pinch = film.bench((sheet["short"], sheet["pinch"][1], 0.0)), film.bench((*sheet["pinch"], 0.0))
     yield from _jaws_to(film, (corner[0], corner[1], film.surface), 0.06)
     yield from _jaws_to(film, (pinch[0], pinch[1], film.surface), 0.05)
 
@@ -1791,8 +1737,9 @@ def _fold_over(film):
     """The carry on an arc about the fold line, the hand turning over with it; laid, drawn on, lifted clear."""
     import numpy as np
 
-    pinch = film.bench((*FOLD_PINCH, 0.0))
-    crease = film.bench((0.0, FOLD_CREASE, 0.0))[1]
+    sheet = _sheet(film)
+    pinch = film.bench((*sheet["pinch"], 0.0))
+    crease = film.bench((0.0, sheet["crease"], 0.0))[1]
     radius, z = crease - pinch[1], film.surface
     for k in range(1, 13):
         turn = math.pi * k / 12
@@ -1810,10 +1757,11 @@ def _fold_over(film):
 
 def _fold_stamps(film):
     """Up off the far end, turned toward the fold, and three stamps along it 20 mm in from the loop's nose."""
-    hold, y = film.bench((0.05, FOLD_EDGE + 0.262, 0.06)), film.stamp_y
+    sheet, y = _sheet(film), film.stamp_y
+    hold = film.bench((*sheet["hold"], 0.06))
     up, down = film.bench((0.0, 0.0, 0.06))[2], film.bench((0.0, 0.0, 0.009))[2]
     yield from _go(film, "left", hold, 0.08, quat=FOLD_STAMP)
-    for x in (0.0, 0.055, 0.11):
+    for x in sheet["stamps"]:
         at = film.bench((x, 0.0, 0.0))[0]
         yield from _go(film, "left", (at, y, up), 0.10)
         yield from _go(film, "left", (at, y, down), 0.04, steps=40)
@@ -1846,7 +1794,7 @@ def _paper_folded(film) -> tuple[bool, str]:
     sim = film.sim
     sim["paper"].entity.update_probe(sim.state, sim.step_count)
     snapshot = Snapshot(sim.make_context())
-    line = {"crease": {"axis": 1, "at": film.bench((0.0, FOLD_CREASE, 0.0))[1]}}
+    line = {"crease": {"axis": 1, "at": film.bench((0.0, _sheet(film)["crease"], 0.0))[1]}}
     angle = float(crease_angle(snapshot, "paper", line)["angle"])
     extent = float(cloth_fold(snapshot.ctx, "paper", axis=1)[0])
     return (
@@ -1857,7 +1805,16 @@ def _paper_folded(film) -> tuple[bool, str]:
 
 SCRUB = "examples/01_cloth/03_scrub_a_stain.py"
 SCRUB_TIP = 0.0167
-"""The closed fingertips hang this far under the tool centre, pointing down [m]."""
+"""The closed fingertips hang this far under the tool centre, pointing down [m].
+
+A number of the YAM's, not of the example's layout: tests/test_scrub_a_stain's TIP."""
+SCRUB_STAIN = (-0.05, 0.05, -0.08)
+"""The stain's ends along x and its line in y, bench frame [m], as ``03_scrub_a_stain``'s selector draws it.
+
+Restated, not read: the selector is a function in the example's ``main()``, and the particles it
+picks lie on the towel's grid, the one row 3.3 mm off the line and 3.3 mm short of each end, so
+nothing in the built scene carries these numbers (tests/test_scrub_a_stain's STAIN restates them too).
+"""
 
 
 def _scrub_reading(film) -> dict:
@@ -1878,7 +1835,7 @@ def _scrub_press(reads: float):
         import numpy as np
 
         panel = film.session.arms["right"]
-        x, y, _ = film.bench((-0.09, -0.08, 0.0))
+        x, y, _ = film.bench((SCRUB_STAIN[0] - 0.04, SCRUB_STAIN[2], 0.0))
         z, floor = film.bench((0.0, 0.0, SCRUB_TIP + 0.010))[2], film.bench((0.0, 0.0, SCRUB_TIP))[2]
         yield from _go(film, "right", (x, y, z), 0.05, steps=600, tolerance=0.004)
         while _scrub_reading(film).get("push (N)", 0.0) < reads and z > floor:
@@ -1900,7 +1857,10 @@ def _scrub_along(film):
     import numpy as np
 
     panel = film.session.arms["right"]
-    (x0, y, _), flat = film.bench((-0.09, -0.08, 0.0)), film.bench((0.06, 0.0, 0.0))[0]
+    (x0, y, _), flat = (
+        film.bench((SCRUB_STAIN[0] - 0.04, SCRUB_STAIN[2], 0.0)),
+        film.bench((SCRUB_STAIN[1] + 0.01, 0, 0))[0],
+    )
     end = flat + 0.015
     n = round((end - x0) / 0.00075)
     for k in range(1, n + 1):
@@ -2032,7 +1992,7 @@ ROBOT_CONTACT = (
 
 ROBOT_WATER = (
     Take(
-        "examples/21_water/00_pour_water.py",
+        "examples/03_materials/14_water.py",
         # From the front, a little to the glass's side: the cup tips across the view, toward the lens, and the
         # stream falls over the glass's near wall. 1.1 m keeps the raised wrist under a third of the frame.
         camera=Orbit(Bench(0.12, -0.20, 0.13), distance=1.1, azimuth=15.0, elevation=32.0, fov=38.0),
@@ -2070,17 +2030,22 @@ ROBOT_WATER = (
 
 # The cutting kind: the right hand takes the knife off its rest by its handle, by contact, and pushes
 # it down through the tofu until the edge meets the board, the drive tests/test_cut_tofu runs through
-# the same arm panel.
-KNIFE_HANDLE = 0.04
-"""The knife's handle middle over the bench, standing on its edge in the rest [m]."""
-KNIFE_EDGE = 0.04
-"""How far the edge is under the handle's middle [m]."""
-BOARD_TOP = 0.012
-"""The cutting board's top over the bench [m]."""
+# the same arm panel. The hand closes on the handle's middle as the example stands the knife in its rest
+# (``Laid("knife")``, 40 mm up), lifts it 70 mm and carries it across to the tofu's middle.
+
+
+def _edge_into_board(film) -> tuple[float, float, float]:
+    """Where the tool centre goes for the knife's edge to end 5 mm into the board, as tests/test_cut_tofu pushes.
+
+    The board's top as the example lays it, 12 mm up, plus how far the edge is under the handle's
+    middle, 40 mm off the knife's spec for its 50 mm blade.
+    """
+    x, y, top = laid(film, "board", (0, 0, 1))
+    return film.bench((x, y, top - float(film.sim["knife"].spec.edge[0][2]) - 0.005))
 
 
 def _parted(film) -> tuple[bool, str]:
-    """``00_cut_tofu``'s readouts: the tofu's pieces and how far the cut ran."""
+    """``03_materials/10_cutting``'s readouts: the tofu's pieces and how far the cut ran."""
     tofu = film.sim["tofu"].entity
     pieces, fraction = tofu.pieces(), tofu.cut_fraction()
     return pieces == 2, f"the tofu is in {pieces} pieces, the cut {100.0 * fraction:.0f}% through (the test asks 2)"
@@ -2088,7 +2053,7 @@ def _parted(film) -> tuple[bool, str]:
 
 ROBOT_CUTTING = (
     Take(
-        "examples/20_cutting/00_cut_tofu.py",
+        "examples/03_materials/10_cutting.py",
         # From the front-right, 0.95 m off: the knife rest, the board and the hand in one frame.
         camera=Orbit(Bench(0.03, -0.22, 0.04), distance=0.95, azimuth=48.0, elevation=30.0, fov=37.0),
         warmup=0.5,
@@ -2096,18 +2061,16 @@ ROBOT_CUTTING = (
         budget=1_200_000,
         beats=(
             Wait(seconds=0.4, label="a knife standing in its rest under the right hand, a block of tofu on a board"),
-            Drag("right", "z", to=Bench(z=KNIFE_HANDLE), seconds=1.2, label="drag the hand down onto the handle"),
+            Drag("right", "z", to=Laid("knife"), seconds=1.2, label="drag the hand down onto the handle"),
             Wait(seconds=0.3),
             Press(text="Close", within=RIGHT, label="Close: the pads squeeze the handle"),
             Wait(seconds=0.8, mark="closed"),
-            Drag(
-                "right", "z", to=Bench(z=KNIFE_HANDLE + 0.07), seconds=1.2, label="up 70 mm: the blade leaves its rest"
-            ),
-            Drag("right", "y", to=Bench(y=-0.16), seconds=1.5, label="across to the tofu"),
+            Drag("right", "z", to=Laid("knife", dz=0.07), seconds=1.2, label="up 70 mm: the blade leaves its rest"),
+            Drag("right", "y", to=Laid("tofu"), seconds=1.5, label="across to the tofu"),
             Drag(
                 "right",
                 "z",
-                to=Bench(z=BOARD_TOP + KNIFE_EDGE - 0.005),
+                to=_edge_into_board,
                 seconds=3.0,
                 label="down through the tofu until the edge meets the board",
             ),
@@ -2119,16 +2082,32 @@ ROBOT_CUTTING = (
 
 # The stuck label: the right hand carries a loose label by its pull tab, lays it on the box and rubs
 # it down with its shut fingertips, the drive tests/test_stick_a_label makes through the same panel.
-STICK = "examples/19_tape/02_stick_a_label.py"
+STICK = "examples/03_materials/09_adhesion.py"
 STICK_AJAR = 0.6
 """The **Grip amount** the jaws open to around the tab: 38 mm, the far jaw clear of the box."""
-STICK_FAR = (0.0, -0.125, 0.146)
-"""Where the carried label's free end touches the box top, bench frame [m]."""
-STICK_NEAR = (0.0, -0.040, TAPE_TOP + 0.019)
-"""Where the tab is set down, bench frame [m]."""
 STICK_TIP, STICK_PUSH, STICK_HOVER, STICK_CLEAR = 0.0165, 0.003, 0.05, 0.011
 """The tool centre over the shut fingertips, how far under the label the rub's cursor goes, how high
-the fingertips move between strokes and how far past the tab's furthest corner a stroke starts [m]."""
+the fingertips move between strokes and how far past the tab's furthest corner a stroke starts [m]:
+tests/test_stick_a_label's TIP, the YAM's, and its drive's PUSH, HOVER and CLEAR."""
+
+
+def _stick_far(film) -> tuple[float, float, float]:
+    """Where the tool centre is when the carried label's free end touches the box top [world].
+
+    Over the middle of the box's far (-y) end as the example lays it, 15 mm in from it and 96 mm over
+    its top: bench (0, -125, 146) mm (tests/test_stick_a_label's FAR).
+    """
+    x, y, z = laid(film, "box", (0, -1, 1))
+    return film.bench((x, y + 0.015, z + 0.096))
+
+
+def _stick_near(film) -> tuple[float, float, float]:
+    """Where the tab is set down [world]: over the box's near (+y) end, 20 mm in from it and 19 mm over its top.
+
+    Bench (0, -40, 69) mm (tests/test_stick_a_label's NEAR).
+    """
+    x, y, z = laid(film, "box", (0, 1, 1))
+    return film.bench((x, y - 0.020, z + 0.019))
 
 
 def _stick_column(label, state, c: int, along: float):
@@ -2169,7 +2148,7 @@ def _stick_lay(film):
     """Up 150 mm, over the box's far end, then down and toward its near end together: it lies down."""
     import numpy as np
 
-    tab, far, near = film.stick_tab, np.asarray(film.bench(STICK_FAR)), np.asarray(film.bench(STICK_NEAR))
+    tab, far, near = film.stick_tab, np.asarray(_stick_far(film)), np.asarray(_stick_near(film))
     yield from _go(film, "right", (tab[0], tab[1], film.bench((0.0, 0.0, 0.15))[2]), 0.04)
     yield from _go(film, "right", far, 0.03)
     yield from _wait(60)
@@ -2182,7 +2161,7 @@ def _stick_off(film):
     """Up 50 mm off the tab."""
     import numpy as np
 
-    yield from _go(film, "right", np.asarray(film.bench(STICK_NEAR)) + np.array([0.0, 0.0, 0.05]), 0.05)
+    yield from _go(film, "right", np.asarray(_stick_near(film)) + np.array([0.0, 0.0, 0.05]), 0.05)
     yield from _wait(30)
 
 
@@ -2284,6 +2263,161 @@ ROBOT_TAPE = (
     ),
 )
 
+# =============================================================================
+# Scored: the same drives on the task pages, ending on the goal
+# =============================================================================
+#
+# Each ``06_tasks/NN_<kind>_scored`` script is a material's scene as a task document with a goal,
+# opened by ``rss.view(env)``: the page holds the same scene and arm panels, and its sidebar opens
+# with the **Goal** folder, one line a clause, ticked once it holds. Its take is its material
+# take's drive, beat for beat; a page whose hand starts at the YAM's own home, pointing ahead,
+# first takes it over the thing and turns it down, as the scored script's medium test does. The
+# take then waits for the goal to read true, holds on the tick, and keeps every check of the
+# material take, with one more: the goal met at the end.
+
+GOAL_WAIT = 8.0
+"""The longest the clip waits for the goal after the drive [s of clip]: a ``hold-for`` banks its seconds here."""
+GOAL_HOLD = 1.5
+"""How long the clip holds on the ticked goal [s of clip]."""
+TASK_FOLDS = ("Inspector", "Policy")
+"""The task page's folds no drive uses, closed: open, the Policy folder's Run and the inspector's rows
+overran the sidebar, and pressing **Close** or ticking **Vacuum** scrolled the Goal folder out of view."""
+
+
+def _goal_reads_true(film) -> bool:
+    """The page's own verdict on its last step: what the Goal folder ticks, scored once a step by its drain."""
+    return bool(film.sim.last_result.success)
+
+
+def _goal_met(film) -> tuple[bool, str]:
+    """The task's goal met at the end, as the page's Goal folder says it: the verdict, and its first clause's line."""
+    from robosimstudio_studio.goal_panel import TICK
+
+    panel = film.session.goal_panel
+    if panel is None:
+        return False, "the page has no Goal folder"
+    lines = [line.strip("- ").strip() for line in panel._tree_text().splitlines() if line.strip()]
+    met = _goal_reads_true(film) and bool(lines) and lines[0].startswith(TICK)
+    return met, f"the Goal folder reads {lines[0] if lines else 'nothing'!r} at the end (need {TICK}), success={met}"
+
+
+def _material(example: str) -> Take:
+    """The take that films ``example``'s own clip."""
+    found = [t for t in (*DRAFTS, *ROBOT_PARTICLES, *ROBOT_BAGS, *ROBOT_BRUSH) if t.example == example and not t.name]
+    found += [t for t in (*ROBOT_SUCTION, *ROBOT_TAPE, *ROBOT_WATER, *ROBOT_CUTTING) if t.example == example]
+    (take,) = found
+    return take
+
+
+def _opening(view: Orbit) -> Orbit:
+    """``view`` drawn back to hold the YAM's right hand at its home as well: aimed between the two, further off, wider."""
+    return Orbit(
+        Mid(Hand("right"), view.about),
+        distance=min(1.4, view.distance + 0.3),
+        azimuth=view.azimuth,
+        elevation=view.elevation,
+        fov=view.fov + 6.0,
+    )
+
+
+def scored(example: str, of: str, *, over: Any = None, turn: bool = False, what: str = "", **kw) -> Take:
+    """``of``'s take on ``example``'s page, its beats one for one, and then the goal.
+
+    ``over``: the scored page's right hand starts at the YAM's own home, pointing ahead, where the
+    material page's starts over ``what``. The clip opens drawn back to hold the hand there, drags it
+    over ``what``, turns it to point down if ``turn``, and closes in to the material take's view in
+    place of that take's opening pause. The sidebar opens the Goal folder and closes what the
+    material take closes; a folder only the material script's page adds is not there to open.
+    """
+    material = _material(of)
+    start: tuple[Beat, ...] = ()
+    if over is not None:
+        start = (
+            Wait(seconds=0.5, label=f"the right hand at the YAM's home, pointing ahead; {what}"),
+            DragTo("right", over, seconds_per_m=4.5, label=f"drag the hand over {what}"),
+            *((_turn("right", TOOL_DOWN, 1.0, "turn the gizmo: the hand points down"),) if turn else ()),
+            _dolly(material.camera, 1.2, "and the view closes in"),
+        )
+        kw.setdefault("camera", _opening(material.camera))
+    return replace(
+        material,
+        example=example,
+        beats=(
+            *start,
+            *material.beats[1 if start else 0 :],
+            Wait(seconds=GOAL_WAIT, until=_goal_reads_true, label="the Goal folder ticks: the goal turns true"),
+            Wait(seconds=GOAL_HOLD, mark="goal", label="the goal met"),
+        ),
+        layout=Layout(collapse=(*material.layout.collapse, *TASK_FOLDS), expand=("Goal",)),
+        expect=(*material.expect, Check(_goal_met)),
+        **kw,
+    )
+
+
+def _over_the_lip(film) -> tuple[float, float, float]:
+    """100 mm over the bag's lip where it crosses 25 mm up, as ``tests/test_open_a_bag_scored`` aims [world].
+
+    The top layer's turned-up lip: its middle across the bag, and where along it the lip stands
+    25 mm over the bench, the height the hand closes at. ``03_materials/06_bag``'s home is here.
+    """
+    import numpy as np
+
+    bag = film.sim["bag"]
+    lip = np.asarray(bag.particle_q, dtype=np.float64)[bag.entity.top[int(bag.entity.spec.cells[0]) + 1 :].ravel()]
+    order, bench = np.argsort(lip[:, 2]), film.bench((0.0, 0.0, 0.0))[2]
+    x, y = float(np.median(lip[:, 0])), float(np.interp(bench + 0.025, lip[order, 2], lip[order, 1]))
+    return (x, y, bench + 0.10)
+
+
+def _over_the_tab_high(film) -> tuple[float, float, float]:
+    """50 mm over the label's tab, where ``tests/test_peel_a_label_scored`` takes the hand first [world]."""
+    x, y, z = _tab(film)
+    return film.bench((x, y, z + 0.05))
+
+
+def _over_the_handle(film) -> tuple[float, float, float]:
+    """60 mm over where the hand closes on the brush's handle [world]: ``03_materials/07_brush``'s home, about."""
+    x, y, z = _over_the_sole(film)
+    return (x, y, z + 0.06)
+
+
+SCORED = (
+    scored("examples/06_tasks/03_granular_scored.py", "examples/03_materials/11_granular.py"),
+    scored(
+        "examples/06_tasks/04_brush_scored.py",
+        "examples/03_materials/07_brush.py",
+        over=_over_the_handle,
+        turn=True,
+        what="the brush's handle",
+        budget=1_800_000,
+    ),
+    scored("examples/06_tasks/05_suction_scored.py", "examples/04_extending/02_suction.py"),
+    scored(
+        "examples/06_tasks/06_bag_scored.py",
+        "examples/03_materials/06_bag.py",
+        over=_over_the_lip,
+        turn=True,
+        what="the bag's lip",
+        budget=1_300_000,  # 20 s with the carry over from the YAM's home: 1,232 KB at quality 46, over the default 900
+    ),
+    scored("examples/06_tasks/07_band_scored.py", "examples/03_materials/04_band.py"),
+    scored(
+        "examples/06_tasks/08_tape_scored.py",
+        "examples/03_materials/08_tape.py",
+        over=_over_the_tab_high,
+        turn=True,
+        what="the label's pull tab",
+        budget=1_500_000,  # 30 s at 12 frames: 1,397 KB at quality 46, over the material take's 1,200
+    ),
+    scored("examples/06_tasks/09_cutting_scored.py", "examples/03_materials/10_cutting.py"),
+    scored(
+        "examples/06_tasks/10_water_scored.py",
+        "examples/03_materials/14_water.py",
+        over=Laid("cup", dz=0.155),
+        what="the cup of water",
+    ),
+)
+
 TAKES: tuple[Take, ...] = (
     *FINAL,
     *DRAFTS,
@@ -2295,17 +2429,10 @@ TAKES: tuple[Take, ...] = (
     *ROBOT_CONTACT,
     *ROBOT_WATER,
     *ROBOT_CUTTING,
+    *SCORED,
 )
 
 KEPT: dict[str, str] = {
-    "16_bags/01_open_a_bag_scored": "the same bag, hands and gesture as 00_open_a_bag with a goal beside them; its clip is that one's",
-    "10_granular/01_sweep_rice_scored": "the same rice, pusher and tray as 00_sweep_rice with a goal beside them; its clip is that one's",
-    "18_bands/01_band_on_pegs_scored": "the same pegboard, band and hook as 00_band_on_pegs with a goal beside them; its clip is that one's",
-    "14_brush/01_scrub_scored": "the same brush, handle and square as 00_scrub_the_bench with a goal beside them; its clip is that one's",
-    "15_suction/01_pick_scored": "the same plate, cup and square as 00_pick_a_plate with a goal beside them; its clip is that one's",
-    "19_tape/01_peel_a_label_scored": "the same box, label and peel as 00_peel_a_label with a goal beside them; its clip is that one's",
-    "21_water/01_pour_water_scored": "the same cup, water and glass as 00_pour_water with a goal beside them; its clip is that one's",
-    "20_cutting/01_cut_tofu_scored": "the same knife, board, tofu and cut as 00_cut_tofu with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",

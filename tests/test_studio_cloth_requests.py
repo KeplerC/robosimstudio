@@ -52,11 +52,10 @@ def _panel():
     hand = types.SimpleNamespace(ee_pose=lambda state: ((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0)))
     iks = {"left": hand, "right": hand}
     q = np.zeros((4, 3))
+    towel = types.SimpleNamespace(carries_particles=True, particles=[0, 1, 2, 3], probe=object())
     env = types.SimpleNamespace(
-        scene=types.SimpleNamespace(
-            by_name={"towel": types.SimpleNamespace(carries_particles=True, particles=[0, 1, 2, 3])},
-            embodiment=types.SimpleNamespace(iks=iks),
-        ),
+        scene=types.SimpleNamespace(by_name={"towel": towel}, embodiment=types.SimpleNamespace(iks=iks)),
+        deformables=lambda: {"towel": towel},  # what Sim.deformables answers: the things carrying a probe
         handles=types.SimpleNamespace(deformables={"towel": types.SimpleNamespace(sets={"towel/edge": [0, 1]})}),
         pipeline=types.SimpleNamespace(hooks=types.SimpleNamespace(post_solve=[]), invalidate_graph=lambda: None),
         model=None,

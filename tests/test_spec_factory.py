@@ -27,6 +27,7 @@ def _declarations(size: float):
     from robosimstudio_materials.mpm.declare import Heap
     from robosimstudio_materials.rod import Rod
     from robosimstudio_materials.rod.band import band
+    from robosimstudio_materials.tape import Tape
     from robosimstudio_materials.water import Water
 
     knife = rss.knife(name="knife", blade_length=4 * size)
@@ -39,6 +40,7 @@ def _declarations(size: float):
         ("brush", Brush.from_spec(rss.brush(name="brush", sole=(4 * size, 2 * size, 0.008)), name="brush")),
         ("cuttable", Cuttable.from_spec(rss.cuttable(name="tofu", knife=knife, size=(size,) * 3), name="tofu")),
         ("knife", Cuttable.knife(knife, name="knife")),
+        ("tape", Tape.from_spec(rss.tape(name="label", on="box", size=(2 * size, 4 * size)), name="label")),
     )
 
 
@@ -121,7 +123,7 @@ class TestADeclarationFromASpecIsAValue(unittest.TestCase):
 
 
 class TestTheScoredBandExampleDeclaresItsBandAsAValue(unittest.TestCase):
-    """``examples/18_bands/01_band_on_pegs_scored``'s ``main()`` again with another band: refused, not the first kept."""
+    """``examples/06_tasks/07_band_scored``'s ``main()`` again with another band: refused, not the first kept."""
 
     def test_a_second_main_with_a_different_band_is_a_clash(self) -> None:
         from unittest import mock
@@ -129,7 +131,7 @@ class TestTheScoredBandExampleDeclaresItsBandAsAValue(unittest.TestCase):
         from robosimstudio.assetlib.registry import ASSETS
         from tests.fixtures.examples import _load
 
-        module = _load("18_bands/01_band_on_pegs_scored.py")
+        module = _load("06_tasks/07_band_scored.py")
         real = module.band
         with (
             mock.patch.dict(ASSETS._items),

@@ -35,7 +35,7 @@ def rod(
         at: The **first** end (not the middle), in the work-surface frame, so
             ``z = radius`` rests on the bench. The chain runs ``length`` along
             ``along`` from here; to centre it, offset by half its length, as
-            ``examples/03_rope/00_cable.py`` does with
+            ``examples/03_materials/00_rope.py`` does with
             ``at=(x, -length / 2, radius + 0.01)``.
         along: Direction the chain runs in. Normalised for you.
         segments: Capsules. 28 is the shipped cable's; more is smoother and

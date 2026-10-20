@@ -112,6 +112,67 @@ class Bench(Target):
         return film.bench((self.x, self.y, self.z))
 
 
+def laid(film, name: str, face=(0.0, 0.0, 0.0)) -> tuple[float, float, float]:
+    """Where the example laid ``name``, in the bench frame [m], read off the spec its scene was built from.
+
+    The point its ``at=`` gave: a box's, a slab's or a post's middle, a sheet's or a label's corner,
+    a block of particles' base, the middle of a rod tied from nodes. With ``face``, a point on an
+    unturned box: ``(0, 0, 1)`` is the middle of its top, ``(-1, 0, 0)`` the middle of its -x face.
+    The layout, not where the thing is now (that is :class:`At`): a take aims where its example put
+    things, and follows them when the example moves them; what settled or was pushed since is physics.
+
+    A spec put at a point of fewer than three numbers is refused by name, as one in world coordinates
+    is. ``rss.sheet`` and ``rss.paper`` take ``at=(x, y)`` and build on the ``void`` cell, whose
+    frame is the identity, with their quaternion's x where the height goes (0 unturned): the spec says
+    no height, and handed on, ``(x, y)`` raised where a take unpacks ``x, y, z``
+    (``b2_flat_at_void.py``). On ``bench_075`` the ten kinds it was tried on refuse it at build.
+    """
+    spec = film.sim[name].spec
+    if getattr(spec, "world_xform", False):
+        raise ValueError(f"{name!r} is placed in world coordinates, not on the bench")
+    nodes = getattr(spec, "nodes", None)
+    if nodes:
+        point = [sum(float(node[i]) for node in nodes) / len(nodes) for i in range(3)]
+    else:
+        field = next((f for f in ("xform", "pose", "at") if getattr(spec, f, None) is not None), None)
+        if field is None:
+            raise ValueError(f"{name!r}: its {type(spec).__name__} says nowhere it was put")
+        where = getattr(spec, field)
+        if len(where) < 3:
+            raise ValueError(
+                f"{name!r} is put at {tuple(float(v) for v in where)}, its {type(spec).__name__}'s {field}: "
+                "a point on the bench is x, y and z, and this says no height"
+            )
+        point = [float(v) for v in where[:3]]
+    if any(face):
+        shape, xform = getattr(spec, "shape", None), getattr(spec, "xform", None)
+        quat = xform[3:7] if xform is not None and len(xform) == 7 else getattr(spec, "quat", (0, 0, 0, 1))
+        turned = max(abs(float(q) - u) for q, u in zip(quat, (0.0, 0.0, 0.0, 1.0), strict=True)) > 1e-9
+        if turned or getattr(shape, "kind", "") != "box":
+            raise ValueError(f"{name!r} is not an unturned box: a face of it is not a point its spec gives")
+        point = [p + float(f) * float(h) for p, f, h in zip(point, face, shape.half_extents, strict=True)]
+    return tuple(point)
+
+
+@dataclass(frozen=True)
+class Laid(Target):
+    """Where the example laid a thing (:func:`laid`), plus an offset along the bench's axes [m].
+
+    ``Laid("box", face=(0, 0, 1), dz=0.03)`` is 30 mm over the middle of the box's top as its
+    example lays it, wherever that example moves the box.
+    """
+
+    name: str
+    dx: float = 0.0
+    dy: float = 0.0
+    dz: float = 0.0
+    face: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    def resolve(self, film):
+        x, y, z = laid(film, self.name, self.face)
+        return film.bench((x + self.dx, y + self.dy, z + self.dz))
+
+
 @dataclass(frozen=True)
 class Hand(Target):
     """An arm's tool centre."""
