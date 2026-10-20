@@ -141,7 +141,17 @@ class Staging:
     arm_actuation: tuple[tuple[str, float], ...] = ()
     """``(:arm-actuation (:ke 1600) (:kd 70))``: this task's arm servo gains."""
     gripper_actuation: tuple[tuple[str, float], ...] = ()
-    """``(:gripper-actuation (:ke 20000) (:kd 20))``: likewise for the fingers."""
+    """``(:gripper-actuation (:ke 20000) (:kd 20))``: likewise for the fingers.
+
+    Either clause also takes ``(:effort-limit 12)``, the force or torque ceiling
+    per DOF [N or N·m] (``ActuationSpec.effort_limit``). Unstated keeps the
+    import's own, which on the YAM's fingers is 1e6 N, no ceiling at all. Then
+    Close at ``(:ke 1500)`` first pushes ke times the finger's 47.5 mm to go,
+    71 N, where ``03_materials/08_tape``'s 12 N caps it. Over that first control
+    step the finger moves 4.1 mm uncapped and 1.9 mm capped. From the third step
+    on, both close at about the same speed, and both hold the tab at 5.8 N. So
+    ``examples/06_tasks/08_tape_scored`` states 12 N, to drive the fingers the
+    way the material page it scores does."""
     terminate_on_success: bool | None = None
     """``(:terminate-on-success false)``: whether success ends the episode. Unstated is true."""
     servo_speed_mps: float | None = None
@@ -324,7 +334,7 @@ def parse_staging(section: dict[str, Any]) -> Staging:
         elif key in _FLAGS:
             out[key] = _flag(value)
         elif key in _GAINS:
-            out[key] = _pairs(_clauses(value), what=raw, keys=("ke", "kd", "armature"))
+            out[key] = _pairs(_clauses(value), what=raw, keys=("ke", "kd", "armature", "effort_limit"))
         elif key == "episodes":
             out["episodes"] = _episodes(_clauses(value))
         else:

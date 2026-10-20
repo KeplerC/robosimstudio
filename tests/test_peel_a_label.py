@@ -177,7 +177,8 @@ class TestALabelThatNeverLetsGoStaysStuck(unittest.TestCase):
         # Every bond held in 24 drives of 24 (peel_probe.py, damped jaws, GPUs 1 and 3). In 10 the label
         # dragged the box 4.6 to 15.3 mm until the tab slid out of the pads, 84 to 90 mm off where they
         # took it. In 14 the pads held and the hand dragged the 0.5 kg box 45 to 46 mm by its label: two
-        # pads squeezing 12 N each at friction 0.8 can pull more than the box's 4.9 N weight. Either way
+        # pads holding the tab with about 5.8 N each at friction 0.8, 9.3 N of grip, can pull more than the
+        # box's 4.9 N weight (12 N is the finger's cap, met only by Close's first push). Either way
         # the hand does not take the tab away from a box that stays put, which is what peeling is.
         self.assertEqual(0.0, self.got["peeled"][-1])
         self.assertEqual(self.got["bonds"], self.got["held"])

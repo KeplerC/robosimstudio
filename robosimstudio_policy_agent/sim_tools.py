@@ -37,7 +37,9 @@ import numpy as np
 from robosimstudio.core.bus import Bus
 from robosimstudio.core.math import quat_to_mat, transform_matrix
 from robosimstudio.core.render.visual import shape_meshes
+from robosimstudio.core.streams import reading
 from robosimstudio.robots.embodiments import top_down_grasp_site_quat
+from robosimstudio.sim.sim import scene_deformables
 from robosimstudio.solvers import grasp_from_obb, top_down_grasp_quat
 from robosimstudio_bench.goals.goal import about_key, leaves, placements
 
@@ -115,15 +117,77 @@ def register_attachment(registry, env, bus: Bus) -> ClothAttachment | None:
 
 
 def _deformables(env) -> dict[str, Any]:
-    """The scene's things carrying a particle probe, by name: what ``Sim.deformables`` answers.
+    """The scene's deformables, by :func:`~robosimstudio.sim.sim.scene_deformables`: what ``Sim.deformables`` answers.
 
-    Not every particle carrier: a cuttable owns eight particles, the corners its cage
-    writes back for a page to draw the cut by, with no probe to summarise them and
-    nothing a pin on them moves, and picked first, ``get_particle_state`` raised
-    ``AttributeError`` on its ``.probe``. Asked of the scene rather than of ``env``,
-    which may be one world of a fleet (a ``WorldView``, with no ``deformables``).
+    Asked of the scene rather than of ``env``, which may be one world of a fleet (a
+    ``WorldView``, with no ``deformables``). Every tool here that lists, defaults or
+    looks one up goes through this, so registering ``sim.attach``, its default target
+    and ``get_particle_state`` agree on what a deformable is.
     """
-    return {n: e for n, e in getattr(env.scene, "by_name", {}).items() if getattr(e, "probe", None) is not None}
+    return scene_deformables(getattr(env, "scene", None))
+
+
+def _deformable(env, name: str) -> tuple[str, Any]:
+    """The deformable called ``name``, or the first one for ``""``; refused when there is none.
+
+    The refusal is ``get_rgbd``'s for a camera it does not have: the name asked for and the ones
+    there are. A name off the list -- a cuttable, a capsule-chain rope, a typo -- raised a bare
+    ``KeyError`` out of ``get_particle_state``, which a graph cannot route on.
+    """
+    deformables = _deformables(env)
+    if not deformables:
+        raise ToolRefusal("this scene has no deformables")
+    name = name or next(iter(deformables))
+    if name not in deformables:
+        raise ToolRefusal(f"no deformable {name!r}; have {sorted(deformables)}")
+    return name, deformables[name]
+
+
+def _probe(entity, env) -> Any:
+    """``entity``'s particle probe for the world ``env`` is: a fleet ``WorldView`` carries its ``world``, an ``Env`` is 0.
+
+    ``entity.probe`` alone is world 0's, so a graph driving world 3 of a wave read world 0's
+    particles back from ``get_particle_state`` -- a centroid, a height band, a footprint, all of
+    the wrong towel, with nothing to say so. Each probe-per-world thing opens one per world
+    (``ParticleMixin.bind``) and the fleet refreshes each one as it scores that world
+    (``FleetEnv._particles``); a thing holding one probe is kept out of a wave by
+    ``scoring_refusal``, and keeps its one here.
+    """
+    probe_for = getattr(entity, "probe_for", None)
+    return probe_for(int(getattr(env, "world", 0) or 0)) if callable(probe_for) else entity.probe
+
+
+def _model_state(env) -> Any:
+    """The whole model's state, which a probe reads: a fleet ``WorldView``'s ``state`` is its world's slice of it.
+
+    A probe holds every particle of the model it was opened on and addresses its world's by model
+    row, as :func:`_first_particle_row` maps them, so it is refreshed from the fleet's own state.
+    """
+    fleet = getattr(env, "fleet", None)
+    return fleet.pipeline.state_0 if fleet is not None else env.state
+
+
+def _particle_rows(env) -> slice | None:
+    """The model rows of the world ``env`` is, on a fleet's ``WorldView``; ``None`` (every row) for an ``Env``.
+
+    What a probe of that world reads (:func:`_probe`): its sets are in its world's block of the
+    fleet's model, which holds every world's particles.
+    """
+    fleet = getattr(env, "fleet", None)
+    return fleet.worlds.particles(int(getattr(env, "world", 0) or 0)) if fleet is not None else None
+
+
+def _first_particle_row(env) -> int:
+    """The model row of particle 0 of the world ``env`` is: 0 for an ``Env``, world ``w``'s first on a fleet's ``WorldView``.
+
+    The world is :func:`_probe`'s, the view's ``world``. A view's ``state.particle_q`` is its own
+    world's slice, indexed like the template, so a deformable's template indices read that world's
+    particles out of it; a pin runs on the fleet's whole state, where the same indices are world
+    0's rows. ``sim.attach`` on world 1 of a two-world granular wave seized eight of world 0's rice
+    grains and moved them 13 mm toward world 1's hand in one step.
+    """
+    world = int(getattr(env, "world", 0) or 0)
+    return env.fleet.worlds.particle(0, world) if world else 0
 
 
 def register_vacuum(registry, env, bus: Bus) -> Vacuum | None:
@@ -500,13 +564,22 @@ class SimTools:
         }
 
     def get_particle_state(self, cloth: str = "", particle_set: str = "") -> dict[str, Any]:
-        deformables = _deformables(self.env)
-        if not deformables:
-            raise ToolRefusal("this scene has no deformables")
-        name = cloth or next(iter(deformables))
-        probe = deformables[name].probe
+        name, entity = _deformable(self.env, cloth)
+        probe = _probe(entity, self.env)
         key = f"{name}/{particle_set}" if particle_set else name
-        return {"cloth": name, "set": key, **self.bus.call(probe.summary, key)}
+
+        def read() -> dict[str, Any]:
+            # Refreshed from the state as it stands, every call: nothing refreshes a probe for a
+            # tool. A fleet refreshes world k's only as it scores that world, every eval_every
+            # steps, and a bare Sim's holds what snapshot_rest left, so the summary alone was the
+            # sheet where it lay at the last score. Only this world's rows, at this step, so that
+            # neither a fleet nor an env reads them again until it steps.
+            step = getattr(self.env, "step_count", None)
+            with reading():
+                probe.update(_model_state(self.env), step, rows=_particle_rows(self.env))
+            return probe.summary(key)
+
+        return {"cloth": name, "set": key, **self.bus.call(read)}
 
     def get_rgbd(self, camera: str = "") -> dict[str, Any]:
         frames = self.bus.snapshot.frames
@@ -1015,8 +1088,11 @@ class ClothAttachment:
         """Seize a deformable's declared feature at one hand and carry it.
 
         Args:
-            entity: Which deformable. Empty takes the task's first, which is the
-                only one in every scene that ships today.
+            entity: Which deformable, of the ones ``get_particle_state`` lists
+                (:func:`_deformables`). Empty takes the first of them. It took the
+                task's first ``deformables``-stage spec, and a cuttable is staged
+                there: a tofu declared before a towel had the hand pin the eight
+                corners of its cage and report ``attached`` while it held nothing.
             arm: Which hand. Empty takes the work arm -- *not* the first arm
                 declared, since the two YAM cells list theirs in opposite orders
                 and declaration order names the idle hand on one of them.
@@ -1041,8 +1117,7 @@ class ClothAttachment:
             from robosimstudio.core.draggers import ParticleDragger
 
             env = self.env
-            name = entity or env.task.deformables[0].name
-            body = env.scene.by_name[name]
+            name, body = _deformable(env, entity)
             arm_name = arm or env.handles.work_arm or next(iter(env.handles.arms))
             if arm_name not in env.handles.arms:
                 raise ToolRefusal(f"no arm {arm_name!r}; have {sorted(env.handles.arms)}")
@@ -1067,7 +1142,16 @@ class ClothAttachment:
             self._sets[arm_name] = str(feature)
             candidates = body.set_indices(feature) if feature else body.particles
             position, quat = env.arm(arm_name).ee_pose(env.state)
-            seized = int(dragger.grab(env.state, position, quat, candidates=candidates, fallback_nearest=False))
+            seized = int(
+                dragger.grab(
+                    env.state,
+                    position,
+                    quat,
+                    candidates=candidates,
+                    fallback_nearest=False,
+                    first_row=_first_particle_row(env),
+                )
+            )
             return {
                 "attached": bool(seized),
                 "n_grabbed": seized,

@@ -8,7 +8,7 @@ Run ``examples/03_materials/06_bag.py`` first.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
@@ -550,9 +550,12 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
 
 
 def _read_bag(model: Any, base: Any) -> Any:
-    """A bag reads off the model as a shell does: its triangles, re-indexed to zero."""
+    """A bag reads off the model as a shell does: its triangles, re-indexed to zero, and its record's ``lumping``.
+
+    Read again as a shell from a record of the name, range and params alone, the bag's ``"mesh"``
+    (:meth:`EntityBag.build`) reached no reader: its geometry said ``None``."""
     record = {"name": base.name, "kind": "shell", "particle_start": base.start, "particle_count": base.count}
-    return actor_geometry(model, {**record, "params": base.params})
+    return replace(actor_geometry(model, {**record, "params": base.params}), lumping=base.lumping)
 
 
 # =============================================================================

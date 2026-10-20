@@ -12,6 +12,11 @@ Checked here on a CPU builder, finalized and never stepped, for each of the
 three paths: a primitive, a mesh file and a geometry-only USD stage. A free
 object's FREE joint is checked too, and is unchanged. And no entity that builds
 on ``EntityRigid`` welds a static body a second time.
+
+A layout that moves a static object is refused by name, by a reset and by a
+fleet's wave, which asks only the statics and keeps nothing it refuses: a static
+the scene's arena declares as well as a welded one, and an instance document
+whose own start poses put a welded static elsewhere than its fleet base does.
 """
 
 from __future__ import annotations
@@ -21,13 +26,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import newton
 import numpy as np
 
 from robosimstudio.domains.rigid.entity import EntityRigid
+from robosimstudio.scene.compiler import CannotReplicate
 from robosimstudio.scene.entity import label_index
-from robosimstudio.specs import AssetSpec, ObjectSpec
+from robosimstudio.specs import AssetSpec, ObjectSpec, TaskSpec
 from robosimstudio.specs.asset import ShapeSpec
 from tests.fixtures.packs import has_pack
 
@@ -69,6 +76,20 @@ def _world_joints(model, body: int) -> list[int]:
     """The joints from the world to ``body``."""
     parents, children = model.joint_parent.numpy(), model.joint_child.numpy()
     return [int(j) for j in np.flatnonzero((children == body) & (parents == -1))]
+
+
+def _fleet(objects: dict, *, base: TaskSpec | None = None):
+    """A two-world fleet holding no model: what ``reset_wave``'s checks read, and a wave already laid down."""
+    from robosimstudio_bench.envs.fleet import FleetEnv
+
+    fleet = FleetEnv.__new__(FleetEnv)
+    fleet.num_worlds = 2
+    fleet.scene = SimpleNamespace(objects=objects)
+    fleet.task = fleet.build_task = base or TaskSpec(name="doc")
+    fleet._declared = {name: entity.declared_q for name, entity in objects.items()}
+    fleet._declared_docs = {}
+    fleet.episodes, fleet.documents = [STAYS, STAYS], [None, None]
+    return fleet
 
 
 class _ThreePaths(unittest.TestCase):
@@ -148,22 +169,216 @@ class TestAnEpisodeThatMovesAStaticObjectIsRefused(_ThreePaths):
                     entity.reset(None, episode)
 
     def test_a_wave_refuses_a_world_whose_episode_moves_it(self) -> None:
-        from types import SimpleNamespace
+        entity, _ = _built(self._spec("primitive", static=True))
+        fleet = _fleet({"box": entity})
+        fleet._check_statics([STAYS, None, STAYS], [None, None, None])
+        with self.assertRaisesRegex(CannotReplicate, "world 1 runs 'doc', and object 'box' is static"):
+            fleet._check_statics([STAYS, MOVED], [None, None])
 
-        from robosimstudio.scene.compiler import CannotReplicate
-        from robosimstudio_bench.envs.fleet import FleetEnv
+    def test_the_reset_and_the_wave_name_one_remedy_written_once(self) -> None:
+        """The way out was written in ``EntityRigid.reset`` and again in ``FleetEnv._check_statics``."""
+        import inspect
+
+        from robosimstudio.domains.rigid import entity as rigid
+        from robosimstudio_bench.envs import fleet as fleet_module
 
         entity, _ = _built(self._spec("primitive", static=True))
-        wave = SimpleNamespace(
-            scene=SimpleNamespace(objects={"box": entity}),
-            world_document=lambda world: SimpleNamespace(full_name="doc"),
-            _declared_for=lambda document: {"box": entity.declared_q},
+        with self.assertRaises(ValueError) as serial:
+            entity.reset(None, MOVED)
+        with self.assertRaises(CannotReplicate) as wave:
+            _fleet({"box": entity})._check_statics([STAYS, MOVED], [None, None])
+        for refusal in (serial.exception, wave.exception):
+            self.assertTrue(str(refusal).endswith(entity.move_remedy), str(refusal))
+        written = sum(inspect.getsource(m).count("(:model-key-fields ...)") for m in (rigid, fleet_module))
+        self.assertEqual(1, written, "the remedy is written in one place")
+
+
+class TestAWaveAsksOnlyItsStatics(unittest.TestCase):
+    """``_check_statics`` composed every free object's start pose in every world, for a refusal that was always empty.
+
+    Twenty free cubes and one static box in twelve worlds: 252 composes, now 12 (``e5_composes.py``).
+    """
+
+    def test_no_free_object_is_composed(self) -> None:
+        cube, _ = _built(ObjectSpec(name="cube", shape=ShapeSpec(half_extents=(0.02,) * 3), pose=POSE))
+        box, _ = _built(ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=True))
+        composed = []
+        cube.episode_start_q = lambda *args, **kwargs: composed.append(args) or cube.declared_q
+        _fleet({"cube": cube, "box": box})._check_statics([STAYS, STAYS], [None, None])
+        self.assertEqual([], composed)
+
+
+class TestARefusedWaveKeepsNothing(unittest.TestCase):
+    """A wave refused by name leaves the fleet holding the wave before it.
+
+    ``reset_wave`` kept the wave's episodes and documents and then checked them,
+    so a caller that caught ``CannotReplicate`` held a fleet whose episodes named
+    the refused wave while its state held the one before.
+    """
+
+    def _refused(self, episodes, documents=None):
+        entity, _ = _built(ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=True))
+        fleet = _fleet({"box": entity})
+        before = (fleet.episodes, fleet.documents)
+        with self.assertRaises(CannotReplicate):
+            fleet.reset_wave(episodes, documents)
+        self.assertIs(before[0], fleet.episodes)
+        self.assertIs(before[1], fleet.documents)
+
+    def test_by_its_statics(self) -> None:
+        self._refused([STAYS, MOVED])
+
+    def test_by_its_documents(self) -> None:
+        self._refused([STAYS, STAYS], [TaskSpec(name="another_model"), None])
+
+
+class TestARefusedResetMovesNothing(unittest.TestCase):
+    """``Sim.reset_scene`` asks every entity before it moves anything.
+
+    It placed entity by entity, and a static object's reset refused only when its turn came: a
+    free cube declared before a static block had gone to the refused episode's x = 0.70 when the
+    block said no, with ``env.episode`` already the refused one (``e3_partial_reset.py``).
+    ``tests/test_a_static_box_stays_put.py`` runs a real ``Env`` through it on a GPU.
+    """
+
+    def test_a_free_cube_before_a_moved_static_box_stays_where_it_was(self) -> None:
+        from robosimstudio.sim import Sim
+
+        cube = EntityRigid(ObjectSpec(name="cube", shape=ShapeSpec(half_extents=(0.02,) * 3), pose=(0.0, 0.2, 0.02)))
+        box = EntityRigid(ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=True))
+        builder = newton.ModelBuilder()
+        for entity in (cube, box):
+            entity.build_into(builder, episode=None)
+        model = builder.finalize(device="cpu")
+        solved: list[dict] = []
+        pipeline = SimpleNamespace(
+            state_0=model.state(),
+            state_1=model.state(),
+            reset_solvers=lambda **flags: solved.append(flags),
+            mark_dirty=lambda: None,
         )
-        wave.episodes = [STAYS, None, STAYS]
-        FleetEnv._check_statics(wave)
-        wave.episodes = [STAYS, MOVED]
-        with self.assertRaisesRegex(CannotReplicate, "world 1 runs 'doc', and object 'box' is static"):
-            FleetEnv._check_statics(wave)
+        sim = Sim.__new__(Sim)
+        # A start articulation unlike the state's, so that writing it is seen as well as the cube's reset.
+        sim.pipeline, sim.model, sim._start_joint_q = pipeline, model, np.zeros(model.joint_coord_count, np.float32)
+        sim.scene = SimpleNamespace(entities=[cube, box])
+        sim.episode = {"object_poses": {"cube": (0.1, 0.2, 0.02, 0.0), **MOVED["object_poses"]}}
+        before = [state.joint_q.numpy().copy() for state in (pipeline.state_0, pipeline.state_1)]
+        with self.assertRaisesRegex(ValueError, "'box' is static"):
+            sim.reset_scene()
+        for state, was in zip((pipeline.state_0, pipeline.state_1), before, strict=True):
+            np.testing.assert_array_equal(was, state.joint_q.numpy(), "the cube went to the refused layout")
+        self.assertEqual([], solved, "the solvers were reset for a layout that was refused")
+
+
+class TestADocumentStatesAStaticWhereItsBaseDoes(unittest.TestCase):
+    """A superset's instance runs on its base's model, so its own start pose for a static must be the base's.
+
+    Its serial runs build its own model, with the static where its start poses put
+    it -- the lowering's default when they omit it -- and a wave's rows are to be
+    those rows. A wave that ran it with the static where the base welded it would
+    score a layout the document does not have, so it is refused, and the refusal
+    says the start poses moved it: a model key, the episode's remedy, never
+    separates two documents of one base.
+    """
+
+    SPEC = ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=True)
+
+    def _wave(self, document: TaskSpec):
+        entity, _ = _built(self.SPEC)
+        fleet = _fleet({"box": entity}, base=TaskSpec(name="base", suite="s", entities=(self.SPEC,)))
+        fleet._check_statics([{}, {}], [fleet.build_task, document])
+
+    def test_one_stating_its_base_pose_runs(self) -> None:
+        self._wave(TaskSpec(name="t00", suite="s", entities=(self.SPEC,)))
+
+    def test_one_stating_another_or_none_is_refused_by_its_start_poses(self) -> None:
+        from robosimstudio.specs import replace
+
+        for pose in ((POSE[0] + 0.05, POSE[1], POSE[2]), (0.0, 0.0, 0.0)):
+            document = TaskSpec(name="t01", suite="s", entities=(replace(self.SPEC, pose=pose),))
+            with (
+                self.subTest(pose=pose),
+                self.assertRaisesRegex(
+                    CannotReplicate, r"world 1 runs 's/t01', and object 'box' is static.*state it where 's/base' does"
+                ),
+            ):
+                self._wave(document)
+
+
+ARENA = (0.4, 0.1, 0.8)
+"""Where the arena stands ``bin``, in world [m]: not its spec's pose, which places nothing for an arena's object."""
+
+ARENA_MOVED = {"object_xforms": {"bin": (ARENA[0] + 0.05, ARENA[1], ARENA[2], 0.0, 0.0, 0.0, 1.0)}}
+ARENA_TURNED = {"object_poses": {"bin": (*ARENA, 0.5)}}
+ARENA_STAYS = {"object_xforms": {"bin": (*ARENA, 0.0, 0.0, 0.0, 1.0)}}
+"""Three episodes for ``bin``: 50 mm along x, turned half a radian, and named where the arena stands it."""
+
+
+def _arena_bin(*, fixed: bool = False):
+    """A ``bin`` the arena declares and ``EntityRigid`` finds: a dynamic body on the arena's own free joint.
+
+    ``fixed``: held by the arena's own fixed joint to the world instead, a link with no free one.
+    """
+    import warp as wp
+
+    builder = newton.ModelBuilder()
+    xform = wp.transform(ARENA, wp.quat_identity())
+    if fixed:
+        body = builder.add_link(xform=xform, label="bin")
+        builder.add_joint_fixed(-1, body, parent_xform=xform, label="bin_fixed")
+    else:
+        body = builder.add_body(xform=xform, label="bin")
+    builder.add_shape_box(body, hx=0.05, hy=0.05, hz=0.05)
+    entity = EntityRigid(ObjectSpec(name="bin", static=True, obb_grasp=False))
+    entity.build_into(builder, episode=None)
+    model = builder.finalize(device="cpu")
+    entity.bind(model)
+    return entity
+
+
+class TestAStaticTheArenaDeclares(unittest.TestCase):
+    """A static object the scene's arena declares: no asset and no shape, found by ``find_in_scene``.
+
+    It only located the body, so it held no pose: a reset whose episode named it
+    50 mm off returned without a word, and a wave stood every world's copy where
+    the arena had it, each scored as though it stood where asked. Its spec's pose
+    places nothing, as the import put the body where it is, so only what an episode
+    names can ask for it elsewhere. And its mass panel was dropped on ``static``
+    alone, though no weld made the body kinematic: here it is dynamic.
+    """
+
+    def test_a_reset_refuses_an_episode_that_names_it_elsewhere(self) -> None:
+        entity = _arena_bin()
+        for name, episode in (("moved", ARENA_MOVED), ("turned", ARENA_TURNED)):
+            with self.subTest(name), self.assertRaisesRegex(ValueError, "'bin' is static, where the scene's arena"):
+                entity.reset(None, episode)
+
+    def test_a_reset_takes_an_episode_that_names_it_where_it_stands_or_not_at_all(self) -> None:
+        entity = _arena_bin()
+        self.assertFalse(np.allclose(entity.declared_q[:3], ARENA), "its spec states the default origin")
+        for episode in (None, {}, ARENA_STAYS, {"object_poses": {"other": (0.0, 0.0, 0.0, 1.0)}}):
+            entity.reset(None, episode)
+
+    def test_a_wave_refuses_a_world_whose_episode_names_it_elsewhere(self) -> None:
+        entity = _arena_bin()
+        fleet = _fleet({"bin": entity})
+        fleet._check_statics([ARENA_STAYS, {}], [None, None])
+        with self.assertRaisesRegex(CannotReplicate, "world 1 runs 'doc', and object 'bin' is static"):
+            fleet._check_statics([{}, ARENA_MOVED], [None, None])
+
+    def test_a_document_stating_another_pose_for_it_runs(self) -> None:
+        """Its spec's pose places nothing in either model, so a document's differing one moves nothing."""
+        entity = _arena_bin()
+        fleet = _fleet({"bin": entity}, base=TaskSpec(name="base", suite="s", entities=(entity.spec,)))
+        document = TaskSpec(name="t01", suite="s", entities=(ObjectSpec(name="bin", static=True, pose=ARENA),))
+        fleet._check_statics([{}, {}], [fleet.build_task, document])
+
+    def test_it_offers_its_mass(self) -> None:
+        self.assertEqual(["contact", "mass"], [t.name for t in _arena_bin().tunables()])
+
+    def test_held_by_the_arenas_fixed_joint_it_offers_no_mass(self) -> None:
+        """Gated on no weld of its own, it offered a mass slider that moved nothing: its body is held, not free."""
+        self.assertEqual(["contact"], [t.name for t in _arena_bin(fixed=True).tunables()])
 
 
 class TestNoStaticBodyIsWeldedTwice(unittest.TestCase):

@@ -269,6 +269,17 @@ class Film:
         import traceback
 
         self.session, self.sim = session, session.env
+        # viser moves to the next port by itself when its bind fails, so a port taken between the
+        # recorder's check and the bind would put the page on another one -- perhaps one another take
+        # of the block was handed -- while the browser opens the claimed one.
+        served = int(session.server.get_port())
+        if served != self.port:
+            self.error = (
+                f"the page serves on port {served}, not {self.port}, the port its recorder claimed: "
+                f"something bound {self.port} after the recorder checked it"
+            )
+            self.log(self.error)
+            return
         try:
             self._shoot()
         except Exception as exc:
