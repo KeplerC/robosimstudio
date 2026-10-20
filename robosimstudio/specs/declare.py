@@ -158,12 +158,23 @@ class HostActor:
             mass). ``None`` says nothing. Not an engine parameter, so no
             ``consumes`` list names it: a bridge reads it to check its reading
             of the model's masses (the Genesis mass check), and a record that
-            says nothing is not guessed at.
+            says nothing is not guessed at. Any other word is refused here: a
+            reader takes one it does not know for saying nothing, and a record
+            stating ``"Mesh"`` for a sheet held round its rim and twice its
+            built density reached Genesis unweighed
+            (``tests/test_a_sheet_says_how_it_was_massed.py``).
     """
 
     kind: str
     params: dict[str, Any] = field(default_factory=dict)
     lumping: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.lumping not in (None, "grid", "mesh"):
+            raise ValueError(
+                f"{self.kind} actor: lumping must be 'grid' (add_cloth_grid), 'mesh' (add_cloth_mesh) or None, "
+                f"got {self.lumping!r}"
+            )
 
     def record(self, *, name: str, particle_start: int, particle_count: int) -> dict[str, Any]:
         """This declaration plus the range the composer resolved, as plain JSON.
