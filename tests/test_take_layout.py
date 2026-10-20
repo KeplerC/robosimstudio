@@ -20,7 +20,7 @@ from pathlib import Path
 from tests.fixtures.examples import _run
 
 TIER = "medium"
-"""Builds twelve example scenes on one GPU and steps none of them."""
+"""Builds twelve example scenes on one GPU, then seven scored scripts beside their materials, and steps none of them."""
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
@@ -59,10 +59,10 @@ def _bench(film, point) -> tuple[float, float, float]:
     return tuple(float(p) - float(o) for p, o in zip(point, origin, strict=True))
 
 
-def _drags(film) -> list[tuple[str, float]]:
-    """Each drag of the film's take to a point of its layout: its axis, and the bench coordinate along it."""
+def _drags(film, beats=None) -> list[tuple[str, float]]:
+    """Each drag of the film's take (or of ``beats``) to a point of its layout: its axis, and the bench coordinate along it."""
     out = []
-    for beat in film.take.beats:
+    for beat in film.take.beats if beats is None else beats:
         if isinstance(beat, Drag) and beat.to is not None and not isinstance(beat.to, At | Top):
             i = "xyz".index(beat.axis)
             out.append((beat.axis, _bench(film, resolve(beat.to, film))[i]))
@@ -161,6 +161,78 @@ class TestTheTakesReadTheNumbersTheyRestated(unittest.TestCase):
         film = _film("03_materials/01_rope_memory.py")
         post, lays = takes._wrap_post(film)
         self.assertNear(((0.0, -0.086, 0.0), 0.031), (_bench(film, post), lays), "the post")
+
+
+SCORED = {
+    "06_tasks/03_granular_scored": "03_materials/11_granular",
+    "06_tasks/04_brush_scored": "03_materials/07_brush",
+    "06_tasks/05_suction_scored": "04_extending/02_suction",
+    "06_tasks/07_band_scored": "03_materials/04_band",
+    "06_tasks/08_tape_scored": "03_materials/08_tape",
+    "06_tasks/09_cutting_scored": "03_materials/10_cutting",
+    "06_tasks/10_water_scored": "03_materials/14_water",
+}
+"""Each scored script whose take aims at its layout, and the material script whose drive the take plays.
+
+``06_tasks/06_bag_scored``'s drive aims at bench heights and at the bag's lip where it lies, nothing laid."""
+
+
+class TestTheScoredTakesAimWhereTheirMaterialTakesDo(unittest.TestCase):
+    """A scored script lays its material's scene out as a task document, and its take plays that scene's drive.
+
+    So the drive, aimed on the scored script's scene, goes where it goes on the material's, and the
+    layout its checks read (the tray, the square, the plate, the glass) is the same one: built both
+    ways, each number to a micrometre.
+    """
+
+    def assertNear(self, expected, got, what: str = "") -> None:
+        expected, got = [float(v) for v in _flat(expected)], [float(v) for v in _flat(got)]
+        self.assertEqual(len(expected), len(got), what)
+        worst = max((abs(a - b) for a, b in zip(expected, got, strict=True)), default=0.0)
+        self.assertLess(worst, TOLERANCE, f"{what}: {got} on the scored scene, {expected} on the material's")
+
+    def _both(self, scored: str):
+        material = SCORED[scored]
+        return _film(f"{scored}.py", scored), _film(f"{material}.py", material)
+
+    def assertSameDrive(self, scored, material) -> None:
+        here, there = _drags(scored, material.take.beats), _drags(material)
+        self.assertTrue(there, "the material take aims at nothing laid")
+        self.assertEqual([a for a, _ in there], [a for a, _ in here], "the drags' axes")
+        self.assertNear([v for _, v in there], [v for _, v in here], scored.take.key)
+
+    def test_the_rice_sweep(self) -> None:
+        scored, material = self._both("06_tasks/03_granular_scored")
+        self.assertSameDrive(scored, material)
+        self.assertNear(takes._tray(material), takes._tray(scored), "the tray")
+
+    def test_the_scrub(self) -> None:
+        scored, material = self._both("06_tasks/04_brush_scored")
+        self.assertSameDrive(scored, material)
+        square = lambda film: film.sim.handles.regions["patch"].xy_ranges  # noqa: E731
+        self.assertNear(square(material), square(scored), "the square")
+
+    def test_the_suction_square_and_plate(self) -> None:
+        scored, material = self._both("06_tasks/05_suction_scored")
+        self.assertNear(takes._square(material), takes._square(scored), "the square")
+        self.assertNear(takes._plate_half(material), takes._plate_half(scored), "the plate")
+        self.assertNear(material.position("plate"), scored.position("plate"), "where it lies")
+
+    @unittest.skipUnless(HAS_SUPERDEX, "[superdex] is not installed; nothing builds the band")
+    def test_the_band_path(self) -> None:
+        self.assertSameDrive(*self._both("06_tasks/07_band_scored"))
+
+    def test_the_peel(self) -> None:
+        self.assertSameDrive(*self._both("06_tasks/08_tape_scored"))
+
+    def test_the_cut(self) -> None:
+        self.assertSameDrive(*self._both("06_tasks/09_cutting_scored"))
+
+    @unittest.skipUnless(HAS_GENESIS, "the [genesis] extra is not installed; nothing builds the water")
+    def test_the_glass(self) -> None:
+        scored, material = self._both("06_tasks/10_water_scored")
+        self.assertNear(takes._walled(material, "glass", 0.0), takes._walled(scored, "glass", 0.0), "the glass")
+        self.assertNear(material.position("cup"), scored.position("cup"), "the cup")
 
 
 def _flat(value):

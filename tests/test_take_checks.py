@@ -188,6 +188,47 @@ class TestAVeiledPageFailsItsTake(unittest.TestCase):
         self.assertEqual(("Unveiled", False), (verdict["expect"], verdict["passed"]))
 
 
+def _task_page(tree: str, success: bool, *, panel: bool = True) -> SimpleNamespace:
+    """A stand-in film of a task page: its Goal folder's clause lines, and the verdict on its last step."""
+    goal = SimpleNamespace(_tree_text=lambda: tree) if panel else None
+    return SimpleNamespace(
+        session=SimpleNamespace(goal_panel=goal), sim=SimpleNamespace(last_result=SimpleNamespace(success=success))
+    )
+
+
+class TestAScoredTakeEndsOnTheGoal(unittest.TestCase):
+    """A scored script's clip shows its goal met: the Goal folder's first clause ticked, and the verdict true.
+
+    The check reads what the page shows -- the tree the folder draws and the verdict the page scored
+    its last step with -- rather than scoring the step a second time: an evaluator's ``once`` latches
+    and its ``hold-for`` banks seconds, so a second call in a step is a clock run twice.
+    """
+
+    def test_a_ticked_goal_passes(self) -> None:
+        ok, said = takes._goal_met(_task_page("- ✓ fill_fraction 0.92", True))
+        self.assertTrue(ok, said)
+        self.assertIn("'✓ fill_fraction 0.92'", said)
+
+    def test_a_crossed_goal_fails(self) -> None:
+        ok, said = takes._goal_met(_task_page("- ✗ once\n  - ✗ hold-for 0.2 s", False))
+        self.assertFalse(ok, said)
+        self.assertIn("'✗ once'", said)
+
+    def test_the_tree_and_the_verdict_must_agree(self) -> None:
+        """A tick drawn before the step that scored it is not a goal met."""
+        self.assertFalse(takes._goal_met(_task_page("- ✓ pieces 2", False))[0])
+        self.assertFalse(takes._goal_met(_task_page("- ✗ pieces 1", True))[0])
+
+    def test_a_page_with_no_goal_folder_fails(self) -> None:
+        ok, said = takes._goal_met(_task_page("", True, panel=False))
+        self.assertFalse(ok)
+        self.assertIn("no Goal folder", said)
+
+    def test_the_wait_ends_on_the_page_s_verdict(self) -> None:
+        self.assertTrue(takes._goal_reads_true(_task_page("", True)))
+        self.assertFalse(takes._goal_reads_true(_task_page("", False)))
+
+
 # =============================================================================
 # The layout a take aims at is the one its example builds
 # =============================================================================

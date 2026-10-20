@@ -18,7 +18,8 @@ Dataclasses only, and no import of the library or a browser:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ from .beats import (
     Expectation,
     Fold,
     Grasp,
+    Hand,
     Held,
     Highest,
     Laid,
@@ -1003,26 +1005,27 @@ def _dolly(camera: Orbit | Camera, seconds: float, label: str) -> Do:
 
     For a take whose first drag needs the hand in view at its home, far over
     what it then works on: the page opens wide and closes in once the hand is down.
+    The beat's ``fn`` is a partial over ``camera``, so a test can read where it ends.
     """
+    return Do(fn=partial(_dolly_to, camera, seconds), label=label)
 
-    def dolly(film):
-        from .page import ease
 
-        eye1, at1, fov1 = camera.resolve(film)
-        now = film.page.js("camera")
-        eye0, at0, fov0 = now["eye"], now["at"], float(now["fov"])
-        frames = max(1, round(seconds * film.take.fps))
-        for k in range(1, frames + 1):
-            t = ease(k / frames)
-            film.aim(
-                [a + (b - a) * t for a, b in zip(eye0, eye1, strict=True)],
-                [a + (b - a) * t for a, b in zip(at0, at1, strict=True)],
-                fov0 + (fov1 - fov0) * t,
-            )
-            film.advance()
-        return {"camera_to": {"eye": [round(v, 3) for v in eye1], "at": [round(v, 3) for v in at1]}}
+def _dolly_to(camera: Orbit | Camera, seconds: float, film) -> dict:
+    from .page import ease
 
-    return Do(fn=dolly, label=label)
+    eye1, at1, fov1 = camera.resolve(film)
+    now = film.page.js("camera")
+    eye0, at0, fov0 = now["eye"], now["at"], float(now["fov"])
+    frames = max(1, round(seconds * film.take.fps))
+    for k in range(1, frames + 1):
+        t = ease(k / frames)
+        film.aim(
+            [a + (b - a) * t for a, b in zip(eye0, eye1, strict=True)],
+            [a + (b - a) * t for a, b in zip(at0, at1, strict=True)],
+            fov0 + (fov1 - fov0) * t,
+        )
+        film.advance()
+    return {"camera_to": {"eye": [round(v, 3) for v in eye1], "at": [round(v, 3) for v in at1]}}
 
 
 def _note(key: str, read, label: str) -> Do:
@@ -2260,6 +2263,161 @@ ROBOT_TAPE = (
     ),
 )
 
+# =============================================================================
+# Scored: the same drives on the task pages, ending on the goal
+# =============================================================================
+#
+# Each ``06_tasks/NN_<kind>_scored`` script is a material's scene as a task document with a goal,
+# opened by ``rss.view(env)``: the page holds the same scene and arm panels, and its sidebar opens
+# with the **Goal** folder, one line a clause, ticked once it holds. Its take is its material
+# take's drive, beat for beat; a page whose hand starts at the YAM's own home, pointing ahead,
+# first takes it over the thing and turns it down, as the scored script's medium test does. The
+# take then waits for the goal to read true, holds on the tick, and keeps every check of the
+# material take, with one more: the goal met at the end.
+
+GOAL_WAIT = 8.0
+"""The longest the clip waits for the goal after the drive [s of clip]: a ``hold-for`` banks its seconds here."""
+GOAL_HOLD = 1.5
+"""How long the clip holds on the ticked goal [s of clip]."""
+TASK_FOLDS = ("Inspector", "Policy")
+"""The task page's folds no drive uses, closed: open, the Policy folder's Run and the inspector's rows
+overran the sidebar, and pressing **Close** or ticking **Vacuum** scrolled the Goal folder out of view."""
+
+
+def _goal_reads_true(film) -> bool:
+    """The page's own verdict on its last step: what the Goal folder ticks, scored once a step by its drain."""
+    return bool(film.sim.last_result.success)
+
+
+def _goal_met(film) -> tuple[bool, str]:
+    """The task's goal met at the end, as the page's Goal folder says it: the verdict, and its first clause's line."""
+    from robosimstudio_studio.goal_panel import TICK
+
+    panel = film.session.goal_panel
+    if panel is None:
+        return False, "the page has no Goal folder"
+    lines = [line.strip("- ").strip() for line in panel._tree_text().splitlines() if line.strip()]
+    met = _goal_reads_true(film) and bool(lines) and lines[0].startswith(TICK)
+    return met, f"the Goal folder reads {lines[0] if lines else 'nothing'!r} at the end (need {TICK}), success={met}"
+
+
+def _material(example: str) -> Take:
+    """The take that films ``example``'s own clip."""
+    found = [t for t in (*DRAFTS, *ROBOT_PARTICLES, *ROBOT_BAGS, *ROBOT_BRUSH) if t.example == example and not t.name]
+    found += [t for t in (*ROBOT_SUCTION, *ROBOT_TAPE, *ROBOT_WATER, *ROBOT_CUTTING) if t.example == example]
+    (take,) = found
+    return take
+
+
+def _opening(view: Orbit) -> Orbit:
+    """``view`` drawn back to hold the YAM's right hand at its home as well: aimed between the two, further off, wider."""
+    return Orbit(
+        Mid(Hand("right"), view.about),
+        distance=min(1.4, view.distance + 0.3),
+        azimuth=view.azimuth,
+        elevation=view.elevation,
+        fov=view.fov + 6.0,
+    )
+
+
+def scored(example: str, of: str, *, over: Any = None, turn: bool = False, what: str = "", **kw) -> Take:
+    """``of``'s take on ``example``'s page, its beats one for one, and then the goal.
+
+    ``over``: the scored page's right hand starts at the YAM's own home, pointing ahead, where the
+    material page's starts over ``what``. The clip opens drawn back to hold the hand there, drags it
+    over ``what``, turns it to point down if ``turn``, and closes in to the material take's view in
+    place of that take's opening pause. The sidebar opens the Goal folder and closes what the
+    material take closes; a folder only the material script's page adds is not there to open.
+    """
+    material = _material(of)
+    start: tuple[Beat, ...] = ()
+    if over is not None:
+        start = (
+            Wait(seconds=0.5, label=f"the right hand at the YAM's home, pointing ahead; {what}"),
+            DragTo("right", over, seconds_per_m=4.5, label=f"drag the hand over {what}"),
+            *((_turn("right", TOOL_DOWN, 1.0, "turn the gizmo: the hand points down"),) if turn else ()),
+            _dolly(material.camera, 1.2, "and the view closes in"),
+        )
+        kw.setdefault("camera", _opening(material.camera))
+    return replace(
+        material,
+        example=example,
+        beats=(
+            *start,
+            *material.beats[1 if start else 0 :],
+            Wait(seconds=GOAL_WAIT, until=_goal_reads_true, label="the Goal folder ticks: the goal turns true"),
+            Wait(seconds=GOAL_HOLD, mark="goal", label="the goal met"),
+        ),
+        layout=Layout(collapse=(*material.layout.collapse, *TASK_FOLDS), expand=("Goal",)),
+        expect=(*material.expect, Check(_goal_met)),
+        **kw,
+    )
+
+
+def _over_the_lip(film) -> tuple[float, float, float]:
+    """100 mm over the bag's lip where it crosses 25 mm up, as ``tests/test_open_a_bag_scored`` aims [world].
+
+    The top layer's turned-up lip: its middle across the bag, and where along it the lip stands
+    25 mm over the bench, the height the hand closes at. ``03_materials/06_bag``'s home is here.
+    """
+    import numpy as np
+
+    bag = film.sim["bag"]
+    lip = np.asarray(bag.particle_q, dtype=np.float64)[bag.entity.top[int(bag.entity.spec.cells[0]) + 1 :].ravel()]
+    order, bench = np.argsort(lip[:, 2]), film.bench((0.0, 0.0, 0.0))[2]
+    x, y = float(np.median(lip[:, 0])), float(np.interp(bench + 0.025, lip[order, 2], lip[order, 1]))
+    return (x, y, bench + 0.10)
+
+
+def _over_the_tab_high(film) -> tuple[float, float, float]:
+    """50 mm over the label's tab, where ``tests/test_peel_a_label_scored`` takes the hand first [world]."""
+    x, y, z = _tab(film)
+    return film.bench((x, y, z + 0.05))
+
+
+def _over_the_handle(film) -> tuple[float, float, float]:
+    """60 mm over where the hand closes on the brush's handle [world]: ``03_materials/07_brush``'s home, about."""
+    x, y, z = _over_the_sole(film)
+    return (x, y, z + 0.06)
+
+
+SCORED = (
+    scored("examples/06_tasks/03_granular_scored.py", "examples/03_materials/11_granular.py"),
+    scored(
+        "examples/06_tasks/04_brush_scored.py",
+        "examples/03_materials/07_brush.py",
+        over=_over_the_handle,
+        turn=True,
+        what="the brush's handle",
+        budget=1_800_000,
+    ),
+    scored("examples/06_tasks/05_suction_scored.py", "examples/04_extending/02_suction.py"),
+    scored(
+        "examples/06_tasks/06_bag_scored.py",
+        "examples/03_materials/06_bag.py",
+        over=_over_the_lip,
+        turn=True,
+        what="the bag's lip",
+        budget=1_300_000,  # 20 s with the carry over from the YAM's home: 1,232 KB at quality 46, over the default 900
+    ),
+    scored("examples/06_tasks/07_band_scored.py", "examples/03_materials/04_band.py"),
+    scored(
+        "examples/06_tasks/08_tape_scored.py",
+        "examples/03_materials/08_tape.py",
+        over=_over_the_tab_high,
+        turn=True,
+        what="the label's pull tab",
+        budget=1_500_000,  # 30 s at 12 frames: 1,397 KB at quality 46, over the material take's 1,200
+    ),
+    scored("examples/06_tasks/09_cutting_scored.py", "examples/03_materials/10_cutting.py"),
+    scored(
+        "examples/06_tasks/10_water_scored.py",
+        "examples/03_materials/14_water.py",
+        over=Laid("cup", dz=0.155),
+        what="the cup of water",
+    ),
+)
+
 TAKES: tuple[Take, ...] = (
     *FINAL,
     *DRAFTS,
@@ -2271,17 +2429,10 @@ TAKES: tuple[Take, ...] = (
     *ROBOT_CONTACT,
     *ROBOT_WATER,
     *ROBOT_CUTTING,
+    *SCORED,
 )
 
 KEPT: dict[str, str] = {
-    "06_tasks/06_bag_scored": "the same bag, hands and gesture as 03_materials/06_bag with a goal beside them; its clip is that one's",
-    "06_tasks/03_granular_scored": "the same rice, pusher and tray as 03_materials/11_granular with a goal beside them; its clip is that one's",
-    "06_tasks/07_band_scored": "the same pegboard, band and hook as 03_materials/04_band with a goal beside them; its clip is that one's",
-    "06_tasks/04_brush_scored": "the same brush, handle and square as 03_materials/07_brush with a goal beside them; its clip is that one's",
-    "06_tasks/05_suction_scored": "the same plate, cup and square as 04_extending/02_suction with a goal beside them; its clip is that one's",
-    "06_tasks/08_tape_scored": "the same box, label and peel as 03_materials/08_tape with a goal beside them; its clip is that one's",
-    "06_tasks/10_water_scored": "the same cup, water and glass as 03_materials/14_water with a goal beside them; its clip is that one's",
-    "06_tasks/09_cutting_scored": "the same knife, board, tofu and cut as 03_materials/10_cutting with a goal beside them; its clip is that one's",
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",
