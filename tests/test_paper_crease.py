@@ -9,7 +9,8 @@ Three claims, two of them cheap:
   ``add_edge`` rest angle and a line-for-line port of the VBD bending kernel agree with it on
   several poses, sign included. CPU warp, no GPU.
 * **The entity.** A sheet builds on the CPU, its hinges are found, the plastic sliders land
-  in the kernel's array, and the flat names resolve.
+  in the kernel's array, and the flat names resolve. A CPU scene refuses paper on ``vbd`` by
+  name, so the sheet names ``newton.solvers.SolverVBD`` by path, the slow way it runs there.
 * **The fold.** On the GPU: a strip of PAPER pinned at one end, its free end carried over 180
   degrees by a pin and held, the standing loop pressed flat by a third pin, everything released.
   The creased strip stays folded and its fold line reads as a crease; the same strip with
@@ -145,7 +146,8 @@ class TestTheEntityOnTheCpu(unittest.TestCase):
     def setUpClass(cls) -> None:
         import robosimstudio as rss
 
-        scene = rss.Scene(cell="void", name="paper_cpu")
+        physics = rss.GENERIC.with_backend("paper", rss.backend("newton.solvers.SolverVBD"))
+        scene = rss.Scene(cell="void", name="paper_cpu", physics=physics)
         scene.add(rss.paper(name="leaf", size=(0.04, 0.04), cells=(4, 4), at=(0.0, 0.0, 0.1), settle_frames=0))
         cls.sim = scene.build(device="cpu")
         cls.entity = cls.sim.scene.by_name["leaf"]
