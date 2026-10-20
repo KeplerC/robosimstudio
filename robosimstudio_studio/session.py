@@ -1165,9 +1165,11 @@ class StudioSession:
                 self.scenery_request = True
 
             scenery.on_update(_scenery)
-            # The things carrying a particle probe, as the deformable panels take: a cuttable's
-            # eight corners are no cloth to draw, and offered it, the cutting page had a cloth look.
-            if self.env.deformables():
+            # Only over a sheet, the one thing a garment style changes the draw of: a rope's tube and a
+            # particle body's points or surface are drawn alike in every style. Gated on the things
+            # carrying a particle probe, a SuperDex rope's page and an MPM liquid's offered a look that
+            # changed nothing; a cuttable's eight corners are points too.
+            if self.viewer.has_sheets:
                 look = gui.add_dropdown("Cloth look", options=GARMENT_STYLES, initial_value=self.viewer.garment_style)
                 look.on_update(lambda _: setattr(self, "cloth_look_request", str(look.value)))
             # Built here rather than in ``panels``: it writes only to the viser
