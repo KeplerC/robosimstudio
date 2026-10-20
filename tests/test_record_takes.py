@@ -218,5 +218,99 @@ class TestAScoredTakeDropsOnlyAnOpeningPause(unittest.TestCase):
         self.assertEqual(moving.beats, kept.beats[: len(moving.beats)], "without over, every beat is kept")
 
 
+class TestRecordersSideBySide(unittest.TestCase):
+    """``record_examples.py`` serves each recorder's pages on its own ports: ``--port`` to ``--port + j - 1``.
+
+    It used to hand one climbing port a take dealt, from ``--port``, so recorders at 9100 and 9101
+    were handed the same ports, and a ``--port`` outside 9100-9199 was wrapped back into it unsaid."""
+
+    def setUp(self) -> None:
+        import tempfile
+        from unittest import mock
+
+        import record_examples
+
+        self.rec = record_examples
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+        for patch in (
+            mock.patch.object(record_examples, "LOCKS", self.tmp / "locks"),
+            mock.patch.object(record_examples, "port_free", lambda port: True),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def _claim(self, port: int, jobs: int) -> list:
+        locks = self.rec.claim(self.rec.page_ports(port, jobs))
+        self.addCleanup(lambda: [lock.close() for lock in locks])
+        return locks
+
+    def test_a_port_outside_the_range_is_refused_by_name(self) -> None:
+        for port in (80, 9099, 9200, 9300):
+            with self.subTest(port=port):
+                with self.assertRaisesRegex(ValueError, rf"^--port {port} is outside 9100-9199"):
+                    self.rec.page_ports(port, 1)
+        with self.assertRaisesRegex(
+            ValueError, r"^--port 9198 with -j 4 serves on 9198-9201, past 9199: start it at 9196"
+        ):
+            self.rec.page_ports(9198, 4)
+        self.assertEqual(range(9196, 9200), self.rec.page_ports(9196, 4))
+
+    def test_a_recorder_whose_ports_meet_anothers_is_refused_by_name(self) -> None:
+        self._claim(9104, 4)
+        with self.assertRaisesRegex(
+            ValueError, r"^port 9104 is a page port of the recorder of pid \d+, ports 9104-9107"
+        ):
+            self._claim(9101, 4)
+        self._claim(9100, 4)  # the refused claim kept none of 9101-9103
+        self._claim(9108, 4)
+
+    def test_a_port_something_else_listens_on_is_refused_by_name(self) -> None:
+        from unittest import mock
+
+        with mock.patch.object(self.rec, "port_free", lambda port: port != 9102):
+            with self.assertRaisesRegex(ValueError, r"^port 9102 is in use by something that is not a recorder"):
+                self._claim(9100, 4)
+        self._claim(9100, 4)
+
+    def test_two_recorders_side_by_side_hand_out_disjoint_ports(self) -> None:
+        """Four takes at once each, at 9100 and at 9104: each child serves on a port of its own recorder's four."""
+        import contextlib
+        import io
+        from unittest import mock
+
+        handed: dict[int, list[int]] = {}
+
+        class Done:
+            returncode = 0
+
+            def __init__(self, cmd, **_) -> None:
+                handed.setdefault(start, []).append(int(cmd[cmd.index("--port") + 1]))
+
+            def poll(self) -> int:
+                return 0
+
+        chosen = list(TAKES[:10])
+        with mock.patch.object(self.rec.subprocess, "Popen", Done), mock.patch.object(self.rec.time, "sleep"):
+            for start in (9100, 9104):
+                argv = ["--gpus", "1", "-j", "4", "--port", str(start), "--out", str(self.tmp / str(start))]
+                args = _parse(self.rec, argv)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(0, self.rec.run_all(chosen, args))
+        self.assertEqual(10, len(handed[9100]))
+        self.assertEqual({9100, 9101, 9102, 9103}, set(handed[9100]))
+        self.assertEqual({9104, 9105, 9106, 9107}, set(handed[9104]))
+
+
+def _parse(rec, argv: list[str]):
+    """``record_examples``'s own command line, parsed as ``main`` parses it, without running anything."""
+    from unittest import mock
+
+    seen = []
+    with mock.patch.object(rec, "run_all", lambda chosen, args: seen.append(args) or 0):
+        rec.main(argv)
+    return seen[0]
+
+
 if __name__ == "__main__":
     unittest.main()
