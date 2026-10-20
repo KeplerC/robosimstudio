@@ -29,7 +29,7 @@ solver's constructor, copies MuJoCo-Warp's re-diagonalized ``body_iquat`` --
 both left fingers among them -- over the C model, whose bounding-volume tree for
 each body MuJoCo's compiler built in the frame it had then. The midphase then
 tests a finger against a box that is no longer round its geoms and skips the
-pair: measured on ``examples/20_cutting/00_cut_tofu``, the right hand closing
+pair: measured on ``examples/03_materials/10_cutting``, the right hand closing
 on the 20 mm knife handle stalled at 20.4 mm on MuJoCo-Warp and passed through
 it to 3.8 mm on the C library, its left finger 8.8 mm inside the handle with no
 contact. :func:`refit_bvh` refits the trees to the frames the model holds, after

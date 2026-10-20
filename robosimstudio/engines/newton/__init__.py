@@ -275,8 +275,8 @@ MPM = register_backend(
         "step_hz": 60.0,
     },
     # CUDA only, as VBD is and for the same reason: Warp's kernels run on a CPU,
-    # one thread at a time. Measured with the GPUs hidden (examples/10_granular/
-    # 00_sweep_rice, its 28,812-grain rice bed beside the YAM): 60 s to build and
+    # one thread at a time. Measured with the GPUs hidden (examples/03_materials/
+    # 11_granular, its 28,812-grain rice bed beside the YAM): 60 s to build and
     # 35.5 s for 20 control steps, 0.009x realtime, against 15.6 ms a step
     # graph-captured on a GPU -- the capture this solver is written for (see the
     # module's docstring) has no CPU form. The honey pour and the dough roll

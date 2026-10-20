@@ -310,12 +310,12 @@ class TestTheDeformableExamplesUnchanged(unittest.TestCase):
         self.assertLess(float(particles[:, 2].max()), surface + 0.015, "the towel never came down")
 
     def test_the_cable(self) -> None:
-        self.run_example("03_rope/00_cable.py", "cable")
+        self.run_example("03_materials/00_rope.py", "cable")
 
 
 @unittest.skipUnless(HAS_SUPERDEX, NO_SUPERDEX)
 class TestTheCableComesUpInTheHand(unittest.TestCase):
-    """``03_rope/00_cable``'s grasp on a CPU, as its page makes it: down, **Close**, up, and the cable comes too.
+    """``03_materials/00_rope``'s grasp on a CPU, as its page makes it: down, **Close**, up, and the cable comes too.
 
     The GPU's rope test (:mod:`tests.test_example_grasps_rope`) on the capsule
     chain, made here on the SuperDex centerline the CPU puts the rope on --
@@ -328,7 +328,7 @@ class TestTheCableComesUpInTheHand(unittest.TestCase):
         from tests.fixtures.examples import _run
         from tests.fixtures.grasp import drag_to_grasp, open_session, tick
 
-        sim, kwargs = _run("03_rope/00_cable.py")
+        sim, kwargs = _run("03_materials/00_rope.py")
         session = open_session(sim, 8979, kwargs.get("page"))
         try:
             self.assertEqual(sim.request.physics.backend_for("rod").get("feedback"), "off")

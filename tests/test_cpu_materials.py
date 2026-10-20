@@ -248,7 +248,7 @@ class TestAClothsContactForcesOnACpu(unittest.TestCase):
             sim.close()
 
 
-CAPSULE_CHAIN_EXAMPLES = ("03_rope/03_cable_memory.py", "03_rope/04_twist.py")
+CAPSULE_CHAIN_EXAMPLES = ("03_materials/01_rope_memory.py", "03_materials/02_twist.py")
 """The rope examples whose physics is the capsule chain's on VBD, under ``examples/``; they move with the examples."""
 
 
