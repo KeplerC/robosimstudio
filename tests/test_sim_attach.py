@@ -184,7 +184,7 @@ class TestTheHookOrdering(unittest.TestCase):
         )
         return env, order, _Dragger
 
-    def _behind_a_cuttable(self, seized: list) -> types.SimpleNamespace:
+    def _behind_a_cuttable(self, seized: list) -> tuple[types.SimpleNamespace, type]:
         """The cutting spec's stage bin: a tofu declared before a towel, each staged as a deformable."""
         env, _order, dragger = self._scene()
         tofu = types.SimpleNamespace(name="tofu", carries_particles=True, particles=list(range(8)))
