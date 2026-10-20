@@ -488,6 +488,15 @@ def _warn_lost_material(node: Any, declared: HostActor, island: Any) -> None:
     states ``tri_ke`` and ``edge_ke``, none states ``shell_young``, and so
     packing tape and bath towelling reached both foreign engines at the same
     ``E = 1e5``. Measured; nothing said so; this says so.
+
+    A kind whose matter is stated on its spec rather than in a material names
+    the spec fields its implementation never reads, as the entity class's
+    ``unread_fields``; those stated away from the spec's defaults are lost the
+    same way. Its actor's params cannot say it by their keys: a Cosserat rope
+    hands over an ``axial_stiffness`` derived from its modulus, and a rope
+    stating ``dahl_eps_max=0.5``, ``twist_ke``, ``shear_ke``, ``bend_ke`` and
+    ``stretch_ke`` -- the capsule chain's -- built and stepped on SuperDex with
+    no message at all.
     """
     engine = island.backend.solver
     info = get_backend(engine)
@@ -504,27 +513,55 @@ def _warn_lost_material(node: Any, declared: HostActor, island: Any) -> None:
                 MaterialLossWarning,
                 stacklevel=3,
             )
-    material = getattr(getattr(node.entity, "spec", None), "material", None)
-    if material is None or not dataclasses.is_dataclass(material):
-        return
-    default = type(material)()
-    stated = [f.name for f in dataclasses.fields(material) if getattr(material, f.name) != getattr(default, f.name)]
-    # Fields that travel some other way than the actor's params -- a tet body's
-    # Young and Poisson go into ``model.tet_materials`` and the bridge inverts
-    # them back out -- are not lost, and saying so sends a reader hunting for a
-    # bug in a modulus that is in fact applied.
-    carried = set(getattr(type(material), "via_model", ()))
-    lost = [name for name in stated if name not in declared.params and name not in carried]
+    spec = getattr(node.entity, "spec", None)
+    material = getattr(spec, "material", None)
+    # Each record named for itself, so the reader is sent to the one holding the field:
+    # a rope's lost fields are its RodSpec's, and a cloth's are its material's.
+    lost: list[str] = []
+    hint = ""
+    if material is not None and dataclasses.is_dataclass(material):
+        # Fields that travel some other way than the actor's params -- a tet body's
+        # Young and Poisson go into ``model.tet_materials`` and the bridge inverts
+        # them back out -- are not lost, and saying so sends a reader hunting for a
+        # bug in a modulus that is in fact applied.
+        carried = set(getattr(type(material), "via_model", ()))
+        names = [name for name in _stated(material) if name not in declared.params and name not in carried]
+        if names:
+            lost.append(f"{len(names)} stated material field(s) never reach {engine}: {names}")
+        unset = [f.name for f in dataclasses.fields(material) if getattr(material, f.name) is None]
+        hint = f" Knobs this material offers and leaves unset: {unset}." if unset else ""
+    unread = tuple(getattr(type(node.entity), "unread_fields", ()))
+    if unread and dataclasses.is_dataclass(spec):
+        names = _stated(spec, unread)
+        if names:
+            lost.append(f"{len(names)} stated {type(spec).__name__} field(s) never reach {engine}: {names}")
     if not lost:
         return
-    unset = [f.name for f in dataclasses.fields(material) if getattr(material, f.name) is None]
-    hint = f" Knobs this material offers and leaves unset: {unset}." if unset else ""
     warnings.warn(
-        f"{node.name!r}: {len(lost)} stated material field(s) never reach {engine}: {lost}. "
-        f"What the engine is handed: {sorted(declared.params)}.{hint}",
+        f"{node.name!r}: {'; '.join(lost)}. What the engine is handed: {sorted(declared.params)}.{hint}",
         MaterialLossWarning,
         stacklevel=3,
     )
+
+
+def _stated(record: Any, names: tuple[str, ...] | None = None) -> list[str]:
+    """``record``'s fields (or those of ``names``) that differ from a default-built one, in order.
+
+    Compared as values (:func:`_as_value`): a rope given ``surface_labels=["table"]`` states
+    nothing its default ``("table",)`` does not, and a list never equals a tuple.
+    """
+    default = type(record)()
+    names = tuple(f.name for f in dataclasses.fields(record)) if names is None else names
+    return [name for name in names if _as_value(getattr(record, name)) != _as_value(getattr(default, name))]
+
+
+def _as_value(value: Any) -> Any:
+    """``value`` with every list, tuple and array in it a tuple, for :func:`_stated` to compare."""
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return tuple(_as_value(item) for item in value)
+    return value
 
 
 def _check_in_place_rates(arrangement: ArrangementSpec, islands: list[Island]) -> None:

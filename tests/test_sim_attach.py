@@ -12,14 +12,20 @@ own rollouts exercise it -- but the three properties a copy is likely to get
 wrong when the seventh caller arrives:
 
 * the tool appears only where there is something to hold, so a rigid cell does
-  not offer a graph a tool that raises the moment it is believed;
+  not offer a graph a tool that raises the moment it is believed -- nor does a
+  cuttable's cell, whose eight particles are the corners its cage writes back
+  for a page to draw, with no probe, the way ``Sim.deformables`` picks;
 * both entries are tagged privileged, because seizing particles has no
   real-robot analogue and a graph that attaches will not transfer;
 * the hook is registered **and the CUDA graph invalidated**, in that order.
   Getting the second wrong is silent: the grab bookkeeping is host-side, so the
   tool reports the particles it seized while nothing holds them.
 
-No GPU: a stub env is the whole fixture.
+``sim.get_particle_state`` picks the same way: offered the cuttable first, it
+raised ``AttributeError`` on its ``.probe``.
+
+No GPU: a stub env is the whole fixture. It has no ``deformables`` of its own,
+as one world of a fleet (a ``WorldView``) has none.
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ import types
 import unittest
 import unittest.mock
 
-from robosimstudio_policy_agent.sim_tools import ClothAttachment, register_attachment
+from robosimstudio_policy_agent.sim_tools import ClothAttachment, SimTools, ToolRefusal, register_attachment
 
 TIER = "fast"
 """No GPU. Gates every commit."""
@@ -54,9 +60,13 @@ class _Bus:
         return fn(*args, **kwargs)
 
 
-def _env(*, deformables: bool) -> types.SimpleNamespace:
-    thing = types.SimpleNamespace(carries_particles=True)
-    return types.SimpleNamespace(scene=types.SimpleNamespace(by_name={"tape": thing} if deformables else {}))
+def _env(*, deformables: bool, cuttable: bool = False) -> types.SimpleNamespace:
+    """A tape carrying a probe when ``deformables``, behind a cuttable's eight corners when ``cuttable``."""
+    probe = types.SimpleNamespace(summary=lambda key: {"set": key, "z_min": 0.10})  # a summary, the band of one
+    thing = types.SimpleNamespace(carries_particles=True, probe=probe)
+    tofu = types.SimpleNamespace(carries_particles=True, particles=list(range(8)))
+    by_name = {**({"tofu": tofu} if cuttable else {}), **({"tape": thing} if deformables else {})}
+    return types.SimpleNamespace(scene=types.SimpleNamespace(by_name=by_name, embodiment=None), handles=None)
 
 
 class TestItAppearsOnlyWhereItApplies(unittest.TestCase):
@@ -71,11 +81,27 @@ class TestItAppearsOnlyWhereItApplies(unittest.TestCase):
         self.assertIsNone(register_attachment(registry, _env(deformables=False), _Bus()))
         self.assertEqual(registry.calls, {})
 
+    def test_a_cuttable_alone_gets_neither(self) -> None:
+        registry = _Registry()
+        self.assertIsNone(register_attachment(registry, _env(deformables=False, cuttable=True), _Bus()))
+        self.assertEqual(registry.calls, {}, "the tofu's corners are nothing a pin moves")
+
     def test_both_entries_are_privileged(self) -> None:
         registry = _Registry()
         register_attachment(registry, _env(deformables=True), _Bus())
         for name, call in registry.calls.items():
             self.assertIn("privileged", tuple(call.get("tags") or ()), f"{name} is not tagged privileged")
+
+
+class TestTheParticleStateReadsADeformable(unittest.TestCase):
+    def test_the_cuttable_is_passed_over(self) -> None:
+        got = SimTools(_env(deformables=True, cuttable=True), _Bus()).get_particle_state()
+        self.assertEqual("tape", got["cloth"], "the tofu came first and has no probe")
+        self.assertEqual(0.10, got["z_min"])
+
+    def test_a_cuttable_alone_is_no_deformable(self) -> None:
+        with self.assertRaises(ToolRefusal):
+            SimTools(_env(deformables=False, cuttable=True), _Bus()).get_particle_state()
 
 
 class TestTheHookOrdering(unittest.TestCase):
