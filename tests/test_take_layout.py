@@ -122,7 +122,7 @@ class TestTheTakesReadTheNumbersTheyRestated(unittest.TestCase):
         self.assertNear(edge + 0.297, _bench(film, (lay["far"], 0, 0))[0], "its far edge")
         self.assertNear(edge + 0.297 / 2, _bench(film, (lay["fold"], 0, 0))[0], "the fold line")
         self.assertNear(edge + 0.297 / 2, lay["line"], "the line crease_angle reads, in the bench frame")
-        self.assertNear(edge + 0.0219, _bench(film, (lay["pinch"], 0, 0))[0], "where the pads close")
+        self.assertNear(edge + 0.013, _bench(film, (lay["pinch"], 0, 0))[0], "where the pads close")
         self.assertNear(
             (-0.08, 0.08), [lay["hands"]["right"], lay["hands"]["left"]], "each hand 25 mm in from its corner"
         )

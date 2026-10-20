@@ -8,7 +8,7 @@ from its own corner. The sheet lies across the middle so the two corners are one
 on the bench edge the old layout hung it over, only the right arm reached and the left hand crossed
 into its space to help. These checks hold that layout and its realism settings in place without
 building anything: the overhang the pads close on, the sheet on the box and across the middle, the arms
-that collide with each other, a grip capped at 10 N a finger and fed the sheet's push, a pad friction
+that collide with each other, a grip capped at 15 N or less and fed the sheet's push, a pad friction
 under 1, and nothing pinned to a hand.
 """
 
@@ -86,9 +86,9 @@ class TestTheFoldIsLaidOutForTwoHands(unittest.TestCase):
 
     def test_the_grip_is_capped_and_feels_the_sheet(self) -> None:
         hands = _keywords(self.source, "ActuationSpec")
-        self.assertLessEqual(
-            hands["effort_limit"] / 2, 15.0, "one driven joint and its mirrored twin: half the cap a finger"
-        )
+        # One motor drives a hand's two fingers through the asset's joint equality: its cap is what one finger
+        # pushes when the other pushes nothing, so the cap itself is the per-finger ceiling.
+        self.assertLessEqual(hands["effort_limit"], 15.0, "the most either finger can push")
         # Stiff enough that a finger held 0.2 mm off shut already asks the whole cap: Close stalls at the cap.
         self.assertGreaterEqual(hands["target_ke"] * 0.0002, hands["effort_limit"])
         coupling = _keywords(self.source, "coupler")

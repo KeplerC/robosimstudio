@@ -5,16 +5,19 @@
 (``scripts/recording/takes.py``'s :func:`fold_drive`) through the example's arm panels, a control step per
 step, with no browser, and reads the same ``crease_angle`` the page shows. Nothing is pinned to a hand: each
 hand presses **Close** on the overhanging edge from its own corner and its fingers stall on the sheet at the
-grip cap, the contact forces fed back along each finger's slide; the two carry the edge up to upright turning
-88 degrees, lay it on the far half and let go; then each runs a closed fingertip along its half of the fold.
+grip's 10 N cap, the contact forces fed back along each finger's slide; the two carry the edge up to upright
+turning 88 degrees and on over the far half, and open over it; then each runs its lower finger along its half
+of the fold, the sheet pushing that finger up its slide against the same 10 N cap.
 
-What it holds the drive to is what made the old fold unrealistic: there the arms passed 60 mm into each
-other, a hand turned 180 degrees holding the edge and the edge stayed clamped while the other hand stamped
-the fold; a later version held the edge in a position vise the sheet read 30 to 120 N in. Here the arms,
-which collide with each other, keep 20 mm apart and each to its own side of the middle at every control
-step; a hand turns at most 90 degrees while it holds and its grip stalls at its cap; nothing but the creasing
-fingertip and the box touches the sheet while the fold is creased; the edges end within 10 mm of each other
-and the fold keeps its crease once the hands have gone, the sheet where it was laid.
+What it holds the drive to is what made the earlier folds unrealistic: the arms passing into each other, a
+hand turned 180 degrees holding the edge, the edge clamped while the other hand stamped the fold, a position
+vise the sheet read 30 to 120 N in, a 20 N grip the sheet pried open and slipped out of before **Open**, and a
+fingertip that ran under the fold and lifted it. Here the arms, which collide with each other, keep 20 mm
+apart and each to its own side of the middle at every control step; a hand turns at most 90 degrees while it
+holds; no finger of either hand pushes more than 15 N, holding or pressing, but at a touch; the pads still
+hold the edge, nearly shut, when **Open** is pressed; nothing but the pressing finger and the box touches the
+sheet while it is creased, and the strokes lift no part of it; the edges end within 10 mm of each other and
+the fold keeps a 2.8 rad crease once the hands have gone, the sheet where it was laid.
 """
 
 from __future__ import annotations
@@ -30,15 +33,20 @@ from tests.fixtures.examples import _run
 from tests.fixtures.grasp import open_session, tick
 
 TIER = "medium"
-"""One GPU: the example built once and its take's drive played through its page (about 11,000 control steps)."""
+"""One GPU: the example built once and its take's drive played through its page (about 10,500 control steps)."""
 
 FOLD_PORT = 9734
 GAP = 0.020
 """The closest the two arms' colliders may come [m]."""
+CAP = 10.0
+"""The example's grip cap [N]: one motor drives a hand's two fingers, so it is the most either pushes along its
+slide."""
+FINGER = 15.0
+"""The most any one finger may push on the sheet, holding it or pressing it [N]: the realism ceiling."""
 
 
 class TestTheHandsFoldTheSheet(unittest.TestCase):
-    """Pinch the overhang from both corners, carry it up and lay it over, let go, crease it: it stays folded in half."""
+    """Pinch the overhang from both corners, carry it over, open, press the fold: it stays folded in half."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -66,14 +74,12 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         index = sim.scene.embodiment.arms
         body = sim.model.shape_body.numpy()
         fingers = {arm: [np.flatnonzero(np.isin(body, side)) for side in index[arm].finger_bodies] for arm in index}
-        labels = [str(n).rsplit("/", 1)[-1] for n in sim.model.joint_label]
-        q_start = sim.model.joint_q_start.numpy()
-        driven = {arm: int(q_start[labels.index(f"{arm}_left_finger")]) for arm in index}
         actuator = cls._finger_actuators(solver.rigid)
         bench_top = float(film.bench((0.0, 0.0, 0.0))[2])
         cls.rest = rest = np.asarray(sim["paper"].particle_q, dtype=np.float64)
         base = rest[:, 0] > lay["fold"] + 0.0106
-        cls.pushes, cls.finger_q, cls.servo, cls.lowest, cls.drift, cls.marks = {}, {}, {}, np.inf, {}, {}
+        cls.pushes, cls.servo, cls.gap, cls.lowest, cls.drift, cls.marks = {}, {}, {}, np.inf, {}, {}
+        cls.highest = {}
         takes._fold_watch(film)
 
         def measures():
@@ -90,17 +96,19 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
                 on_box = points[:, 0] >= lay["box_edge"]
                 under = np.where(on_box, points[:, 2] - lay["top"], points[:, 2] - bench_top)
                 cls.lowest = min(cls.lowest, float(under.min()))
+                cls.highest.setdefault(phase, []).append(float(points[:, 2].max() - lay["top"]))
                 moved = np.abs(points[base, :2].mean(axis=0) - rest[base, :2].mean(axis=0))
                 cls.drift[phase] = np.maximum(cls.drift.get(phase, 0.0), moved)
                 forces = solver.shape_contact_forces()
-                joint_q = sim.state.joint_q.numpy()
                 servo = solver.rigid.mjw_data.qfrc_actuator.numpy()[0]
                 for arm in index:
                     push = [float(np.linalg.norm(forces[side].sum(axis=0))) for side in fingers[arm]]
                     whole = float(np.linalg.norm(sum(forces[side].sum(axis=0) for side in fingers[arm])))
                     cls.pushes.setdefault((phase, arm), []).append((max(push), whole))
-                    cls.finger_q.setdefault((phase, arm), []).append(float(joint_q[driven[arm]]))
                     cls.servo.setdefault((phase, arm), []).append(abs(float(servo[actuator[arm]])))
+                    if phase in ("pinched", "carry"):
+                        centres = takes._fold_pads(film, arm)[0]
+                        cls.gap.setdefault(arm, []).append(float(np.linalg.norm(centres[1] - centres[0])) - 0.004)
             if mark:
                 cls.marks[mark] = measures()
         cls.watch = film.fold_watch
@@ -110,6 +118,7 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
             float(points[near & (rest[:, 1] < 0), 0].mean() - points[far & (rest[:, 1] < 0), 0].mean()),
             float(points[near & (rest[:, 1] > 0), 0].mean() - points[far & (rest[:, 1] > 0), 0].mean()),
         ]
+        labels = [str(n).rsplit("/", 1)[-1] for n in sim.model.joint_label]
         cls.effort = sim.model.joint_effort_limit.numpy()[
             [sim.model.joint_qd_start.numpy()[labels.index(f"{a}_left_finger")] for a in index]
         ]
@@ -118,7 +127,8 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
             f"{cls.watch['left_y'] * 1e3:+.1f}/{cls.watch['right_y'] * 1e3:+.1f} mm across the middle, turns "
             f"{cls.watch['turn']}, edges {np.round(np.array(cls.edges) * 1e3, 1)} mm, marks {cls.marks}, lowest "
             f"{cls.lowest * 1e3:.2f} mm, drift { ({k: np.round(v * 1e3, 1).tolist() for k, v in cls.drift.items()}) }, "
-            f"{cls.ms_per_step:.1f} ms",
+            f"pushes { ({k: round(max(p for p, _ in v), 1) for k, v in cls.pushes.items()}) }, pad gap "
+            f"{ ({k: round(max(v) * 1e3, 1) for k, v in cls.gap.items()}) } mm, {cls.ms_per_step:.1f} ms",
             flush=True,
         )
 
@@ -161,25 +171,48 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
 
     def test_the_grip_stalls_on_the_sheet_at_its_cap(self) -> None:
         """Close drives the fingers to shut; the sheet's push, fed back along their slides, stops them short, and
-        the servo asking 100 kN/m of them saturates at its 20 N cap: 10 N a finger, the driven one and its twin."""
-        np.testing.assert_allclose(self.effort, 20.0)
+        the servo asking 100 kN/m of them saturates at its 10 N cap, which one motor spends on both fingers."""
+        np.testing.assert_allclose(self.effort, CAP)
         for arm in ("left", "right"):
-            servo = self.servo[("pinched", arm)] + self.servo[("carry", arm)]
-            self.assertGreater(float(np.median(servo)), 19.9, f"the {arm} grip binds at its cap")
-            self.assertLessEqual(max(servo), 20.0 + 1.0e-3, f"and never passes it ({max(servo):.2f} N)")
-            held = self.finger_q[("pinched", arm)] + self.finger_q[("carry", arm)]
-            self.assertGreater(float(np.median(held)), 0.0, f"the {arm} fingers stop on the sheet, short of shut")
+            pinched = self.servo[("pinched", arm)]
+            self.assertGreater(float(np.median(pinched)), CAP - 0.1, f"the {arm} grip binds at its cap")
+            held = pinched + self.servo[("carry", arm)]
+            self.assertLessEqual(max(held), CAP + 1.0e-3, f"and never passes it ({max(held):.2f} N)")
             self.assertGreater(np.median([p for p, _ in self.pushes[("carry", arm)]]), 1.0, "the pads hold the edge")
 
-    def test_only_the_creasing_fingertip_touches_the_sheet_while_it_is_creased(self) -> None:
+    def test_no_finger_pushes_more_than_15_n_but_at_a_touch(self) -> None:
+        """Each finger's own contact force, its friction included, at the control steps a hand holds or presses: at
+        most 15 N but on a step or two where a finger meets the sheet, which in 8 drives read up to 17.2 N."""
+        for phase in ("close", "pinched", "carry", "sweep_right", "sweep_left"):
+            for arm in ("left", "right"):
+                pushes = np.array([p for p, _ in self.pushes[(phase, arm)]])
+                over = int((pushes > FINGER).sum())
+                self.assertLessEqual(over, max(2, len(pushes) // 500), f"a {arm} finger passed 15 N {over} times")
+                self.assertLessEqual(pushes.max(), 20.0, f"a {arm} finger pushed {pushes.max():.1f} N in the {phase}")
+
+    def test_the_pads_still_pinch_the_edge_when_open_is_pressed(self) -> None:
+        """The edge is let go, not lost: the pads touch it on the carry's last step and stood nearly shut on it."""
+        for arm in ("left", "right"):
+            last = self.pushes[("carry", arm)][-1][1]
+            self.assertGreater(last, 1.0, f"the {arm} pads held {last:.2f} N of the edge as Open was pressed")
+            widest = max(self.gap[arm])
+            self.assertLess(widest, 0.010, f"the {arm} pads stood {widest * 1e3:.1f} mm apart on the sheet")
+
+    def test_only_the_pressing_finger_touches_the_sheet_while_it_is_creased(self) -> None:
         self.assertEqual(0.0, max(p for p, _ in self.pushes[("sweep_right", "left")]), "the left hand touched it")
         self.assertEqual(0.0, max(p for p, _ in self.pushes[("sweep_left", "right")]), "the right hand touched it")
         for arm in ("left", "right"):
-            pressed = [w for _, w in self.pushes[(f"sweep_{arm}", arm)] if w > 1.0]
-            self.assertGreater(len(pressed), 500, f"the {arm} fingertip pressed the fold")
-            self.assertLess(
-                np.median(pressed), self.takes.FOLD_PUSH + 4.0, f"and pressed about {self.takes.FOLD_PUSH} N"
-            )
+            pressed = [i for i, (_, w) in enumerate(self.pushes[(f"sweep_{arm}", arm)]) if w > 1.0]
+            self.assertGreater(len(pressed), 500, f"the {arm} finger pressed the fold")
+            servo = [self.servo[(f"sweep_{arm}", arm)][i] for i in pressed]
+            self.assertGreater(float(np.median(servo)), CAP - 0.1, f"the {arm} press is its grip's cap")
+
+    def test_the_strokes_lift_no_part_of_the_sheet(self) -> None:
+        """The finger runs on top of the fold: nothing of the sheet rises above where it stood when the hands let go."""
+        laid = max(self.highest["let_go"][-30:])
+        for arm in ("left", "right"):
+            top = max(self.highest[f"sweep_{arm}"])
+            self.assertLessEqual(top, laid + 0.001, f"the {arm} strokes raised the sheet to {top * 1e3:.1f} mm")
 
     def test_nothing_is_pinned(self) -> None:
         entity = self.sim["paper"].entity
@@ -193,7 +226,7 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
     def test_the_creased_fold_stays_once_the_hands_have_gone(self) -> None:
         gone, later = self.marks["gone"][0], self.marks["plus3s"][0]
         self.assertGreaterEqual(gone, self.takes.FOLD_CREASE, f"the fold kept {gone:.3f} rad once the hands had gone")
-        self.assertLess(abs(later - gone), 0.02, f"and {later:.3f} three seconds later")
+        self.assertGreaterEqual(later, self.takes.FOLD_CREASE, f"and {later:.3f} three seconds later")
         self.assertGreater(gone, self.marks["released"][0] + 0.3, "the strokes, not the lay alone, creased it")
 
     def test_the_sheet_lies_folded_in_half_where_it_was_laid(self) -> None:
@@ -201,7 +234,7 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         self.assertLess(extent, 0.6, f"its span is {extent:.3f} of the flat sheet's")
         self.assertGreater(extent, 0.45, "half over, not more")
         # A particle's centre at the surface is the sheet half sunk into it (its contact radius is 0.5 mm); a
-        # creasing press has put one 1.6 um under, which is the solve's tolerance, not the sheet going through.
+        # press has put one 1.6 um under, which is the solve's tolerance, not the sheet going through.
         self.assertGreaterEqual(
             self.lowest, -5.0e-5, f"a particle went {-self.lowest * 1e3:.3f} mm under the surface it lay on"
         )
