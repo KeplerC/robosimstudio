@@ -24,8 +24,8 @@ and [`02_soft`](../02_soft/README.md).
   `rss.BRUSH_60HZ`), and the module's docstring says why and what that costs.
 - **Tape**, `08` and `09`: [`tape.py`](../../robosimstudio_materials/tape.py) is
   `rss.tape`, a sheet stuck to a free body on the tape's solver (`rss.TAPE_60HZ`) by
-  bonds that let go. `rss.tapes.PAPER_LABEL`, `LABEL`, `MASKING_TAPE` and
-  `DUCT_TAPE` ship.
+  bonds that let go. `rss.tapes.PAPER_LABEL` is built stuck; `LABEL`,
+  `MASKING_TAPE` and `DUCT_TAPE` stick where they are pressed.
 - **Cutting**, `10`: [`cutting/`](../../robosimstudio_materials/cutting/__init__.py) is
   `rss.cuttable` and `rss.knife`, on a vendored walk-on-spheres cage cutter.
   `rss.cuttables.TOFU`, `CAKE` and `FOAM` ship.
