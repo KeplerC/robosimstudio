@@ -342,8 +342,12 @@ class PanelReadings(Panel):
         self._folder: Any = None
 
     def _cloth(self) -> Any:
-        deformables = {n: e for n, e in self.session.env.scene.by_name.items() if e.carries_particles}
-        return next(iter(deformables.values()), None) if deformables else None
+        """The first thing carrying a particle probe (``Sim.deformables``), or ``None``.
+
+        Not the first particle carrier: a cuttable's eight corners are a drawing of
+        its cage, and a footprint and a settle speed read off them describe nothing.
+        """
+        return next(iter(self.session.env.deformables().values()), None)
 
     def _read(self) -> list[Any]:
         entity = self._cloth()
@@ -436,12 +440,29 @@ class PanelReadings(Panel):
             entity = self._cloth()
             if entity is not None:
                 pipeline = self.session.env.pipeline
-                entity.settle(pipeline)
-                # The settle stepped the whole particle array, so every thing that
-                # shares it takes its baseline again, not only this cloth.
-                for thing in getattr(pipeline, "particle_settles", {}).get("things", [entity]):
+                things = getattr(pipeline, "particle_settles", {}).get("things", [entity])
+                # Every thing on the settle record that has a settle runs it, in the
+                # order they joined; a kind that does not settle -- a SuperDex rope,
+                # the cloth example's own ``MyCloth``: each joins the record without
+                # a run -- is re-baselined where it lies (asked to settle, it raised
+                # ``AttributeError`` out of the page loop). Settling the first thing
+                # alone skipped a towel or a sponge on the record behind a rope.
+                settled, lying = [], []
+                for thing in things:
+                    settle = getattr(thing, "settle", None)
+                    if callable(settle):
+                        settle(pipeline)
+                        settled.append(thing.name)
+                    else:
+                        lying.append(thing.name)
+                # The settles stepped the whole particle array, so every thing that
+                # shares it takes its baseline again, after the last of them.
+                for thing in things:
                     thing.snapshot_rest(pipeline)
-                self._note.value = "re-settled; baseline moved with it"
+                note = [f"re-settled {', '.join(settled)}"] if settled else []
+                if lying:
+                    note.append(f"re-baselined {', '.join(lying)} where {'it lies' if len(lying) == 1 else 'they lie'}")
+                self._note.value = "; ".join(note)
             self.refresh()
 
     def refresh(self) -> None:

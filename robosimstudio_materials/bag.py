@@ -16,12 +16,13 @@ import newton
 import numpy as np
 import warp as wp
 
+import robosimstudio.engines.superdex  # noqa: F401 -- registers the shell builder's keys (section 7), not the wheel
 from robosimstudio.assetlib.record import AssetRecord, SpecFactory
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomCalibration, AtomSpec, register_atom
 from robosimstudio.assetlib.semantics.handlers import handler
 from robosimstudio.assetlib.sim import contacts_with
 from robosimstudio.domains.capabilities import host_bridge
-from robosimstudio.engines.geometry import actor_geometry, register_actor_builder, register_actor_kind
+from robosimstudio.engines.geometry import actor_consumes, actor_geometry, register_actor_builder, register_actor_kind
 from robosimstudio.scene.registry import register_entity
 from robosimstudio.specs.arrangement import GENERIC, backend
 from robosimstudio.specs.base import Vec3
@@ -282,6 +283,7 @@ class EntityBag(EntityCloth):
         placed = self.placed((*spec.pose, *spec.quat))
         start = int(builder.particle_count)
         self.surface_count = len(vertices)
+        self.lumping = "mesh"
         builder.add_cloth_mesh(
             pos=wp.vec3(*[float(v) for v in placed[:3]]),
             rot=wp.quat(*[float(v) for v in placed[3:7]]),
@@ -316,11 +318,12 @@ class EntityBag(EntityCloth):
             "mass_damping": float(spec.mass_damping),
             "stiffness_damping": float(spec.stiffness_damping),
         }
+        # Under the shell's names, as cloth states them (``ClothMaterialSpec.actor_names``).
         if material.shell_young is not None:
-            params["shell_young"] = float(material.shell_young)
+            params["young"] = float(material.shell_young)
         if material.shell_poisson is not None:
-            params["shell_poisson"] = float(material.shell_poisson)
-        return HostActor(kind="bag", params=params)
+            params["poisson"] = float(material.shell_poisson)
+        return HostActor(kind="bag", params=params, lumping=self.lumping)
 
     def apply_model_materials(self, model: newton.Model) -> None:
         """Nothing: SuperDex reads the bag's contact off :meth:`host_actor`.
@@ -521,8 +524,9 @@ _BAG_SHELL = {
 }
 """What a bag is built with where its record says nothing: :data:`CANVAS`, colliding with itself, undamped."""
 
-_BAG_NAMES = {"shell_young": "young", "shell_poisson": "poisson"}
-"""The bag's params under its material's field names, as the composer checks a stated field, to the shell's keys."""
+_OLD_NAMES = {"shell_young": "young", "shell_poisson": "poisson"}
+"""The names a bag record stated its modulus under before it took the shell's, to the shell's: a record written
+then, which a repro bundle replays verbatim, still states the bag's own modulus."""
 
 
 def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None, tet_materials=None) -> dict:
@@ -531,11 +535,17 @@ def build_bag_actor(bridge: Any, record: dict, particle_q=None, tet_indices=None
     ``bridge.build_shell`` builds every sheet about its own centroid with the offset in the root
     transform (section 1), states contact (friction, falloff) and damping from the params, and
     reads the nodes back through the root, as ``place_actor`` writes them. What is the bag's own is
-    what it is built with where its record says nothing (:data:`CANVAS`, self-contact on) and the
-    names it states its modulus under: ``shell_young`` and ``shell_poisson``, its material's.
+    what it is built with where its record says nothing: :data:`CANVAS`, self-contact on. Its
+    modulus is the shell's ``young``/``poisson``, as a sheet's is.
     """
     del particle_q, tet_indices, tet_materials
-    params = {_BAG_NAMES.get(key, key): value for key, value in record.get("params", {}).items()}
+    # A record from before the bag stated the shell's names says ``shell_young``/``shell_poisson``
+    # (``_OLD_NAMES``): read as the shell's, or a replayed bag is built at the canvas's modulus, not the one
+    # it states. A shell name stated beside one wins.
+    params = dict(record.get("params", {}))
+    for old, new in _OLD_NAMES.items():
+        if old in params:
+            params.setdefault(new, params.pop(old))
     return bridge.build_shell({**record, "params": params}, defaults=_BAG_SHELL)
 
 
@@ -564,25 +574,9 @@ register_actor_builder(
     "superdex",
     "bag",
     build_bag_actor,
-    # The shell builder's keys, and the two the bag states its modulus under (``_BAG_NAMES``).
-    consumes=(
-        "areal_density",
-        "contact_padding",
-        "contact_penalty",
-        "contact_smoothing",
-        "contact_threshold",
-        "friction",
-        "friction_falloff",
-        "mass_damping",
-        "particle_radius",
-        "poisson",
-        "self_contact",
-        "shell_poisson",
-        "shell_young",
-        "stiffness_damping",
-        "thickness",
-        "young",
-    ),
+    # What the shell builder reads, off its own declaration: a key ``build_shell`` learns is the bag's too. And
+    # ``_OLD_NAMES``, which ``build_bag_actor`` reads as the shell's: a record stating them is not told they are unread.
+    consumes=(*actor_consumes("superdex", "shell"), *_OLD_NAMES),
     summary="SuperDex builds a bag as a self-colliding shell in its own frame.",
 )
 

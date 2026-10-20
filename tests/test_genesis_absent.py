@@ -37,11 +37,11 @@ class _Arr:
         return self._a
 
 
-def _model(particles, *, tris=(), shapes=()):
-    """A finalized model as both bridges read it before ``gs.init``: its particles, triangles and shapes.
+def _model(particles, *, tris=(), shapes=(), mass=0.0):
+    """A finalized model as both bridges read it before ``gs.init``: its particles and their masses, triangles, shapes.
 
     ``shapes`` are world-fixed ``(GeoType, half extents, transform)``; a mirror record ``{"shape": i, "body": -1}``
-    names the i-th.
+    names the i-th. ``mass`` [kg] is every particle's.
     """
     from types import SimpleNamespace
 
@@ -49,6 +49,7 @@ def _model(particles, *, tris=(), shapes=()):
     tris = np.asarray(tris, dtype=np.int64).reshape(-1, 3)
     return SimpleNamespace(
         particle_q=_Arr(np.asarray(particles, dtype=np.float32)),
+        particle_mass=_Arr(np.full(len(particles), mass, dtype=np.float32)),
         tri_count=len(tris),
         tri_indices=_Arr(tris.reshape(-1)),
         shape_type=_Arr([int(kind) for kind, _, _ in shapes]),
@@ -274,13 +275,18 @@ class TestALiquidIslandStatesItsSubsteps(unittest.TestCase):
 class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
     """``gs.init`` runs once a process: an IPC island refused after it still set float64 for every later island, and a
     water island built next stepped at 64 where it asked for 32, warned 8x slower (``g1_order.py``). Each refusal the
-    model and the recipe can make comes first; the mass check alone reads Genesis's own entity, and follows the build."""
+    model and the recipe can make comes first, the mass check among them: it reads what a sheet is handed, which
+    Genesis's built entity does not say (``g1_mass.py``)."""
 
     BENCH = (0.3, 0.65, 0.375), (0.6, 0.0, 0.375, 0.0, 0.0, 0.0, 1.0)
     """bench_075's top as a world-fixed box: half extents, and its pose, its top face at 0.75 m."""
 
-    def _open(self, kind: str = "shell", *, at: float = 0.76) -> None:
-        """A 100 mm sheet of four particles standing ``at`` over the bench's middle, its mirror the bench."""
+    WEIGHS = 0.003
+    """[kg]: the 100 mm sheet at the 0.3 kg/m^2 a shell record stating none is handed."""
+
+    def _open(self, kind: str = "shell", *, at: float = 0.76, weighs: float = WEIGHS, **params) -> None:
+        """A 100 mm sheet of four particles weighing ``weighs`` standing ``at`` over the bench's middle, its mirror the
+        bench, its record stating ``params``."""
         from unittest import mock
 
         from newton import GeoType
@@ -289,12 +295,9 @@ class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
         from robosimstudio.engines.genesis.solver import SolverGenesis
 
         sheet = [[0.55 + x, y, at] for y in (-0.05, 0.05) for x in (0.0, 0.1)]
-        model = _model(sheet, tris=[[0, 1, 2], [1, 3, 2]], shapes=[(GeoType.BOX, *self.BENCH)])
-        recipe = {
-            "island": "cloth",
-            "actors": [{"kind": kind, "name": "towel", "particle_start": 0, "particle_count": 4}],
-            "mirrors": [{"shape": 0, "body": -1}],
-        }
+        model = _model(sheet, tris=[[0, 1, 2], [1, 3, 2]], shapes=[(GeoType.BOX, *self.BENCH)], mass=weighs / 4)
+        actor = {"kind": kind, "name": "towel", "particle_start": 0, "particle_count": 4, "params": params}
+        recipe = {"island": "cloth", "actors": [actor], "mirrors": [{"shape": 0, "body": -1}]}
         with mock.patch.object(bridge, "ensure_initialized", side_effect=LookupError("asked for the engine")):
             SolverGenesis(model, recipe=recipe, substeps=2)
 
@@ -311,6 +314,215 @@ class TestAnIpcIslandIsRefusedBeforeTheEngineIsAskedFor(unittest.TestCase):
             self.assertIn(word, str(caught.exception))
         with self.assertRaisesRegex(LookupError, "asked for the engine"):
             self._open(at=0.76)
+
+    def test_a_sheet_genesis_would_weigh_twice_is_refused(self):
+        """A record stating 0.6 kg/m^2 over a sheet Newton built at 0.3: 6.0 g on Genesis to Newton's 3.0. Read off
+        the entity, the check found no mass on genesis-world 1.3.3 and the sheet reached the engine with a warning."""
+        with self.assertRaises(ValueError) as caught:
+            self._open(areal_density=0.6)
+        for word in ("'towel'", "6.0 g", "3.0 g", "ratio 2.000", "areal_density"):
+            self.assertIn(word, str(caught.exception))
+        with self.assertRaises(ValueError) as caught:
+            self._open(weighs=2.0 * self.WEIGHS)  # and a sheet stating none, which is handed 0.3
+        self.assertIn("ratio 0.500", str(caught.exception))
+
+    def test_a_sheet_inside_the_band_reaches_the_engine(self):
+        """The band is 10 % either way, for a factor rather than a figure: a sheet built as stated weighs the same."""
+        for weighs, params in ((self.WEIGHS, {}), (self.WEIGHS, {"areal_density": 0.3, "thickness": 0.004})):
+            with self.subTest(**params), self.assertRaisesRegex(LookupError, "asked for the engine"):
+                self._open(weighs=weighs, **params)
+        for weighs in (0.91 * self.WEIGHS, 1.09 * self.WEIGHS):
+            with self.subTest(weighs=weighs), self.assertRaisesRegex(LookupError, "asked for the engine"):
+                self._open(weighs=weighs)
+        for weighs in (0.89 * self.WEIGHS, 1.12 * self.WEIGHS):
+            with self.subTest(weighs=weighs), self.assertRaisesRegex(ValueError, "would weigh"):
+                self._open(weighs=weighs)
+
+
+class TestOnlyTheParticlesNewtonWeighsAreWeighed(unittest.TestCase):
+    """A held cloth's held particles and a pinned paper's pinned ones are massless on Newton, its kinematic particle,
+    and Genesis is handed the whole sheet. Weighed whole against Newton's sum, a 200 mm towel held by one edge row of
+    its 121 particles read 1.100 and a 120 x 130 mm board pinned by two of its 14 rows 1.167, and both were refused
+    blaming a correct record (``r1_probe.py``). Built here by their own entities on a CPU model, no scene."""
+
+    def _open(self, model, record: dict) -> None:
+        from unittest import mock
+
+        from robosimstudio.engines.genesis import bridge
+        from robosimstudio.engines.genesis.solver import SolverGenesis
+
+        recipe = {"island": "cloth", "actors": [record], "mirrors": []}
+        with mock.patch.object(bridge, "ensure_initialized", side_effect=LookupError("asked for the engine")):
+            SolverGenesis(model, recipe=recipe, substeps=2)
+
+    def _built(self, spec, *, holder: bool = False):
+        """``spec`` built by its entity, bound and its materials applied as a compile applies them, and its record."""
+        import newton
+
+        import robosimstudio as rss
+        from robosimstudio.scene.registry import resolve_entity_class
+
+        entity = resolve_entity_class(spec, rss.GENERIC)(spec)
+        builder = newton.ModelBuilder()
+        if holder:
+            builder.add_body(label="holder")
+        entity.build_into(builder, None)
+        model = builder.finalize(device="cpu")
+        entity.bind(model)
+        entity.apply_model_materials(model)
+        particles = entity.owned_particles()
+        record = entity.host_actor().record(
+            name=spec.name, particle_start=int(min(particles)), particle_count=len(particles)
+        )
+        return model, record
+
+    def test_a_held_cloth_and_a_pinned_paper_reach_the_engine(self):
+        """Their records state what Newton built them at; a record stating twice or half is still refused."""
+        import robosimstudio as rss
+
+        held = rss.sheet(
+            name="towel",
+            size=(0.2, 0.2),
+            cells=(10, 10),
+            held_by="holder",
+            particle_sets=(("held", lambda rest: rest[:, 1] > rest[:, 1].max() - 0.012),),
+        )
+        paper = rss.paper(name="flap", size=(0.12, 0.13), cells=(12, 13), material=rss.papers.CARDBOARD)
+        pinned = rss.replace(
+            paper, particle_sets=(("bound", lambda rest: rest[:, 1] <= rest[:, 1].min() + 0.018),), pinned="bound"
+        )
+        for spec, holder, massless, factor in ((held, True, 11, 2.0), (pinned, False, 26, 0.5)):
+            with self.subTest(spec.name):
+                model, record = self._built(spec, holder=holder)
+                count = record["particle_count"]
+                self.assertEqual("grid", record["lumping"], "add_cloth_grid built it, and its record says so")
+                self.assertEqual(massless, int((model.particle_mass.numpy() == 0.0).sum()), "massless, as built")
+                with self.assertRaisesRegex(LookupError, "asked for the engine"):
+                    self._open(model, record)
+                params = {**record["params"], "areal_density": factor * record["params"]["areal_density"]}
+                with self.assertRaises(ValueError) as caught:
+                    self._open(model, {**record, "params": params})
+                for word in (f"ratio {factor:.3f}", f"over the {count - massless} of its {count} particles"):
+                    self.assertIn(word, str(caught.exception))
+
+    def test_a_mesh_sheets_massless_corner_is_weighed_by_the_area_newton_gives_it(self):
+        """``add_cloth_mesh`` masses a particle by a third of its triangles' area, ``add_cloth_grid`` every one alike.
+        A strip whose last cell is 17 times the others', its far edge massless: 8 of its 10 particles, and 57.5 % of
+        its area by Newton's lumping. Counted alike, Genesis's share read 1.391 of Newton's mass, refused."""
+        import newton
+        import warp as wp
+
+        xs, ys = (0.0, 0.01, 0.02, 0.03, 0.2), (0.0, 0.1)
+        vertices = [wp.vec3(x, y, 0.0) for y in ys for x in xs]
+        quads = [(i, i + 1, i + 6, i + 5) for i in range(4)]
+        faces = [v for a, b, c, d in quads for v in (a, b, c, a, c, d)]
+        builder = newton.ModelBuilder()
+        builder.add_cloth_mesh(
+            pos=wp.vec3(0.0), rot=wp.quat_identity(), scale=1.0, vel=wp.vec3(0.0), vertices=vertices, indices=faces,
+            density=0.3,
+        )  # fmt: skip
+        model = builder.finalize(device="cpu")
+        mass = model.particle_mass.numpy()
+        mass[[4, 9]] = 0.0  # the far edge, as a held or pinned set is left
+        model.particle_mass.assign(mass)
+        record = {"kind": "shell", "name": "strip", "particle_start": 0, "particle_count": 10, "lumping": "mesh"}
+        for areal, raises in ((0.3, LookupError), (0.6, ValueError)):
+            with self.subTest(areal_density=areal), self.assertRaises(raises):
+                self._open(model, {**record, "params": {"areal_density": areal}})
+
+    RIM = 40
+    """Of an 11 x 11 sheet's 121 particles, the ones on its edge: what a hand round it or a pin along it leaves massless."""
+
+    @staticmethod
+    def _rim(rest) -> np.ndarray:
+        """The particles on a square sheet's edge."""
+        x, y = rest[:, 0], rest[:, 1]
+        edge = 1.0e-6
+        return (x < x.min() + edge) | (x > x.max() - edge) | (y < y.min() + edge) | (y > y.max() - edge)
+
+    @staticmethod
+    def _regular(n: int = 11, side: float = 0.2) -> tuple[np.ndarray, np.ndarray]:
+        """An ``n`` x ``n`` regular mesh ``side`` [m] square: its vertices, and two triangles to a cell."""
+        ticks = np.linspace(0.0, side, n)
+        vertices = np.array([[x, y, 0.0] for y in ticks for x in ticks])
+        cells = [(a, a + 1, a + n + 1, a + n) for a in (j * n + i for j in range(n - 1) for i in range(n - 1))]
+        return vertices, np.array([t for a, b, c, d in cells for t in ((a, b, c), (a, c, d))], dtype=np.int64)
+
+    def test_a_regular_mesh_held_round_its_rim_is_weighed_by_the_area_newton_gives_it(self):
+        """An 11 x 11 ``add_cloth_mesh`` sheet at 0.3 kg/m^2, its rim massless: its 81 weighed particles weigh alike, as
+        a grid's do, and hold 81 of its 100 cells. Told apart by whether they weigh alike, it was counted as a grid,
+        81/121 of its area, and a record stating 0.3 read 0.826, refused. Its record says how it was massed: read
+        that way it reaches the engine, read as a grid it is refused at the same 0.826, and saying nothing it is not
+        weighed at all."""
+        import newton
+        import warp as wp
+
+        vertices, faces = self._regular()
+        builder = newton.ModelBuilder()
+        builder.add_cloth_mesh(
+            pos=wp.vec3(0.0), rot=wp.quat_identity(), scale=1.0, vel=wp.vec3(0.0),
+            vertices=[wp.vec3(*v) for v in vertices], indices=faces.reshape(-1).tolist(), density=0.3,
+        )  # fmt: skip
+        model = builder.finalize(device="cpu")
+        mass = model.particle_mass.numpy()
+        mass[self._rim(vertices)] = 0.0
+        model.particle_mass.assign(mass)
+        weighed = mass[mass > 0.0]
+        self.assertEqual((121 - self.RIM, True), (len(weighed), bool(np.allclose(weighed, weighed[0]))), "alike")
+        record = {"kind": "shell", "name": "sheet", "particle_start": 0, "particle_count": 121}
+        mesh = {**record, "lumping": "mesh"}
+        with self.assertRaisesRegex(LookupError, "asked for the engine"):
+            self._open(model, {**mesh, "params": {"areal_density": 0.3}})
+        with self.assertRaisesRegex(ValueError, "ratio 2.000"):
+            self._open(model, {**mesh, "params": {"areal_density": 0.6}})
+        with self.assertRaisesRegex(ValueError, "ratio 0.826"):
+            self._open(model, {**record, "lumping": "grid", "params": {"areal_density": 0.3}})
+        with self.assertLogs("robosimstudio.engines.genesis.bridge", "DEBUG") as said:
+            with self.assertRaisesRegex(LookupError, "asked for the engine"):
+                self._open(model, {**record, "params": {"areal_density": 0.6}})
+        self.assertIn("not weighed", "\n".join(said.output))
+
+    def test_a_mesh_sheet_held_round_its_rim_says_how_it_was_massed(self):
+        """``rss.sheet(mesh="mesh")`` over a regular mesh, held round its rim: built by its entity, its record says
+        ``add_cloth_mesh`` massed it, so a record of its built density reaches the engine and one of twice is refused."""
+        import tempfile
+        from pathlib import Path
+
+        import trimesh
+
+        import robosimstudio as rss
+
+        vertices, faces = self._regular()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sheet.obj"
+            trimesh.Trimesh(vertices=vertices, faces=faces, process=False).export(path)
+            spec = rss.sheet(
+                name="towel",
+                mesh="mesh",
+                asset=rss.AssetSpec(path=str(path)),
+                held_by="holder",
+                particle_sets=(("held", self._rim),),
+            )
+            model, record = self._built(spec, holder=True)
+        self.assertEqual("mesh", record["lumping"])
+        self.assertEqual(self.RIM, int((model.particle_mass.numpy() == 0.0).sum()), "massless, as built")
+        with self.assertRaisesRegex(LookupError, "asked for the engine"):
+            self._open(model, record)
+        params = {**record["params"], "areal_density": 2.0 * record["params"]["areal_density"]}
+        with self.assertRaisesRegex(ValueError, "ratio 2.000"):
+            self._open(model, {**record, "params": params})
+
+    def test_weighed_particles_holding_no_area_are_refused_by_name(self):
+        """Newton weighs only two particles of the range, on no triangle of it, at two masses: the area they hold is
+        0, and the refusal divided by it, a ZeroDivisionError for the ValueError meant."""
+        corners = [[0.0, 0, 0.1], [0.1, 0, 0.1], [0.0, 0.1, 0.1], [0.1, 0.1, 0.1]]
+        model = _model([*corners, [0.3, 0, 0.1], [0.4, 0, 0.1]], tris=[[0, 1, 2], [1, 3, 2]])
+        model.particle_mass = _Arr(np.array([0.0, 0.0, 0.0, 0.0, 1.0e-3, 2.0e-3], dtype=np.float32))
+        record = {"kind": "shell", "name": "strip", "particle_start": 0, "particle_count": 6, "lumping": "mesh"}
+        with self.assertRaises(ValueError) as caught:
+            self._open(model, {**record, "params": {"areal_density": 0.3}})
+        for word in ("'strip'", "over the 2 of its 6 particles", "hold none of its triangles' area"):
+            self.assertIn(word, str(caught.exception))
 
 
 class TestTheLongestSubstepIsTheMaterials(unittest.TestCase):

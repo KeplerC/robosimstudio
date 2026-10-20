@@ -362,6 +362,18 @@ class TestTheTakesAimWhereTheirExampleLaysThings(unittest.TestCase):
         path = [("x", 0.045), ("z", 0.12), ("x", 0.097), ("z", 0.135), ("x", -0.01), ("x", -0.13)]
         self.assertEqual(path, _drags("03_materials/04_band", pegs))
 
+    def test_a_thing_put_at_a_point_with_no_height_is_refused_by_name(self) -> None:
+        """``rss.sheet(at=(x, y))`` builds on the void cell; ``laid`` handed the take ``(x, y)``, and its unpack raised."""
+        from recording.beats import Laid, laid
+
+        film = _laid_film({"sheet": SimpleNamespace(pose=(0.05, 0.0), quat=(0.0, 0.0, 0.0, 1.0))})
+        for read in (lambda: laid(film, "sheet"), lambda: Laid("sheet", dz=0.03).resolve(film)):
+            with self.assertRaises(ValueError) as caught:
+                read()
+            for word in ("'sheet'", "(0.05, 0.0)", "pose", "no height"):
+                self.assertIn(word, str(caught.exception))
+        self.assertEqual((0.05, 0.0, 0.0), laid(_laid_film({"sheet": SimpleNamespace(pose=(0.05, 0.0, 0.0))}), "sheet"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -94,9 +94,9 @@ def register_attachment(registry, env, bus: Bus) -> ClothAttachment | None:
     tool that raises the first time a graph believes the registry.
 
     Returns the attachment so a suite registering further tools can share it,
-    or ``None`` when the scene has no deformables.
+    or ``None`` when the scene has no deformables (:func:`_deformables`).
     """
-    if not any(getattr(e, "carries_particles", False) for e in getattr(env.scene, "by_name", {}).values()):
+    if not _deformables(env):
         return None
     attachment = ClothAttachment(env, bus)
     registry.register_callable(
@@ -112,6 +112,18 @@ def register_attachment(registry, env, bus: Bus) -> ClothAttachment | None:
         tags=("privileged",),
     )
     return attachment
+
+
+def _deformables(env) -> dict[str, Any]:
+    """The scene's things carrying a particle probe, by name: what ``Sim.deformables`` answers.
+
+    Not every particle carrier: a cuttable owns eight particles, the corners its cage
+    writes back for a page to draw the cut by, with no probe to summarise them and
+    nothing a pin on them moves, and picked first, ``get_particle_state`` raised
+    ``AttributeError`` on its ``.probe``. Asked of the scene rather than of ``env``,
+    which may be one world of a fleet (a ``WorldView``, with no ``deformables``).
+    """
+    return {n: e for n, e in getattr(env.scene, "by_name", {}).items() if getattr(e, "probe", None) is not None}
 
 
 def register_vacuum(registry, env, bus: Bus) -> Vacuum | None:
@@ -488,7 +500,7 @@ class SimTools:
         }
 
     def get_particle_state(self, cloth: str = "", particle_set: str = "") -> dict[str, Any]:
-        deformables = {n: e for n, e in self.env.scene.by_name.items() if e.carries_particles}
+        deformables = _deformables(self.env)
         if not deformables:
             raise ToolRefusal("this scene has no deformables")
         name = cloth or next(iter(deformables))
