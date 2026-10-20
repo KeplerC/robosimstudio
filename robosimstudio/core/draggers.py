@@ -375,7 +375,7 @@ class ParticleDragger:
         scripted grasp say how far off it was rather than merely that it failed.
         """
         self.grabbed_indices = np.zeros(0, dtype=np.int32)
-        """Which particles are held, for evaluators asking whether a grasp latched."""
+        """Which particles are held, as rows of the state :meth:`apply` pins, for evaluators asking whether a grasp latched."""
 
     @property
     def is_pin(self) -> bool:
@@ -397,6 +397,7 @@ class ParticleDragger:
         *,
         candidates: Sequence[int] | None = None,
         fallback_nearest: bool = True,
+        first_row: int = 0,
     ) -> int:
         """Seize the particles near ``position`` and hold them in that frame.
 
@@ -413,6 +414,12 @@ class ParticleDragger:
                 aim was. A scripted routine should pass ``False`` and treat a
                 miss as a failed grasp rather than dragging a strip off from
                 centimetres away.
+            first_row: The row that ``state``'s particle 0 is in the state
+                :meth:`apply` is handed. 0 when both are one model's; one world's
+                stride in when ``state`` is a fleet world's slice (a
+                ``WorldView``'s), whose indices are the template's: the grab reads
+                that world's particles, and without the offset pinned world 0's
+                at the same indices.
 
         Returns:
             How many particles were taken; 0 is a miss, not an error.
@@ -439,6 +446,7 @@ class ParticleDragger:
 
         # Offsets in the grip frame, so the patch keeps its shape as it moves.
         offsets = (q[idx] - pos) @ quat_to_mat(quat_xyzw)
+        idx = idx + int(first_row)
 
         padded_idx = np.zeros(self.max_particles, dtype=np.int32)
         padded_off = np.zeros((self.max_particles, 3), dtype=np.float32)

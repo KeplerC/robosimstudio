@@ -40,6 +40,9 @@ import types
 import unittest
 import unittest.mock
 
+import numpy as np
+
+from robosimstudio.core.worlds import WorldMap
 from robosimstudio.sim import Sim
 from robosimstudio_policy_agent.sim_tools import ClothAttachment, SimTools, ToolRefusal, register_attachment
 
@@ -128,6 +131,75 @@ class TestOneWorldOfAFleetReadsItsOwnParticles(unittest.TestCase):
 
     def test_an_env_with_no_world_reads_world_zero(self) -> None:
         self.assertEqual(0.10, SimTools(_env(deformables=True), _Bus()).get_particle_state()["z_min"])
+
+
+class TestOneWorldOfAFleetHoldsItsOwnParticles(unittest.TestCase):
+    """``sim.attach`` on world 1 of a fleet pins world 1's particles, and world 0's do not move.
+
+    The candidates are the template's indices. ``WorldView.state`` slices world 1's particles out
+    for the grab to read, so they find world 1's sheet; the pin then runs on the fleet's whole
+    state, where those indices are world 0's rows. On a real two-world granular wave
+    ``attach("rice")`` on world 1 seized eight rows under the 16000-particle stride and moved world
+    0's rice 13 mm toward world 1's hand in one step.
+
+    A real ``WorldView`` and a real pinning dragger on the CPU, over two worlds of four particles
+    that share space, as a wave's worlds do: world 1's sheet sits 50 mm over world 0's.
+    """
+
+    PER_WORLD = 4
+
+    def setUp(self) -> None:
+        import warp as wp
+
+        from robosimstudio_bench.envs.world_view import WorldView
+
+        sheet = np.array([[0.0, 0.0, 0.10], [0.01, 0.0, 0.10], [0.0, 0.01, 0.10], [0.01, 0.01, 0.10]])
+        rows = np.concatenate([sheet, sheet + np.array([0.0, 0.0, 0.05])]).astype(np.float32)
+        self.state = types.SimpleNamespace(
+            particle_q=wp.array(rows, dtype=wp.vec3, device="cpu"),
+            particle_qd=wp.zeros(len(rows), dtype=wp.vec3, device="cpu"),
+        )
+        self.hand = [(0.005, 0.005, 0.155), (0.0, 0.0, 0.0, 1.0)]  # over world 1's sheet, 5 mm up
+        ik = types.SimpleNamespace(ee_pose=lambda _state: (self.hand[0], self.hand[1]))
+        towel = types.SimpleNamespace(carries_particles=True, probe=object(), particles=list(range(self.PER_WORLD)))
+        handles = types.SimpleNamespace(arms={"left": object()}, work_arm="left")
+        self.fleet = types.SimpleNamespace(
+            model=types.SimpleNamespace(device="cpu"),
+            pipeline=types.SimpleNamespace(
+                state_0=self.state, hooks=types.SimpleNamespace(post_solve=[]), invalidate_graph=lambda: None
+            ),
+            scene=types.SimpleNamespace(by_name={"towel": towel}, embodiment=types.SimpleNamespace(iks={"left": ik})),
+            worlds=WorldMap(2, 0, 0, 0, 0, 0, self.PER_WORLD),
+            handles_for=lambda _world: handles,
+        )
+        self.view = WorldView(self.fleet, 1)
+        self.before = rows.copy()
+
+    def _attach(self) -> tuple[dict, ClothAttachment]:
+        attachment = ClothAttachment(self.view, _Bus())
+        return attachment.attach("towel", radius=0.02, max_particles=8), attachment
+
+    def test_it_seizes_world_ones_rows(self) -> None:
+        result, attachment = self._attach()
+        self.assertTrue(result["attached"])
+        held = attachment.draggers["left"].grabbed_indices.tolist()
+        self.assertEqual(self.PER_WORLD, len(held))
+        self.assertTrue(all(self.PER_WORLD <= row < 2 * self.PER_WORLD for row in held), f"world 0's rows {held}")
+
+    def test_world_zero_does_not_move_and_world_one_follows_the_hand(self) -> None:
+        _result, attachment = self._attach()
+        self.hand[0] = (0.005, 0.005, 0.165)  # the hand lifts 10 mm
+        for hook in list(self.view.post_step_hooks):
+            hook(self.view)
+        for _ in range(40):  # 0.5 mm a substep at most, so 20 substeps carry the 10 mm
+            for apply in self.fleet.pipeline.hooks.post_solve:
+                apply(self.state, 1.0 / 600.0)
+        after = self.state.particle_q.numpy()
+        np.testing.assert_array_equal(self.before[: self.PER_WORLD], after[: self.PER_WORLD], "world 0's sheet moved")
+        lift = after[self.PER_WORLD :, 2] - self.before[self.PER_WORLD :, 2]
+        np.testing.assert_allclose(lift, 0.010, atol=1e-5, err_msg="world 1's sheet did not ride the hand")
+        attachment.detach()
+        self.assertFalse(attachment.draggers["left"].active)
 
 
 class TestAnUnknownDeformableIsRefused(unittest.TestCase):

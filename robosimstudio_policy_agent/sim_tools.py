@@ -156,6 +156,19 @@ def _probe(entity, env) -> Any:
     return probe_for(int(getattr(env, "world", 0) or 0)) if callable(probe_for) else entity.probe
 
 
+def _first_particle_row(env) -> int:
+    """The model row of particle 0 of the world ``env`` is: 0 for an ``Env``, world ``w``'s first on a fleet's ``WorldView``.
+
+    The world is :func:`_probe`'s, the view's ``world``. A view's ``state.particle_q`` is its own
+    world's slice, indexed like the template, so a deformable's template indices read that world's
+    particles out of it; a pin runs on the fleet's whole state, where the same indices are world
+    0's rows. ``sim.attach`` on world 1 of a two-world granular wave seized eight of world 0's rice
+    grains and moved them 13 mm toward world 1's hand in one step.
+    """
+    world = int(getattr(env, "world", 0) or 0)
+    return env.fleet.worlds.particle(0, world) if world else 0
+
+
 def register_vacuum(registry, env, bus: Bus) -> Vacuum | None:
     """Register ``sim.vacuum``, if the robot carries a suction hand.
 
@@ -1096,7 +1109,16 @@ class ClothAttachment:
             self._sets[arm_name] = str(feature)
             candidates = body.set_indices(feature) if feature else body.particles
             position, quat = env.arm(arm_name).ee_pose(env.state)
-            seized = int(dragger.grab(env.state, position, quat, candidates=candidates, fallback_nearest=False))
+            seized = int(
+                dragger.grab(
+                    env.state,
+                    position,
+                    quat,
+                    candidates=candidates,
+                    fallback_nearest=False,
+                    first_row=_first_particle_row(env),
+                )
+            )
             return {
                 "attached": bool(seized),
                 "n_grabbed": seized,
