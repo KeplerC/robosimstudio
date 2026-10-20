@@ -161,9 +161,11 @@ class TestStagingSubSections(unittest.TestCase):
         """``(:effort-limit 12)`` is ``ActuationSpec.effort_limit``, and the scored tape page states its material page's 12 N.
 
         Before the clause existed the scored document could not say it: ``_pairs`` refused the key, and
-        its fingers kept the YAM import's 1e6 N where ``03_materials/08_tape`` caps them at 12 N. Neither
-        peel reaches the cap (5.8 N through it, ``g2_grip.py``), so this makes the two pages one drive
-        by construction; it does not move the drive.
+        its fingers kept the YAM import's 1e6 N where ``03_materials/08_tape`` caps them at 12 N. Close's
+        first push reaches the cap: 1500 times the 47.5 mm to go is about 71 N uncapped against 12 N
+        capped, and the finger travels 4.1 mm against 1.9 mm in that first step; the hold after it is
+        about 5.8 N on both pages (``g2_close.py``). So the clause is what makes the scored page close
+        the way its material page does.
         """
         import importlib.util
         from pathlib import Path
