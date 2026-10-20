@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: Apache-2.0 AND MIT
 """Tape and labels in one file: a sheet stuck to a body by bonds that let go, with a pull tab.
 
 This file is what ``rss.tape`` builds, imported as ``robosimstudio_materials.tape``. It is cloth
@@ -81,7 +81,7 @@ __all__ = [
 #
 # Contact adhesion (:attr:`TapeMaterialSpec.adhesion` ``"contact"``, :data:`LABEL` and the presets after
 # it). A bond forms where the sheet is pressed onto the body and holds by ipc-toolkit's adhesion law
-# (Fang, Li et al., TVCG 2023; section 4), so a loose label sticks only where a hand presses it.
+# (Fang, Li et al., IEEE TVCG 2024; ported in section 4), so a loose label sticks only where a hand presses it.
 # ipc-toolkit adds its potentials to an implicit solve. Added instead as forces on ``particle_f``
 # before the solve, the ``pre_solve`` phase of ``core/schedule.py``, with the reaction on the body's
 # ``body_f``, they cannot work here: SolverVBD folds ``particle_f`` into the step's predicted velocity,
@@ -560,10 +560,12 @@ def _break_kernel(
         enabled_model[rows[i]] = False
 
 
-# Contact adhesion. The force law is ipc-toolkit's (v1.6.0, MIT, Copyright (c) 2020-2025 Zachary
-# Ferguson; Fang, Li et al., "Augmented Incremental Potential Contact for Sticky Interactions", TVCG
-# 2023): ``src/ipc/adhesion/adhesion.cpp`` and the argument shift in
-# ``src/ipc/potentials/normal_adhesion_potential.cpp``, written below as warp functions. ipc-toolkit
+# Contact adhesion. The force law is ipc-toolkit's (https://github.com/ipc-sim/ipc-toolkit, v1.6.0;
+# Fang, Li et al., "Augmented Incremental Potential Contact for Sticky Interactions", IEEE TVCG 30(8),
+# 2024, doi:10.1109/TVCG.2023.3295656): ``src/ipc/adhesion/adhesion.cpp`` and the argument shift in
+# ``src/ipc/potentials/normal_adhesion_potential.cpp``, translated below into warp functions and, on the
+# host, into :func:`contact_stiffness`. That code is ipc-toolkit's under the MIT License, Copyright (c)
+# 2020-2025 Zachary Ferguson; its licence is in ``robosimstudio_materials/LICENSE.ipc-toolkit``. ipc-toolkit
 # evaluates its potential on the squared distance less ``dmin^2``; the pull here is that potential's
 # derivative along the distance itself, so it peaks at ``strength`` (``Y * eps_c``) per unit area when
 # the gap reaches ``peak``, and is zero at contact and past ``reach``. Section 1 says how it is applied.

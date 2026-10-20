@@ -55,8 +55,13 @@ __all__ = [
 # fold springs back. Paper moves it: after every solve a kernel reads the current angle of each
 # hinge of this sheet and, where it has gone further than :attr:`PaperMaterialSpec.yield_angle`
 # past the rest angle, carries the rest angle toward it. That is the perfectly plastic hinge of
-# the folding literature (Narain et al. 2013, "Folding and crumpling adaptive sheets"): below the
-# yield the sheet is elastic, above it the excess bend is kept. VBD reads ``edge_rest_angle``
+# the folding literature, after the bending yield of Narain, Pfaff and O'Brien ("Folding and
+# Crumpling Adaptive Sheets", ACM Trans. Graph. 32(4), SIGGRAPH 2013, doi:10.1145/2461912.2462010):
+# below the yield the sheet is elastic, above it the excess bend is kept. Their yield acts on each
+# face's bending strain against a yield curvature [1/m], and they also soften a face's bending
+# stiffness as its damage grows; here the yield is an angle [rad] on each hinge's rest angle, and
+# nothing softens. Their rule keeps all of the excess (``plastic_rate`` 1) and never relaxes; a
+# ``plastic_rate`` below 1 and ``plastic_recovery`` are this file's. VBD reads ``edge_rest_angle``
 # from the model on every launch (``solver_vbd.py`` passes ``self.model.edge_rest_angle`` to its
 # bending kernels; verified at 1.6.0 by writing the array on a built scene and watching the sheet
 # move), so the write takes effect on the next substep, inside a captured graph too.

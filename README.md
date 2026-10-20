@@ -33,7 +33,11 @@ on [viser](https://github.com/viser-project/viser). It draws on
 [LeRobot](https://github.com/huggingface/lerobot). Robot models come from
 [i2rt](https://github.com/i2rt-robotics/i2rt) and
 [robosuite](https://github.com/ARISE-Initiative/robosuite); see `NOTICE`.
-Thanks to their authors.
+The cutting kind vendors the cage cutter of
+[Fast Cutting of Cage Based Deformation with Walk on Spheres](https://github.com/hoskillua/wos_cutting_siggraph26)
+(Saeed et al., SIGGRAPH 2026), and the tape ports the adhesion law of the
+[IPC Toolkit](https://github.com/ipc-sim/ipc-toolkit) (Fang, Li et al., IEEE
+TVCG 2024). Thanks to their authors.
 
 ## Citation
 
