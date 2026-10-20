@@ -395,20 +395,27 @@ def _install_environment_cell_lookup() -> bool:
     Standing down is said, by name, when it may leave a fault in place: one of
     the two lines there without the other (the lookup changed around it), or
     neither found on a Warp the workaround was written for (:data:`_FAULTY_WARPS`).
-    A later Warp with neither line has fixed both, and is quiet.
+    A later Warp with neither line has fixed both, and is quiet. A source that
+    cannot be read says so on any Warp, since nothing then says which it is.
     """
     import warnings
 
+    version = str(wp.config.version)
+    where = "Warp's Nanogrid environment cell lookup (warp.fem NanogridBase.make_filtered_cell_lookup)"
     try:
         source = inspect.getsource(_WARP_CELL_LOOKUP)
-    except (OSError, TypeError):
-        source = ""
+    except (OSError, TypeError) as exc:
+        warnings.warn(
+            f"Warp {version}: the source of {where} cannot be read ({exc}), so whether it has the rounding faults "
+            "robosimstudio corrects there is unknown; the correction is not installed, and separate MPM worlds bin "
+            "their particles through Warp's own lookup",
+            stacklevel=2,
+        )
+        return False
     found = [line in source for line in _FAULTY_LINES]
     if all(found):
         fem.Nanogrid.make_filtered_cell_lookup = _environment_cell_lookup
         return True
-    version = str(wp.config.version)
-    where = "Warp's Nanogrid environment cell lookup (warp.fem NanogridBase.make_filtered_cell_lookup)"
     if any(found):
         kept, gone = _FAULTY_LINES if found[0] else _FAULTY_LINES[::-1]
         warnings.warn(
