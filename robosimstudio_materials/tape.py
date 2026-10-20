@@ -1642,7 +1642,9 @@ class EntityTape(EntityCloth):
         as a reset left it while the radius was held per bond, the row started 1 mm inside the contact and
         was thrown 2.3 mm past it by the eighth (``f6_probe.py``, VBD on the CPU).
         """
-        radii = None if self._model is None else self._radii_now()  # once, for the sheet, the bonds and their laying
+        # Once, for the sheet, the bonds and their laying; not at all for a loose sheet, laid at no radius,
+        # whose change is all 0 without it (:meth:`_radius_change`).
+        radii = None if self._model is None or not len(self.lift_shapes) else self._radii_now()
         moved, change = self.margin_moved(), self._radius_change(radii)
         lifts = (moved + change[self.particles - self._start].astype(np.float64))[:, None]
         lifts[np.isin(self.particles, self.clamp_particles)] = moved
