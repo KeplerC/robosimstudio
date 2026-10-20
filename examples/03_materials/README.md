@@ -148,9 +148,9 @@ Bring each hand in along the edge of the A4 sheet that runs past the box, from i
 
 In 8 drives of the take's path (`probe2.py`, GPUs 3 and 5) the arms, which collide, came no closer than 79.3 mm
 and kept 9.0 mm on their own sides; each hand turned 88.2 degrees holding the edge, its pads 5.0 mm apart at most,
-and a finger pushed 7.4 N holding and 13.1 N pressing (95th percentile), over 15 N for a step at a touch in 3. The
-edges ended 2.4 mm apart on average (6.0 at the worst corner) and the fold kept 2.89 to 2.90 rad once the hands had
-gone, unchanged 3 s later, `fold_extent` 0.50. The **Crease** folder reads `crease_angle`.
+and a finger pushed 7.4 N holding and 13.1 N pressing (95th percentile), but over 15 N for a step in 3: 15.6 to 17.2
+at a touch, 67.9 once as an open hand slid off the fallen edge. The edges ended 2.4 mm apart (6.0 at the worst
+corner) and the fold kept 2.89 to 2.90 rad once the hands had gone, unchanged 3 s later, `fold_extent` 0.50.
 
 ```bash
 uv run examples/03_materials/05_paper.py
