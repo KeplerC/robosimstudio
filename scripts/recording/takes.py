@@ -1515,75 +1515,189 @@ ROBOT_TAPE = (
 # =============================================================================
 # Newton 1.7's VBD reports the force each rigid-soft contact puts on its shape, which the one-way
 # coupler reads with ``contact_forces``. The fold is carried by contact alone; the scrub's readout
-# is that force. tests/test_fold_paper_robot.py and tests/test_scrub_a_stain.py drive the same paths.
+# is that force. tests/test_fold_paper_robot.py plays the fold's beats below headless, and
+# tests/test_scrub_a_stain.py drives the scrub's path.
 
 FOLD = "examples/03_materials/05_paper.py"
 
+FOLD_OPEN = 0.79
+"""The **Grip amount** the hands come in with: the pads 20 mm apart, the lower one clear of the bench."""
+FOLD_GRIP = 0.986
+"""The **Grip amount** that pinches the sheet: the pads stop 2.1 mm apart, the grip nubs 0.9 mm, on a
+sheet whose contact thickness is 1.0 mm. **Close** (1.0) takes the pads to 0.8 mm and crushes it."""
+FOLD_HANDS = 0.025
+"""How far in from each corner the pads' middle closes [m]: the fingertips stay 70 mm apart."""
+FOLD_GROW = 0.009
+"""The carry's arc starts at the pinch and ends 18 mm further out than a circle about the fold line [m]:
+on the circle the sheet bent one hinge column (10.6 mm) short of its middle and the edges missed by
+21 to 25 mm; grown 6 to 12 mm, the bend lands on the middle column (``fold_b.py``)."""
+FOLD_TURN = 88.0
+"""How far each hand turns over the carry [deg], about the fold line: with the flap to nearly vertical, then
+held. 90 here turned the hands 90.5 to 90.6 degrees, the servo's overshoot."""
+FOLD_PRESS = 0.0035
+"""How high the closed fingertip runs over the box top along the fold [m]: on the flap, 2 mm over the sheet
+under it. At 3 mm one particle went 0.03 mm under the box's top."""
+FOLD_SWEEP = (20.0, 30.0)
+"""The sweeping hand's tool: tipped 20 degrees forward and 30 toward the sheet's middle, trailing the
+stroke. Straight down, neither arm reaches the fold line at the box's height (13 to 48 mm short)."""
 
-def _sheet(film) -> dict:
-    """Where the fold works on the sheet as ``03_materials/05_paper`` lays it, bench frame [m], off its spec.
 
-    The example lays the A4 sheet's near corner at (-55, -435) mm, 35 mm past the bench's right
-    edge. ``edge`` is its near edge; ``crease`` the fold line a third of the way along its 297 mm,
-    where the example reads the fold; ``pinch`` where the jaws' middle closes on the overhang, 35 mm
-    in from the corner and 13.5 in from the edge; ``short`` the x the jaws come in from, 60 mm short
-    of the corner; ``hold`` where the left hand holds the far end down, across the sheet's middle
-    and 35 mm in from its far edge; ``stamps`` the x of the left hand's three stamps, 55 mm apart
-    from 55 mm in. The offsets are tests/test_fold_paper_robot's.
+def _frame_quat(approach, close):
+    """The tool's quaternion (x, y, z, w) with its +z along ``approach`` and its pads parting along ``close``.
+
+    In the frame the arm panel's IK aims (the YAM's): the pads part along local y and the finger blades
+    run back along local -x from them.
+    """
+    import numpy as np
+
+    from robosimstudio.core.math import mat_to_quat
+
+    z = np.asarray(approach, dtype=np.float64)
+    z /= np.linalg.norm(z)
+    y = np.asarray(close, dtype=np.float64)
+    y = y - z * float(np.dot(y, z))
+    y /= np.linalg.norm(y)
+    return mat_to_quat(np.stack([np.cross(y, z), y, z], axis=1))
+
+
+_FOLD_SIDE = {"right": -1.0, "left": 1.0}
+
+
+def _fold_hand(arm: str, turn: float = 0.0):
+    """A pinching hand: the tool along the near edge toward the sheet's middle, the pads parting vertically,
+    the finger blades back toward the robot and off the box; then turned ``turn`` degrees about the fold line."""
+    import numpy as np
+
+    s = _FOLD_SIDE[arm]
+    t = math.radians(turn)
+    turn_y = np.array([[math.cos(t), 0.0, math.sin(t)], [0.0, 1.0, 0.0], [-math.sin(t), 0.0, math.cos(t)]])
+    from robosimstudio.core.math import mat_to_quat, quat_to_mat
+
+    return mat_to_quat(turn_y @ quat_to_mat(_frame_quat((0.0, -s, 0.0), (0.0, 0.0, s))))
+
+
+def _fold_sweeper(arm: str):
+    """The sweeping hand: fingertip down, tipped :data:`FOLD_SWEEP` forward and toward the sheet's middle."""
+    import numpy as np
+
+    s = _FOLD_SIDE[arm]
+    forward, trail = (math.radians(v) for v in FOLD_SWEEP)
+    tool = np.array([math.sin(forward) * math.cos(trail), -s * math.sin(trail), -math.cos(trail) * math.cos(forward)])
+    return _frame_quat(tool, (0.0, -s * math.cos(trail), math.sin(trail)))
+
+
+def _fold_layout(film) -> dict:
+    """Where the fold works [world, m], off the specs ``03_materials/05_paper`` builds its sheet and box from.
+
+    ``edge`` and ``far`` are the A4 sheet's two short edges along x, ``fold`` the line half way; ``pinch``
+    the x the pads' middle closes at, 6 mm in from the edge so their 12 mm cover the overhang's first
+    12 mm; ``hands`` each hand's y, :data:`FOLD_HANDS` in from its corner; ``box_edge`` and ``top`` the
+    box's near face and top; ``line`` the fold line in the bench frame, where ``crease_angle`` reads it.
     """
     x, y, _ = laid(film, "paper")
-    width, length = (float(v) for v in film.sim["paper"].spec.size)
+    length, width = (float(v) for v in film.sim["paper"].spec.size)
+    edge = film.bench((x, 0.0, 0.0))[0]
     return {
-        "edge": y,
-        "crease": y + length / 3,
-        "pinch": (x + 0.035, y + 0.0135),
-        "short": x - 0.06,
-        "hold": (x + width / 2, y + length - 0.035),
-        "stamps": (x + 0.055, x + 0.11, x + 0.165),
+        "edge": edge,
+        "far": edge + length,
+        "fold": edge + length / 2,
+        "pinch": edge + 0.006,
+        "hands": {
+            "right": film.bench((0.0, y + FOLD_HANDS, 0.0))[1],
+            "left": film.bench((0.0, y + width - FOLD_HANDS, 0.0))[1],
+        },
+        "box_edge": film.bench(laid(film, "box", (-1.0, 0.0, 0.0)))[0],
+        "top": film.bench(laid(film, "box", (0.0, 0.0, 1.0)))[2],
+        "line": x + length / 2,
     }
 
 
-def _q(a, b):
-    """``a`` after ``b``, both xyzw."""
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return (
-        aw * bx + ax * bw + ay * bz - az * by,
-        aw * by - ax * bz + ay * bw + az * bx,
-        aw * bz + ax * by - ay * bx + az * bw,
-        aw * bw - ax * bx - ay * by - az * bz,
-    )
-
-
-def _about(axis, degrees):
-    """A quaternion (x, y, z, w) turning ``degrees`` about the unit ``axis``; not the arm-gizmo ``_turn`` above."""
-    s, c = math.sin(math.radians(degrees) / 2), math.cos(math.radians(degrees) / 2)
-    return (axis[0] * s, axis[1] * s, axis[2] * s, c)
-
-
-FOLD_JAWS = _q(_q(_about((0, 1, 0), 10.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5))), _about((0, 0, 1), 90.0))
-"""The right hand's pinch: the tool along +x tipped 10 degrees down, the jaws closing vertically."""
-
-
-def _fold_jaws(film):
-    """The right hand's jaws' middle [world]: the mean of its finger boxes, as tests/test_fold_paper_robot reads it."""
+def _fold_pads(film, arm: str):
+    """The hand's two pad boxes (12 x 4 x 80 mm, not the slanted wing boxes beside them): centres and corners [world]."""
     import newton
     import numpy as np
 
     from robosimstudio.core.math import quat_to_mat
 
     sim = film.sim
-    index = sim.scene.embodiment.arms["right"]
+    index = sim.scene.embodiment.arms[arm]
     body = sim.model.shape_body.numpy()
     kinds = sim.model.shape_type.numpy()
-    boxes = [
-        s
-        for side in index.finger_bodies
-        for s in np.flatnonzero(np.isin(body, side))
-        if int(kinds[s]) == int(newton.GeoType.BOX)
-    ]
+    scale = sim.model.shape_scale.numpy()
     body_q, xform = sim.state.body_q.numpy(), sim.model.shape_transform.numpy()
-    return np.mean([body_q[body[s]][:3] + quat_to_mat(body_q[body[s]][3:7]) @ xform[s][:3] for s in boxes], axis=0)
+    centres, corners = [], []
+    for side in index.finger_bodies:
+        for s in np.flatnonzero(np.isin(body, side)):
+            if int(kinds[s]) != int(newton.GeoType.BOX) or abs(float(scale[s][2]) - 0.04) > 1.0e-4:
+                continue
+            rot = quat_to_mat(body_q[body[s]][3:7])
+            c = body_q[body[s]][:3] + rot @ xform[s][:3]
+            r = rot @ quat_to_mat(xform[s][3:7])
+            centres.append(c)
+            corners += [c + r @ (np.array([i, j, k]) * scale[s][:3]) for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)]
+    return np.array(centres), np.array(corners)
+
+
+def _fold_jaws(film, arm: str):
+    """The middle between the two pads [world]: where the sheet goes."""
+    return _fold_pads(film, arm)[0].mean(axis=0)
+
+
+def _fold_tip(film, arm: str):
+    """The closed pads' lowest corner [world]: what the sweep runs along the fold."""
+    corners = _fold_pads(film, arm)[1]
+    return corners[corners[:, 2].argmin()]
+
+
+def _fold_targets(film, points: dict, quats: dict) -> dict:
+    """Tool-centre targets that put each hand's pads' middle at its point, turned to its quaternion."""
+    import numpy as np
+
+    from robosimstudio.core.math import quat_to_mat
+
+    out = {}
+    for arm, point in points.items():
+        tcp, q = film.session.arms[arm].ik.ee_pose(film.sim.state)
+        local = quat_to_mat(q).T @ (_fold_jaws(film, arm) - tcp)
+        out[arm] = np.asarray(point, dtype=np.float64) - quat_to_mat(quats[arm]) @ local
+    return out
+
+
+def _slerp(q0, q1, t: float):
+    import numpy as np
+
+    q0, q1 = np.asarray(q0, dtype=np.float64), np.asarray(q1, dtype=np.float64)
+    d = float(np.dot(q0, q1))
+    if d < 0.0:
+        q1, d = -q1, -d
+    if d > 0.9995:
+        q = q0 + t * (q1 - q0)
+        return q / np.linalg.norm(q)
+    th = math.acos(d)
+    return (math.sin((1.0 - t) * th) * q0 + math.sin(t * th) * q1) / math.sin(th)
+
+
+def _go_both(film, targets: dict, quats: dict, speed: float, steps: int = 120, tolerance: float = 0.006):
+    """:func:`_go` for several hands at once, turning each cursor as it walks: both drags end together."""
+    import numpy as np
+
+    panels = {arm: film.session.arms[arm] for arm in targets}
+    starts = {arm: np.array(p.cursor_pos, dtype=np.float64) for arm, p in panels.items()}
+    turns = {arm: np.array(p.cursor_quat, dtype=np.float64) for arm, p in panels.items()}
+    stride = float(speed) / float(film.session.env.request.physics.control_hz)
+    legs = max(1, *(int(np.ceil(np.linalg.norm(np.asarray(targets[a]) - starts[a]) / stride)) for a in targets))
+    for k in range(1, legs + 1):
+        for arm, panel in panels.items():
+            point = starts[arm] + (np.asarray(targets[arm]) - starts[arm]) * (k / legs)
+            panel.aim(point, _slerp(turns[arm], quats[arm], k / legs), moving=k < legs)
+        yield
+    for arm, panel in panels.items():
+        panel.aim(np.asarray(targets[arm], dtype=np.float64), quats[arm], moving=False)
+    for _ in range(steps):
+        yield
+        miss = [np.linalg.norm(p.ik.ee_pose(film.sim.state)[0] - np.asarray(targets[a])) for a, p in panels.items()]
+        if max(miss) < tolerance:
+            break
 
 
 def _per_step(script, label: str) -> Do:
@@ -1681,112 +1795,120 @@ def _go(film, arm: str, target, speed: float, steps: int = 120, tolerance: float
             break
 
 
-def _jaws_to(film, point, speed: float, steps: int = 120, quat=None):
-    """Put the right hand's jaws' middle at ``point``: the cursor is the tool centre."""
-    import numpy as np
-
-    panel = film.session.arms["right"]
-    offset = _fold_jaws(film) - panel.ik.ee_pose(film.sim.state)[0]
-    yield from _go(film, "right", np.asarray(point) - offset, speed, steps, quat=quat)
-
-
 def _wait(n: int):
     for _ in range(n):
         yield
 
 
-def _bench_edge(film) -> float:
-    """The bench's right edge, the -y side of its cell's table [world y, m]: -0.40 on ``bench_0728``."""
-    from robosimstudio.scene.registry import get_cell
-
-    cell = get_cell(film.sim.handles.scene_name)
-    return float(cell.center[1]) - float(cell.half[1])
-
-
-def _fold_surface(film) -> float:
-    """The overhang's height as it hangs now [world z, m]: the median of the sheet's particles past the bench."""
+def _fold_reach(film):
+    """Both hands, pads 20 mm apart, out past their corners at the overhang's height, then in along the edge;
+    each then nudged up or down until its pads' middle is level with the sheet between them."""
     import numpy as np
 
-    rest = np.asarray(film.sim["paper"].particle_q, dtype=np.float64)
-    return float(np.median(rest[rest[:, 1] < _bench_edge(film)][:, 2]))
+    film.fold = lay = _fold_layout(film)
+    points = np.asarray(film.sim["paper"].particle_q, dtype=np.float64)
+    lay["strip"] = strip = float(np.median(points[points[:, 0] < lay["box_edge"]][:, 2]))
+    for arm in _FOLD_SIDE:
+        film.session.arms[arm].grip_request = FOLD_OPEN
+    hands = {arm: _fold_hand(arm) for arm in _FOLD_SIDE}
+    x, ys = lay["pinch"], lay["hands"]
+    out = {arm: _FOLD_SIDE[arm] * 0.20 for arm in _FOLD_SIDE}
+    yield from _go_both(
+        film, _fold_targets(film, {a: (x, out[a], strip + 0.10) for a in hands}, hands), hands, 0.15, 300
+    )
+    out = {arm: _FOLD_SIDE[arm] * 0.165 for arm in _FOLD_SIDE}
+    yield from _go_both(film, _fold_targets(film, {a: (x, out[a], strip) for a in hands}, hands), hands, 0.06, 200)
+    targets = _fold_targets(film, {a: (x, ys[a], strip) for a in hands}, hands)
+    yield from _go_both(film, targets, hands, 0.04, 200, 0.003)
+    # A person looks: the hand sags a few millimetres under its own weight, so the cursor goes up by what is left.
+    for _ in range(4):
+        for arm, quat in hands.items():
+            jaws = _fold_jaws(film, arm)
+            points = np.asarray(film.sim["paper"].particle_q, dtype=np.float64)
+            near = np.linalg.norm(points[:, :2] - jaws[:2], axis=1) < 0.007
+            targets[arm] = targets[arm] + np.array([0.0, 0.0, float(np.median(points[near, 2])) - jaws[2]])
+            film.session.arms[arm].aim(targets[arm], quat, moving=False)
+        yield from _wait(40)
 
 
-FOLD_STAMP = _q(_about((0, 0, 1), -30.0), (0.0, math.sqrt(0.5), 0.0, math.sqrt(0.5)))
-"""The left hand's stamp: the tool along +x turned 30 degrees toward the fold, which it reaches that way."""
+def _fold_pinch(film):
+    """Both hands' **Grip amount** drawn from :data:`FOLD_OPEN` to :data:`FOLD_GRIP` over a second: the pads
+    stop on the sheet. Set at once, the fingers met it at speed and it read 900 N a pad for a step."""
+    for k in range(1, 61):
+        for arm in _FOLD_SIDE:
+            film.session.arms[arm].grip_request = FOLD_OPEN + (FOLD_GRIP - FOLD_OPEN) * k / 60
+        yield
+    yield from _wait(30)
 
 
-def _fold_hold(film):
-    """The left hand onto the far end, its flat underside 3 mm into the bench."""
-    hold = film.bench((*_sheet(film)["hold"], 0.003))
-    yield from _go(film, "left", (hold[0], hold[1], 0.80), 0.15, steps=600, tolerance=0.004)
-    yield from _go(film, "left", hold, 0.06, steps=60, tolerance=0.004)
-
-
-def _fold_in(film):
-    """Jaws vertical, level with the overhang and short of its corner, then in along it."""
-    film.surface = _fold_surface(film)
-    panel = film.session.arms["right"]
-    yield from _go(film, "right", panel.ik.ee_pose(film.sim.state)[0], 0.05, steps=600, tolerance=0.004, quat=FOLD_JAWS)
-    sheet = _sheet(film)
-    corner, pinch = film.bench((sheet["short"], sheet["pinch"][1], 0.0)), film.bench((*sheet["pinch"], 0.0))
-    yield from _jaws_to(film, (corner[0], corner[1], film.surface), 0.06)
-    yield from _jaws_to(film, (pinch[0], pinch[1], film.surface), 0.05)
-
-
-def _fold_over(film):
-    """The carry on an arc about the fold line, the hand turning over with it; laid, drawn on, lifted clear."""
-    import numpy as np
-
-    sheet = _sheet(film)
-    pinch = film.bench((*sheet["pinch"], 0.0))
-    crease = film.bench((0.0, sheet["crease"], 0.0))[1]
-    radius, z = crease - pinch[1], film.surface
+def _fold_carry(film):
+    """The near edge up and over on matching arcs, each hand turning with the flap to vertical, then holding
+    its turn; lowered to 30 mm over the far edge."""
+    lay = film.fold
+    centre = lay["fold"] + FOLD_GROW
+    radius = lay["fold"] - lay["pinch"] + FOLD_GROW
     for k in range(1, 13):
         turn = math.pi * k / 12
-        quat = _q(FOLD_JAWS, _about((0, 0, 1), -math.degrees(turn)))
-        point = (pinch[0], crease - radius * math.cos(turn), z + (radius + 0.015) * math.sin(turn))
-        yield from _jaws_to(film, point, 0.06, 120 if k < 12 else 60, quat=quat)
-    yield from _jaws_to(film, (pinch[0], crease + radius, z + 0.03), 0.03)
-    yield from _jaws_to(film, (pinch[0], crease + radius, z + 0.020), 0.02, 60)
-    yield from _wait(30)
-    yield from _jaws_to(film, (pinch[0], crease + radius + 0.03, z + 0.03), 0.03)
-    yield from _wait(20)
-    film.stamp_y = float(np.asarray(film.sim["paper"].particle_q)[:, 1].min()) + 0.02  # the loop's nose, plus 20 mm
-    yield from _jaws_to(film, (pinch[0], crease + radius + 0.03, z + 0.05), 0.02)
+        quats = {arm: _fold_hand(arm, min(FOLD_TURN, math.degrees(turn))) for arm in _FOLD_SIDE}
+        up = radius * math.sin(turn) + (0.03 if k == 12 else 0.0)
+        points = {arm: (centre - radius * math.cos(turn), lay["hands"][arm], lay["strip"] + up) for arm in _FOLD_SIDE}
+        yield from _go_both(film, _fold_targets(film, points, quats), quats, 0.06, 60)
 
 
-def _fold_stamps(film):
-    """Up off the far end, turned toward the fold, and three stamps along it 20 mm in from the loop's nose."""
-    sheet, y = _sheet(film), film.stamp_y
-    hold = film.bench((*sheet["hold"], 0.06))
-    up, down = film.bench((0.0, 0.0, 0.06))[2], film.bench((0.0, 0.0, 0.009))[2]
-    yield from _go(film, "left", hold, 0.08, quat=FOLD_STAMP)
-    for x in sheet["stamps"]:
-        at = film.bench((x, 0.0, 0.0))[0]
-        yield from _go(film, "left", (at, y, up), 0.10)
-        yield from _go(film, "left", (at, y, down), 0.04, steps=40)
-        yield from _wait(15)
-        yield from _go(film, "left", (at, y, up), 0.06)
-
-
-def _fold_up(film):
-    """Up 25 mm with the jaws still shut: opening to half brings the lower pad 25 mm back down."""
+def _fold_let_go(film):
+    """Open to :data:`FOLD_OPEN`, up 50 mm, and out to each hand's own side, turning to the sweep's fingertip."""
     import numpy as np
 
-    yield from _jaws_to(film, _fold_jaws(film) + np.array([0.0, 0.0, 0.025]), 0.02)
+    lay = film.fold
+    yield from _wait(10)
+    for arm in _FOLD_SIDE:
+        film.session.arms[arm].grip_request = FOLD_OPEN
+    yield from _wait(40)
+    held = {arm: _fold_hand(arm, FOLD_TURN) for arm in _FOLD_SIDE}
+    up = {arm: _fold_jaws(film, arm) + np.array([0.0, 0.0, 0.05]) for arm in _FOLD_SIDE}
+    yield from _go_both(film, _fold_targets(film, up, held), held, 0.05, 60)
+    sweep = {arm: _fold_sweeper(arm) for arm in _FOLD_SIDE}
+    film.fold["park"] = park = {
+        arm: np.array([lay["fold"] - 0.03, _FOLD_SIDE[arm] * 0.20, lay["top"] + 0.12]) for arm in _FOLD_SIDE
+    }
+    yield from _go_both(film, park, sweep, 0.10, 150, 0.01)
+    for arm in _FOLD_SIDE:
+        film.session.arms[arm].grip_request = 1.0
+    yield from _wait(60)
 
 
-def _fold_out(film):
-    """Out 40 mm past the edge with the jaws open, up 80 mm, and the left hand away."""
-    import numpy as np
+def _fold_sweep(arm: str):
+    """One hand runs its closed fingertip along the fold line, from the middle out past its own corner,
+    :data:`FOLD_PRESS` over the box, 5 mm in from the fold's nose; then up and back to its side."""
 
-    yield from _jaws_to(film, _fold_jaws(film) + np.array([0.0, 0.04, 0.0]), 0.05)
-    yield from _jaws_to(film, _fold_jaws(film) + np.array([0.0, 0.0, 0.08]), 0.08)
-    yield from _go(film, "left", film.bench((0.11, -0.15, 0.12)), 0.08)
+    def script(film):
+        import numpy as np
+
+        lay, quat = film.fold, _fold_sweeper(arm)
+        points = np.asarray(film.sim["paper"].particle_q, dtype=np.float64)
+        x = float(points[np.abs(points[:, 1]) < 0.075][:, 0].min()) + 0.005  # the fold's nose, and 5 mm on
+        s = _FOLD_SIDE[arm]
+        tcp = film.session.arms[arm].ik.ee_pose(film.sim.state)[0]
+        offset = _fold_tip(film, arm) - tcp
+        start = np.array([x, s * 0.015, lay["top"] + FOLD_PRESS]) - offset
+        yield from _go_both(film, {arm: start + np.array([0.0, 0.0, 0.07])}, {arm: quat}, 0.10, 120)
+        yield from _go_both(film, {arm: start}, {arm: quat}, 0.02, 60, 0.002)
+        for _ in range(3):  # the hand sags: nudge until the fingertip runs at the press height
+            start = start + np.array([0.0, 0.0, lay["top"] + FOLD_PRESS - _fold_tip(film, arm)[2]])
+            film.session.arms[arm].aim(start, quat, moving=False)
+            yield from _wait(20)
+        end = start + np.array([0.0, s * 0.105, 0.0])
+        yield from _go_both(film, {arm: end}, {arm: quat}, 0.03, 30, 0.003)
+        yield from _go_both(film, {arm: end + np.array([0.0, 0.0, 0.05])}, {arm: quat}, 0.05, 60)
+        yield from _go_both(film, {arm: lay["park"][arm]}, {arm: quat}, 0.10, 60, 0.01)
+
+    return script
 
 
 def _paper_folded(film) -> tuple[bool, str]:
-    """The sheet's fold, a third of the way along it, kept 2.2 rad once the hands had gone, and it lies folded."""
+    """Folded in half and creased: the edges laid within 10 mm of each other, the fold line keeping 2.2 rad."""
+    import numpy as np
+
     from robosimstudio.assetlib.semantics.snapshot import Snapshot
     from robosimstudio.assetlib.vocabulary.measures import cloth_fold
     from robosimstudio_materials.paper import crease_angle
@@ -1794,12 +1916,17 @@ def _paper_folded(film) -> tuple[bool, str]:
     sim = film.sim
     sim["paper"].entity.update_probe(sim.state, sim.step_count)
     snapshot = Snapshot(sim.make_context())
-    line = {"crease": {"axis": 1, "at": film.bench((0.0, _sheet(film)["crease"], 0.0))[1]}}
-    angle = float(crease_angle(snapshot, "paper", line)["angle"])
-    extent = float(cloth_fold(snapshot.ctx, "paper", axis=1)[0])
+    lay = _fold_layout(film)
+    angle = float(crease_angle(snapshot, "paper", {"crease": {"axis": 0, "at": lay["line"]}})["angle"])
+    extent = float(cloth_fold(snapshot.ctx, "paper", axis=0)[0])
+    entity = sim["paper"].entity
+    rest = np.asarray(entity.rest["particle_q"], dtype=np.float64)[np.asarray(entity.particles)]
+    now = np.asarray(sim["paper"].particle_q, dtype=np.float64)
+    near, far = rest[:, 0] < rest[:, 0].min() + 0.003, rest[:, 0] > rest[:, 0].max() - 0.003
+    gap = float(now[near, 0].mean() - now[far, 0].mean())
     return (
-        angle >= 2.2 and extent < 0.83,
-        f"the fold kept {angle:.2f} rad (need 2.2), span {extent:.3f} (need under 0.83)",
+        angle >= 2.2 and abs(gap) <= 0.01 and extent < 0.65,
+        f"the fold kept {angle:.2f} rad (need 2.2), the edges {gap * 1e3:+.1f} mm apart (need 10), span {extent:.3f}",
     )
 
 
@@ -1908,34 +2035,28 @@ def _stain_wiped(film) -> tuple[bool, str]:
 ROBOT_CONTACT = (
     Take(
         FOLD,
-        # From in front of the bench and to its right, 1.35 m off: the overhang, both hands, the
-        # carry's arc and the sheet in thirds all in view, the panel's Crease readouts beside them.
-        camera=Orbit(Bench(0.0, -0.22, 0.12), distance=1.40, azimuth=-25.0, elevation=34.0, fov=38.0),
+        # From beyond the bench, to the robot's left and up: both hands, the box and the sheet across a
+        # third of the view, the matched arcs of the carry and the sweep along the fold, the Crease
+        # readouts beside them.
+        camera=Orbit(Bench(0.10, 0.0, 0.10), distance=0.95, azimuth=40.0, elevation=38.0, fov=38.0),
         warmup=0.5,
         fps=8,
-        speed=2.0,  # two minutes of scene: two hands, a carry and three stamps
+        speed=2.0,  # a minute of scene: a reach, a carry and two sweeps
         budget=2_000_000,
-        # The left arm's folder stays open: collapsed, its Close is not on the page to press, and the
-        # left hand held the far end open-fingered; the sheet slid 37 mm and no take folded.
         layout=Layout(collapse=("Simulation", "Material", "Physics")),
         beats=(
             Fold(title="Simulation", open=False),
             Fold(title="How to drive this", open=False),
-            Wait(seconds=0.4, label="an A4 sheet hangs 35 mm over the bench's right edge"),
-            Press(text="Close", within="Arm: left", label="Close the left hand"),
-            _per_step(_fold_hold, "it holds the far end down"),
-            _per_step(_fold_in, "the right hand down and in: the jaws straddle the overhanging corner"),
-            Press(text="Close", within=RIGHT, label="Close: the pads pinch the paper"),
+            Wait(seconds=0.4, label="an A4 sheet on a box, its near edge 35 mm over the box's edge"),
+            _per_step(_fold_reach, "both hands out past their corners, then in along the edge: the pads straddle it"),
+            _per_step(_fold_pinch, "Grip amount 0.986 on both: the pads stop on the sheet"),
             Scroll(pixels=-600, seconds=0.4),  # back to the top: the Crease readouts lead the panel
-            Wait(seconds=0.6, mark="closed"),
-            _per_step(_fold_over, "carry the edge up and over, turning the hand over, and lay it on the middle"),
-            _per_step(_fold_stamps, "the left hand turns toward the fold and stamps it in three places"),
-            _per_step(_fold_up, "up 25 mm"),
-            Slider(text="Grip amount", value=0.5, seconds=0.6, within=RIGHT, label="Grip amount 0.5: the pads part"),
-            Scroll(pixels=-600, seconds=0.3),
-            Wait(seconds=0.3),
-            _per_step(_fold_out, "drawn out past the edge, and away"),
-            Wait(seconds=1.5, label="it stays folded"),
+            Wait(seconds=0.4, mark="pinched"),
+            _per_step(_fold_carry, "up and over together, each hand turning 90 degrees, each on its own side"),
+            _per_step(_fold_let_go, "let go 30 mm over the far edge, and out to each hand's own side"),
+            _per_step(_fold_sweep("right"), "the right fingertip runs along the fold, from the middle out"),
+            _per_step(_fold_sweep("left"), "the left fingertip runs along the fold, from the middle out"),
+            Wait(seconds=1.5, label="it stays folded in half"),
         ),
         expect=(Check(_paper_folded, needs=("paper",)),),
     ),
