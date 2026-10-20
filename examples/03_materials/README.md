@@ -144,20 +144,9 @@ Source: [`04_band.py`](04_band.py)
 
 ![Paper: fold a sheet](media/05_paper.webp)
 
-An A4 sheet hangs 35 mm over the bench's right edge: close the left hand and press the far end down, drag the right hand down and in so its jaws straddle the overhanging corner, press **Close**, carry the edge up and over while turning the hand over, lay it on the middle and draw it on and up 3 cm, stamp the fold with the left hand, set the right hand's **Grip amount** to 0.5 and draw it out past the edge: the sheet stays folded in thirds.
+Bring each hand in along the edge of the A4 sheet that runs past the box, from its own corner, with **Grip amount** 0.79, set 0.986 on both so the pads stop on the sheet, carry the edge up and over together, each hand turning with the flap to vertical and no further, set 0.79 30 mm over the far edge, then **Close** each hand in turn and run its fingertip along the fold from the middle out: the sheet stays folded in half.
 
-The pads hold the paper by friction alone, and the fold keeps 2.52 to 2.67 rad over 22 drives
-(`tests/test_fold_paper_robot`, its take, Newton 1.7). The overhang is what makes the pinch possible:
-a sheet lying flat gives the lower pad nothing to get under (seven top-down pinches raised it 0 mm), and
-the palm stops the jaws at the corner. The three stamps also shove the folded sheet 42 to 55 mm along
-the bench, away from the edge, and the fold rides with it (11 drives, `tests/test_fold_paper_robot`
-and `fold3.py`). The stamps need the edge still held and lifted clear: let go first and the flap
-springs back up 85 to 87 mm, so the stamps leave the fold at the 1.38 to 1.39 rad the carry laid; held
-where it was laid, 3 mm over the sheet, the open hand drawn out took the whole sheet 58 to 66 mm along
-with it (`fold_counter.py`, two drives each, GPU 3). The **Crease** folder reads `crease_angle` and
-`fold_extent`. Set `yield_angle` to 0 under **Material** before the fold and no crease forms: in two
-drives the crease read 0.00 rad laid and stamped, the flap stood 63 to 65 mm up as the hand left, and
-the sheet then lay open and flat, `fold_extent` 1.22 (`fold_r3.py`, GPU 3).
+The two arms collide with each other here and keep 79 mm apart; each hand turns 88 degrees while it holds the edge, so the flap bends by the grip instead of riding in it, and both have let go and left before a fingertip touches the fold. Over five drives of the take's own path (`tests/test_fold_paper_robot`, GPU 5) the edges ended 1.3 to 1.5 mm apart, 5.7 mm at worst at a corner, and the fold kept 2.31 to 2.34 rad three seconds after the hands left, `fold_extent` 0.51 to 0.53. A sheet flat on the bench gives a pad nothing to get under, so it lies on a box with its near edge 35 mm past it. **Close** takes the pads to 0.8 mm apart and crushes the sheet; 0.986 stops them 2.1 mm apart. The **Crease** folder reads `crease_angle` and `fold_extent`.
 
 ```bash
 uv run examples/03_materials/05_paper.py
