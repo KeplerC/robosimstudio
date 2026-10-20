@@ -109,6 +109,27 @@ class TestARopeOnSuperdexSaysWhatItDrops(unittest.TestCase):
         self.assertIn("'surface_labels'", _lost(surface_labels=["table", "bin"])[0], "a list that differs is stated")
 
 
+class TestANumpyValueAtItsDefaultIsNotStated(unittest.TestCase):
+    """``_stated`` compares through ``_as_value``, which widened a float32 array's floats to float64."""
+
+    def test_a_float32_array_of_the_default_is_not_stated(self) -> None:
+        """An MPM material's ``color`` as a float32 array of ``(0.86, 0.8, 0.62)`` was named stated."""
+        import numpy as np
+
+        from robosimstudio.scene.physics.compose import _stated
+
+        @dataclasses.dataclass
+        class _Material:
+            color: tuple = (0.86, 0.8, 0.62)
+            yield_stress: float = 0.1
+
+        self.assertEqual([], _stated(_Material(color=np.array((0.86, 0.8, 0.62), dtype=np.float32))))
+        self.assertEqual([], _stated(_Material(yield_stress=np.float32(0.1))), "a float32 scalar")
+        self.assertEqual([], _stated(_Material(yield_stress=np.array(0.1, dtype=np.float32))), "a 0-d array")
+        self.assertEqual(["color"], _stated(_Material(color=np.array((0.86, 0.8, 0.6), dtype=np.float32))))
+        self.assertEqual(["yield_stress"], _stated(_Material(yield_stress=np.float32(0.2))))
+
+
 @unittest.skipUnless(HAS_ROD, "the rod pack is not in this tree")
 class TestTheListIsTrue(unittest.TestCase):
     """Each name is a ``RodSpec`` field the SuperDex rope's own code never reads: a list that went stale

@@ -572,11 +572,22 @@ def _stated(record: Any, names: tuple[str, ...] | None = None) -> list[str]:
 
 
 def _as_value(value: Any) -> Any:
-    """``value`` with every list, tuple and array in it a tuple, for :func:`_stated` to compare."""
+    """``value`` with every list, tuple and array in it a tuple, for :func:`_stated` to compare.
+
+    And every numpy number in it a Python one, a float as the shortest decimal that is it at its own
+    width: ``np.float32(0.1)`` is ``0.1``. An array went through ``tolist``, which widens each float32
+    to the float64 nearest it, so an MPM material's ``color`` given as a float32 array of its default
+    ``(0.86, 0.8, 0.62)`` compared as ``0.8600000143...`` and was named stated. A float32 scalar beside
+    its default compares equal on numpy 2 (NEP 50 casts the Python float to float32) and not on 1.x.
+    """
     if isinstance(value, np.ndarray):
-        value = value.tolist()
+        value = value[()] if value.ndim == 0 else list(value)
     if isinstance(value, (list, tuple)):
         return tuple(_as_value(item) for item in value)
+    if isinstance(value, np.floating):
+        return float(str(value))
+    if isinstance(value, np.generic):
+        return value.item()
     return value
 
 
