@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Particle things share one settle per pipeline through ``ParticleMixin.join_settle``,
 and the studio's re-settle runs the settle of every thing on that record that has one and
-re-baselines every thing on it, not only the cloth.
+re-baselines every thing on it, not only the cloth -- each distinct run once, as the build does,
+and naming as re-settled only the things whose run stepped.
 
 No GPU: stand-in things and a stand-in pipeline.
 """
@@ -16,7 +17,8 @@ TIER = "fast"
 """Stand-ins only: no GPU."""
 
 
-def _thing(name: str = "towel", log: list | None = None):
+def _thing(name: str = "towel", log: list | None = None, run: tuple[int, int] | None = None):
+    """A particle thing; ``run`` is the ``(settle_frames, settle_substeps)`` its spec states."""
     from robosimstudio.domains.capabilities import ParticleMixin
 
     class _Stub(ParticleMixin):
@@ -24,6 +26,8 @@ def _thing(name: str = "towel", log: list | None = None):
             self.name = name
             self.settles = 0
             self.snapshots = 0
+            if run is not None:
+                self.spec = SimpleNamespace(settle_frames=run[0], settle_substeps=run[1])
 
         def settle(self, pipeline) -> None:
             del pipeline
@@ -143,6 +147,29 @@ class TestStudioResettle(unittest.TestCase):
             "every baseline is taken after the last settle",
         )
         self.assertEqual("re-settled towel, sponge; re-baselined cable where it lies", panel._note.value)
+
+    def test_two_like_sheets_settle_once(self) -> None:
+        """Two sheets on ``(10, 4)`` are one run at the build (``TestJoinSettle``), and a settle steps the
+        whole particle array: the button ran both, stepping the scene twice -- 120 steps and 2.53 s of
+        page loop where the build took 60 and 1.26 s, measured on the two sheets
+        ``tests.test_fix_examples_soft_cloth`` builds."""
+        a, b = _thing("a", run=(10, 4)), _thing("b", run=(10, 4))
+        panel = self._drain([a, b], a)
+        self.assertEqual((1, 0), (a.settles, b.settles), "one run, stepped once")
+        self.assertEqual((1, 1), (a.snapshots, b.snapshots))
+        self.assertEqual("re-settled a, b", panel._note.value, "b's run stepped: it was a's")
+
+    def test_a_different_run_settles_again(self) -> None:
+        a, b = _thing("a", run=(10, 4)), _thing("b", run=(20, 4))
+        self._drain([a, b], a)
+        self.assertEqual((1, 1), (a.settles, b.settles))
+
+    def test_a_settle_of_no_frames_is_named_as_rebaselined(self) -> None:
+        """A tape label's ``settle_frames`` is 0, so its settle returns at once: beside a towel the State line
+        read "re-settled towel, label" when nothing had stepped the label's run."""
+        towel, label = _thing("towel", run=(60, 10)), _thing("label", run=(0, 10))
+        panel = self._drain([towel, label], towel)
+        self.assertEqual("re-settled towel; re-baselined label where it lies", panel._note.value)
 
 
 if __name__ == "__main__":
