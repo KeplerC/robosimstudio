@@ -56,6 +56,8 @@ Source: [`02_episodes.py`](02_episodes.py)
 
 ## Sweep rice, scored
 
+![Sweep rice, scored](media/03_granular_scored.webp)
+
 The same rice, pusher and tray as a task document, with a goal on the share of rice in the tray: sweep, and the goal turns true at half.
 
 The heap is a `Heap.from_spec` record the document places under its own name,
@@ -76,6 +78,8 @@ Source: [`03_granular_scored.py`](03_granular_scored.py)
 
 ## Scrub a patch, scored
 
+![Scrub a patch, scored](media/04_brush_scored.webp)
+
 The same brush, handle and square as a task document, with a goal on the share of the square the bristle tips have scrubbed: turn the hand to point down, close on the handle, scrub, and the goal turns true at half.
 
 The brush is a `Brush.from_spec` record and its handle a `Body.from_spec`
@@ -93,6 +97,8 @@ uv run examples/06_tasks/04_brush_scored.py
 Source: [`04_brush_scored.py`](04_brush_scored.py)
 
 ## Pick up a plate, scored
+
+![Pick up a plate, scored](media/05_suction_scored.webp)
 
 The same plate, cup and square as a task document, with a goal on the plate resting in the square: carry it over, untick **Vacuum**, lift the hand away, and the goal turns true.
 
@@ -113,6 +119,8 @@ Source: [`05_suction_scored.py`](05_suction_scored.py)
 
 ## Open a bag, scored
 
+![Open a bag, scored](media/06_bag_scored.webp)
+
 The same bag and hand as a task document, with a goal on how far the mouth stands open: turn the right hand to point down, open the bag as in `03_materials/06_bag`, and the goal turns true at 30 mm.
 
 The bag is a `Bag.from_spec` record the document places under its own name, the physics is
@@ -130,6 +138,8 @@ Source: [`06_bag_scored.py`](06_bag_scored.py)
 
 ## Hook a band, scored
 
+![Hook a band, scored](media/07_band_scored.webp)
+
 The same pegboard and band as a task document, with a goal that the band encircles both pegs: hook it from the upper peg onto the lower, and the goal turns true.
 
 The pegs are the example's posts declared with a `rod` feature, their two
@@ -145,6 +155,8 @@ uv run --extra superdex examples/06_tasks/07_band_scored.py
 Source: [`07_band_scored.py`](07_band_scored.py)
 
 ## Peel a label, scored
+
+![Peel a label, scored](media/08_tape_scored.webp)
 
 The same box and label as a task document, with a goal on the share of the label's bonds that have let go: turn the right hand to point down, take the tab and peel as in `03_materials/08_tape`, and the goal turns true at 80%.
 
@@ -163,6 +175,8 @@ Source: [`08_tape_scored.py`](08_tape_scored.py)
 
 ## Cut tofu, scored
 
+![Cut tofu, scored](media/09_cutting_scored.webp)
+
 The same knife, rest, board and tofu as a task document, with a goal that the tofu is in two pieces: take the knife and push it down through the tofu as in `03_materials/10_cutting`, and the goal turns true.
 
 The tofu is a `Cuttable.from_spec` record, the knife a `Cuttable.knife` one carrying its edge as a
@@ -178,6 +192,8 @@ uv run examples/06_tasks/09_cutting_scored.py
 Source: [`09_cutting_scored.py`](09_cutting_scored.py)
 
 ## Pour water, scored
+
+![Pour water, scored](media/10_water_scored.webp)
 
 The same cup, water and glass as a task document, with a goal on the water's level in the glass: pour as in `03_materials/14_water`, and the goal turns true at the 25 mm line.
 

@@ -64,12 +64,15 @@
 
 | [Sweep rice, scored](06_tasks/03_granular_scored.py) | [Scrub a patch, scored](06_tasks/04_brush_scored.py) | [Pick up a plate, scored](06_tasks/05_suction_scored.py) |
 |---|---|---|
+| <img src="06_tasks/media/03_granular_scored.webp" width="240"> | <img src="06_tasks/media/04_brush_scored.webp" width="240"> | <img src="06_tasks/media/05_suction_scored.webp" width="240"> |
 
 | [Open a bag, scored](06_tasks/06_bag_scored.py) | [Hook a band, scored](06_tasks/07_band_scored.py) | [Peel a label, scored](06_tasks/08_tape_scored.py) |
 |---|---|---|
+| <img src="06_tasks/media/06_bag_scored.webp" width="240"> | <img src="06_tasks/media/07_band_scored.webp" width="240"> | <img src="06_tasks/media/08_tape_scored.webp" width="240"> |
 
 | [Cut tofu, scored](06_tasks/09_cutting_scored.py) | [Pour water, scored](06_tasks/10_water_scored.py) |
 |---|---|
+| <img src="06_tasks/media/09_cutting_scored.webp" width="240"> | <img src="06_tasks/media/10_water_scored.webp" width="240"> |
 
 ## [07 Policies as Graphs](07_policies/README.md)
 
