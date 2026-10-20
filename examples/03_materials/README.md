@@ -140,9 +140,9 @@ uv run --extra superdex examples/03_materials/04_band.py
 
 Source: [`04_band.py`](04_band.py)
 
-## Paper: fold a sheet in half
+## Paper: fold a sheet
 
-![Paper: fold a sheet in half](media/05_paper.webp)
+![Paper: fold a sheet](media/05_paper.webp)
 
 Bring each hand in along the edge of the A4 sheet that runs past the box, from its own corner, with **Grip amount** 0.79, and press **Close**: the fingers stall on the sheet at their 20 N cap. Carry the edge up to upright, each hand turning with the flap to 88 degrees and no further, lay it on the far half and open 40 mm over it. Then close each hand and run its fingertip along its half of the fold, out and back, pressing about 13 N: the sheet stays folded in half.
 
