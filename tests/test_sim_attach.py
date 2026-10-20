@@ -72,11 +72,12 @@ class _Bus:
 
 def _env(*, deformables: bool, cuttable: bool = False) -> types.SimpleNamespace:
     """A tape carrying a probe when ``deformables``, behind a cuttable's eight corners when ``cuttable``."""
-    probe = types.SimpleNamespace(summary=lambda key: {"set": key, "z_min": 0.10})  # a summary, the band of one
+    probe = types.SimpleNamespace(summary=lambda key: {"set": key, "z_min": 0.10}, update=lambda _state: None)
     thing = types.SimpleNamespace(carries_particles=True, probe=probe)
     tofu = types.SimpleNamespace(carries_particles=True, particles=list(range(8)))
     by_name = {**({"tofu": tofu} if cuttable else {}), **({"tape": thing} if deformables else {})}
-    return types.SimpleNamespace(scene=types.SimpleNamespace(by_name=by_name, embodiment=None), handles=None)
+    scene = types.SimpleNamespace(by_name=by_name, embodiment=None)
+    return types.SimpleNamespace(scene=scene, handles=None, state=None)
 
 
 class TestItAppearsOnlyWhereItApplies(unittest.TestCase):
@@ -118,10 +119,13 @@ class TestOneWorldOfAFleetReadsItsOwnParticles(unittest.TestCase):
     """A ``WorldView`` carries its ``world``; the tool read ``entity.probe``, world 0's, for every world."""
 
     def _view(self, world: int) -> types.SimpleNamespace:
-        probes = [types.SimpleNamespace(summary=lambda key, z=z: {"set": key, "z_min": z}) for z in (0.10, 0.30)]
+        probes = [
+            types.SimpleNamespace(summary=lambda key, z=z: {"set": key, "z_min": z}, update=lambda _state: None)
+            for z in (0.10, 0.30)
+        ]
         towel = types.SimpleNamespace(carries_particles=True, probe=probes[0], probe_for=lambda w: probes[w])
         scene = types.SimpleNamespace(by_name={"towel": towel}, embodiment=None)
-        return types.SimpleNamespace(scene=scene, handles=None, world=world)
+        return types.SimpleNamespace(scene=scene, handles=None, world=world, state=None)
 
     def test_world_one_reads_world_ones_towel(self) -> None:
         self.assertEqual(0.30, SimTools(self._view(1), _Bus()).get_particle_state()["z_min"], "world 0's towel")
@@ -200,6 +204,66 @@ class TestOneWorldOfAFleetHoldsItsOwnParticles(unittest.TestCase):
         np.testing.assert_allclose(lift, 0.010, atol=1e-5, err_msg="world 1's sheet did not ride the hand")
         attachment.detach()
         self.assertFalse(attachment.draggers["left"].active)
+
+
+class TestTheParticleStateIsReadNow(unittest.TestCase):
+    """``sim.get_particle_state`` reads the particles as they stand when it is called.
+
+    It read the probe's summary as the probe last held it, and nothing refreshes a probe on a
+    tool's behalf: a fleet refreshes world k's only when it scores that world, every ``eval_every``
+    steps, and a bare ``Sim``'s holds what ``snapshot_rest`` left. So a sheet that had moved read
+    where it was at the last score. Real probes over a CPU state: the particles move with nothing
+    scored, then the tool reads.
+    """
+
+    def _state(self, rows: np.ndarray) -> types.SimpleNamespace:
+        import warp as wp
+
+        return types.SimpleNamespace(
+            particle_q=wp.array(rows.astype(np.float32), dtype=wp.vec3, device="cpu"),
+            particle_qd=wp.zeros(len(rows), dtype=wp.vec3, device="cpu"),
+        )
+
+    def _probes(self, worlds: int, per_world: int) -> list:
+        from robosimstudio.core.probes.particle import ParticleProbe
+
+        model = types.SimpleNamespace(particle_count=worlds * per_world)
+        probes = []
+        for world in range(worlds):
+            probe = ParticleProbe(model, world=world)
+            probe.add_set("towel", np.arange(per_world) + world * per_world)
+            probes.append(probe)
+        return probes
+
+    def test_an_env_reads_the_sheet_where_it_is(self) -> None:
+        state = self._state(np.zeros((4, 3)))
+        (probe,) = self._probes(1, 4)
+        probe.update(state)  # the last score, with the sheet at z = 0
+        state.particle_q.assign(np.full((4, 3), 0.25, dtype=np.float32))  # moved, nothing scored
+        towel = types.SimpleNamespace(carries_particles=True, probe=probe, probe_for=lambda _w: probe)
+        scene = types.SimpleNamespace(by_name={"towel": towel}, embodiment=None)
+        env = types.SimpleNamespace(scene=scene, handles=None, state=state)
+        self.assertAlmostEqual(0.25, SimTools(env, _Bus()).get_particle_state()["centroid_z"], places=6)
+
+    def test_world_one_of_a_fleet_reads_its_sheet_where_it_is(self) -> None:
+        from robosimstudio_bench.envs.world_view import WorldView
+
+        state = self._state(np.zeros((8, 3)))
+        probes = self._probes(2, 4)
+        for probe in probes:
+            probe.update(state)  # each world's last score
+        rows = np.zeros((8, 3), dtype=np.float32)
+        rows[4:, 2] = 0.30  # world 1's sheet lifted 300 mm since
+        state.particle_q.assign(rows)
+        towel = types.SimpleNamespace(carries_particles=True, probe=probes[0], probe_for=lambda w: probes[w])
+        fleet = types.SimpleNamespace(
+            pipeline=types.SimpleNamespace(state_0=state),
+            scene=types.SimpleNamespace(by_name={"towel": towel}, embodiment=None),
+            worlds=WorldMap(2, 0, 0, 0, 0, 0, 4),
+            handles_for=lambda _world: None,
+        )
+        got = [SimTools(WorldView(fleet, w), _Bus()).get_particle_state()["centroid_z"] for w in (0, 1)]
+        np.testing.assert_allclose([0.0, 0.30], got, atol=1e-6)
 
 
 class TestAnUnknownDeformableIsRefused(unittest.TestCase):

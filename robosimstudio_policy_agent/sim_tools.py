@@ -37,6 +37,7 @@ import numpy as np
 from robosimstudio.core.bus import Bus
 from robosimstudio.core.math import quat_to_mat, transform_matrix
 from robosimstudio.core.render.visual import shape_meshes
+from robosimstudio.core.streams import reading
 from robosimstudio.robots.embodiments import top_down_grasp_site_quat
 from robosimstudio.sim.sim import scene_deformables
 from robosimstudio.solvers import grasp_from_obb, top_down_grasp_quat
@@ -154,6 +155,16 @@ def _probe(entity, env) -> Any:
     """
     probe_for = getattr(entity, "probe_for", None)
     return probe_for(int(getattr(env, "world", 0) or 0)) if callable(probe_for) else entity.probe
+
+
+def _model_state(env) -> Any:
+    """The whole model's state, which a probe reads: a fleet ``WorldView``'s ``state`` is its world's slice of it.
+
+    A probe holds every particle of the model it was opened on and addresses its world's by model
+    row, as :func:`_first_particle_row` maps them, so it is refreshed from the fleet's own state.
+    """
+    fleet = getattr(env, "fleet", None)
+    return fleet.pipeline.state_0 if fleet is not None else env.state
 
 
 def _first_particle_row(env) -> int:
@@ -546,7 +557,17 @@ class SimTools:
         name, entity = _deformable(self.env, cloth)
         probe = _probe(entity, self.env)
         key = f"{name}/{particle_set}" if particle_set else name
-        return {"cloth": name, "set": key, **self.bus.call(probe.summary, key)}
+
+        def read() -> dict[str, Any]:
+            # Refreshed from the state as it stands, every call: nothing refreshes a probe for a
+            # tool. A fleet refreshes world k's only as it scores that world, every eval_every
+            # steps, and a bare Sim's holds what snapshot_rest left, so the summary alone was the
+            # sheet where it lay at the last score.
+            with reading():
+                probe.update(_model_state(self.env))
+            return probe.summary(key)
+
+        return {"cloth": name, "set": key, **self.bus.call(read)}
 
     def get_rgbd(self, camera: str = "") -> dict[str, Any]:
         frames = self.bus.snapshot.frames
