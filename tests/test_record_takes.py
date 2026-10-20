@@ -293,6 +293,47 @@ class TestRecordersSideBySide(unittest.TestCase):
             self.assertEqual(2, self.rec.run_all(list(TAKES[:2]), args))
         self.assertRegex(err.getvalue(), r"^port 9100's lock .* cannot be opened")
 
+    def test_recorders_under_different_tmpdirs_lock_in_one_place(self) -> None:
+        """The locks lived under ``tempfile.gettempdir()``, so recorders started with different ``TMPDIR``s never met.
+
+        A recorder in a process of its own holds the highest port it can lock, under one ``TMPDIR``; a
+        second, under another, asks for the same port.
+        """
+        import os
+        import textwrap
+
+        head = f"import sys; sys.path.insert(0, {str(REPO / 'scripts')!r}); import record_examples as rec; "
+        head += "rec.port_free = lambda port: True\n"
+        hold = textwrap.dedent(
+            """
+            for port in reversed(rec.PORTS):
+                try:
+                    locks = rec.claim(range(port, port + 1))
+                except ValueError:
+                    continue
+                print(port, flush=True)
+                sys.stdin.read()
+                break
+            """
+        )
+        ask = "import sys\ntry:\n    rec.claim(range(int(sys.argv[1]), int(sys.argv[1]) + 1)); print('claimed')\n"
+        ask += "except ValueError as exc:\n    print(exc)\n"
+
+        def env(name: str) -> dict:
+            (self.tmp / name).mkdir()
+            return {**os.environ, "TMPDIR": str(self.tmp / name)}
+
+        holder = subprocess.Popen(
+            [sys.executable, "-c", head + hold], env=env("a"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+        )
+        self.addCleanup(holder.wait)
+        self.addCleanup(holder.stdin.close)
+        port = int(holder.stdout.readline())
+        asked = subprocess.run(
+            [sys.executable, "-c", head + ask, str(port)], env=env("b"), capture_output=True, text=True, check=True
+        )
+        self.assertRegex(asked.stdout, rf"^port {port} is a page port of the recorder of pid {holder.pid}")
+
     def test_two_recorders_side_by_side_hand_out_disjoint_ports(self) -> None:
         """Four takes at once each, at 9100 and at 9104: each child serves on a port of its own recorder's four."""
         import contextlib

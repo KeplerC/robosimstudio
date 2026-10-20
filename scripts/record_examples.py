@@ -35,6 +35,7 @@ meet, and one whose block meets another's is refused, naming the port.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import json
 import os
@@ -43,7 +44,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -64,8 +64,11 @@ a child that looked for a free one would look long before viser binds it, and tw
 would both find the same. The block is locked for as long as the recorder runs, so a second
 recorder whose block meets it is refused, naming the port."""
 
-LOCKS = Path(tempfile.gettempdir()) / "robosimstudio-record-ports"
-"""Where a recorder locks its block, a file a port."""
+LOCKS = Path("/tmp/robosimstudio-record-ports")
+"""Where every recorder on the machine locks its block, a file a port: one path whatever ``TMPDIR`` says,
+because the ports are the machine's. Under ``tempfile.gettempdir()`` two recorders started with
+different ``TMPDIR`` values locked in two directories, each blind to the other's locks. Made writable by
+every user, as ``/tmp`` is, so another user's recorder locks beside this one's."""
 
 
 def page_ports(port: int, jobs: int) -> range:
@@ -96,8 +99,14 @@ def _open_lock(port: int):
     """``port``'s lock file, open; a lock this user may not open is refused by name, its owner said."""
     path = LOCKS / f"{port}.lock"
     try:
-        LOCKS.mkdir(parents=True, exist_ok=True)
-        return open(path, "a+")  # held until the recorder exits
+        if not LOCKS.is_dir():
+            LOCKS.mkdir(parents=True, exist_ok=True)
+            with contextlib.suppress(PermissionError):  # made by another user's recorder in between
+                LOCKS.chmod(0o1777)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o666)
+        with contextlib.suppress(PermissionError):  # another user's lock file, which they made 0o666
+            os.fchmod(fd, 0o666)
+        return os.fdopen(fd, "a+")  # held until the recorder exits
     except PermissionError as exc:
         import pwd
 
