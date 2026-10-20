@@ -267,8 +267,52 @@ def _sum_soft_contact_forces(
     wp.atomic_add(out, s, wp.spatial_top(contact_f[offset + tid]))
 
 
+@wp.kernel
+def _slide_feedback(
+    count: wp.array[int],
+    shape: wp.array[int],
+    offset: int,
+    contact_f: wp.array[wp.spatial_vector],
+    shape_body: wp.array[int],
+    body_slide: wp.array[int],
+    joint_parent: wp.array[int],
+    joint_X_c: wp.array[wp.transform],
+    joint_axis: wp.array[wp.vec3],
+    joint_qd_start: wp.array[int],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_f: wp.array[wp.spatial_vector],
+):
+    """Each live rigid-soft record's push along the slide joint of the body it is on, as a pair across that joint.
+
+    The child body gets the push's component along the joint's axis at its centre of mass, and the
+    parent the opposite force at the same point, so the pair adds nothing to the robot as a whole and
+    everything to the one joint between them: what a finger closing on a sheet feels from it.
+    """
+    tid = wp.tid()
+    if tid >= count[0]:
+        return
+    s = shape[tid]
+    if s < 0:
+        return
+    b = shape_body[s]
+    if b < 0:
+        return
+    j = body_slide[b]
+    if j < 0:
+        return
+    rot = wp.transform_get_rotation(body_q[b]) * wp.transform_get_rotation(joint_X_c[j])
+    axis = wp.quat_rotate(rot, joint_axis[joint_qd_start[j]])
+    push = wp.dot(wp.spatial_top(contact_f[offset + tid]), axis) * axis
+    wp.atomic_add(body_f, b, wp.spatial_vector(push, wp.vec3()))
+    p = joint_parent[j]
+    if p >= 0:
+        lever = wp.transform_point(body_q[b], body_com[b]) - wp.transform_point(body_q[p], body_com[p])
+        wp.atomic_add(body_f, p, wp.spatial_vector(-push, wp.cross(lever, -push)))
+
+
 class SolverOneWay:
-    """Two solvers over one model, the rigid one leading: a kinematic mirror, no feedback.
+    """Two solvers over one model, the rigid one leading: a kinematic mirror, fed back only along slides.
 
     One solver with the standard ``step`` signature: the rigid solver steps with
     its own contacts, the collision pipeline runs over its new body poses, and
@@ -301,6 +345,17 @@ class SolverOneWay:
     readout or a force-gated measure wants and what a stalled finger cannot
     get from this coupler.
 
+    Except along a slide. With ``slide_feedback`` every prismatic joint gets, the
+    substep after, the soft contacts' push on its child's shapes resolved along
+    its axis, applied to the child and, opposite, to its parent at the child's
+    centre of mass: a pair that moves nothing but that one joint. A finger closing
+    on a sheet then stops where the sheet pushes back with its actuator's force,
+    so a hand's ``effort_limit`` is its grip; the arm itself still goes where it
+    is told. Measured on the paper fold (``examples/03_materials/05_paper``): jaws
+    servoed at 100 kN/m and capped at 20 N stall on the sheet with the servo at
+    the cap, where without the pair jaws go to their target whatever is between
+    them, and a position grip on the same sheet read 30 to 120 N on its pads.
+
     Args:
         model: The shared model.
         rigid: The rigid solver, built over the whole model.
@@ -308,9 +363,21 @@ class SolverOneWay:
         collision: The pipeline the deformable solver's contacts come from.
         names: ``(rigid island name, deformable island name)``.
         contact_forces: Ask the deformable solver for its contact forces every substep.
+        slide_feedback: Give every slide (prismatic) joint the soft contacts' push along its axis,
+            the substep after it was pushed. See :meth:`step`.
     """
 
-    def __init__(self, model, rigid, soft, collision, names: tuple[str, str], *, contact_forces: bool = False) -> None:
+    def __init__(
+        self,
+        model,
+        rigid,
+        soft,
+        collision,
+        names: tuple[str, str],
+        *,
+        contact_forces: bool = False,
+        slide_feedback: bool = False,
+    ) -> None:
         self.model = model
         self.rigid = rigid
         self.soft = soft
@@ -322,8 +389,16 @@ class SolverOneWay:
         self._body_q_prev = wp.clone(model.body_q) if model.body_count else None
         self.observables = None
         self._shape_forces = None
-        if contact_forces:
+        self._body_slide = None
+        if contact_forces or slide_feedback:
             self.enable_contact_forces()
+        if slide_feedback and model.body_count:
+            kinds = model.joint_type.numpy()
+            child = model.joint_child.numpy()
+            table = np.full(int(model.body_count), -1, dtype=np.int32)
+            for j in np.flatnonzero(kinds == int(newton.JointType.PRISMATIC)):
+                table[int(child[j])] = int(j)
+            self._body_slide = wp.array(table, dtype=wp.int32, device=self.device)
 
     def enable_contact_forces(self) -> None:
         """Ask the deformable solver for its contact forces from the next substep on.
@@ -421,6 +496,30 @@ class SolverOneWay:
             self.soft.step(state_in, state_out, control, self.contacts, dt, observables=self.observables)
             return
         wp.copy(self._body_q_prev, state_in.body_q)
+        if self._body_slide is not None and self.contacts.soft_contact_max > 0:
+            # Last substep's records and forces, still in the buffers: the collide and the solve below
+            # replace them. ``body_f`` was cleared before this substep, so the pair adds, once.
+            model, contacts = self.model, self.contacts
+            wp.launch(
+                _slide_feedback,
+                dim=contacts.soft_contact_max,
+                inputs=[
+                    contacts.soft_contact_count,
+                    contacts.soft_contact_shape,
+                    int(contacts.rigid_contact_max),
+                    self.observables.contact_f,
+                    model.shape_body,
+                    self._body_slide,
+                    model.joint_parent,
+                    model.joint_X_c,
+                    model.joint_axis,
+                    model.joint_qd_start,
+                    state_in.body_q,
+                    model.body_com,
+                ],
+                outputs=[state_in.body_f],
+                device=self.device,
+            )
         self.rigid.step(state_in, state_out, control, None, dt)
         # The pipeline collides ``state_in``: this substep's arm against the particles where they start.
         wp.copy(state_in.body_q, state_out.body_q)
@@ -469,8 +568,15 @@ def build_one_way(ctx: CouplerBuild) -> Any:
         kwargs["contact_matching"] = collision.contact_matching
     pipeline = newton.CollisionPipeline(ctx.model, **kwargs)
     forces = bool(ctx.spec.get("contact_forces", False))
+    slides = bool(ctx.spec.get("slide_feedback", False))
     return SolverOneWay(
-        ctx.model, rigid_solver, soft_solver, pipeline, (rigid.name, deformable.name), contact_forces=forces
+        ctx.model,
+        rigid_solver,
+        soft_solver,
+        pipeline,
+        (rigid.name, deformable.name),
+        contact_forces=forces,
+        slide_feedback=slides,
     )
 
 
