@@ -35,13 +35,13 @@ meet, and one whose block meets another's is refused, naming the port.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import fcntl
 import json
 import os
 import runpy
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -64,11 +64,12 @@ a child that looked for a free one would look long before viser binds it, and tw
 would both find the same. The block is locked for as long as the recorder runs, so a second
 recorder whose block meets it is refused, naming the port."""
 
-LOCKS = Path("/tmp/robosimstudio-record-ports")
+LOCKS = Path(os.environ.get("ROBOSIMSTUDIO_RECORD_LOCKS") or "/tmp/robosimstudio-record-ports")
 """Where every recorder on the machine locks its block, a file a port: one path whatever ``TMPDIR`` says,
 because the ports are the machine's. Under ``tempfile.gettempdir()`` two recorders started with
-different ``TMPDIR`` values locked in two directories, each blind to the other's locks. Made writable by
-every user, as ``/tmp`` is, so another user's recorder locks beside this one's."""
+different ``TMPDIR`` values locked in two directories, each blind to the other's locks. Opened to every
+user, as ``/tmp`` is, so another user's recorder locks beside this one's. ``ROBOSIMSTUDIO_RECORD_LOCKS``
+names another, for a test: recorders meet only where they name the same one."""
 
 
 def page_ports(port: int, jobs: int) -> range:
@@ -95,17 +96,41 @@ def port_free(port: int) -> bool:
         return True
 
 
+def _open_shared(path: Path) -> int:
+    """``path`` opened for reading and appending, made 0o666 if it is not there: a lock file, whoever made it.
+
+    Opened without ``O_CREAT`` when it is there. :data:`LOCKS` is sticky and writable by all, and there
+    ``fs.protected_regular`` refuses an ``O_CREAT`` open of another user's file, 0o666 or not, unless the
+    directory is the opener's: one ``O_CREAT`` open locked a user out of every port another user's
+    recorder had once locked, since a lock file is never removed. Made ``O_EXCL``, so a recorder that
+    makes it an instant after another opens the other's. This user's own, made under an older recorder
+    or another umask, is opened to every user here."""
+    for _ in range(3):
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_APPEND)
+        except FileNotFoundError:
+            try:
+                fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_EXCL, 0o666)
+            except FileExistsError:  # another recorder made it between the two
+                continue
+            os.fchmod(fd, 0o666)  # whatever the umask took off
+            return fd
+        st = os.fstat(fd)
+        if st.st_uid == os.geteuid() and stat.S_IMODE(st.st_mode) & 0o666 != 0o666:
+            os.fchmod(fd, 0o666)
+        return fd
+    raise FileNotFoundError(f"{path} was made and removed three times while this recorder opened it")
+
+
 def _open_lock(port: int):
     """``port``'s lock file, open; a lock this user may not open is refused by name, its owner said."""
     path = LOCKS / f"{port}.lock"
     try:
-        if not LOCKS.is_dir():
-            LOCKS.mkdir(parents=True, exist_ok=True)
-            with contextlib.suppress(PermissionError):  # made by another user's recorder in between
-                LOCKS.chmod(0o1777)
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o666)
-        with contextlib.suppress(PermissionError):  # another user's lock file, which they made 0o666
-            os.fchmod(fd, 0o666)
+        LOCKS.mkdir(parents=True, exist_ok=True)
+        st = LOCKS.stat()
+        if st.st_uid == os.geteuid() and stat.S_IMODE(st.st_mode) & 0o1777 != 0o1777:
+            LOCKS.chmod(0o1777)  # this user's, whichever recorder made it: opened to every user, as /tmp is
+        fd = _open_shared(path)
         return os.fdopen(fd, "a+")  # held until the recorder exits
     except PermissionError as exc:
         import pwd

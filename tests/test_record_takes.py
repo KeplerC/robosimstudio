@@ -274,10 +274,15 @@ class TestRecordersSideBySide(unittest.TestCase):
         self._claim(9100, 4)
 
     def test_a_lock_this_user_may_not_open_is_refused_by_name(self) -> None:
-        """A lock directory another user made is not writable here: ``claim`` raised ``PermissionError`` past ``run_all``."""
+        """A lock directory another user made is not writable here: ``claim`` raised ``PermissionError`` past ``run_all``.
+
+        Only root can make one another user's, so it is this user's 0o555 directory, read as another's: a
+        recorder opens its own to every user.
+        """
         import contextlib
         import io
         import os
+        from unittest import mock
 
         if os.geteuid() == 0:
             self.skipTest("root opens any file")
@@ -285,6 +290,9 @@ class TestRecordersSideBySide(unittest.TestCase):
         locks.mkdir()
         locks.chmod(0o555)
         self.addCleanup(locks.chmod, 0o755)
+        someone = mock.patch.object(self.rec.os, "geteuid", lambda: os.getuid() + 1)
+        someone.start()
+        self.addCleanup(someone.stop)
         with self.assertRaisesRegex(ValueError, rf"^port 9100's lock {locks}/9100.lock cannot be opened"):
             self._claim(9100, 4)
         args = _parse(self.rec, ["--gpus", "1", "-j", "4", "--port", "9100", "--out", str(self.tmp / "out")])
@@ -296,43 +304,43 @@ class TestRecordersSideBySide(unittest.TestCase):
     def test_recorders_under_different_tmpdirs_lock_in_one_place(self) -> None:
         """The locks lived under ``tempfile.gettempdir()``, so recorders started with different ``TMPDIR``s never met.
 
-        A recorder in a process of its own holds the highest port it can lock, under one ``TMPDIR``; a
-        second, under another, asks for the same port.
+        A recorder in a process of its own holds a port under one ``TMPDIR``; a second, under another, asks
+        for the same port. Both lock in a directory of this test's, which ``ROBOSIMSTUDIO_RECORD_LOCKS``
+        names, so the machine's own is never touched; and one with only a ``TMPDIR`` locks in the machine's.
         """
         import os
-        import textwrap
 
         head = f"import sys; sys.path.insert(0, {str(REPO / 'scripts')!r}); import record_examples as rec; "
         head += "rec.port_free = lambda port: True\n"
-        hold = textwrap.dedent(
-            """
-            for port in reversed(rec.PORTS):
-                try:
-                    locks = rec.claim(range(port, port + 1))
-                except ValueError:
-                    continue
-                print(port, flush=True)
-                sys.stdin.read()
-                break
-            """
-        )
+        hold = "locks = rec.claim(range(9150, 9151)); print(9150, flush=True); sys.stdin.read()\n"
         ask = "import sys\ntry:\n    rec.claim(range(int(sys.argv[1]), int(sys.argv[1]) + 1)); print('claimed')\n"
         ask += "except ValueError as exc:\n    print(exc)\n"
+        environ = {k: v for k, v in os.environ.items() if k != "ROBOSIMSTUDIO_RECORD_LOCKS"}
 
-        def env(name: str) -> dict:
+        def env(name: str, locks: bool = True) -> dict:
             (self.tmp / name).mkdir()
-            return {**os.environ, "TMPDIR": str(self.tmp / name)}
+            moved = {"ROBOSIMSTUDIO_RECORD_LOCKS": str(self.tmp / "locks")} if locks else {}
+            return {**environ, "TMPDIR": str(self.tmp / name), **moved}
 
         holder = subprocess.Popen(
             [sys.executable, "-c", head + hold], env=env("a"), stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
         )
         self.addCleanup(holder.wait)
         self.addCleanup(holder.stdin.close)
+        self.addCleanup(holder.stdout.close)
         port = int(holder.stdout.readline())
         asked = subprocess.run(
             [sys.executable, "-c", head + ask, str(port)], env=env("b"), capture_output=True, text=True, check=True
         )
         self.assertRegex(asked.stdout, rf"^port {port} is a page port of the recorder of pid {holder.pid}")
+        named = subprocess.run(
+            [sys.executable, "-c", head + "print(rec.LOCKS)"],
+            env=env("c", locks=False),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual("/tmp/robosimstudio-record-ports", named.stdout.strip())
 
     def test_two_recorders_side_by_side_hand_out_disjoint_ports(self) -> None:
         """Four takes at once each, at 9100 and at 9104: each child serves on a port of its own recorder's four."""
@@ -361,6 +369,107 @@ class TestRecordersSideBySide(unittest.TestCase):
         self.assertEqual(10, len(handed[9100]))
         self.assertEqual({9100, 9101, 9102, 9103}, set(handed[9100]))
         self.assertEqual({9104, 9105, 9106, 9107}, set(handed[9104]))
+
+
+class TestALockOpensForEveryUser(unittest.TestCase):
+    """A recorder opens a lock another user's recorder made, and opens its own directory and locks to every user.
+
+    ``/tmp`` is sticky and writable by all, and under ``fs.protected_regular`` (2 on the box the
+    recorders run on) the kernel refuses an ``O_CREAT`` open there of a file that belongs to another
+    user who does not own the directory either, 0o666 or not. Every recorder opened its lock
+    ``O_CREAT``, and a lock file is never removed, so a port another user's recorder had locked once
+    could never be claimed. And the directory was made writable by all only by the call that made it,
+    so one an earlier recorder had made 0o755, with 0o644 locks, stayed so.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        from unittest import mock
+
+        import record_examples
+
+        self.rec = record_examples
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
+        self.locks = self.tmp / "locks"
+        for patch in (
+            mock.patch.object(record_examples, "LOCKS", self.locks),
+            mock.patch.object(record_examples, "port_free", lambda port: True),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def _claim(self, opener=None) -> list[int]:
+        """Claim 9100 with ``os.open`` replaced by ``opener(path, flags, real_open)``: the flags it was handed."""
+        import os
+        from unittest import mock
+
+        real, flags = os.open, []
+
+        def recording(path, how, *args):
+            if str(path).endswith("9100.lock"):
+                flags.append(how)
+            return opener(path, how, lambda: real(path, how, *args)) if opener else real(path, how, *args)
+
+        with mock.patch.object(self.rec.os, "open", recording):
+            locks = self.rec.claim(range(9100, 9101))
+        for lock in locks:
+            lock.close()
+        return flags
+
+    def test_a_lock_that_is_there_is_opened_without_creating_it(self) -> None:
+        import os
+
+        self.locks.mkdir()
+        (self.locks / "9100.lock").touch()
+        flags = self._claim()
+        self.assertTrue(flags)
+        self.assertEqual([0] * len(flags), [how & os.O_CREAT for how in flags], "opened O_CREAT")
+
+    def test_a_lock_another_users_recorder_made_is_claimed(self) -> None:
+        """The kernel's rule, modelled: ``O_CREAT`` without ``O_EXCL`` on a lock that is there is refused."""
+        import errno
+        import os
+
+        def protected(path, how, call):
+            if how & os.O_CREAT and not how & os.O_EXCL and os.path.exists(path):
+                raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+            return call()
+
+        self.locks.mkdir()
+        (self.locks / "9100.lock").touch()
+        self._claim(protected)
+
+    def test_a_lock_made_between_the_look_and_the_make_is_opened(self) -> None:
+        """Two recorders that find no lock both make it: the one whose make finds it there opens the other's."""
+        import os
+
+        def raced(path, how, call):
+            if how & os.O_EXCL:
+                open(path, "a").close()  # the other recorder's, an instant before; not through os.open
+            return call()
+
+        flags = self._claim(raced)
+        plain, make = os.O_RDWR | os.O_APPEND, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_EXCL
+        self.assertEqual([plain, make, plain], flags)
+
+    def test_this_users_directory_and_locks_are_opened_to_every_user(self) -> None:
+        import os
+        import stat
+
+        self.locks.mkdir()
+        self.locks.chmod(0o755)
+        (self.locks / "9100.lock").touch()
+        (self.locks / "9100.lock").chmod(0o644)
+        umask = os.umask(0o022)
+        try:
+            locks = self.rec.claim(range(9100, 9102))
+        finally:
+            os.umask(umask)
+        for lock in locks:
+            lock.close()
+        modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in (self.locks, *sorted(self.locks.iterdir()))}
+        self.assertEqual({"locks": 0o1777, "9100.lock": 0o666, "9101.lock": 0o666}, modes)
 
 
 class TestAPageServesOnItsClaimedPort(unittest.TestCase):
