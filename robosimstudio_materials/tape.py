@@ -1081,8 +1081,12 @@ class EntityTape(EntityCloth):
         """The model the bonds are bound on: the margins, radii and shapes every bond kernel reads."""
         self._under: Any = None
         self._radius: np.ndarray = np.zeros(0, dtype=np.float32)
-        """Every particle's radius as the bonds were bound [m], the model's whole array: what each particle's change
-        is measured from, a bond's by :meth:`radius_moved` and every particle's of the sheet by a reset."""
+        """The sheet's particle radii as the bonds were bound [m], by offset into the sheet (:attr:`_start`): what each
+        particle's change is measured from, a bond's by :meth:`radius_moved` and every particle's of the sheet by a
+        reset. The sheet's alone: held whole, the model's array kept every other particle's radius for the life of
+        the tape, 0.4-4 MB beside an MPM material of 10^5-10^6 particles."""
+        self._start: int = 0
+        """The sheet's first particle in the model, as built: a particle less it is its offset into :attr:`_radius`."""
         self._laid: Any = None
         """Opening adhesion: per bond, the contact thickness its particle and anchor are laid at [m], on the device:
         the particle's radius plus the margin the sheet is laid at (:meth:`_relay`). Contact adhesion's is its
@@ -1176,6 +1180,7 @@ class EntityTape(EntityCloth):
                     rows, made = rows[made], made[made]
         self.up = np.array(wp.transform_vector(sheet, wp.vec3(0.0, 0.0, 1.0)), dtype=np.float64)
         start = int(builder.particle_count)
+        self._start = start
         self.surface_count = len(vertices)
         self.lumping = "mesh"
         builder.add_cloth_mesh(
@@ -1543,8 +1548,8 @@ class EntityTape(EntityCloth):
         self._limit = wp.array([float(self.spec.material.break_opening)], dtype=wp.float32, device=device)
         self._model = model
         self._under = wp.array(self.lift_shapes.astype(np.int32), dtype=wp.int32, device=device)
-        self._radius = model.particle_radius.numpy().astype(np.float32)
-        self._laid = wp.array(self._laid_at(self.lift), dtype=float, device=device)
+        self._radius = self._radii_now()
+        self._laid = wp.array(self._laid_at(self.lift, self._radius), dtype=float, device=device)
         self._normals = wp.array(
             np.tile(self.normal, (len(self.bonds), 1)).astype(np.float32), dtype=wp.vec3, device=device
         )
@@ -1630,10 +1635,16 @@ class EntityTape(EntityCloth):
         radius has moved goes that much further again, by its own change, a bond's anchor with it and the
         tab and the end it clamps not, as :meth:`_relay` lays each bond between resets
         (:meth:`radius_moved`). Lifted by the largest change, a radius written to half the sheet laid the
-        other half that much over the thickness each of its bonds is seated at.
+        other half that much over the thickness each of its bonds is seated at. A sheet laid on the face with
+        no bond, held only by its tab, is laid so too: stuck to nothing, it still rests where the contact
+        rests it. A tabbed label with no bonded row on a cylinder, its radius written from 0.5 to 1.5 mm and
+        the scene reset, kept its face row within 0.13 mm of that over 32 substeps; left where it was built,
+        as a reset left it while the radius was held per bond, the row started 1 mm inside the contact and
+        was thrown 2.3 mm past it by the eighth (``f6_probe.py``, VBD on the CPU).
         """
-        moved, raised = self.margin_moved(), self.radius_moved()
-        lifts = (moved + self._raised(self.particles).astype(np.float64))[:, None]
+        radii = None if self._model is None else self._radii_now()  # once, for the sheet, the bonds and their laying
+        moved, change = self.margin_moved(), self._radius_change(radii)
+        lifts = (moved + change[self.particles - self._start].astype(np.float64))[:, None]
         lifts[np.isin(self.particles, self.clamp_particles)] = moved
         for thing in getattr(pipeline, "particle_settles", {}).get("things", [self]):
             rest = getattr(thing, "rest", None)
@@ -1642,7 +1653,7 @@ class EntityTape(EntityCloth):
                 rest["particle_qd"][self.particles] = 0.0
         super().reset(pipeline, episode, world=world)
         if self.broken is not None:
-            self._reset_bonds(moved, raised)
+            self._reset_bonds(moved, change[self.bond_particles - self._start], radii)
         if self.coord_start >= 0:
             c, tab = self.coord_start, self.tab_q0.copy()
             tab[:3] += moved * self.up
@@ -1662,50 +1673,60 @@ class EntityTape(EntityCloth):
             return 0.0
         return float(self._model.shape_margin.numpy()[self.lift_shapes].max()) - self.lift
 
-    def radius_moved(self) -> np.ndarray:
+    def radius_moved(self, radii: np.ndarray | None = None) -> np.ndarray:
         """How far each bond's particle radius has moved since a stuck sheet was laid [m], per bond: what a reset
         lays that bond's particle and anchor further off the face by, past :meth:`margin_moved`. The sheet's
-        material ``particle_radius`` writes it live; all 0 on a loose sheet.
+        material ``particle_radius`` writes it live; all 0 on a loose sheet. Off ``radii``
+        (:meth:`_radii_now`), read when not given.
 
         Reset at the radius it was built at after a live write from 0.5 to 1.5 mm, a contact bond was seated
         at the new thickness over a particle laid at the old, 1 mm inside the contact, and the relay, finding
         the bond already at the new thickness, moved nothing: :data:`LABEL` kept 8 of its 144 bonds one control
         step in. An opening bond was laid at the old thickness and moved by the relay at the next control
         step. Laid here, all 144 of either held (``r2_probe.py``, VBD on the CPU)."""
-        return self._raised(self.bond_particles)
+        return self._radius_change(radii)[self.bond_particles - self._start]
 
-    def _raised(self, particles: np.ndarray) -> np.ndarray:
-        """How far each of ``particles``' radius has moved since the bonds were bound [m], in float32 as
-        :func:`_relay_kernel` sums it; all 0 on a loose sheet, which is laid at no radius."""
+    def _radii_now(self) -> np.ndarray:
+        """The sheet's particle radii as the model holds them now [m], by offset into the sheet, in float32 as
+        :func:`_relay_kernel` sums them: the sheet's slice alone copied off the device, once a bind or a reset.
+        A reset copied the model's whole array three times under opening adhesion, for the bonds' change, the
+        sheet's and the bonds' laying, and twice under contact adhesion, which seats its bonds on the device."""
+        start = self._start
+        return self._model.particle_radius[start : start + self.surface_count].numpy().astype(np.float32)
+
+    def _radius_change(self, radii: np.ndarray | None = None) -> np.ndarray:
+        """How far each of the sheet's particle radii has moved since the bonds were bound [m], by offset into the
+        sheet, in float32 as :func:`_relay_kernel` sums it, off ``radii`` (:meth:`_radii_now`, read when not
+        given); all 0 on a loose sheet, which is laid at no radius."""
         if not len(self.lift_shapes) or self._model is None or not len(self._radius):
-            return np.zeros(len(particles), dtype=np.float32)
-        return self._model.particle_radius.numpy()[particles].astype(np.float32) - self._radius[particles]
+            return np.zeros(self.surface_count, dtype=np.float32)
+        return (self._radii_now() if radii is None else radii) - self._radius
 
-    def _radii(self) -> np.ndarray:
-        """Each bond's particle radius as the model holds it now [m]."""
-        return self._model.particle_radius.numpy()[self.bond_particles].astype(np.float32)
+    def _laid_at(self, margin: float, radii: np.ndarray) -> np.ndarray:
+        """Each bond's contact thickness laid at ``margin`` over its radius in ``radii`` (:meth:`_radii_now`) [m], in
+        float32 as :func:`_relay_kernel` sums it."""
+        return radii[self.bond_particles - self._start] + np.float32(margin)
 
-    def _laid_at(self, margin: float) -> np.ndarray:
-        """Each bond's contact thickness laid at ``margin`` and its radius now [m], in float32 as
-        :func:`_relay_kernel` sums it."""
-        return self._radii() + np.float32(margin)
-
-    def _reset_bonds(self, moved: float | None = None, raised: np.ndarray | None = None) -> None:
+    def _reset_bonds(
+        self, moved: float | None = None, raised: np.ndarray | None = None, radii: np.ndarray | None = None
+    ) -> None:
         """Every bond as built, in every array a solver reads: made or not (:attr:`made`), at its anchor, and
         under contact adhesion seated as a bond starts (:meth:`_seat_bonds`), not with the secant, the anchor
         and the face the last episode left. The seat writes a contact bond's anchor into every copy itself;
         an opening bond's goes ``moved`` and its own ``raised`` further off the face (:meth:`margin_moved`
-        and :meth:`radius_moved`, per bond, read when not given)."""
+        and :meth:`radius_moved`, per bond), and is laid over its radius in ``radii`` (:meth:`_radii_now`), each
+        read when not given."""
         self.broken.zero_()
         rows = {"enabled": self.made}
         if not self._contact:
+            radii = self._radii_now() if radii is None else radii
             moved = self.margin_moved() if moved is None else moved
-            raised = self.radius_moved() if raised is None else raised
+            raised = self.radius_moved(radii) if raised is None else raised
             lift = moved + np.asarray(raised, dtype=np.float64)[:, None]
             anchors = (self.anchors + lift * self.normal).astype(np.float32)
             rows["body_point"] = anchors
             self._anchor.assign(anchors)
-            self._laid.assign(self._laid_at(self.lift + moved))
+            self._laid.assign(self._laid_at(self.lift + moved, radii))
         for key, value in rows.items():
             for array in self._arrays.get(key, ()):
                 values = array.numpy()
