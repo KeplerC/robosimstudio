@@ -31,21 +31,6 @@ from .tuner import MaterialTuner
 __all__ = ["PanelReadings", "PanelTune"]
 
 
-def _settle_run(thing: Any) -> tuple[int, int] | None:
-    """The run ``thing`` joined the scene's settle with, or ``None`` when its spec states none.
-
-    What its kind's ``on_scene_ready`` hands ``ParticleMixin.join_settle``: ``(settle_frames,
-    settle_substeps)`` for a sheet, a tape, a bag, a soft body and an MPM body, and ``(settle_frames,
-    0)`` for water, whose spec has no substeps. Each of their settles steps ``settle_frames`` frames
-    and returns at once on none, so a run of ``0`` frames is a settle that steps nothing.
-    """
-    spec = getattr(thing, "spec", None)
-    frames = getattr(spec, "settle_frames", None)
-    if frames is None:
-        return None
-    return int(frames), int(getattr(spec, "settle_substeps", 0) or 0)
-
-
 class Panel:
     """The studio's panel protocol, duck-typed to avoid importing its module."""
 
@@ -472,17 +457,22 @@ class PanelReadings(Panel):
                 # pressed from a reset. Named as
                 # re-settled only where the run stepped: a tape label's
                 # ``settle_frames`` of 0 beside a towel was "re-settled towel, label".
+                #
+                # The run each thing joined with, as ``join_settle`` kept it
+                # (``settle_run``), not one worked out again from its spec: a kind
+                # that joins with no run, or with a run of its own, settled on its
+                # spec's fields here and on its own at the build.
                 settled, lying, ran = [], [], set()
                 for thing in things:
                     settle = getattr(thing, "settle", None)
-                    if not callable(settle):
+                    run = getattr(thing, "settle_run", None)
+                    if run is None or not callable(settle):
                         lying.append(thing.name)
                         continue
-                    run = _settle_run(thing)
-                    if run is None or run not in ran:
+                    if run not in ran:
                         ran.add(run)
                         settle(pipeline)
-                    (settled if run is None or run[0] > 0 else lying).append(thing.name)
+                    (settled if run[0] > 0 else lying).append(thing.name)
                 # The settles stepped the whole particle array, so every thing that
                 # shares it takes its baseline again, after the last of them.
                 for thing in things:

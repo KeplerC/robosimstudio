@@ -18,7 +18,10 @@ TIER = "fast"
 
 
 def _thing(name: str = "towel", log: list | None = None, run: tuple[int, int] | None = None):
-    """A particle thing; ``run`` is the ``(settle_frames, settle_substeps)`` its spec states."""
+    """A particle thing; ``run`` is the ``(settle_frames, settle_substeps)`` its spec states.
+
+    And the run it joined the settle with, as ``join_settle`` keeps it, until it joins again.
+    """
     from robosimstudio.domains.capabilities import ParticleMixin
 
     class _Stub(ParticleMixin):
@@ -28,6 +31,7 @@ def _thing(name: str = "towel", log: list | None = None, run: tuple[int, int] | 
             self.snapshots = 0
             if run is not None:
                 self.spec = SimpleNamespace(settle_frames=run[0], settle_substeps=run[1])
+            self.settle_run = run
 
         def settle(self, pipeline) -> None:
             del pipeline
@@ -64,17 +68,23 @@ class TestJoinSettle(unittest.TestCase):
         self.assertEqual((1, 1), (a.settles, b.settles))
 
 
+def _panel(pipeline):
+    """The readings panel over ``pipeline``, its **Re-settle** pressed."""
+    from robosimstudio_studio.tuning.panels import PanelReadings
+
+    panel = PanelReadings(SimpleNamespace(env=SimpleNamespace(pipeline=pipeline)))
+    panel._note = SimpleNamespace(value="")
+    panel.resettle_requested = True
+    return panel
+
+
 class TestStudioResettle(unittest.TestCase):
     def _panel(self, pipeline, cloth):
-        from robosimstudio_studio.tuning.panels import PanelReadings
-
-        panel = PanelReadings(SimpleNamespace(env=SimpleNamespace(pipeline=pipeline)))
-        panel._note = SimpleNamespace(value="")
-        panel.resettle_requested = True
-        return panel
+        del cloth
+        return _panel(pipeline)
 
     def test_every_thing_on_the_record_is_rebaselined(self) -> None:
-        cloth, cable = _thing("towel"), _thing("sponge")
+        cloth, cable = _thing("towel", run=(60, 10)), _thing("sponge", run=(30, 4))
         pipeline = SimpleNamespace(particle_settles={"runs": set(), "things": [cloth, cable]})
         panel = self._panel(pipeline, cloth)
         with (
@@ -88,7 +98,7 @@ class TestStudioResettle(unittest.TestCase):
         self.assertEqual("re-settled towel, sponge", panel._note.value)
 
     def test_without_a_record_the_cloth_alone_is_rebaselined(self) -> None:
-        cloth = _thing()
+        cloth = _thing(run=(60, 10))
         panel = self._panel(SimpleNamespace(), cloth)
         with (
             mock.patch.object(type(panel), "_busy", return_value=""),
@@ -138,7 +148,7 @@ class TestStudioResettle(unittest.TestCase):
         """A rope first on the record, then a towel and a sponge that settle: only the first thing was
         asked, so the towel and the sponge were skipped and the page said the rope "does not settle"."""
         log: list[str] = []
-        rope, towel, sponge = self._rope(log), _thing("towel", log), _thing("sponge", log)
+        rope, towel, sponge = self._rope(log), _thing("towel", log, (60, 10)), _thing("sponge", log, (30, 4))
         panel = self._drain([rope, towel, sponge], rope)
         self.assertEqual((1, 1), (towel.settles, sponge.settles))
         self.assertEqual(
@@ -170,6 +180,45 @@ class TestStudioResettle(unittest.TestCase):
         towel, label = _thing("towel", run=(60, 10)), _thing("label", run=(0, 10))
         panel = self._drain([towel, label], towel)
         self.assertEqual("re-settled towel; re-baselined label where it lies", panel._note.value)
+
+
+class TestResettleRunsWhatTheBuildRan(unittest.TestCase):
+    """Re-settle runs the run each thing joined the settle with, as the build did.
+
+    It worked each thing's run out again from its spec's ``(settle_frames, settle_substeps)``, which
+    is what the shipped kinds hand ``join_settle`` and not what a kind has to: one that joins with no
+    run, as the examples' own kinds do, was settled on every Re-settle though the build never settled
+    it, and one that joins with a run of its own was settled on its spec's. Here each thing joins at a
+    "build", then the button is pressed, and each settles as often as it did at the build.
+    """
+
+    def _build_then_resettle(self, joins: list) -> tuple[list[int], list[int], str]:
+        pipeline = SimpleNamespace()
+        for thing, run in joins:
+            thing.join_settle(pipeline, run)
+        built = [thing.settles for thing, _run in joins]
+        for thing, _run in joins:
+            thing.settles = 0
+        panel = _panel(pipeline)
+        with (
+            mock.patch.object(type(panel), "_busy", return_value=""),
+            mock.patch.object(type(panel), "_cloth", return_value=joins[0][0]),
+            mock.patch.object(type(panel), "refresh"),
+        ):
+            panel.drain()
+        return built, [thing.settles for thing, _run in joins], panel._note.value
+
+    def test_a_thing_that_joins_with_no_run_is_not_settled(self) -> None:
+        mine = _thing("mine", run=(60, 10))  # its spec states a run it does not join with
+        built, resettled, note = self._build_then_resettle([(mine, None)])
+        self.assertEqual(([0], [0]), (built, resettled))
+        self.assertEqual("re-baselined mine where it lies", note)
+
+    def test_a_run_of_its_own_is_run_again_and_shared_as_at_the_build(self) -> None:
+        a, b = _thing("a", run=(60, 10)), _thing("b", run=(30, 2))
+        built, resettled, note = self._build_then_resettle([(a, (30, 2)), (b, (30, 2))])
+        self.assertEqual(([1, 0], [1, 0]), (built, resettled), "one run, (30, 2), stepped once both times")
+        self.assertEqual("re-settled a, b", note)
 
 
 if __name__ == "__main__":
