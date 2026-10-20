@@ -1,0 +1,323 @@
+# SPDX-License-Identifier: Apache-2.0
+"""A static object is welded to the world: one fixed joint from the world, and a kinematic body.
+
+``ObjectSpec.static`` says *welded to the world rather than free*. Every path
+``EntityRigid`` built a static object by made a bare ``add_link`` instead: a
+body with no joint, flagged DYNAMIC. VBD integrated it like a free body, and
+MuJoCo refused to convert it. ``tests/test_a_static_box_stays_put.py`` measures
+both on a GPU. A geometry-only USD stage built a *free* body for
+``static=True``, with a FREE joint.
+
+Checked here on a CPU builder, finalized and never stepped, for each of the
+three paths: a primitive, a mesh file and a geometry-only USD stage. A free
+object's FREE joint is checked too, and is unchanged. And no entity that builds
+on ``EntityRigid`` welds a static body a second time.
+"""
+
+from __future__ import annotations
+
+import ast
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+import newton
+import numpy as np
+
+from robosimstudio.domains.rigid.entity import EntityRigid
+from robosimstudio.scene.entity import label_index
+from robosimstudio.specs import AssetSpec, ObjectSpec
+from robosimstudio.specs.asset import ShapeSpec
+from tests.fixtures.packs import has_pack
+
+TIER = "fast"
+"""Builds one object into a CPU builder and finalizes it; no solver, no GPU."""
+
+POSE = (0.1, -0.2, 0.3)
+
+MOVED = {"object_poses": {"box": (POSE[0] + 0.05, POSE[1], POSE[2], 0.0)}}
+TURNED = {"object_poses": {"box": (*POSE, 0.5)}}
+STAYS = {"object_poses": {"box": (*POSE, 0.0)}}
+"""Three episodes for ``box``: 50 mm along x, turned half a radian, and where it was built."""
+
+ROOT = Path(__file__).resolve().parents[1]
+
+WIPE_THE_BAR = ROOT / "examples" / "08_demos" / "wipe_the_bar"
+"""The demo whose ``GrabBar`` extends ``EntityRigid``'s build of a static object with elbows and legs."""
+
+_USD_CUBE = """#usda 1.0
+def Mesh "cube"
+{
+    int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+    int[] faceVertexIndices = [0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7]
+    point3f[] points = [(-0.05, -0.05, -0.05), (0.05, -0.05, -0.05), (0.05, 0.05, -0.05), (-0.05, 0.05, -0.05),
+                        (-0.05, -0.05, 0.05), (0.05, -0.05, 0.05), (0.05, 0.05, 0.05), (-0.05, 0.05, 0.05)]
+}
+"""
+"""A 10 cm cube with no physics schema: geometry, which ``_build_usd`` treats as an ``.obj``."""
+
+
+def _built(spec: ObjectSpec, entity_class=EntityRigid):
+    entity = entity_class(spec)
+    builder = newton.ModelBuilder()
+    entity.build_into(builder, episode=None)
+    return entity, builder.finalize(device="cpu")
+
+
+def _world_joints(model, body: int) -> list[int]:
+    """The joints from the world to ``body``."""
+    parents, children = model.joint_parent.numpy(), model.joint_child.numpy()
+    return [int(j) for j in np.flatnonzero((children == body) & (parents == -1))]
+
+
+class _ThreePaths(unittest.TestCase):
+    """A primitive, a mesh file and a geometry-only USD stage, each a 10 cm cube named ``box`` at :data:`POSE`."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import trimesh
+
+        cls._dir = tempfile.TemporaryDirectory()
+        root = Path(cls._dir.name)
+        trimesh.creation.box(extents=(0.1, 0.1, 0.1)).export(root / "cube.obj")
+        (root / "cube.usda").write_text(_USD_CUBE)
+        cls.paths = {"primitive": None, "mesh": root / "cube.obj", "usd": root / "cube.usda"}
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._dir.cleanup()
+
+    def _spec(self, how: str, *, static: bool) -> ObjectSpec:
+        path = self.paths[how]
+        if path is None:
+            return ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=static)
+        return ObjectSpec(name="box", asset=AssetSpec(path=str(path)), pose=POSE, static=static, obb_grasp=False)
+
+
+class TestAStaticObjectIsWelded(_ThreePaths):
+    def test_each_build_path_bolts_it_to_the_world_where_it_stands(self) -> None:
+        for how in self.paths:
+            with self.subTest(how=how):
+                entity, model = _built(self._spec(how, static=True))
+                body = entity.body
+                joints = np.flatnonzero(model.joint_child.numpy() == body)
+                self.assertEqual(1, len(joints), "one joint holds it")
+                j = int(joints[0])
+                self.assertEqual(int(newton.JointType.FIXED), int(model.joint_type.numpy()[j]), "a weld, not free")
+                self.assertEqual(-1, int(model.joint_parent.numpy()[j]), "to the world")
+                np.testing.assert_allclose(model.joint_X_p.numpy()[j], model.body_q.numpy()[body], atol=1.0e-7)
+                np.testing.assert_allclose(model.body_q.numpy()[body][:3], POSE, atol=1.0e-7)
+                self.assertEqual(
+                    int(newton.BodyFlags.KINEMATIC), int(model.body_flags.numpy()[body]), "nothing pushes it"
+                )
+                self.assertEqual((-1, 0), (entity.coord_start, model.joint_coord_count), "no coordinates to reset")
+
+    def test_a_free_object_keeps_its_free_joint(self) -> None:
+        for how in self.paths:
+            with self.subTest(how=how):
+                entity, model = _built(self._spec(how, static=False))
+                joints = np.flatnonzero(model.joint_child.numpy() == entity.body)
+                self.assertEqual([int(newton.JointType.FREE)], [int(model.joint_type.numpy()[j]) for j in joints])
+                self.assertEqual(int(newton.BodyFlags.DYNAMIC), int(model.body_flags.numpy()[entity.body]))
+                self.assertEqual(0, entity.coord_start)
+
+
+class TestAnEpisodeThatMovesAStaticObjectIsRefused(_ThreePaths):
+    """A static object stands where its model welded it, so an episode that moves it is refused by name.
+
+    The weld has no coordinates, so ``EntityRigid.reset`` returned early and the
+    object stood at the build episode's pose whatever a later episode on the same
+    model said, and a fleet's wave stood every world's copy there. On a GPU,
+    ``tests/test_a_static_box_stays_put.py`` runs both, and the way out the
+    refusal names.
+    """
+
+    def test_a_reset_refuses_an_episode_that_moves_or_turns_it(self) -> None:
+        for how in self.paths:
+            entity, _ = _built(self._spec(how, static=True))
+            for name, episode in (("moved", MOVED), ("turned", TURNED)):
+                with self.subTest(how=how, episode=name), self.assertRaisesRegex(ValueError, "'box' is static"):
+                    entity.reset(None, episode)
+
+    def test_a_reset_takes_an_episode_that_leaves_it_where_it_was_built(self) -> None:
+        for how in self.paths:
+            with self.subTest(how=how):
+                entity, _ = _built(self._spec(how, static=True))
+                for episode in (None, STAYS, {"object_poses": {"other": (0.0, 0.0, 0.0, 1.0)}}):
+                    entity.reset(None, episode)
+
+    def test_a_wave_refuses_a_world_whose_episode_moves_it(self) -> None:
+        from types import SimpleNamespace
+
+        from robosimstudio.scene.compiler import CannotReplicate
+        from robosimstudio_bench.envs.fleet import FleetEnv
+
+        entity, _ = _built(self._spec("primitive", static=True))
+        wave = SimpleNamespace(
+            scene=SimpleNamespace(objects={"box": entity}),
+            world_document=lambda world: SimpleNamespace(full_name="doc"),
+            _declared_for=lambda document: {"box": entity.declared_q},
+        )
+        wave.episodes = [STAYS, None, STAYS]
+        FleetEnv._check_statics(wave)
+        wave.episodes = [STAYS, MOVED]
+        with self.assertRaisesRegex(CannotReplicate, "world 1 runs 'doc', and object 'box' is static"):
+            FleetEnv._check_statics(wave)
+
+
+class TestNoStaticBodyIsWeldedTwice(unittest.TestCase):
+    """One joint to the world per static body, however an entity extends ``EntityRigid``'s build.
+
+    ``EntityRigid`` welds a static object itself, so a subclass that welds it
+    again after ``super().build()`` gives it a second fixed joint to the world
+    under the same label. The wipe-the-bar demo's ``GrabBar`` did: the bar had two
+    ``bar_weld`` joints, ``SolverMuJoCo`` made the first the mocap root and the
+    second a weld equality, and ``label_index`` found the label twice.
+    """
+
+    @staticmethod
+    def _bar():
+        if str(WIPE_THE_BAR) not in sys.path:
+            sys.path.insert(0, str(WIPE_THE_BAR))
+        import bar
+
+        return _built(bar.BarSpec(), bar.GrabBar)
+
+    def test_the_grab_bar_has_one_weld_and_its_label_names_it(self) -> None:
+        entity, model = self._bar()
+        welds = _world_joints(model, entity.body)
+        self.assertEqual(1, len(welds), "the bar had two, both 'bar_weld'")
+        self.assertEqual(welds[0], label_index(model.joint_label, "bar_weld"))
+
+    def test_every_static_body_the_shipped_rigid_entities_build(self) -> None:
+        builds = {"primitive": _built(ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), static=True))}
+        builds["grab_bar"] = self._bar()
+        if has_pack("cutting"):
+            import robosimstudio as rss
+            from robosimstudio_materials.cutting.entity import EntityKnife
+
+            builds["knife"] = _built(rss.knife(name="knife", static=True), EntityKnife)
+        for name, (entity, model) in builds.items():
+            with self.subTest(name):
+                kinematic = np.flatnonzero(model.body_flags.numpy() == int(newton.BodyFlags.KINEMATIC))
+                self.assertEqual([entity.body], [int(b) for b in kinematic], "the one static body")
+                self.assertEqual(1, len(_world_joints(model, entity.body)), "one weld")
+
+
+class TestAStaticObjectStatesNoMass(unittest.TestCase):
+    """A static body's mass is read by no solver, so the build does not write one and no panel offers one.
+
+    The mesh path already skipped ``set_body_mass`` for a static object. The
+    primitive path, the knife's among them, still wrote ``mass`` onto the
+    kinematic body, which VBD gives an inverse mass of zero and MuJoCo makes a
+    mocap body, and :meth:`EntityRigid.tunables` offered a ``mass`` that moved
+    nothing.
+    """
+
+    def _builds(self):
+        box = ObjectSpec(name="box", shape=ShapeSpec(half_extents=(0.05,) * 3), pose=POSE, static=True, mass=5.0)
+        out = {"box": (box, EntityRigid)}
+        if has_pack("cutting"):
+            import robosimstudio as rss
+            from robosimstudio_materials.cutting.entity import EntityKnife
+
+            out["knife"] = (rss.knife(name="knife", static=True, mass=0.5), EntityKnife)
+        return out
+
+    def test_a_static_primitive_weighs_what_it_would_with_no_mass_stated(self) -> None:
+        from robosimstudio.specs import replace
+
+        for name, (spec, entity_class) in self._builds().items():
+            with self.subTest(name):
+                entity, model = _built(spec, entity_class)
+                unstated, bare = _built(replace(spec, mass=None), entity_class)
+                mass = float(model.body_mass.numpy()[entity.body])
+                self.assertNotEqual(float(spec.mass), mass, "it wrote the stated mass")
+                self.assertEqual(float(bare.body_mass.numpy()[unstated.body]), mass)
+
+    def test_a_static_object_offers_its_contact_and_no_mass(self) -> None:
+        for name, (spec, entity_class) in self._builds().items():
+            with self.subTest(name):
+                entity, model = _built(spec, entity_class)
+                entity.bind(model)
+                self.assertEqual(["contact"], [t.name for t in entity.tunables()])
+
+    def test_a_free_object_still_offers_its_mass(self) -> None:
+        from robosimstudio.specs import replace
+
+        spec, _ = self._builds()["box"]
+        entity, model = _built(replace(spec, static=False))
+        entity.bind(model)
+        self.assertAlmostEqual(5.0, float(model.body_mass.numpy()[entity.body]), places=5)
+        self.assertEqual(["contact", "mass"], [t.name for t in entity.tunables()])
+
+
+WELDS_ELSEWHERE = {
+    "robosimstudio/domains/static/welded.py": "weld_to_world, the recipe itself",
+    "robosimstudio_materials/rod/entity.py": (
+        "a cable's anchored end: a capsule inside the rod's own articulation, tied to the world by a weld "
+        "VBD solves, not a static body of its own"
+    ),
+}
+"""The files that may add a fixed joint from the world themselves, and why."""
+
+
+def _world_welds(path: Path) -> list[int]:
+    """The lines of ``path`` that call ``add_joint_fixed`` with the world as the parent."""
+
+    def is_world(node) -> bool:
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return isinstance(node.operand, ast.Constant) and node.operand.value == 1
+        return isinstance(node, ast.Constant) and node.value == -1
+
+    lines = []
+    for node in ast.walk(ast.parse(path.read_text())):
+        if not (isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "add_joint_fixed"):
+            continue
+        parent = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "parent"), None)
+        if parent is not None and is_world(parent):
+            lines.append(node.lineno)
+    return lines
+
+
+class TestOneRecipeWeldsABodyToTheWorld(unittest.TestCase):
+    """Every fixed joint from the world in the shipped code is ``weld_to_world``'s.
+
+    The recipe, a kinematic link and a fixed joint from the world at its pose, was
+    written out in ``EntityRigid``, in ``WeldedFixture.weld_in_place`` and in the
+    wipe-the-bar demo, and the demo's copy welded a body ``EntityRigid`` had
+    already welded. Read by AST, so it stays in the fast tier.
+    """
+
+    PACKAGES = (
+        "robosimstudio",
+        "robosimstudio_bench",
+        "robosimstudio_materials",
+        "robosimstudio_policy_agent",
+        "robosimstudio_real2sim_agent",
+        "robosimstudio_studio",
+        "examples",
+        "scripts",
+    )
+
+    def test_nothing_else_adds_a_fixed_joint_from_the_world(self) -> None:
+        found = {}
+        for package in self.PACKAGES:
+            for path in sorted((ROOT / package).rglob("*.py")):
+                relative = path.relative_to(ROOT).as_posix()
+                if "__pycache__" in path.parts or relative.startswith("examples/live/run/"):
+                    continue
+                if (lines := _world_welds(path)) and relative not in WELDS_ELSEWHERE:
+                    found[relative] = lines
+        self.assertEqual({}, found, "weld a body to the world through weld_to_world")
+
+    def test_the_allowed_files_still_weld_to_the_world(self) -> None:
+        """An entry nothing needs any more is one that would let the next copy through."""
+        for relative in WELDS_ELSEWHERE:
+            with self.subTest(relative):
+                self.assertTrue(_world_welds(ROOT / relative))
+
+
+if __name__ == "__main__":
+    unittest.main()

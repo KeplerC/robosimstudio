@@ -350,7 +350,8 @@ class ObjectSpec:
             of safety glasses, so the density that would be right for the box a
             collider approximation stands in for makes the object 47x light.
             Applied by rescaling, so the shape's inertia distribution survives;
-            see ``set_body_mass``.
+            see ``set_body_mass``. Ignored when :attr:`static`: a welded body
+            is kinematic, and no solver reads its mass.
         friction: Friction for the imported shapes, or ``None`` for Newton's
             default. Scene-declared objects state theirs in the scene.
         contact_gap: Contact activation gap for the imported shapes [m], or

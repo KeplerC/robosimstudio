@@ -22,6 +22,7 @@ import newton
 import numpy as np
 import warp as wp
 
+from robosimstudio.domains.static.welded import weld_to_world
 from robosimstudio.paths import resolve_asset, resolve_path
 from robosimstudio.scene.build.bodies import preserve_body_inertia, set_body_mass
 from robosimstudio.scene.build.colliders import (
@@ -35,6 +36,12 @@ from robosimstudio.solvers import ObbGrasp, compute_obb
 from robosimstudio.specs import ObjectSpec
 
 __all__ = ["EntityRigid"]
+
+WELD_TOLERANCE = 1.0e-5
+"""How far an episode's pose may sit from a static object's weld and still be where it was built.
+
+In metres, and per quaternion component. The weld is read back off the builder in
+float32, so this is that rounding, not a move."""
 
 
 class EntityRigid(Entity):
@@ -77,6 +84,9 @@ class EntityRigid(Entity):
         self.body: int = -1
         self.coord_start: int = -1
         self.dof_start: int = -1
+        self.weld_joint: int = -1
+        """The fixed joint from the world that holds a static object, ``-1`` for a free one."""
+        self._welded_at: np.ndarray | None = None
         self.shapes: np.ndarray = np.zeros(0, dtype=np.int32)
         self.obb: ObbGrasp | None = None
         self.init_pose = np.asarray(spec.pose, dtype=np.float64)
@@ -105,7 +115,7 @@ class EntityRigid(Entity):
             self._build_usd(builder, path, xform)
         elif path.suffix.lower() in (".obj", ".stl", ".ply", ".glb", ".gltf", ".dae"):
             if self.spec.static:
-                body = builder.add_link(xform=xform, label=self.spec.name)
+                body = self._add_welded_link(builder, xform)
             else:
                 # add_body creates the free joint AND the articulation. The
                 # articulation half is load-bearing: without one SolverMuJoCo takes
@@ -308,7 +318,9 @@ class EntityRigid(Entity):
         the body and free joint itself, so the stage decides what the object
         weighs and collides as. A stage with no physics schema anywhere is
         geometry, and is treated exactly as an ``.obj`` is -- this creates the
-        body and the free joint, and the spec supplies density and collider.
+        body and the free joint, or the weld when the spec is static (it built a
+        free body for ``static=True`` before), and the spec supplies density and
+        collider.
 
         Asking the file rather than taking a flag is deliberate: the two are not
         interchangeable descriptions of one object, they are different claims,
@@ -364,10 +376,13 @@ class EntityRigid(Entity):
 
         import newton.usd
 
-        self.body = builder.add_body(xform=xform, label=self.spec.name)
-        joint = builder.joint_count - 1
-        self.coord_start = int(builder.joint_q_start[joint])
-        self.dof_start = int(builder.joint_qd_start[joint])
+        if self.spec.static:
+            self.body = self._add_welded_link(builder, xform)
+        else:
+            self.body = builder.add_body(xform=xform, label=self.spec.name)
+            joint = builder.joint_count - 1
+            self.coord_start = int(builder.joint_q_start[joint])
+            self.dof_start = int(builder.joint_qd_start[joint])
         cfg = builder.default_shape_cfg.copy()
         cfg.density = float(self.spec.density)
         if self.spec.friction is not None:
@@ -431,6 +446,50 @@ class EntityRigid(Entity):
         """The pose this object measures its episode layouts from: the spec's own."""
         return self._declared.copy()
 
+    def _add_welded_link(self, builder: newton.ModelBuilder, xform) -> int:
+        """A static object's body: welded to the world where it stands, and kinematic.
+
+        :attr:`~robosimstudio.specs.ObjectSpec.static` says *welded to the world
+        rather than free*, and :func:`~robosimstudio.domains.static.welded.weld_to_world`
+        is that weld, the one :class:`~robosimstudio.domains.static.welded.WeldedFixture`
+        puts a replicated static on. A bare ``add_link`` was neither: VBD integrated
+        it like a free body and MuJoCo refused to convert it, as
+        ``tests/test_a_static_box_stays_put.py`` measures.
+        """
+        body, self.weld_joint = weld_to_world(builder, xform, label=self.spec.name)
+        self._welded_at = np.asarray(builder.body_q[body], dtype=np.float64)
+        return body
+
+    def move_refusal(self, pose) -> str:
+        """Why this object cannot stand at ``pose`` (world, xyz + xyzw) in the model it was built into, or ``""``.
+
+        Only a static object has a reason. It stands where its model welded it,
+        and nothing writes the weld again: the joint has no coordinates for
+        :meth:`reset` to write, and neither this entity nor a fleet's wave places
+        a world's copy of it. So an episode that put it anywhere else used to run
+        with it where the build's episode stood it, and say nothing.
+
+        Placing it per episode through the mocap channel
+        (:meth:`~robosimstudio.domains.static.welded.WeldedFixture.place_welded`)
+        is not done. That channel is MuJoCo's, and a static the coupled solver
+        mirrors into a deformable's island takes its proxy when the island is
+        built, before any reset (:class:`~robosimstudio.domains.static.entity.PlacedAtBuild`).
+        """
+        if self._welded_at is None:
+            return ""
+        pose = np.asarray(pose, dtype=np.float64).reshape(-1)[:7]
+        at = self._welded_at
+        turned = min(np.abs(pose[3:] - at[3:]).max(), np.abs(pose[3:] + at[3:]).max())
+        if np.abs(pose[:3] - at[:3]).max() <= WELD_TOLERANCE and turned <= WELD_TOLERANCE:
+            return ""
+        where = ", ".join(f"{v:.4f}" for v in at[:3])
+        asked = ", ".join(f"{v:.4f}" for v in pose[:3])
+        return (
+            f"object {self.spec.name!r} is static, welded where its model was built, at ({where}) "
+            f"facing {tuple(round(float(v), 4) for v in at[3:])}, and this episode stands it at ({asked}) "
+            f"facing {tuple(round(float(v), 4) for v in pose[3:])}"
+        )
+
     def _add_primitive(self, builder: newton.ModelBuilder, pose) -> None:
         """A body made from a primitive, with no file behind it.
 
@@ -441,7 +500,7 @@ class EntityRigid(Entity):
         """
         xform = wp.transform(tuple(float(v) for v in pose[:3]), wp.quat(*[float(v) for v in pose[3:7]]))
         if self.spec.static:
-            body = builder.add_link(xform=xform, label=self.spec.name)
+            body = self._add_welded_link(builder, xform)
         else:
             body = builder.add_body(xform=xform, label=self.spec.name)
             joint = builder.joint_count - 1
@@ -455,7 +514,8 @@ class EntityRigid(Entity):
             label=self.spec.name,
             cfg=self._contact_cfg(builder),
         )
-        if self.spec.mass is not None:
+        # Not on a static body, as the mesh path does not: it is kinematic, and no solver reads its mass.
+        if self.spec.mass is not None and not self.spec.static:
             set_body_mass(builder, body, float(self.spec.mass))
 
     def _contact_cfg(self, builder: newton.ModelBuilder):
@@ -1048,7 +1108,22 @@ class EntityRigid(Entity):
 
         Only its own coordinates are touched, so resetting one object never
         disturbs another or the arm.
+
+        A static object has none, and an episode that moves it is refused by name
+        (:meth:`move_refusal`): the model it would run in welded it elsewhere.
+
+        Raises:
+            ValueError: When this episode moves a static object.
         """
+        if self.weld_joint >= 0:
+            refusal = self.move_refusal(self._placed(self._episode_pose(episode)))
+            if refusal:
+                raise ValueError(
+                    f"{refusal}. A weld has no coordinates for a reset to write, so a layout that moves a static "
+                    "object needs a model of its own: name object_poses (or object_xforms) in the sampler's "
+                    "(:model-key-fields ...), or drop static=True"
+                )
+            return
         if self.coord_start < 0:
             return
         # The remembered start pose stays in the frame the *spec* stated it in,
@@ -1066,7 +1141,7 @@ class EntityRigid(Entity):
 
     # ---------------------------------------------------------------- tuning
     def tunables(self, pipeline=None):
-        """Contact material over this object's shapes, and its mass.
+        """Contact material over this object's shapes, and its mass unless it is static.
 
         Over ``self.shapes`` rather than ``range.shape_indices``: a
         scene-declared object does not *build* its shapes -- :meth:`find_in_scene`
@@ -1075,6 +1150,10 @@ class EntityRigid(Entity):
         objects in an imported arena are that case, which is to say: using the
         range here would have offered a working panel that wrote into no shapes
         at all, on the majority of objects in the benchmark's corpus.
+
+        No mass on a static object, as :meth:`EntityStatic.tunables
+        <robosimstudio.domains.static.entity.EntityStatic.tunables>` offers none:
+        its body is welded and kinematic, and a mass written there moves nothing.
         """
         from robosimstudio.core.tuning import BodyWriter, ShapeWriter, Tunable
         from robosimstudio.specs import BodySpec, ContactMaterialSpec
@@ -1092,7 +1171,7 @@ class EntityRigid(Entity):
                     summary=f"What {self.name}'s {len(self.shapes)} shape(s) feel on contact.",
                 )
             )
-        if self.body >= 0:
+        if self.body >= 0 and not self.spec.static:
             bodies = BodyWriter(self.model, [self.body], pipeline)
             out.append(
                 Tunable(

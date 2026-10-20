@@ -261,8 +261,7 @@ class EntityStatic(WeldedFixture, Entity):
         if self.replicated and type(self).places_per_world(spec):
             placed = self._placed(self.xform_now)
             xform = wp.transform(tuple(float(v) for v in placed[:3]), wp.quat(*[float(v) for v in placed[3:7]]))
-            self.body = int(builder.add_link(xform=xform, label=spec.name))
-            self.weld_in_place(builder, self.body, label=f"{spec.name}_weld")
+            self.body = self.weld_in_place(builder, xform, label=spec.name)
 
     def build(self, builder: newton.ModelBuilder, episode) -> None:
         self._claim_body(builder, episode)

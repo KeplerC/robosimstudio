@@ -50,14 +50,43 @@ from typing import Any
 import newton
 import numpy as np
 
-__all__ = ["WeldedFixture"]
+__all__ = ["WeldedFixture", "weld_to_world"]
+
+
+def weld_to_world(builder: newton.ModelBuilder, xform: Any, *, label: str) -> tuple[int, int]:
+    """A body bolted to the world at ``xform``: ``(body, joint)``, both indices into ``builder``.
+
+    The one recipe for a body that stands still, whichever entity builds it: a
+    link added kinematic, and a fixed joint from the world at the link's own pose,
+    labelled ``<label>_weld``. Both halves are needed.
+
+    * **The joint** is what MuJoCo converts. Outside any articulation it becomes a
+      standalone world root, and the converter says so once in a ``UserWarning``.
+      A link with no joint at all is refused: "cannot convert bodies that are
+      outside articulations and have no standalone joint to world".
+    * **The kinematic flag** is what VBD reads. It gives the body an inverse mass
+      of zero, where the joint alone let a static block move 0.05 mm under a
+      pressing hand and a static cube 0.01 mm under a towel (``s4_weld_only.py``).
+      It is also what asks MuJoCo's converter for a mocap body, the per-world
+      channel :meth:`WeldedFixture.place_welded` writes, rather than a pose baked
+      into the model (the module docstring).
+
+    The joint's parent transform is the body's pose and its child transform is
+    identity, so ``joint_X_p`` **is** the body's world pose, which is what makes
+    :meth:`WeldedFixture.place_welded` a single row write rather than a frame
+    composition. The joint has no coordinates, so a reset has none to write, and
+    no articulation, so forward kinematics leaves ``body_q`` where it was put.
+    """
+    body = int(builder.add_link(xform=xform, label=label, is_kinematic=True))
+    joint = int(builder.add_joint_fixed(-1, body, parent_xform=builder.body_q[body], label=f"{label}_weld"))
+    return body, joint
 
 
 class WeldedFixture:
     """Mixin: a body welded to the world, re-placeable per world at reset.
 
-    Two calls, one at each end of the lifecycle. :meth:`weld_in_place` replaces
-    the ``add_joint_fixed`` a welded entity would have written itself, and
+    Two calls, one at each end of the lifecycle. :meth:`weld_in_place` builds the
+    welded body (:func:`weld_to_world`) and records its joint, and
     :meth:`place_welded` is what its ``reset`` calls.
 
     Mixed in *before* the entity base so ``self.body``, ``self.worlds`` and
@@ -72,20 +101,14 @@ class WeldedFixture:
     is what turns it into one world's row.
     """
 
-    def weld_in_place(self, builder: newton.ModelBuilder, body: int, *, label: str) -> None:
-        """Bolt ``body`` to the world where it stands, on the per-world channel.
+    def weld_in_place(self, builder: newton.ModelBuilder, xform: Any, *, label: str) -> int:
+        """A body bolted to the world at ``xform``, on the per-world channel; returns its index.
 
-        The joint's parent transform is the body's pose and its child transform
-        is identity, so ``joint_X_p`` **is** the body's world pose -- which is
-        what makes :meth:`place_welded` a single row write rather than a frame
-        composition. Stated here rather than relied upon at the far end.
+        :func:`weld_to_world`, with the joint kept as :attr:`weld_joint` for
+        :meth:`place_in_model` and :meth:`place_welded` to write.
         """
-        self.weld_joint = int(builder.joint_count)
-        builder.add_joint_fixed(-1, int(body), parent_xform=builder.body_q[int(body)], label=label)
-        # The reason the converter gives this body a per-world pose at all; see
-        # the module docstring. Set after the joint so a builder that refuses the
-        # weld never leaves a body marked for a channel it does not have.
-        builder.body_flags[int(body)] = int(newton.BodyFlags.KINEMATIC)
+        body, self.weld_joint = weld_to_world(builder, xform, label=label)
+        return body
 
     def place_in_model(self, model: Any, pose: np.ndarray, *, world: int = 0) -> None:
         """Bolt this world's copy to ``pose`` in the MODEL, before anything reads it.
