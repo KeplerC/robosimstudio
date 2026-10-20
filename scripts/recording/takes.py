@@ -2330,10 +2330,19 @@ def scored(example: str, of: str, *, over: Any = None, turn: bool = False, what:
     over ``what``, turns it to point down if ``turn``, and closes in to the material take's view in
     place of that take's opening pause. The sidebar opens the Goal folder and closes what the
     material take closes; a folder only the material script's page adds is not there to open.
+    With ``over``, ``of``'s take must open on a :class:`Wait`, the pause this stands in for; a
+    take that opens on anything else is refused, since dropping its first beat drops a step of
+    the drive.
     """
     material = _material(of)
     start: tuple[Beat, ...] = ()
     if over is not None:
+        opening = material.beats[0] if material.beats else None
+        if not isinstance(opening, Wait):
+            raise ValueError(
+                f"{of}'s take opens on {type(opening).__name__}, not a Wait: the drag over {what or 'the work'} "
+                "stands in for an opening pause, and dropping this beat would drop a step of the drive"
+            )
         start = (
             Wait(seconds=0.5, label=f"the right hand at the YAM's home, pointing ahead; {what}"),
             DragTo("right", over, seconds_per_m=4.5, label=f"drag the hand over {what}"),

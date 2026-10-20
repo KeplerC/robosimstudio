@@ -192,5 +192,31 @@ class TestAMaterialTakeIsItsScriptsOwnClip(unittest.TestCase):
                     self.assertIs(own, takes._material(own.example))
 
 
+class TestAScoredTakeDropsOnlyAnOpeningPause(unittest.TestCase):
+    """``scored(over=...)`` puts its drag over the work where the material take's opening pause was."""
+
+    TAPE = "examples/03_materials/08_tape.py"
+
+    def test_a_material_take_that_opens_on_a_drag_is_refused(self) -> None:
+        """Its first beat is a step of the drive, not a pause: dropping it is refused, naming the script.
+
+        The four shipped takes that drag over the work first are checked as the table is read."""
+        from dataclasses import replace
+        from unittest import mock
+
+        from recording import takes
+
+        own = takes._material(self.TAPE)
+        drag = next(b for b in own.beats if not isinstance(b, takes.Wait))
+        moving = replace(own, beats=(drag, *own.beats))
+        group = tuple(moving if t is own else t for t in takes.ROBOT_TAPE)
+        with mock.patch.object(takes, "ROBOT_TAPE", group):
+            refusal = rf"08_tape\.py's take opens on {type(drag).__name__}, not a Wait"
+            with self.assertRaisesRegex(ValueError, refusal):
+                takes.scored("examples/06_tasks/08_tape_scored.py", self.TAPE, over=(0.0, 0.0, 0.1), what="the tab")
+            kept = takes.scored("examples/06_tasks/08_tape_scored.py", self.TAPE)
+        self.assertEqual(moving.beats, kept.beats[: len(moving.beats)], "without over, every beat is kept")
+
+
 if __name__ == "__main__":
     unittest.main()
