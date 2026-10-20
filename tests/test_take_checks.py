@@ -287,6 +287,18 @@ class TestTheTakesAimWhereTheirExampleLaysThings(unittest.TestCase):
         hinge = takes._flap_hinge(_laid_film({"flap": flap}))
         self.assertAlmostEqual(0.123 + 0.02 * np.cos(np.radians(15.0)), hinge, 12)
 
+    def test_a_thing_put_at_a_point_with_no_height_is_refused_by_name(self) -> None:
+        """``rss.sheet(at=(x, y))`` builds on the void cell; ``laid`` handed the take ``(x, y)``, and its unpack raised."""
+        from recording.beats import Laid, laid
+
+        film = _laid_film({"sheet": SimpleNamespace(pose=(0.05, 0.0), quat=(0.0, 0.0, 0.0, 1.0))})
+        for read in (lambda: laid(film, "sheet"), lambda: Laid("sheet", dz=0.03).resolve(film)):
+            with self.assertRaises(ValueError) as caught:
+                read()
+            for word in ("'sheet'", "(0.05, 0.0)", "pose", "no height"):
+                self.assertIn(word, str(caught.exception))
+        self.assertEqual((0.05, 0.0, 0.0), laid(_laid_film({"sheet": SimpleNamespace(pose=(0.05, 0.0, 0.0))}), "sheet"))
+
 
 if __name__ == "__main__":
     unittest.main()

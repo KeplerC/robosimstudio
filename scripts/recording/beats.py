@@ -120,6 +120,12 @@ def laid(film, name: str, face=(0.0, 0.0, 0.0)) -> tuple[float, float, float]:
     unturned box: ``(0, 0, 1)`` is the middle of its top, ``(-1, 0, 0)`` the middle of its -x face.
     The layout, not where the thing is now (that is :class:`At`): a take aims where its example put
     things, and follows them when the example moves them; what settled or was pushed since is physics.
+
+    A spec put at a point of fewer than three numbers is refused by name, as one in world coordinates
+    is. ``rss.sheet`` and ``rss.paper`` take ``at=(x, y)`` and build on the ``void`` cell, whose
+    frame is the identity, with their quaternion's x where the height goes (0 unturned): the spec says
+    no height, and handed on, ``(x, y)`` raised where a take unpacks ``x, y, z``
+    (``b2_flat_at_void.py``). On ``bench_075`` the ten kinds it was tried on refuse it at build.
     """
     spec = film.sim[name].spec
     if getattr(spec, "world_xform", False):
@@ -128,9 +134,15 @@ def laid(film, name: str, face=(0.0, 0.0, 0.0)) -> tuple[float, float, float]:
     if nodes:
         point = [sum(float(node[i]) for node in nodes) / len(nodes) for i in range(3)]
     else:
-        where = next((getattr(spec, f) for f in ("xform", "pose", "at") if getattr(spec, f, None) is not None), None)
-        if where is None:
+        field = next((f for f in ("xform", "pose", "at") if getattr(spec, f, None) is not None), None)
+        if field is None:
             raise ValueError(f"{name!r}: its {type(spec).__name__} says nowhere it was put")
+        where = getattr(spec, field)
+        if len(where) < 3:
+            raise ValueError(
+                f"{name!r} is put at {tuple(float(v) for v in where)}, its {type(spec).__name__}'s {field}: "
+                "a point on the bench is x, y and z, and this says no height"
+            )
         point = [float(v) for v in where[:3]]
     if any(face):
         shape, xform = getattr(spec, "shape", None), getattr(spec, "xform", None)

@@ -131,6 +131,10 @@ def _root_reader(actor):
     """Node positions in the scene's world frame through an actor's root as it stands.
 
     A shell's root is its centroid (:meth:`SuperdexBridge.build_shell`); a skinned soft body's moves.
+    Read at every call, a shell's too, though nothing moves it now: held from the build, the
+    ``01_cloth/02_engines`` towel's read went from 13 to 5.6 us a control step, where the tick's
+    2.1-2.3 ms and the control step's 6.6-6.9 ms are inside their run-to-run spread either way
+    (``c4_root.py``, five runs each, GPU 6), and a root moved later would have read stale.
     """
 
     def read() -> np.ndarray:
@@ -1563,6 +1567,10 @@ class SuperdexBridge:
 _CONSUMES = {
     # What each builder above actually reads off ``HostActor.params``; the
     # composer warns on anything an actor states outside its kind's set.
+    # ``welds`` is read by ``_build_welds``, which joins every kind's stated
+    # nodes alike: a weld stated on a sheet holds a second sheet hung off it
+    # at 0.000 mm after a second, which falls 4.9 m without it, and on a bag
+    # the same (``c1_shell_weld.py``; ``tests/test_superdex_sheet.py``).
     "shell": (
         "areal_density",
         "contact_padding",
@@ -1577,6 +1585,7 @@ _CONSUMES = {
         "self_contact",
         "stiffness_damping",
         "thickness",
+        "welds",
         "young",
     ),
     "tet": (
