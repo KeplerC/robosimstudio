@@ -2304,7 +2304,9 @@ def _goal_met(film) -> tuple[bool, str]:
 def _material(example: str) -> Take:
     """The take that films ``example``'s own clip."""
     found = [t for t in (*DRAFTS, *ROBOT_PARTICLES, *ROBOT_BAGS, *ROBOT_BRUSH) if t.example == example and not t.name]
-    found += [t for t in (*ROBOT_SUCTION, *ROBOT_TAPE, *ROBOT_WATER, *ROBOT_CUTTING) if t.example == example]
+    found += [
+        t for t in (*ROBOT_SUCTION, *ROBOT_TAPE, *ROBOT_WATER, *ROBOT_CUTTING) if t.example == example and not t.name
+    ]
     (take,) = found
     return take
 

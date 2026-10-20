@@ -163,5 +163,34 @@ class TestTheTakeTable(unittest.TestCase):
         self.assertEqual("[]", done.stdout.strip())
 
 
+class TestAMaterialTakeIsItsScriptsOwnClip(unittest.TestCase):
+    """``_material`` finds the take a scored script plays: its material script's own clip, never an extra one."""
+
+    GROUPS = (
+        "DRAFTS",
+        "ROBOT_PARTICLES",
+        "ROBOT_BAGS",
+        "ROBOT_BRUSH",
+        "ROBOT_SUCTION",
+        "ROBOT_TAPE",
+        "ROBOT_WATER",
+        "ROBOT_CUTTING",
+    )
+
+    def test_a_named_take_of_the_script_is_passed_over_in_every_group(self) -> None:
+        """A second, named take of a script in any group leaves its own clip the one found, not two."""
+        from dataclasses import replace
+        from unittest import mock
+
+        from recording import takes
+
+        for group in self.GROUPS:
+            with self.subTest(group=group):
+                own = next(t for t in getattr(takes, group) if not t.name)
+                extra = replace(own, name=f"{own.stem}_again")
+                with mock.patch.object(takes, group, (*getattr(takes, group), extra)):
+                    self.assertIs(own, takes._material(own.example))
+
+
 if __name__ == "__main__":
     unittest.main()
