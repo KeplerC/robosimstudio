@@ -159,8 +159,10 @@ class HostActor:
             ``consumes`` list names it: a bridge reads it to check its reading
             of the model's masses (the Genesis mass check), and a record that
             says nothing is not guessed at. Any other word is refused here: a
-            reader takes one it does not know for saying nothing, so
-            ``"Mesh"`` sent a sheet at twice its density to Genesis unweighed.
+            reader takes one it does not know for saying nothing, and a record
+            stating ``"Mesh"`` for a sheet held round its rim and twice its
+            built density reached Genesis unweighed
+            (``tests/test_a_sheet_says_how_it_was_massed.py``).
     """
 
     kind: str
