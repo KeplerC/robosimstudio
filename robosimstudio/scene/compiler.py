@@ -926,10 +926,12 @@ def _finalize(builder: newton.ModelBuilder) -> newton.Model:
 
     Newton 1.7 builds it as ``wp.array(np.array([]), ndim=2)``, which warp makes a
     one-dimensional empty array, and VBD's ``reset`` hands it to ``reset_rigid_state``
-    whenever the model has a body to integrate. A static box is a body with no joint
-    (``add_link``), so a sheet and a static box with no robot failed at the first reset --
-    "argument 'joint_dof_dim' expects an array with 2 dimension(s)" -- with the sheet on
-    VBD or on SuperDex alike, and a free box (a FREE joint) built (``c5b_joints.py``).
+    whenever the model has a body to integrate. A body with no joint (a bare ``add_link``)
+    beside a sheet with no robot failed at the first reset -- "argument 'joint_dof_dim'
+    expects an array with 2 dimension(s)" -- with the sheet on VBD or on SuperDex alike, and
+    a free box (a FREE joint) built (``c5b_joints.py``). A static box was such a body until
+    it was welded to the world (``robosimstudio.domains.static.welded.weld_to_world``); any
+    other model with a body and no joint still meets it here.
     """
     model = builder.finalize()
     if model.joint_dof_dim is not None and model.joint_dof_dim.ndim != 2 and not model.joint_count:

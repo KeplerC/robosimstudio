@@ -105,15 +105,16 @@ class TestASheetOnSuperdex(unittest.TestCase):
 class TestASheetOverAStaticBox(unittest.TestCase):
     """A towel on SuperDex dropped over a static 10 cm box, no robot, the rest of GENERIC.
 
-    The scene did neither of two things. It did not build: a static box is a body with no joint,
-    and a model with none failed at its first reset (``tests/test_a_model_without_joints.py``),
+    The scene did neither of two things. It did not build: a static box was then a body with no
+    joint, and a model with none failed at its first reset (``tests/test_a_model_without_joints.py``),
     then twice more where the episode reset reads joint coordinates. And with an arm beside it,
     where it built, the box was no mirror on SuperDex -- a body on VBD, an island of particles too,
     got no channel -- so the towel lay through it on the bench, its node over the box at 0.751 m;
     0.855 m now, on the box's 0.849 m top (``c5a_drape.py``), and 0.854 m with no arm
-    (``c5b_drape.py``). The box is not held to its pose here: a static box is a body Newton 1.7's
-    VBD integrates, which slid 9 mm under the towel in those two seconds, and dropped from 0.2 m
-    it falls (``c5_static_air.py``).
+    (``c5b_drape.py``). The box was not held to its pose then either: VBD integrated the jointless
+    body, which slid 9 mm under the towel in those two seconds. A static box is now welded to the
+    world and kinematic (``tests/test_a_static_box_stays_put.py``), so it stays put and the model
+    has a joint; the mirror channel is what this class still checks.
     """
 
     @classmethod
