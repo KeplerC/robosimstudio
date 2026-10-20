@@ -27,7 +27,11 @@ authors:
     given-names: Spencer
   - family-names: Goldberg
     given-names: Ken
-license: Apache-2.0
+license:
+  - Apache-2.0
+  - MIT
+  - BSD-2-Clause
+  - BSD-3-Clause
 version: 0.1.0
 repository-code: "https://github.com/robosimstudio/robosimstudio"
 url: "https://robosimstudio.github.io/"
@@ -84,6 +88,8 @@ references:
       - family-names: Kry
         given-names: Paul G.
     collection-title: "ACM SIGGRAPH 2026 Conference Papers"
+    start: 1
+    end: 10
     year: 2026
     doi: "10.1145/3799902.3811051"
     repository-code: "https://github.com/hoskillua/wos_cutting_siggraph26"
@@ -139,6 +145,8 @@ references:
     journal: "ACM Transactions on Graphics"
     volume: 32
     issue: "4"
+    start: 1
+    end: 8
     year: 2013
     doi: "10.1145/2461912.2462010"
     notes: "The yield rule of the plastic hinge in robosimstudio_materials/paper.py."

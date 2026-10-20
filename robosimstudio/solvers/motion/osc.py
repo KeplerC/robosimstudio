@@ -401,9 +401,10 @@ class OscController:
 
         The affine map from ``[input_min, input_max]`` onto
         ``[output_min, output_max]``, with the input clipped to its range first.
-        This is ``Controller.scale_action`` verbatim: a unit action is exactly
-        ``output_max``, and a policy trained against the reference's action
-        space needs the same 0.05 m per unit here as it saw there.
+        It is the same map as robosuite's ``Controller.scale_action``: a unit
+        action is exactly ``output_max``, and a policy trained against the
+        reference's action space needs the same 0.05 m per unit here as it saw
+        there.
         """
         flat = np.asarray(action, dtype=np.float64).reshape(-1)
         if flat.shape[0] != 6:

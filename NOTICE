@@ -4,8 +4,9 @@ Copyright 2026 Kaiyuan Chen
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 This distribution includes third-party robot models, code and an image. Each
-keeps its own licence, named in its entry; an MIT or BSD licence is in a
-LICENSE file beside the files it covers, and the Apache License 2.0 in LICENSE:
+keeps its own licence, named in its entry; its text is in a LICENSE file
+beside the files it covers or, for an Apache License 2.0 entry with no such
+file, in LICENSE:
 
 assets/embodiments/panda/
     Franka Emika Panda arm and hand, from robosuite 1.4.0
