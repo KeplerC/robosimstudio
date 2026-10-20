@@ -314,12 +314,20 @@ ARENA_STAYS = {"object_xforms": {"bin": (*ARENA, 0.0, 0.0, 0.0, 1.0)}}
 """Three episodes for ``bin``: 50 mm along x, turned half a radian, and named where the arena stands it."""
 
 
-def _arena_bin():
-    """A ``bin`` the arena declares and ``EntityRigid`` finds: a dynamic body on the arena's own free joint."""
+def _arena_bin(*, fixed: bool = False):
+    """A ``bin`` the arena declares and ``EntityRigid`` finds: a dynamic body on the arena's own free joint.
+
+    ``fixed``: held by the arena's own fixed joint to the world instead, a link with no free one.
+    """
     import warp as wp
 
     builder = newton.ModelBuilder()
-    body = builder.add_body(xform=wp.transform(ARENA, wp.quat_identity()), label="bin")
+    xform = wp.transform(ARENA, wp.quat_identity())
+    if fixed:
+        body = builder.add_link(xform=xform, label="bin")
+        builder.add_joint_fixed(-1, body, parent_xform=xform, label="bin_fixed")
+    else:
+        body = builder.add_body(xform=xform, label="bin")
     builder.add_shape_box(body, hx=0.05, hy=0.05, hz=0.05)
     entity = EntityRigid(ObjectSpec(name="bin", static=True, obb_grasp=False))
     entity.build_into(builder, episode=None)
@@ -367,6 +375,10 @@ class TestAStaticTheArenaDeclares(unittest.TestCase):
 
     def test_it_offers_its_mass(self) -> None:
         self.assertEqual(["contact", "mass"], [t.name for t in _arena_bin().tunables()])
+
+    def test_held_by_the_arenas_fixed_joint_it_offers_no_mass(self) -> None:
+        """Gated on no weld of its own, it offered a mass slider that moved nothing: its body is held, not free."""
+        self.assertEqual(["contact"], [t.name for t in _arena_bin(fixed=True).tunables()])
 
 
 class TestNoStaticBodyIsWeldedTwice(unittest.TestCase):

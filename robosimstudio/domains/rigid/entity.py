@@ -86,6 +86,11 @@ class EntityRigid(Entity):
         self.dof_start: int = -1
         self.weld_joint: int = -1
         """The fixed joint :func:`weld_to_world` built to hold a static object, ``-1`` for any other body."""
+        self.held_in_scene = False
+        """A static the arena declares whose body no FREE joint moves (the arena's own fixed joint holds it).
+
+        :meth:`find_in_scene` only locates such a body, so it has no :attr:`weld_joint`, and a mass
+        written there moves nothing, as on a welded one. An arena static on a free joint is dynamic."""
         self.held_at: np.ndarray | None = None
         """Where a static object stands for its model's whole life (world, xyz + xyzw), ``None`` for a free one.
 
@@ -642,6 +647,11 @@ class EntityRigid(Entity):
         self.body = label_index(builder.body_label, body_name)
         if self.spec.static:
             self.held_at = np.asarray(builder.body_q[self.body], dtype=np.float64)
+            try:
+                j = self._free_joint(builder)
+            except KeyError:  # no joint by its name, and none FREE with it as the child
+                j = -1
+            self.held_in_scene = j < 0 or newton.JointType(builder.joint_type[j]) is not newton.JointType.FREE
         else:
             j = self._free_joint(builder)
             if newton.JointType(builder.joint_type[j]) is not newton.JointType.FREE:
@@ -1181,9 +1191,10 @@ class EntityRigid(Entity):
 
         No mass on a body :func:`weld_to_world` built, as :meth:`EntityStatic.tunables
         <robosimstudio.domains.static.entity.EntityStatic.tunables>` offers none:
-        it is welded and kinematic, and a mass written there moves nothing. A
-        static object the arena declares keeps its panel: :meth:`find_in_scene`
-        only locates its body, which may be the arena's dynamic one.
+        it is welded and kinematic, and a mass written there moves nothing. Nor on
+        a static the arena declares and holds with a joint of its own
+        (:attr:`held_in_scene`). One the arena puts on a FREE joint keeps its panel:
+        :meth:`find_in_scene` only locates its body, and that body is dynamic.
         """
         from robosimstudio.core.tuning import BodyWriter, ShapeWriter, Tunable
         from robosimstudio.specs import BodySpec, ContactMaterialSpec
@@ -1201,7 +1212,7 @@ class EntityRigid(Entity):
                     summary=f"What {self.name}'s {len(self.shapes)} shape(s) feel on contact.",
                 )
             )
-        if self.body >= 0 and self.weld_joint < 0:
+        if self.body >= 0 and self.weld_joint < 0 and not self.held_in_scene:
             bodies = BodyWriter(self.model, [self.body], pipeline)
             out.append(
                 Tunable(
