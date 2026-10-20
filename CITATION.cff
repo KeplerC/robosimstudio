@@ -27,7 +27,11 @@ authors:
     given-names: Spencer
   - family-names: Goldberg
     given-names: Ken
-license: Apache-2.0
+license:
+  - Apache-2.0
+  - MIT
+  - BSD-2-Clause
+  - BSD-3-Clause
 version: 0.1.0
 repository-code: "https://github.com/robosimstudio/robosimstudio"
 url: "https://robosimstudio.github.io/"
@@ -69,3 +73,80 @@ preferred-citation:
   year: 2026
   url: "https://arxiv.org/abs/2610.18835"
   doi: "10.48550/arXiv.2610.18835"
+references:
+  - type: conference-paper
+    title: "Fast Cutting of Cage Based Deformation with Walk on Spheres"
+    authors:
+      - family-names: Saeed
+        given-names: Hossam
+      - family-names: Lambiri
+        given-names: Michael
+      - family-names: Schneider
+        given-names: Teseo
+      - family-names: Nowrouzezahrai
+        given-names: Derek
+      - family-names: Kry
+        given-names: Paul G.
+    collection-title: "ACM SIGGRAPH 2026 Conference Papers"
+    start: 1
+    end: 10
+    year: 2026
+    doi: "10.1145/3799902.3811051"
+    repository-code: "https://github.com/hoskillua/wos_cutting_siggraph26"
+    commit: "74190cf31be04b05e5b242130c64830b041e538b"
+    license: MIT
+    notes: "Its cagecut package is vendored in robosimstudio_materials/cutting/cagecut."
+  - type: software
+    title: "IPC Toolkit"
+    authors:
+      - family-names: Ferguson
+        given-names: Zachary
+      - name: others
+    version: "1.6.0"
+    year-original: 2020
+    repository-code: "https://github.com/ipc-sim/ipc-toolkit"
+    url: "https://ipctk.xyz"
+    license: MIT
+    notes: "Its adhesion law is ported to Warp in robosimstudio_materials/tape.py."
+  - type: article
+    title: "Augmented Incremental Potential Contact for Sticky Interactions"
+    authors:
+      - family-names: Fang
+        given-names: Yu
+      - family-names: Li
+        given-names: Minchen
+      - family-names: Cao
+        given-names: Yadi
+      - family-names: Li
+        given-names: Xuan
+      - family-names: Wolper
+        given-names: Joshuah
+      - family-names: Yang
+        given-names: Yin
+      - family-names: Jiang
+        given-names: Chenfanfu
+    journal: "IEEE Transactions on Visualization and Computer Graphics"
+    volume: 30
+    issue: "8"
+    start: 5596
+    end: 5608
+    year: 2024
+    doi: "10.1109/TVCG.2023.3295656"
+    notes: "The contact adhesion law of robosimstudio_materials/tape.py."
+  - type: article
+    title: "Folding and Crumpling Adaptive Sheets"
+    authors:
+      - family-names: Narain
+        given-names: Rahul
+      - family-names: Pfaff
+        given-names: Tobias
+      - family-names: "O'Brien"
+        given-names: James F.
+    journal: "ACM Transactions on Graphics"
+    volume: 32
+    issue: "4"
+    start: 1
+    end: 8
+    year: 2013
+    doi: "10.1145/2461912.2462010"
+    notes: "The yield rule of the plastic hinge in robosimstudio_materials/paper.py."

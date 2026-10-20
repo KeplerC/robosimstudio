@@ -88,8 +88,11 @@ TOFU = CuttableMaterialSpec(
     poisson_ratio=0.45,
     # Mostly water: 1050 kg/m^3, a few per cent over water for the protein.
     density=1050.0,
-    # Soft food gels part at a few J/m^2 under a wire: 1.9-3.1 for a 20% starch gel, 3.7 for
-    # Gruyere, 6.0 for mild Cheddar (Gamonpilas, Charalambides and Williams, ICF12).
+    # Soft food gels part at a few J/m^2 under a wire: a rate-corrected toughness G0 of 1.96 and 2.87
+    # for 15% and 20% modified sago starch gels (1.9-3.1 across its cutting speeds; Gamonpilas,
+    # Charalambides, Williams, Dooling and Gibbon, "On the study of wire cutting of starch gels", ICF12,
+    # Ottawa 2009), and, quoted there, G0 3.7 for Gruyere and 6.0 for mild Cheddar (Kamyab, Chakrabarti
+    # and Williams, "Cutting cheese with wire", J. Mater. Sci. 33, 1998, doi:10.1023/A:1017517332112).
     toughness=3.0,
     color=(0.93, 0.91, 0.82),
 )
