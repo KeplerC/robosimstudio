@@ -273,6 +273,26 @@ class TestRecordersSideBySide(unittest.TestCase):
                 self._claim(9100, 4)
         self._claim(9100, 4)
 
+    def test_a_lock_this_user_may_not_open_is_refused_by_name(self) -> None:
+        """A lock directory another user made is not writable here: ``claim`` raised ``PermissionError`` past ``run_all``."""
+        import contextlib
+        import io
+        import os
+
+        if os.geteuid() == 0:
+            self.skipTest("root opens any file")
+        locks = self.tmp / "locks"
+        locks.mkdir()
+        locks.chmod(0o555)
+        self.addCleanup(locks.chmod, 0o755)
+        with self.assertRaisesRegex(ValueError, rf"^port 9100's lock {locks}/9100.lock cannot be opened"):
+            self._claim(9100, 4)
+        args = _parse(self.rec, ["--gpus", "1", "-j", "4", "--port", "9100", "--out", str(self.tmp / "out")])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(2, self.rec.run_all(list(TAKES[:2]), args))
+        self.assertRegex(err.getvalue(), r"^port 9100's lock .* cannot be opened")
+
     def test_two_recorders_side_by_side_hand_out_disjoint_ports(self) -> None:
         """Four takes at once each, at 9100 and at 9104: each child serves on a port of its own recorder's four."""
         import contextlib
@@ -300,6 +320,34 @@ class TestRecordersSideBySide(unittest.TestCase):
         self.assertEqual(10, len(handed[9100]))
         self.assertEqual({9100, 9101, 9102, 9103}, set(handed[9100]))
         self.assertEqual({9104, 9105, 9106, 9107}, set(handed[9104]))
+
+
+class TestAPageServesOnItsClaimedPort(unittest.TestCase):
+    """viser moves to the next port by itself when its bind fails (``viser/infra/_infra.py``), so a page
+    whose claimed port was taken between the recorder's check and the bind served on another one,
+    perhaps a port another take of the block was handed, and the browser was pointed at the claimed one."""
+
+    def _film(self, served: int):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from recording import lockstep
+
+        film = lockstep.Film(None, port=9104, scratch=None, software=False, probe=False, log=lambda _m: None)
+        session = SimpleNamespace(env=None, server=SimpleNamespace(get_port=lambda: served))
+        with mock.patch.object(lockstep.Film, "_shoot") as shoot:
+            film(session)
+        return film, shoot
+
+    def test_a_page_on_another_port_is_refused_by_name(self) -> None:
+        film, shoot = self._film(9105)
+        self.assertRegex(film.error, r"^the page serves on port 9105, not 9104, the port its recorder claimed")
+        shoot.assert_not_called()
+
+    def test_a_page_on_its_port_is_filmed(self) -> None:
+        film, shoot = self._film(9104)
+        self.assertEqual("", film.error)
+        shoot.assert_called_once()
 
 
 def _parse(rec, argv: list[str]):

@@ -92,16 +92,35 @@ def port_free(port: int) -> bool:
         return True
 
 
+def _open_lock(port: int):
+    """``port``'s lock file, open; a lock this user may not open is refused by name, its owner said."""
+    path = LOCKS / f"{port}.lock"
+    try:
+        LOCKS.mkdir(parents=True, exist_ok=True)
+        return open(path, "a+")  # held until the recorder exits
+    except PermissionError as exc:
+        import pwd
+
+        there = next((p for p in (path, LOCKS) if p.exists()), LOCKS)
+        try:
+            owner = f"user {pwd.getpwuid(there.stat().st_uid).pw_name}"
+        except (KeyError, OSError):
+            owner = "another user"
+        raise ValueError(
+            f"port {port}'s lock {path} cannot be opened ({exc.strerror}); {there} is owned by {owner}: "
+            f"run as them, or remove {LOCKS} once no recorder of theirs is running"
+        ) from None
+
+
 def claim(block: range) -> list:
     """Lock ``block``'s ports for this recorder until it exits: the open lock files, to keep.
 
-    A port another recorder has locked, or that something else listens on, is refused by name,
-    and nothing of the block stays locked."""
-    LOCKS.mkdir(parents=True, exist_ok=True)
+    A port another recorder has locked, that something else listens on, or whose lock this user may
+    not open, is refused by name, and nothing of the block stays locked."""
     held = []
     try:
         for port in block:
-            lock = open(LOCKS / f"{port}.lock", "a+")  # held until the recorder exits
+            lock = _open_lock(port)
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
