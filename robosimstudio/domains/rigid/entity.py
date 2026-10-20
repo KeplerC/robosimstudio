@@ -1169,7 +1169,7 @@ class EntityRigid(Entity):
 
     # ---------------------------------------------------------------- tuning
     def tunables(self, pipeline=None):
-        """Contact material over this object's shapes, and its mass unless it is static.
+        """Contact material over this object's shapes, and its mass unless it is welded.
 
         Over ``self.shapes`` rather than ``range.shape_indices``: a
         scene-declared object does not *build* its shapes -- :meth:`find_in_scene`
@@ -1179,9 +1179,11 @@ class EntityRigid(Entity):
         range here would have offered a working panel that wrote into no shapes
         at all, on the majority of objects in the benchmark's corpus.
 
-        No mass on a static object, as :meth:`EntityStatic.tunables
+        No mass on a body :func:`weld_to_world` built, as :meth:`EntityStatic.tunables
         <robosimstudio.domains.static.entity.EntityStatic.tunables>` offers none:
-        its body is welded and kinematic, and a mass written there moves nothing.
+        it is welded and kinematic, and a mass written there moves nothing. A
+        static object the arena declares keeps its panel: :meth:`find_in_scene`
+        only locates its body, which may be the arena's dynamic one.
         """
         from robosimstudio.core.tuning import BodyWriter, ShapeWriter, Tunable
         from robosimstudio.specs import BodySpec, ContactMaterialSpec
@@ -1199,7 +1201,7 @@ class EntityRigid(Entity):
                     summary=f"What {self.name}'s {len(self.shapes)} shape(s) feel on contact.",
                 )
             )
-        if self.body >= 0 and not self.spec.static:
+        if self.body >= 0 and self.weld_joint < 0:
             bodies = BodyWriter(self.model, [self.body], pipeline)
             out.append(
                 Tunable(

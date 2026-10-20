@@ -297,7 +297,8 @@ class TestAStaticTheArenaDeclares(unittest.TestCase):
     50 mm off returned without a word, and a wave stood every world's copy where
     the arena had it, each scored as though it stood where asked. Its spec's pose
     places nothing, as the import put the body where it is, so only what an episode
-    names can ask for it elsewhere.
+    names can ask for it elsewhere. And its mass panel was dropped on ``static``
+    alone, though no weld made the body kinematic: here it is dynamic.
     """
 
     def test_a_reset_refuses_an_episode_that_names_it_elsewhere(self) -> None:
@@ -325,6 +326,9 @@ class TestAStaticTheArenaDeclares(unittest.TestCase):
         fleet = _fleet({"bin": entity}, base=TaskSpec(name="base", suite="s", entities=(entity.spec,)))
         document = TaskSpec(name="t01", suite="s", entities=(ObjectSpec(name="bin", static=True, pose=ARENA),))
         fleet._check_statics([{}, {}], [fleet.build_task, document])
+
+    def test_it_offers_its_mass(self) -> None:
+        self.assertEqual(["contact", "mass"], [t.name for t in _arena_bin().tunables()])
 
 
 class TestNoStaticBodyIsWeldedTwice(unittest.TestCase):
