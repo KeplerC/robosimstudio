@@ -167,6 +167,16 @@ def _model_state(env) -> Any:
     return fleet.pipeline.state_0 if fleet is not None else env.state
 
 
+def _particle_rows(env) -> slice | None:
+    """The model rows of the world ``env`` is, on a fleet's ``WorldView``; ``None`` (every row) for an ``Env``.
+
+    What a probe of that world reads (:func:`_probe`): its sets are in its world's block of the
+    fleet's model, which holds every world's particles.
+    """
+    fleet = getattr(env, "fleet", None)
+    return fleet.worlds.particles(int(getattr(env, "world", 0) or 0)) if fleet is not None else None
+
+
 def _first_particle_row(env) -> int:
     """The model row of particle 0 of the world ``env`` is: 0 for an ``Env``, world ``w``'s first on a fleet's ``WorldView``.
 
@@ -562,9 +572,11 @@ class SimTools:
             # Refreshed from the state as it stands, every call: nothing refreshes a probe for a
             # tool. A fleet refreshes world k's only as it scores that world, every eval_every
             # steps, and a bare Sim's holds what snapshot_rest left, so the summary alone was the
-            # sheet where it lay at the last score.
+            # sheet where it lay at the last score. Only this world's rows, at this step, so that
+            # neither a fleet nor an env reads them again until it steps.
+            step = getattr(self.env, "step_count", None)
             with reading():
-                probe.update(_model_state(self.env))
+                probe.update(_model_state(self.env), step, rows=_particle_rows(self.env))
             return probe.summary(key)
 
         return {"cloth": name, "set": key, **self.bus.call(read)}

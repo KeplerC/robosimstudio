@@ -91,7 +91,7 @@ class ParticleProbe:
         self.sets[name] = idx
         return idx
 
-    def update(self, state: newton.State, step: int | None = None) -> None:
+    def update(self, state: newton.State, step: int | None = None, *, rows: slice | None = None) -> None:
         """Read this step's positions and velocities. Once per control step, after physics.
 
         Both come back in the same call for the reason ``WorldState`` gathers
@@ -106,13 +106,23 @@ class ParticleProbe:
                 per step otherwise -- once for ``obs["deformables"]`` and once
                 for the evaluator -- and on a garment that is two copies of
                 every vertex for an identical answer. ``None`` always reads.
+            rows: Read only these rows of the model's particles, the block of
+                the world this probe's sets are in, and keep the rest as they
+                were. A fleet's model holds every world's, and copying them all
+                to answer one world is that many times the copy. ``None`` reads
+                every row.
         """
         if step is not None and step == self.step:
             return
-        if self.model.particle_count:
+        if not self.model.particle_count:
+            self.step = step
+        elif rows is None:
             self.update_arrays(state.particle_q.numpy(), state.particle_qd.numpy(), step)
         else:
-            self.step = step
+            positions, velocities = self.positions.copy(), self.velocities.copy()
+            positions[rows] = state.particle_q[rows].numpy()
+            velocities[rows] = state.particle_qd[rows].numpy()
+            self.update_arrays(positions, velocities, step)
 
     def update_arrays(self, positions, velocities, step: int | None = None) -> None:
         """Take this step's cloud from host arrays already read back.

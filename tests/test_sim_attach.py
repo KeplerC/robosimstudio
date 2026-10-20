@@ -72,7 +72,9 @@ class _Bus:
 
 def _env(*, deformables: bool, cuttable: bool = False) -> types.SimpleNamespace:
     """A tape carrying a probe when ``deformables``, behind a cuttable's eight corners when ``cuttable``."""
-    probe = types.SimpleNamespace(summary=lambda key: {"set": key, "z_min": 0.10}, update=lambda _state: None)
+    probe = types.SimpleNamespace(
+        summary=lambda key: {"set": key, "z_min": 0.10}, update=lambda _state, *_step, **_rows: None
+    )
     thing = types.SimpleNamespace(carries_particles=True, probe=probe)
     tofu = types.SimpleNamespace(carries_particles=True, particles=list(range(8)))
     by_name = {**({"tofu": tofu} if cuttable else {}), **({"tape": thing} if deformables else {})}
@@ -120,7 +122,9 @@ class TestOneWorldOfAFleetReadsItsOwnParticles(unittest.TestCase):
 
     def _view(self, world: int) -> types.SimpleNamespace:
         probes = [
-            types.SimpleNamespace(summary=lambda key, z=z: {"set": key, "z_min": z}, update=lambda _state: None)
+            types.SimpleNamespace(
+                summary=lambda key, z=z: {"set": key, "z_min": z}, update=lambda _state, *_step, **_rows: None
+            )
             for z in (0.10, 0.30)
         ]
         towel = types.SimpleNamespace(carries_particles=True, probe=probes[0], probe_for=lambda w: probes[w])
@@ -264,6 +268,50 @@ class TestTheParticleStateIsReadNow(unittest.TestCase):
         )
         got = [SimTools(WorldView(fleet, w), _Bus()).get_particle_state()["centroid_z"] for w in (0, 1)]
         np.testing.assert_allclose([0.0, 0.30], got, atol=1e-6)
+
+    def test_a_fleet_world_copies_its_own_rows_once_a_step(self) -> None:
+        """It copied the whole model's particles, every world's, under the stream lock, to summarise one
+        world's set, and read them with no step, so the fleet's own read of that world at the same step
+        copied them all again. Counted here by the rows each copy to the host carries."""
+        from robosimstudio_bench.envs.world_view import WorldView
+
+        copied: list[int] = []
+
+        class Counted:
+            """A device array whose copies to the host are counted, by rows."""
+
+            def __init__(self, array) -> None:
+                self.array = array
+
+            def __getitem__(self, rows):
+                return Counted(self.array[rows])
+
+            def numpy(self) -> np.ndarray:
+                copied.append(len(self.array))
+                return self.array.numpy()
+
+        rows = np.zeros((8, 3), dtype=np.float32)
+        rows[4:, 2] = 0.30  # world 1's sheet
+        device = self._state(rows)
+        state = types.SimpleNamespace(particle_q=Counted(device.particle_q), particle_qd=Counted(device.particle_qd))
+        probes = self._probes(2, 4)
+        towel = types.SimpleNamespace(carries_particles=True, probe=probes[0], probe_for=lambda w: probes[w])
+        fleet = types.SimpleNamespace(
+            pipeline=types.SimpleNamespace(state_0=state),
+            scene=types.SimpleNamespace(by_name={"towel": towel}, embodiment=None),
+            worlds=WorldMap(2, 0, 0, 0, 0, 0, 4),
+            handles_for=lambda _world: None,
+            step_count=7,
+        )
+        tools = SimTools(WorldView(fleet, 1), _Bus())
+        self.assertAlmostEqual(0.30, tools.get_particle_state()["centroid_z"], places=6)
+        self.assertEqual([4, 4], copied, "world 1's positions and velocities, 4 rows each, and nothing else")
+        probes[1].update(state, 7)  # the fleet scoring world 1 at the same step
+        self.assertAlmostEqual(0.30, tools.get_particle_state()["centroid_z"], places=6)
+        self.assertEqual([4, 4], copied, "copied again at the step it was read at")
+        fleet.step_count = 8
+        tools.get_particle_state()
+        self.assertEqual([4, 4, 4, 4], copied, "the next step is read")
 
 
 class TestAnUnknownDeformableIsRefused(unittest.TestCase):
