@@ -54,12 +54,15 @@ class VisualPart:
         local: 4x4 in that body's frame.
         name: Label, used for material heuristics and for debugging which part
             of a composite is misplaced.
+        shape: The model shape it was drawn from, or -1 for a part that is not
+            one -- what a rasteriser's segmentation maps a pixel back through.
     """
 
     mesh: Any
     body: int = -1
     local: np.ndarray = field(default_factory=lambda: np.eye(4))
     name: str = ""
+    shape: int = -1
 
     def world_matrix(self, body_q: np.ndarray | None) -> np.ndarray:
         """This part's world 4x4 for one step's body transforms."""
@@ -264,6 +267,7 @@ def model_visual_parts(
                 body=int(shape_body[s]),
                 local=transform_matrix(shape_xform[s]),
                 name=labels[s] if s < len(labels) else f"shape_{s}",
+                shape=s,
             )
         )
     return parts
