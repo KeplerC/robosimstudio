@@ -46,6 +46,46 @@ class TestTheWriter(unittest.TestCase):
         self.assertEqual(len(red), 20)
         np.testing.assert_allclose(red, [6.0 * k for k in range(20)], atol=4.0)
 
+    def test_a_caller_that_draws_into_one_buffer_gets_every_frame(self) -> None:
+        """The encode happens after append returns, so a reused canvas is copied as it is queued."""
+        import imageio.v2 as imageio
+
+        from robosimstudio.core.render.video import VideoWriter
+
+        canvas = np.zeros((48, 64, 3), dtype=np.uint8)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "clip.mp4"
+            with VideoWriter(path, fps=10, preset="ultrafast") as writer:
+                for frame in _frames(20):
+                    canvas[...] = frame
+                    writer.append(canvas)
+            with imageio.get_reader(str(path)) as reader:
+                red = [float(np.asarray(frame)[..., 0].mean()) for frame in reader]
+        np.testing.assert_allclose(red, [6.0 * k for k in range(20)], atol=4.0)
+
+    def test_a_writer_dropped_without_close_still_finishes_its_file(self) -> None:
+        """As imageio's did: the thread holds the feed, not the writer, so the writer is collected."""
+        import gc
+        import weakref
+
+        import imageio.v2 as imageio
+
+        from robosimstudio.core.render.video import VideoWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "clip.mp4"
+            writer = VideoWriter(path, fps=10, preset="ultrafast")
+            for frame in _frames(12):
+                writer.append(frame)
+            process, thread, alive = writer._process, writer._thread, weakref.ref(writer)
+            del writer
+            gc.collect()
+            self.assertIsNone(alive(), "the writer was kept alive")
+            thread.join(timeout=30)
+            self.assertEqual(process.wait(timeout=30), 0)
+            with imageio.get_reader(str(path)) as reader:
+                self.assertEqual(sum(1 for _ in reader), 12)
+
     def test_a_frame_of_another_size_is_refused(self) -> None:
         from robosimstudio.core.render.video import VideoWriter
 
