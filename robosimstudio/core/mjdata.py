@@ -94,9 +94,25 @@ _BLOCK_HOOKS = ("_apply_mjc_control", "_update_mjc_data", "_update_newton_state"
 a substep. Private, so asked for by name: a Newton that moved them loses the block step and keeps the substep loop."""
 
 
+def _stepped(solver: Any) -> Any:
+    """The ``SolverMuJoCo`` that ``solver`` steps -- itself, or the Newton side of a cosim wrapper -- else ``None``.
+
+    By type rather than by the attributes it answers to: a wrapper forwards reads
+    to the solver inside it, so it has every hook, but an *assignment* to it --
+    the step counter -- lands on the wrapper and the solver that steps never sees it.
+    """
+    from newton.solvers import SolverMuJoCo
+
+    if isinstance(solver, SolverMuJoCo):
+        return solver
+    inner = getattr(solver, "__dict__", {}).get("newton_solver")
+    return inner if isinstance(inner, SolverMuJoCo) else None
+
+
 def can_step_block(solver: Any) -> bool:
     """Whether :func:`step_block` can drive ``solver``: MuJoCo's C library, with the hooks it needs."""
-    return host_side(solver) and all(hasattr(solver, name) for name in _BLOCK_HOOKS)
+    stepped = _stepped(solver)
+    return stepped is not None and host_side(stepped) and all(hasattr(stepped, name) for name in _BLOCK_HOOKS)
 
 
 def step_block(solver: Any, state: Any, control: Any, dt: float, substeps: int) -> None:
@@ -117,7 +133,9 @@ def step_block(solver: Any, state: Any, control: Any, dt: float, substeps: int) 
     is no longer rounded through Newton's float32 between substeps.
 
     Args:
-        solver: A :class:`newton.solvers.SolverMuJoCo` with ``use_mujoco_cpu``.
+        solver: A :class:`newton.solvers.SolverMuJoCo` with ``use_mujoco_cpu``,
+            or a cosim wrapper around one (its host engines tick once a
+            period, after the body, either way).
         state: Read for the control's targets and any edit made since the last
             period, then overwritten with the result.
         control: The period's control.
@@ -126,6 +144,7 @@ def step_block(solver: Any, state: Any, control: Any, dt: float, substeps: int) 
     """
     import mujoco
 
+    solver = _stepped(solver)
     model = solver.model
     solver._apply_mjc_control(model, state, control, solver.mj_data)
     if solver.update_data_interval > 0 and solver._step % solver.update_data_interval == 0:

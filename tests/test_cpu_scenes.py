@@ -192,6 +192,30 @@ class TestAControlPeriodIsOneCallIntoMuJoCo(unittest.TestCase):
         np.testing.assert_allclose(block_q, loop_q, atol=1e-5)
         self.assertAlmostEqual(block_z, loop_z, delta=1e-4)
 
+    def test_a_cosim_wrapper_is_stepped_through_to_the_solver_inside_it(self) -> None:
+        """A wrapper forwards reads, so it has every hook; the step counter must still land inside it."""
+        import newton
+        import warp as wp
+
+        from robosimstudio.core import mjdata
+        from robosimstudio.scene.physics.couplers import SolverCosim
+
+        builder = newton.ModelBuilder()
+        body = builder.add_body(xform=wp.transform((0.0, 0.0, 0.5), wp.quat_identity()))
+        builder.add_shape_box(body, hx=0.05, hy=0.05, hz=0.05)
+        builder.add_ground_plane()
+        model = builder.finalize(device="cpu")
+        inner = newton.solvers.SolverMuJoCo(model, use_mujoco_cpu=True)
+        wrapper = SolverCosim(model, inner, {})
+        self.assertTrue(mjdata.can_step_block(wrapper))
+        state, control = model.state(), model.control()
+        before = inner._step
+        mjdata.step_block(wrapper, state, control, 0.002, 10)
+        self.assertEqual(inner._step, before + 10)
+        self.assertNotIn("_step", vars(wrapper))
+        self.assertLess(float(state.body_q.numpy()[body, 2]), 0.5, "ten steps of gravity moved nothing")
+        self.assertFalse(mjdata.can_step_block(object()))
+
     def test_a_stage_between_substeps_puts_the_loop_back_while_it_is_there(self) -> None:
         from robosimstudio.core.schedule import Stage
 
