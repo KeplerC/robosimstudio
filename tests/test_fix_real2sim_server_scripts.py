@@ -53,7 +53,7 @@ class SceneFileSim(unittest.TestCase):
 def _bare_server(root: Path) -> LiveServer:
     live = LiveServer.__new__(LiveServer)
     live.path = root / "scene.py"
-    live.head_stepped, live._head_idle = False, 0
+    live.head_stepped, live._head_ready = False, None
     live.build_error, live._tick_error = "", ""
     live.busy, live.busy_since = "", 0.0
     live._suspended_arms = []
@@ -61,6 +61,7 @@ def _bare_server(root: Path) -> LiveServer:
     live.scripts_started = 0
     live.last_script = {}
     live.sim = mock.MagicMock(step_count=0)
+    live.session = types.SimpleNamespace(arms={})
     live._baseline_modules = set()
     live.script = []
     live.recorder = None

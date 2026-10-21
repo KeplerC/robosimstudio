@@ -19,7 +19,7 @@ TIER = "fast"
 def _bare_server() -> LiveServer:
     live = LiveServer.__new__(LiveServer)
     live.path = Path("/nonexistent/scene.py")
-    live.head_stepped, live._head_idle = False, 0
+    live.head_stepped, live._head_ready = False, None
     live.build_error, live._tick_error = "", ""
     live.busy, live.busy_since = "", 0.0
     live._suspended_arms = []

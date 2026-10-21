@@ -157,9 +157,9 @@ class TakeAccounting(unittest.TestCase):
         self.assertEqual(rec.steps, 19)
 
     def test_a_reset_then_more_steps_than_before_in_one_go_is_still_a_reset(self) -> None:
-        sim = types.SimpleNamespace(step_count=100, settled_body_q=np.zeros(1))
+        sim = types.SimpleNamespace(step_count=100, reset_count=4)
         mark = checks.reset_mark(sim)
-        sim.settled_body_q, sim.step_count = np.zeros(1), 500  # sim.reset(); sim.run(500)
+        sim.reset_count, sim.step_count = 5, 500  # sim.reset(); sim.run(500)
         self.assertEqual(checks.steps_since(sim, 100, mark), 500)
 
     def test_a_long_chain_keeps_a_sample_of_its_links(self) -> None:
@@ -279,7 +279,7 @@ def _server() -> LiveServer:
     live = LiveServer.__new__(LiveServer)
     live.path = Path("/nonexistent/scene.py")
     live.script, live.recorder, live.run_budget, live.last_error = [], None, 0, ""
-    live.head_stepped, live._head_idle, live._suspended_arms = False, 0, []
+    live.head_stepped, live._head_ready, live._suspended_arms, live.last_take = False, None, [], {}
     live.build_error, live._tick_error = "", ""
     live.busy, live.busy_since = "", 0.0
     live._status_lock, live._status_pending = threading.Lock(), None
@@ -290,25 +290,41 @@ def _server() -> LiveServer:
     return live
 
 
+def _pass(live: LiveServer, page_steps: int = 1) -> None:
+    """One loop pass with the page's own step stood in: it steps when the page would."""
+
+    def tick() -> bool:
+        if not live.script or live.page_steps_script():
+            live.sim.step_count += page_steps
+        return False
+
+    live.bus = types.SimpleNamespace(pump=lambda budget: 0)
+    live.session.tick = tick
+    live._take_clicks = lambda: None  # type: ignore[method-assign]
+    live.watch_enabled, live._tick_error, live._refreshed = False, "", time.perf_counter()
+    live.tick_once()
+
+
 class RoutineStepping(unittest.TestCase):
-    def test_a_routine_that_only_yields_is_stepped_by_the_page_with_the_arms_live(self) -> None:
+    def test_a_routine_that_takes_the_session_is_stepped_by_the_page_through_live_arms(self) -> None:
         live = _server()
 
         def glide():
             for _ in range(3):
                 yield
 
-        serial = live.start_script(glide(), name="glide")
-        live._play()
+        serial = live.start_script(glide(), name="glide", drives_page=True)
+        _pass(live)
         self.assertTrue(live.page_steps_script())
         self.assertFalse(live.session.arms["left"].suspended)
         for _ in range(4):
             if live.script:
-                live._play()
+                _pass(live)
         self.assertEqual(live.last_script["serial"], serial)
         self.assertEqual(live.last_script["how"], "finished")
+        self.assertEqual(live.last_script["steps"], 3, "the page's steps for it are its steps")
 
-    def test_one_that_steps_itself_holds_the_page_and_the_arms_and_gives_them_back(self) -> None:
+    def test_one_that_does_not_has_the_arms_held_off_and_given_back(self) -> None:
         live = _server()
         live.session.arms["right"].suspended = True  # held off already: not ours to give back
 
@@ -318,38 +334,35 @@ class RoutineStepping(unittest.TestCase):
                 yield
 
         live.start_script(drive(), name="drive")
-        live._play()
+        _pass(live)
         self.assertTrue(live.head_stepped)
         self.assertFalse(live.page_steps_script())
         self.assertEqual(live.session.arms["left"].calls, ["suspend"])
-        live._play()
-        live._play()
+        _pass(live)
+        _pass(live)
         self.assertEqual(live.session.arms["left"].calls, ["suspend", "resume"])
         self.assertEqual(live.session.arms["right"].calls, [])
         self.assertEqual(live.last_script["steps"], 2)
 
-    def test_a_routine_that_does_both_gets_the_arms_back_when_it_only_yields(self) -> None:
+    def test_a_session_routine_that_reaches_settles_and_reaches_again_is_driven_throughout(self) -> None:
         live = _server()
 
         def both():
             yield  # reach: the page steps
             live.sim.step_count += 30  # sim.run(30): it steps itself
             yield
-            while True:
-                yield  # reach again: the page steps, through the arms
+            yield  # reach again: the page steps, through the arms, which never left
 
-        live.start_script(both(), name="both")
-        live._play()
+        live.start_script(both(), name="both", drives_page=True)
+        _pass(live)
         self.assertTrue(live.page_steps_script())
-        live._play()
-        self.assertFalse(live.page_steps_script())
-        self.assertTrue(live.session.arms["left"].suspended)
-        for _ in range(server_mod.PAGE_AFTER - 1):
-            live._play()
-            self.assertFalse(live.page_steps_script(), "an extra yield after its own step is not stepped twice")
-        live._play()
-        self.assertTrue(live.page_steps_script(), "the page steps it again")
-        self.assertFalse(live.session.arms["left"].suspended, "with the arms given back to drive it")
+        _pass(live)
+        self.assertFalse(live.page_steps_script(), "a pass it stepped itself is not stepped twice")
+        _pass(live)
+        self.assertTrue(live.page_steps_script())
+        self.assertEqual(live.session.arms["left"].calls, [], "its arms were never taken from it")
+        _pass(live)
+        self.assertEqual(live.last_script["steps"], 1 + 30 + 1)
 
     def test_a_routine_whose_finally_raises_still_ends_and_the_queue_empties(self) -> None:
         live = _server()
