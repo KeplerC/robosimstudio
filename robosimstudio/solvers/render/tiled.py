@@ -125,13 +125,18 @@ def _unpack_rgb(
     out[row, y, x, 2] = wp.uint8((v >> wp.uint32(16)) & wp.uint32(0xFF))
 
 
-def _read_worlds(buffer: wp.array | None, chosen: Sequence[int], worlds: int) -> np.ndarray | None:
-    """The chosen worlds of a ``[worlds, ...]`` device buffer on the host, in ``chosen``'s order, copying only those."""
-    if buffer is None or not chosen:
+def _read_worlds(buffer: wp.array | None, chosen: Sequence[int]) -> np.ndarray | None:
+    """The chosen worlds of a ``[worlds, ...]`` device buffer on the host, in ``chosen``'s order.
+
+    One copy, of the span from the first world chosen to the last: one world's
+    worth for a fleet's single-world render, never a copy per world.
+    """
+    if buffer is None or not len(chosen):
         return None
-    if len(chosen) == worlds:
-        return buffer.numpy()
-    return np.stack([buffer[world].numpy() for world in chosen])
+    lo, hi = min(chosen), max(chosen) + 1
+    span = buffer[lo:hi].numpy()
+    rows = np.asarray(chosen, dtype=np.int64) - lo
+    return span if np.array_equal(rows, np.arange(hi - lo)) else span[rows]
 
 
 class RendererTiled(RendererBase):
@@ -406,13 +411,12 @@ class RendererTiled(RendererBase):
                 forward_depth_image=pass_["depth"],
                 shape_index_image=pass_["shape"],
             )
-            # Only the chosen worlds cross: one copy per channel when that is
-            # every world, a copy per world otherwise -- a fleet's render() of
-            # one world reads one world's depth, not the fleet's. Colour is
-            # unpacked on the device first, so only RGB bytes cross.
+            # Only the chosen worlds' span crosses, one copy a channel: a fleet's
+            # render() of one world reads one world's depth, not the fleet's.
+            # Colour is unpacked on the device first, so only RGB bytes cross.
             colors = self._read_rgb(pass_, chosen) if pass_["color"] is not None else None
-            depths = _read_worlds(pass_["depth"], chosen, self.num_worlds)
-            shapes = _read_worlds(pass_["shape"], chosen, self.num_worlds)
+            depths = _read_worlds(pass_["depth"], chosen)
+            shapes = _read_worlds(pass_["shape"], chosen)
 
             for k, world in enumerate(chosen):
                 rgb = colors[k] if colors is not None else None

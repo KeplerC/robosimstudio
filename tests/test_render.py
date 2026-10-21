@@ -354,11 +354,12 @@ class TestRenderSpec(unittest.TestCase):
 
         depth = np.random.default_rng(1).random((4, 2, 3, 5), dtype=np.float32)
         buffer = wp.array(depth, dtype=wp.float32, device="cpu")
-        np.testing.assert_array_equal(_read_worlds(buffer, [0, 1, 2, 3], 4), depth)
-        np.testing.assert_array_equal(_read_worlds(buffer, [1, 3], 4), depth[[1, 3]])
-        np.testing.assert_array_equal(_read_worlds(buffer, [2], 4), depth[[2]])
-        self.assertIsNone(_read_worlds(buffer, [], 4))
-        self.assertIsNone(_read_worlds(None, [0], 4))
+        np.testing.assert_array_equal(_read_worlds(buffer, [0, 1, 2, 3]), depth)
+        np.testing.assert_array_equal(_read_worlds(buffer, [1, 3]), depth[[1, 3]])
+        np.testing.assert_array_equal(_read_worlds(buffer, [2]), depth[[2]])
+        np.testing.assert_array_equal(_read_worlds(buffer, [3, 0, 1, 2]), depth[[3, 0, 1, 2]])
+        self.assertIsNone(_read_worlds(buffer, []))
+        self.assertIsNone(_read_worlds(None, [0]))
 
     def test_explicit_kwargs_beat_the_spec(self):
         """A kwarg names one renderer; the spec describes the scene."""
