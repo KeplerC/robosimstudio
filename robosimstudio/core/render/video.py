@@ -127,10 +127,20 @@ class VideoWriter:
             and ``"ultrafast"`` faster again.
         queue: Frames that may wait for the encoder before :meth:`append`
             blocks, which is what bounds the memory a slow encoder can take.
+        threads: Encoder threads, 0 for ffmpeg's own choice (about one and a
+            half per core). A pool running a writer per camera per worker sets
+            it, or the encoders oversubscribe the machine.
     """
 
     def __init__(
-        self, path: str | Path, *, fps: int = 30, quality: int = 7, preset: str = "medium", queue: int = 16
+        self,
+        path: str | Path,
+        *,
+        fps: int = 30,
+        quality: int = 7,
+        preset: str = "medium",
+        queue: int = 16,
+        threads: int = 0,
     ) -> None:
         import queue as queue_mod
 
@@ -139,6 +149,7 @@ class VideoWriter:
         self.fps = int(fps)
         self.quality = int(quality)
         self.preset = str(preset)
+        self.threads = max(0, int(threads))
         self.frames = 0
         self._queue: queue_mod.Queue = queue_mod.Queue(maxsize=max(1, int(queue)))
         self._process = None
@@ -159,6 +170,7 @@ class VideoWriter:
             "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(self.fps),
             "-i", "-", "-an",
             "-vcodec", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf), "-preset", self.preset,
+            *(["-threads", str(self.threads)] if self.threads else []),
             str(self.path),
         ]  # fmt: skip
         self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -230,19 +242,25 @@ class VideoSet:
         suffix: Appended to each camera name, so one run can hold both
             ``wrist.mp4`` and ``wrist_depth.mp4``.
         preset: libx264's speed preset for every writer; see :class:`VideoWriter`.
+        threads: Encoder threads for every writer; see :class:`VideoWriter`.
     """
 
-    def __init__(self, root: str | Path, *, fps: int = 30, suffix: str = "", preset: str = "medium") -> None:
+    def __init__(
+        self, root: str | Path, *, fps: int = 30, suffix: str = "", preset: str = "medium", threads: int = 0
+    ) -> None:
         self.root = Path(root)
         self.fps = int(fps)
         self.suffix = suffix
         self.preset = str(preset)
+        self.threads = int(threads)
         self.writers: dict[str, VideoWriter] = {}
 
     def append(self, name: str, frame: np.ndarray) -> None:
         writer = self.writers.get(name)
         if writer is None:
-            writer = VideoWriter(self.root / f"{name}{self.suffix}.mp4", fps=self.fps, preset=self.preset)
+            writer = VideoWriter(
+                self.root / f"{name}{self.suffix}.mp4", fps=self.fps, preset=self.preset, threads=self.threads
+            )
             self.writers[name] = writer
         writer.append(frame)
 
