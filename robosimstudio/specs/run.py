@@ -155,7 +155,8 @@ class JobSpec:
     max_steps: int = 0
     control_mode: str = ""
     allow_undeclared_graph: bool = False
-    device: str = "cuda"
+    device: str = "auto"
+    """``auto``, ``cpu``, ``cuda`` or ``cuda:N``; see :mod:`robosimstudio.machine`."""
     num_worlds: int = 1
     eval_every: int = 1
     documents: tuple[str, ...] = ()

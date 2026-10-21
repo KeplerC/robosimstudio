@@ -53,7 +53,7 @@ def main():
             mu_base=0.0,
         )
     )
-    sim = scene.build(control_mode="joint_position")
+    sim = scene.build(control_mode="joint_position", device="cuda")  # VBD: a CPU's rope has no Dahl memory
 
     def page(studio):
         out = studio.gui.add_number("straightness (1 = straight)", 1.0, step=1e-3, disabled=True)

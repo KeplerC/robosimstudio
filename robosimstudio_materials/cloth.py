@@ -1090,9 +1090,36 @@ def contact_force(sim, name: str) -> np.ndarray:
     contact damping. A few grams per particle is a penetration near float32's resolution at bench
     height, which VBD's few iterations do not balance. Read changes in it, and forces of a newton
     or more.
+
+    Raises:
+        RuntimeError: When the scene's physics has no such reading (:func:`_force_reader`), on
+            a CPU among them.
     """
-    forces = sim.pipeline.program.solver.shape_contact_forces()
+    forces = _force_reader(sim).shape_contact_forces()
     return forces[contact_shapes(sim, name)].sum(axis=0)
+
+
+def _force_reader(sim) -> Any:
+    """The solver that reads the soft contacts' forces, or a refusal saying why this scene has none.
+
+    The one-way coupler reads them off VBD (``CONTACT_F``). On a CPU there is no VBD island to
+    read: a CPU build puts every cloth on SuperDex (``rss.CPU``), the one-way coupler has nothing
+    to couple, and the call would otherwise fall through to MuJoCo's solver as an
+    ``AttributeError``.
+    """
+    solver = sim.pipeline.program.solver
+    if getattr(solver, "shape_contact_forces", None) is not None:
+        return solver
+    if str(sim.model.device) == "cpu":
+        raise RuntimeError(
+            "contact forces need a GPU: they are Newton's VBD contact forces (CONTACT_F), read through "
+            'coupler("one_way", contact_forces=True), and this scene is on a CPU, where VBD does not run and '
+            "rss.CPU puts the cloth on SuperDex, which reports none. Build it on a GPU."
+        )
+    raise RuntimeError(
+        'contact forces are read through coupler("one_way", contact_forces=True) with the cloth on VBD, and '
+        f"this scene's physics has no such coupler ({sim.pipeline.program.summary().splitlines()[0]})"
+    )
 
 
 class ForceGatedWipe:
@@ -1133,6 +1160,10 @@ class ForceGatedWipe:
             count [m]. 0.2 mm is 12 mm/s at 60 Hz. Along the test's strokes the hand moves 0.75 mm
             a step; pressing down, 0.02 mm at most; lifting straight up, 0.05 mm (median), more only
             in the first steps while it finishes the stroke (``scrub_lift.py``). 0 counts every touch.
+
+    Raises:
+        RuntimeError: Made over a scene whose physics reads no contact forces, a CPU's among them
+            (:func:`_force_reader`): refused here, as the page opens, not on its first step.
     """
 
     KEEP = 600
@@ -1148,6 +1179,7 @@ class ForceGatedWipe:
         window: int = 7,
         rub: float = 0.0002,
     ) -> None:
+        _force_reader(sim)
         self.sim = sim
         self.band = (float(band[0]), float(band[1]))
         self.stain = np.asarray(sim[cloth].entity.sets[f"{cloth}/{stain}"], dtype=np.int64)
@@ -1180,7 +1212,7 @@ class ForceGatedWipe:
 
     def touched(self) -> np.ndarray:
         """The stain particles the hand is touching: a corner of a record against it that carries force."""
-        corners, shape, force = self.sim.pipeline.program.solver.soft_contact_records()
+        corners, shape, force = _force_reader(self.sim).soft_contact_records()
         live = np.isin(shape, self.hand) & (np.linalg.norm(force, axis=1) > 1.0e-6)
         hit = corners[live].ravel()
         return np.isin(self.stain, hit[hit >= 0])
@@ -1191,7 +1223,7 @@ class ForceGatedWipe:
         if step < self.step:
             self.reset()
         self.step = step
-        forces = self.sim.pipeline.program.solver.shape_contact_forces()
+        forces = _force_reader(self.sim).shape_contact_forces()
         now = float(forces[self.hand, 2].sum())
         self.raw.append(now)
         self.recent = [*self.recent, now][-self.window :]

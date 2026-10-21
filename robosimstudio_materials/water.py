@@ -274,7 +274,7 @@ class EntityWater(ParticleMixin, Entity):
             # Refused rather than built: no Newton solver moves the inactive particles.
             raise NotImplementedError(
                 f"water {spec.name!r}: water is Genesis's SPH liquid; route the 'water' kind to backend('genesis'), "
-                "as rss.WATER_60HZ does"
+                "as rss.WATER_60HZ does (it needs a GPU and the [genesis] extra)"
             )
         placed = self.placed((*spec.at, *spec.quat))
         rotation = quat_to_mat(np.asarray(placed[3:7], dtype=np.float64))
@@ -519,6 +519,8 @@ DOMAIN = register_domain(
     role="deformables",
     contacts=TOUCHES,
     summary="Water that keeps its volume: particles on Genesis's SPH, a host engine beside Newton.",
+    engine="genesis",
+    staged_by="WATER_60HZ",
 )
 
 register_entity("water")(EntityWater)

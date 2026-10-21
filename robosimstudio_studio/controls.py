@@ -335,10 +335,14 @@ class PanelVideo(Panel):
 
     def __init__(self, session, *, backend: str = "", fps: int = 30, every: int = 2, max_frames: int = 900):
         super().__init__(session)
-        from robosimstudio.solvers.render import choose_renderer
+        from robosimstudio.machine import platform_of
 
-        device = getattr(getattr(self.env, "model", None), "device", None)
-        self.backend = choose_renderer(backend, device)[0]
+        try:
+            self.backend, self._unavailable = platform_of(self.env).renderer_for(backend)[0], ""
+        except (ValueError, ImportError) as exc:
+            # A renderer named for a device it cannot run on, or not installed:
+            # the page still opens, and Export says why it has nothing to render with.
+            self.backend, self._unavailable = "", str(exc)
         self.fps = int(fps)
         self.every = max(1, int(every))
         self.buffer: deque[dict[str, np.ndarray]] = deque(maxlen=max(30, int(max_frames)))
@@ -351,7 +355,8 @@ class PanelVideo(Panel):
             export = gui.add_button("Export video")
             export.on_click(lambda _: setattr(self, "export_requested", True))
             self._count = gui.add_text("Buffered", initial_value="0", disabled=True)
-            self._result = gui.add_text("Last export", initial_value=f"{self.backend} at {self.fps} fps", disabled=True)
+            first = f"{self.backend} at {self.fps} fps" if self.backend else f"no renderer: {self._unavailable}"
+            self._result = gui.add_text("Last export", initial_value=first[:200], disabled=True)
 
     # ------------------------------------------------------------------ capture
     def capture(self) -> None:
@@ -390,6 +395,9 @@ class PanelVideo(Panel):
             return
         if not self.buffer:
             self._result.value = "nothing captured yet"
+            return
+        if not self.backend:
+            self._result.value = f"no renderer: {self._unavailable}"[:200]
             return
         backend = self.backend
         steps = list(self.buffer)

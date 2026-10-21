@@ -124,9 +124,15 @@ def build_solver(spec: BackendSpec, view: Any, *, has_particles: bool = True) ->
     cls = resolve_backend_class(spec)
     kwargs = effective_backend(spec, has_particles=has_particles).kwargs()
     try:
-        return cls(model=view, **kwargs)
+        solver = cls(model=view, **kwargs)
     except TypeError as exc:
         raise CompositionError(
             f"backend {spec.solver!r} ({cls.__module__}.{cls.__qualname__}) refused its parameters "
             f"{sorted(kwargs)}: {exc}"
         ) from exc
+    # MuJoCo's C library on a CPU: the constructor's own notify moved the inertial
+    # frames the compiler built the collision trees in (robosimstudio.core.mjdata).
+    from robosimstudio.core.mjdata import refit_bvh
+
+    refit_bvh(solver)
+    return solver

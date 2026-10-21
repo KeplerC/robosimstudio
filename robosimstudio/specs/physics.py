@@ -54,6 +54,7 @@ engines: nothing is registered by importing this module.
 from __future__ import annotations
 
 from .arrangement import (
+    CPU,
     GENERIC,
     MUJOCO_500HZ,
     ArrangementSpec,
@@ -102,6 +103,7 @@ __all__ = [
     "BACKENDS",
     "COUPLERS",
     "COUPLINGS",
+    "CPU",
     "DOMAINS",
     "GENERIC",
     "MUJOCO_500HZ",

@@ -220,6 +220,17 @@ class DomainInfo:
         world_fixed: Whether its entities own no dynamics and sit on the world.
             True for scenery, and the last of the three things the composer
             matched ``domain == "static"`` for.
+        engine: The backend alias that steps this kind where no other does --
+            ``"genesis"`` for water, ``"mpm"`` for the particle materials,
+            ``"vbd"`` for paper, tape and the brush -- or empty. A scene whose
+            arrangement puts the kind on another registered backend is refused
+            by name on either device, with the route that works
+            (:func:`~robosimstudio.scene.physics.devices.misrouted`), before
+            anything is built: on a GPU a heap, a liquid or a dough on
+            WATER_60HZ's VBD died in a Warp copy error and a brush on
+            MUJOCO_500HZ in MuJoCo's converter with a ``KeyError``.
+        staged_by: The flat ``rss`` name of an arrangement that puts the kind on
+            ``engine`` (``"WATER_60HZ"``): what that refusal says to stage.
     """
 
     name: str
@@ -229,6 +240,8 @@ class DomainInfo:
     role: str = "objects"
     contacts: tuple[str, ...] = ()
     world_fixed: bool = False
+    engine: str = ""
+    staged_by: str = ""
 
     def __post_init__(self) -> None:
         if self.role not in ROLES:
@@ -308,6 +321,8 @@ def register_domain(
     role: str = "objects",
     contacts: tuple[str, ...] = (),
     world_fixed: bool = False,
+    engine: str = "",
+    staged_by: str = "",
 ) -> DomainInfo:
     """Register a physics domain. Identical re-registration is accepted.
 
@@ -326,6 +341,8 @@ def register_domain(
             cannot" -- which is what lets a genuinely new layout arrive without
             being unmeasurable on the day it does.
         summary: One line for a reader.
+        engine: The backend that steps it where no other does -- see :attr:`DomainInfo.engine`.
+        staged_by: The flat ``rss`` name of an arrangement that puts it there.
     """
     # The head is minted before the record is built, because ``DomainInfo``
     # validates against the registry rather than writing to it: a dataclass whose
@@ -340,6 +357,8 @@ def register_domain(
         role=role,
         contacts=tuple(contacts),
         world_fixed=world_fixed,
+        engine=str(engine),
+        staged_by=str(staged_by),
     )
     return DOMAINS.register(name, info, origin=name)
 
@@ -480,6 +499,43 @@ class BackendInfo:
     couplers, its solver's ``step`` is a no-op inside the captured graph, and
     the real work runs as an eager per-control-step stage. False for every
     solver that integrates Newton's own state on the device."""
+    devices: tuple[str, ...] = ()
+    """The Warp device kinds the solver runs on: ``"cuda"``, ``"cpu"``, or both.
+
+    Empty means unknown, which is never refused -- the same convention as
+    :attr:`supports`, so a dotted-path solver nobody registered still builds on
+    whatever device it is asked to. A registered fact rather than a guess at
+    build time, because the answer is not "does it run" but "does it run at a
+    speed anyone would wait for": VBD's Warp kernels execute on a CPU, one
+    thread at a time, and a 1922-particle towel took 96 s for 20 control steps
+    there. It is registered CUDA-only for that reason, and a CPU scene that
+    names it is refused with the arrangement that serves it instead."""
+    cpu_params: tuple[tuple[str, Any], ...] = ()
+    """Constructor kwargs a build on a CPU device must have.
+
+    Filled in where an arrangement leaves them unstated and refused where it
+    states something else, so ``backend("mujoco")`` means MuJoCo's C library on a
+    CPU without the arrangement having to say so, and a stated
+    ``use_mujoco_contacts=False`` -- which MuJoCo's C backend ignores rather
+    than refuses -- is an error naming the parameter instead of different
+    physics."""
+    cpu_max_worlds: int = 0
+    """How many worlds the solver steps on a CPU; 0 is no limit.
+
+    MuJoCo's C backend holds one ``MjData``, so it is 1 there: a replicated
+    build is refused before the solver's own importer raises from deep inside
+    the conversion."""
+    cpu_note: str = ""
+    """How the solver runs on a CPU, in a few words, for the platform readout.
+
+    For a solver registered without ``"cpu"`` in :attr:`devices`, why it is not
+    run there: the clause a CPU build that has nothing else for its kind prints
+    when it refuses that kind (:func:`robosimstudio.scene.physics.devices.unserved`)."""
+    extra: str = ""
+    """The ``robosimstudio`` extra that installs the engine, where the base install lacks it (``"genesis"``).
+
+    Named by the refusal that routes a kind to this backend
+    (:func:`robosimstudio.scene.physics.devices.misrouted`), beside the GPU it needs."""
 
     def __eq__(self, other: object) -> bool:  # schemas are mappings; compare them by content
         if not isinstance(other, BackendInfo):
@@ -497,6 +553,11 @@ class BackendInfo:
             self.maximal_coordinates,
             self.native_contacts,
             self.steps_in_place,
+            self.devices,
+            self.cpu_params,
+            self.cpu_max_worlds,
+            self.cpu_note,
+            self.extra,
         ) == (
             other.alias,
             other.cls,
@@ -510,6 +571,11 @@ class BackendInfo:
             other.maximal_coordinates,
             other.native_contacts,
             other.steps_in_place,
+            other.devices,
+            other.cpu_params,
+            other.cpu_max_worlds,
+            other.cpu_note,
+            other.extra,
         )
 
     def effective(self, spec: BackendSpec, *, has_particles: bool = True) -> BackendSpec:
@@ -572,6 +638,11 @@ def register_backend(
     maximal_coordinates: bool = False,
     native_contacts: bool = False,
     steps_in_place: bool = False,
+    devices: Sequence[str] = (),
+    cpu_params: Mapping[str, Any] | None = None,
+    cpu_max_worlds: int = 0,
+    cpu_note: str = "",
+    extra: str = "",
 ) -> BackendInfo:
     """Register a solver under an alias. Identical re-registration is accepted.
 
@@ -587,7 +658,17 @@ def register_backend(
         host_engine: Whether this backend is a foreign engine stepped on the
             host rather than a Newton solver stepped on the device -- see
             :attr:`BackendInfo.host_engine`.
+        devices: The device kinds it runs on (``"cuda"``, ``"cpu"``); empty
+            leaves it unknown -- see :attr:`BackendInfo.devices`.
+        cpu_params: Kwargs a CPU build must have -- see :attr:`BackendInfo.cpu_params`.
+        cpu_max_worlds: Worlds it steps on a CPU; 0 is no limit.
+        cpu_note: How it runs on a CPU, for the platform readout -- or, for a
+            backend with no CPU path, why not, for the refusal that names it.
+        extra: The ``robosimstudio`` extra that installs it, where the base install lacks it.
     """
+    unknown = set(devices) - {"cuda", "cpu"}
+    if unknown:
+        raise ValueError(f"backend {alias!r}: devices are 'cuda' and 'cpu', got {sorted(unknown)}")
     path = cls if isinstance(cls, str) else f"{cls.__module__}.{cls.__qualname__}"
     info = BackendInfo(
         alias=alias,
@@ -602,6 +683,11 @@ def register_backend(
         maximal_coordinates=bool(maximal_coordinates),
         native_contacts=bool(native_contacts),
         steps_in_place=bool(steps_in_place),
+        devices=tuple(devices),
+        cpu_params=_frozen_params(dict(cpu_params or {})),
+        cpu_max_worlds=int(cpu_max_worlds),
+        cpu_note=str(cpu_note),
+        extra=str(extra),
     )
     return BACKENDS.register(alias, info, origin=path)
 

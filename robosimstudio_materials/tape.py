@@ -2070,6 +2070,8 @@ DOMAIN = register_domain(
     role="deformables",
     contacts=TOUCHES,
     summary="A sheet stuck to a body by bonds made at the build or where it is pressed, its end in a rigid pull tab.",
+    engine="vbd",
+    staged_by="TAPE_60HZ",
 )
 
 register_entity("tape")(EntityTape)

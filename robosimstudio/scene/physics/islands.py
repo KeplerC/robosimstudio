@@ -29,6 +29,7 @@ import numpy as np
 from robosimstudio.specs.physics import BACKENDS, ArrangementSpec, BackendSpec, get_backend, get_domain
 
 from .backends import solver_class_path
+from .devices import on_device
 from .errors import CompositionError
 from .interactions import InteractionGraph, Node
 from .world import expand_indices, expand_shapes
@@ -158,6 +159,7 @@ def partition(
     """
     groups: dict[BackendSpec, Island] = {}
     statics: list[Node] = []
+    num_worlds = int(worlds.num_worlds) if worlds is not None else 1
 
     for node in graph.nodes.values():
         if get_domain(node.domain).world_fixed:
@@ -170,6 +172,16 @@ def partition(
                 f"domain (it serves {list(arrangement.domains())}). Add a backend for {node.domain!r}, or a "
                 "'*' fallback."
             )
+        # Before grouping, so two entities whose specs are equal stay in one
+        # island once both carry the device's kwargs.
+        spec = on_device(
+            spec,
+            model.device,
+            owner=node.name,
+            domain=node.domain,
+            declared=node.sim.backend is not None,
+            num_worlds=num_worlds,
+        )
         info = get_backend(spec.solver)
         if info.supports:
             needed = [k for k in get_domain(node.domain).state if k != "shapes" and node.has(k)]
@@ -196,6 +208,7 @@ def partition(
                 "the scene declares no entity with dynamics and the arrangement names no '*' backend, "
                 "so there is nothing to solve and nothing to solve it with"
             )
+        spec = on_device(spec, model.device, owner="the model", domain="*", num_worlds=num_worlds)
         if not (model.body_count or model.joint_count or model.particle_count):
             # Distinct from the case above, and worth its own sentence: there the
             # arrangement was short an entry, here the *scene* has nothing in it

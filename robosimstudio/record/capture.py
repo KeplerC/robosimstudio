@@ -106,6 +106,14 @@ def _features(asset_type: str) -> dict[str, Any]:
     return out
 
 
+def _built_rate(env, physics) -> float | None:
+    """The control rate the scene steps at: the pipeline's, else the document's."""
+    rate = getattr(getattr(env, "pipeline", None), "control_hz", None)
+    if rate is not None:
+        return float(rate)
+    return float(physics.control_hz) if physics is not None else None
+
+
 def capture_manifest(env: Any, episode: Any = None) -> dict[str, Any]:
     """Serialize stable simulator indices and geometry, without deriving facts.
 
@@ -240,7 +248,8 @@ def capture_manifest(env: Any, episode: Any = None) -> dict[str, Any]:
             "embodiment": embodiment if isinstance(embodiment, str) else str(getattr(embodiment, "name", embodiment)),
             "gripper": getattr(source, "gripper", None),
             "instruction": str(getattr(episode, "instruction", getattr(source, "instruction", ""))),
-            "control_hz": float(physics.control_hz) if physics is not None else None,
+            # As built: on a CPU a GENERIC task runs at CPU's rate, not its document's.
+            "control_hz": _built_rate(env, physics),
             "episode_id": int(getattr(episode, "episode_id", -1)),
             "seed": int(getattr(episode, "seed", -1)),
             "sampled": _json_safe(dict(getattr(episode, "overrides", ()) or ())),

@@ -345,7 +345,7 @@ class Scene:
         *,
         episode=None,
         num_worlds: int = 1,
-        device=None,
+        device="auto",
         use_cuda_graph: bool | None = None,
         verbose: bool = False,
         compose=None,
@@ -362,7 +362,15 @@ class Scene:
         ``episode`` through ``pipeline`` are the compiler's own -- ``compose``
         and ``pipeline`` being the two seams that let a caller replace the
         physics assembly or the substep program outright without subclassing
-        anything here. ``control_mode`` through ``renderer_kwargs`` are the
+        anything here.
+
+        **``device`` is ``"auto"``**: ``ROBOSIMSTUDIO_DEVICE`` where it names
+        one, else CUDA where there is a GPU and the CPU where there is not.
+        Name one (``"cpu"``, ``"cuda:1"``) to choose. The physics follows the
+        device -- on a CPU, MuJoCo's C library and SuperDex, with ``GENERIC``
+        built as :data:`~robosimstudio.specs.physics.CPU` -- and the renderer
+        runs where the physics does. The build prints the whole choice on one
+        line, and :attr:`Sim.platform` keeps it. ``control_mode`` through ``renderer_kwargs`` are the
         :class:`~robosimstudio.sim.Sim`'s: which control mode starts active,
         when to truncate, and whether to attach an observation rig.
 

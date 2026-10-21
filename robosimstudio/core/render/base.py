@@ -56,6 +56,14 @@ class RendererBase:
     """Short backend name, as it appears in run metadata."""
     supported_channels: tuple[str, ...] = ("rgb",)
 
+    devices: tuple[str, ...] = ()
+    """The Warp device kinds this backend renders on: ``"cuda"``, ``"cpu"``, or both.
+
+    Empty means unknown and is never refused. Read off the class by
+    :func:`~robosimstudio.solvers.render.choose_renderer` before anything is
+    built, so a renderer named on a device it cannot use fails by name instead
+    of inside a GL or CUDA context."""
+
     wants: tuple[str, ...] = ()
     """Scene facts this backend takes, by name, or ``()`` for none.
 

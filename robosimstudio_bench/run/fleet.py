@@ -1033,7 +1033,7 @@ class RunnerFleet:
             **slot.row(fleet.task.full_name),
             "solution": policy.name,
             "renderer": self.job.renderer,
-            "device": self.job.device,
+            "device": str(fleet.model.device),
             "wave": index,
         }
         self.store.append_result(row)
@@ -1068,7 +1068,7 @@ class RunnerFleet:
                 gripper=fleet.task.gripper,
                 solution=policy.name,
                 renderer=job.renderer,
-                device=job.device,
+                device=str(fleet.model.device),  # what was built on; job.device may be "auto"
                 started=started,
                 finished=datetime.now(UTC).isoformat(),
                 episodes=len(self.rows),

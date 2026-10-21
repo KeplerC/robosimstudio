@@ -153,7 +153,7 @@ MUJOCO = register_backend(
     supports=("bodies", "joints", "shapes"),
     native_contacts=True,
     schema=MUJOCO_SCHEMA,
-    summary="MuJoCo-Warp: articulated rigid bodies, the robot's solver.",
+    summary="MuJoCo-Warp: articulated rigid bodies, the robot's solver. MuJoCo's C library on a CPU.",
     # ``jacobian`` sparse rather than MuJoCo's "auto" is measured: five stacked
     # boxes stand every time under sparse and three times in eight under auto
     # (a stacking benchmark run during development); the ceilings are sized for the busiest frame,
@@ -169,6 +169,16 @@ MUJOCO = register_backend(
         "enable_multiccd": False,
         "use_mujoco_contacts": True,
     },
+    # On a CPU Newton steps MuJoCo's own C library (``mj_step`` on one
+    # ``MjData``) instead of MuJoCo-Warp. It brings its own collision pipeline,
+    # so contacts must stay MuJoCo's: handed Newton's, the C path ignores them
+    # rather than refusing. One world, because there is one ``MjData``. The
+    # hello-world arm and cube ran at 9x realtime there and the cube came to rest
+    # at the same 0.7750 m it does on a GPU.
+    devices=("cuda", "cpu"),
+    cpu_params={"use_mujoco_cpu": True, "use_mujoco_contacts": True},
+    cpu_max_worlds=1,
+    cpu_note="MuJoCo's C library, one world",
 )
 VBD = register_backend(
     "vbd",
@@ -197,6 +207,14 @@ VBD = register_backend(
         "particle_vertex_contact_buffer_size": 32,
         "particle_edge_contact_buffer_size": 64,
     },
+    # CUDA only, measured: on a CPU its Warp kernels run one thread at a time,
+    # and the 1922-particle towel took 193 s to build and 96 s for 20 control
+    # steps (0.003x realtime). A CPU scene routes cloth to SuperDex instead;
+    # ``newton.solvers.SolverVBD`` by dotted path states no devices and is not refused.
+    # The note is what a CPU build that has nothing else for paper, tape or a
+    # brush says (robosimstudio.scene.physics.devices.unserved).
+    devices=("cuda",),
+    cpu_note="its Warp kernels run on one CPU thread there: a 1922-particle towel stepped at 0.003x realtime",
 )
 XPBD = register_backend(
     "xpbd",
@@ -204,18 +222,23 @@ XPBD = register_backend(
     supports=("bodies", "joints", "particles", "shapes"),
     maximal_coordinates=True,
     summary="Extended position-based dynamics.",
+    devices=("cuda", "cpu"),  # an arm and a cube: 3.7x realtime on a CPU
+    cpu_note="Warp kernels on one CPU thread",
 )
 FEATHERSTONE = register_backend(
     "featherstone",
     cls="newton.solvers.SolverFeatherstone",
     supports=("bodies", "joints", "shapes"),
     summary="Featherstone articulated bodies.",
+    devices=("cuda", "cpu"),
+    cpu_note="Warp kernels on one CPU thread",
 )
 KINEMATIC = register_backend(
     "kinematic",
     cls="robosimstudio.scene.physics.kinematic.KinematicSolver",
     supports=("bodies", "joints", "shapes"),
     summary="Bodies that follow their joint targets exactly: a robot as a moving boundary.",
+    devices=("cuda", "cpu"),
 )
 MPM = register_backend(
     "mpm",
@@ -251,4 +274,17 @@ MPM = register_backend(
         "project_gap": 0.03,
         "step_hz": 60.0,
     },
+    # CUDA only, as VBD is and for the same reason: Warp's kernels run on a CPU,
+    # one thread at a time. Measured with the GPUs hidden (examples/03_materials/
+    # 11_granular, its 28,812-grain rice bed beside the YAM): 60 s to build and
+    # 35.5 s for 20 control steps, 0.009x realtime, against 15.6 ms a step
+    # graph-captured on a GPU -- the capture this solver is written for (see the
+    # module's docstring) has no CPU form. The honey pour and the dough roll
+    # took 111 and 118 s to build and 67 and 74 s for 20 steps. A CPU scene
+    # with a heap, a liquid or a dough is refused naming it;
+    # ``robosimstudio.engines.newton.mpm.SolverMPM`` by dotted path states no
+    # devices and is not.
+    devices=("cuda",),
+    cpu_note="Newton's implicit MPM is captured into a CUDA graph here, and on a CPU a 28,812-grain rice bed "
+    "stepped at 0.009x realtime",
 )

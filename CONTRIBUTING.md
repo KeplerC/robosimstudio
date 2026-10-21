@@ -2,7 +2,9 @@
 
 ## Set up
 
-You need an NVIDIA GPU and [uv](https://docs.astral.sh/uv/).
+You need [uv](https://docs.astral.sh/uv/). An NVIDIA GPU is needed only for the
+`medium` and `slow` tiers. Without one, `export UV_NO_GROUP=rtx` and add
+`--extra cpu` to the `uv run` lines below; see [Installation](examples/install.md#without-a-gpu).
 
 ```bash
 git clone https://github.com/robosimstudio/robosimstudio.git
@@ -15,14 +17,16 @@ uvx pre-commit install                                  # ruff on every commit
 
 ```bash
 uv run python scripts/testrun.py --tier fast     # no GPU; CI runs this
+uv run --extra cpu --no-group rtx python scripts/testrun.py --tier cpu   # no GPU; real scenes on a CPU; CI runs this
 uv run --extra gap python scripts/testrun.py --tier medium   # needs the GPU; builds and steps scenes
 uvx ruff@0.16.1 check . && uvx ruff@0.16.1 format . --check
 ```
 
-Every test module declares `TIER = "fast" | "medium" | "slow"`;
+Every test module declares `TIER = "fast" | "medium" | "slow" | "cpu"`;
 `scripts/testrun.py` fails, naming the module, on one without it. Tests that
-build a scene are `medium`. CI runs only `fast`, so run `medium` on a GPU before
-changing simulation code.
+build a scene on a GPU are `medium`, and tests that build one on a CPU are `cpu`
+(the runner hides every GPU for `fast` and `cpu`, as CI's runners have none). CI runs `fast` and `cpu`, so run
+`medium` on a GPU before changing simulation code.
 
 ## Where things go
 

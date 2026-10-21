@@ -45,7 +45,7 @@ def main():
         )
         for name, side, twist_ke in (("soft_twist", y, bend_ke / 10), ("stiff_twist", -y, bend_ke * 10))
     }
-    sim = scene.build(control_mode="joint_position")
+    sim = scene.build(control_mode="joint_position", device="cuda")  # VBD: a CPU's rope has no twist joint
 
     def page(studio):
         roll = studio.gui.add_slider("tip roll (turns)", min=0.0, max=2.0, step=0.05, initial_value=0.0)

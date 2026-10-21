@@ -33,6 +33,7 @@ from robosimstudio.core.env import EnvBase
 from robosimstudio.core.render.base import RendererBase
 from robosimstudio.core.render.look import look_for
 from robosimstudio.core.render.spec import RenderSpec
+from robosimstudio.machine import Platform, platform_of
 from robosimstudio.scene.parking import GravcompParking, parked_objects, restrict_contacts, scene_park_poses
 from robosimstudio.scene.ref import Ref
 from robosimstudio.scene.state import WorldState
@@ -56,8 +57,7 @@ class Sim(EnvBase):
         max_steps: Control steps before an episode truncates. 0 never truncates,
             which is right for a scene with nothing to succeed at.
         renderer: Backend name for the observation rig, ``"auto"`` for the
-            machine's (see :func:`~robosimstudio.solvers.render.choose_renderer`),
-            or ``""`` for none.
+            platform's (see :attr:`platform`), or ``""`` for none.
         render_every: Render on one step in this many.
         renderer_kwargs: Forwarded to the backend.
         verbose: Print what could not be built rather than silently doing without.
@@ -168,6 +168,15 @@ class Sim(EnvBase):
     @property
     def num_worlds(self) -> int:
         return int(self.scene.num_worlds)
+
+    @property
+    def platform(self) -> Platform:
+        """Where this scene runs and what draws it, and what the build adapted -- one line when printed.
+
+        The compiler's answer (:attr:`CompiledScene.platform`); every renderer
+        this object builds is chosen through it.
+        """
+        return platform_of(self.scene)
 
     # ------------------------------------------------------------------ build
     def _resolve_cameras(self) -> tuple[CameraSpec, ...]:
@@ -315,7 +324,12 @@ class Sim(EnvBase):
                 backends drawing one scene, and a caller who genuinely wants it
                 asks for it by passing a bare ``RenderSpec()``.
             **kwargs: Forwarded to the backend, including ``channels``.
+
+        ``backend`` may also be ``"auto"`` or ``""``, for the platform's pick; a
+        name is checked against this scene's device first, so ``rtx`` on a CPU
+        fails by name rather than inside the path tracer.
         """
+        backend = self.platform.renderer_for(backend)[0]
         render = self.look if render is None else render
         specs = list(self.cameras if cameras is None else cameras)
         for key, provide in self._scene_facts(specs).items():
@@ -333,11 +347,11 @@ class Sim(EnvBase):
     ) -> dict[str, np.ndarray]:
         """One frame of the scene as it stands, through the renderer.
 
-        The renderer is :func:`~robosimstudio.solvers.render.choose_renderer`'s:
-        ``ROBOSIMSTUDIO_RENDERER`` where it names one, else path traced
-        (``rtx``) -- the room, the materials and the lights -- where ovrtx is
-        installed and this scene's GPU has RT cores, and drawn from the colliders
-        alone (``tiled``) where not, with one printed line saying why. The
+        The renderer is the :attr:`platform`'s: ``ROBOSIMSTUDIO_RENDERER``
+        where it names one, else path traced (``rtx``) -- the room, the
+        materials and the lights -- where ovrtx is installed and this scene's
+        GPU has RT cores, and drawn from the colliders alone (``tiled``) where
+        not, a CPU included, with one printed line saying why. The
         renderer is built on the first call and kept for the next one with the
         same camera, so a loop that photographs every few steps pays for the
         stage once.
@@ -357,10 +371,10 @@ class Sim(EnvBase):
             frame = sim.render()
             imageio.imwrite("still.png", frame["rgb"])
         """
-        from robosimstudio.solvers.render import FALLBACK, choose_renderer
+        from robosimstudio.solvers.render import FALLBACK
 
         spec = self._camera_for(camera)
-        backend, why = choose_renderer(device=self.model.device)
+        backend, why = self.platform.renderer_for("")
         key = (backend, spec, tuple(channels))
         if self._still_renderer is None or self._still_key != key:
             if self._still_renderer is not None:
@@ -573,7 +587,9 @@ class Sim(EnvBase):
 
         if backend == FALLBACK and not self._fallback_said:
             self._fallback_said = True
-            hint = "" if why.startswith(ENV) or why == "asked for" else f" ({ENV}=rtx to override)"
+            # No override to offer on a CPU: there is nothing there rtx could run on.
+            quiet = why.startswith(ENV) or why == "asked for" or self.platform.is_cpu
+            hint = "" if quiet else f" ({ENV}=rtx to override)"
             print(f"[sim] rendering with {FALLBACK}, the colliders alone: {why}{hint}")
 
     def _make_renderer(self, backend: str) -> RendererBase:
@@ -584,12 +600,10 @@ class Sim(EnvBase):
         display setting, so a policy evaluated here sees the reference's own
         exposure and not the backend's default.
         """
-        from robosimstudio.solvers.render import choose_renderer
-
-        # ``auto`` is resolved here, against this scene's GPU; a name is taken
+        # ``auto`` is resolved here, on this scene's platform; a name is taken
         # as given, so ``rtx`` without ovrtx raises rather than quietly
         # becoming a different picture.
-        backend, why = choose_renderer(backend, device=self.model.device)
+        backend, why = self.platform.renderer_for(backend)
         self._say_fallback(backend, why)
         kwargs = dict(self.renderer_kwargs)
         render = kwargs.pop("render", None)

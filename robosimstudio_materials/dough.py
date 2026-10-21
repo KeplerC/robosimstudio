@@ -106,6 +106,8 @@ DOMAIN = register_domain(
     role="deformables",
     contacts=("surface", "fixtures", "objects", "hands", "deformables"),
     summary="A plastic solid: particles on Newton's implicit MPM with a yield stress.",
+    engine="mpm",
+    staged_by="DOUGH_60HZ",
 )
 
 register_entity("dough")(EntityDough)

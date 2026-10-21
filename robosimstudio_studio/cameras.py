@@ -31,7 +31,7 @@ import numpy as np
 from robosimstudio.core.math import xform_from_matrix
 from robosimstudio.core.render.live import RenderBudget
 from robosimstudio.core.render.video import colorize_depth, colorize_labels
-from robosimstudio.solvers.render import default_renderer
+from robosimstudio.machine import platform_of
 
 from .panels import Panel
 
@@ -211,8 +211,13 @@ class PanelCamera(Panel):
         # The environment's own frames when it has a rig to read, else the
         # renderer. Not a choice: a page shows what the scene is photographed
         # as, and a picture is made with one renderer.
-        device = getattr(getattr(self.env, "model", None), "device", None)
-        self.backends = ((SOURCE_OBS,) if self.env.renderer is not None else ()) + (default_renderer(device),)
+        # The platform's pick, or "" with the reason when none can be named (a
+        # ROBOSIMSTUDIO_RENDERER this device cannot run): the panel still builds,
+        # and says why it has nothing to render, the way the render switch does.
+        plat = platform_of(self.env)
+        picked = plat.renderer
+        self._unavailable = "" if picked else plat.renderer_why
+        self.backends = ((SOURCE_OBS,) if self.env.renderer is not None else ()) + (picked,)
         self.backend = self.backend if self.backend in self.backends else self.backends[0]
 
         self._renderer = None
@@ -638,6 +643,9 @@ class PanelCamera(Panel):
         backend, names, wanted = config[:3]
         if not wanted:
             self._state.value = "pick a channel"
+            return False
+        if not backend:
+            self._fail(f"no renderer: {self._unavailable}")
             return False
         if backend == SOURCE_OBS:
             self._built, self._model = config, self.env.model

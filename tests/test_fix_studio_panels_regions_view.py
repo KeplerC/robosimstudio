@@ -171,7 +171,7 @@ class TestEachBrowserGetsItsOwnShape(unittest.TestCase):
         session = _StubSession(env, _StubGui())
         clients = {1: _client(1, 1600, 900), 2: _client(2, 800, 800)}
         session.server.get_clients = lambda: clients
-        with unittest.mock.patch("robosimstudio_studio.render_view.choose_renderer", return_value=("tiled", "x")):
+        with unittest.mock.patch("robosimstudio_studio.render_view._choose", return_value=("tiled", "x")):
             panel = PanelRenderView(session, world_model=True, scale=0.5)
         panel.drain()
         wide, square = clients[1].scene.background, clients[2].scene.background
@@ -202,7 +202,7 @@ class TestEachBrowserGetsItsOwnShape(unittest.TestCase):
         session = _StubSession(env, _StubGui())
         clients = {1: _client(1, 1600, 900)}
         session.server.get_clients = lambda: clients
-        with unittest.mock.patch("robosimstudio_studio.render_view.choose_renderer", return_value=("tiled", "x")):
+        with unittest.mock.patch("robosimstudio_studio.render_view._choose", return_value=("tiled", "x")):
             panel = PanelRenderView(session, world_model=True, scale=0.5)
         panel.drain()
         clients[1] = _client(1, 1200, 900)

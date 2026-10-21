@@ -99,6 +99,8 @@ DOMAIN = register_domain(
     role="deformables",
     contacts=("surface", "fixtures", "objects", "hands", "deformables"),
     summary="A heap of grains: particles on Newton's implicit MPM.",
+    engine="mpm",
+    staged_by="GRANULAR_60HZ",
 )
 
 register_entity("heap")(EntityHeap)

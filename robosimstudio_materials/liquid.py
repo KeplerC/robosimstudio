@@ -238,6 +238,8 @@ DOMAIN = register_domain(
     role="deformables",
     contacts=("surface", "fixtures", "objects", "hands", "deformables"),
     summary="A pool of liquid: particles on Newton's implicit MPM, measured by count.",
+    engine="mpm",
+    staged_by="LIQUID_120HZ",
 )
 
 register_entity("liquid")(EntityLiquid)

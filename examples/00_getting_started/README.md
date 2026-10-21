@@ -43,6 +43,10 @@ Source: [`01_core_concepts.py`](01_core_concepts.py)
 
 <!-- examples:end -->
 
+## No GPU?
+
+See [Installation](../install.md#without-a-gpu).
+
 ## Scene, Sim and Ref
 
 A scene is three objects:

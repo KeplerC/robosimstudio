@@ -341,11 +341,13 @@ class PanelGoal(Panel):
     def _staging_text(self) -> str:
         """What the document left to convention, and where it came from."""
         task = self.env.task
+        # The arrangement as built, which on a CPU may be CPU where the document left GENERIC.
+        physics = getattr(getattr(self.env, "request", None), "physics", None) or task.physics
         rows = [
             f"- scene `{task.scene}`",
             f"- embodiment `{task.embodiment}`" + (f" gripper `{task.gripper}`" if task.gripper else ""),
-            f"- physics `{'+'.join(dict.fromkeys(b.solver for _, b in task.physics.backends))}` at "
-            f"{task.physics.control_hz:g} Hz, {task.physics.substeps} substeps",
+            f"- physics `{'+'.join(dict.fromkeys(b.solver for _, b in physics.backends))}` at "
+            f"{physics.control_hz:g} Hz, {physics.substeps} substeps",
             f"- control mode `{task.control_mode}`",
         ]
         handles = self.env.handles

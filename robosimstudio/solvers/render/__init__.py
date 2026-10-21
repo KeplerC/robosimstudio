@@ -150,10 +150,34 @@ def rt_cores(device: Any = None) -> tuple[bool, str]:
         return False, f"no CUDA device ({exc})"
     if not gpu.is_cuda:
         return False, f"{gpu.alias} is not a CUDA device"
-    label = f"{gpu.name} (sm_{gpu.arch})"
+    from robosimstudio.machine import gpu_label
+
+    label = gpu_label(gpu)
     if gpu.arch not in RT_ARCHES or any(tag in gpu.name for tag in _NO_RT_NAMES):
         return False, f"{label} has no RT cores"
     return True, label
+
+
+def _cuda_only(name: str, device: Any) -> str:
+    """Why ``name`` cannot run on ``device``, or ``""`` when it can or nobody said.
+
+    Asked of the class (:attr:`RendererBase.devices`), and only of a registered
+    alias: a dotted path is imported when it is built, not when it is named.
+    """
+    if name not in RENDERERS:
+        return ""
+    import warp as wp
+
+    try:
+        target = wp.get_device(device)
+    except Exception:
+        return ""
+    if target.is_cuda:
+        return ""
+    devices = tuple(getattr(backend_class(name), "devices", ()))
+    if not devices or "cpu" in devices:
+        return ""
+    return f"renderer {name!r} runs on {' and '.join(devices)} only, and this scene is on {target.alias}"
 
 
 def choose_renderer(requested: str = "", device: Any = None) -> tuple[str, str]:
@@ -161,12 +185,18 @@ def choose_renderer(requested: str = "", device: Any = None) -> tuple[str, str]:
 
     1. ``requested``, when it names one -- a renderer named in code;
     2. :data:`ENV`, when it names one -- a renderer named for the machine;
-    3. otherwise ``rtx`` where ovrtx is installed and ``device`` has RT cores,
+    3. otherwise ``rtx`` where ``device`` has RT cores and ovrtx is installed,
        else ``tiled``.
 
     Empty and ``auto`` name nothing, at either level. A name is used as given:
     ``rtx`` asked for on a GPU without RT cores is tried, not swapped for
-    ``tiled``.
+    ``tiled``. A name a CPU cannot run -- ``rtx`` -- raises on a CPU device
+    rather than being tried, since there is nothing to try it on. The device is
+    asked first, so the reason a CPU gets ``tiled`` is that it is a CPU, not
+    that a GPU renderer happens to be missing.
+
+    Every renderer in the tree is chosen through this, by way of
+    :meth:`robosimstudio.machine.Platform.renderer_for`.
 
     Args:
         requested: A registered alias, a dotted path, ``auto`` or empty.
@@ -186,6 +216,10 @@ def choose_renderer(requested: str = "", device: Any = None) -> tuple[str, str]:
         if name not in RENDERERS and "." not in name:
             where = f"{ENV}={name!r}" if source == ENV else repr(name)
             raise ValueError(f"unknown renderer {where}: choose {AUTO!r}, {list(RENDERERS)} or a dotted path")
+        refused = _cuda_only(name, device)
+        if refused:
+            by = f"set by {ENV}" if source == ENV else "asked for"
+            raise ValueError(f"{refused} ({by}); leave it unset, or name {AUTO!r}, to render with {FALLBACK!r}")
         if name == PUBLIC and not rtx_available():
             raise ImportError(
                 f"renderer {PUBLIC!r} was {'set by ' + ENV if source == ENV else 'asked for'} but ovrtx is not "
@@ -194,10 +228,12 @@ def choose_renderer(requested: str = "", device: Any = None) -> tuple[str, str]:
                 f"--extra-index-url https://pypi.nvidia.com; or leave it unset to pick by the machine"
             )
         return name, f"{ENV}={name}" if source == ENV else "asked for"
+    capable, gpu = rt_cores(device)
+    if not capable:
+        return FALLBACK, gpu
     if not rtx_available():
         return FALLBACK, "ovrtx is not installed"
-    capable, gpu = rt_cores(device)
-    return (PUBLIC if capable else FALLBACK), gpu
+    return PUBLIC, gpu
 
 
 def default_renderer(device: Any = None) -> str:

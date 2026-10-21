@@ -23,6 +23,13 @@ BACKEND = register_backend(
     summary="Genesis, co-simulated on the host: cloth and FEM bodies on its IPC coupler (libuipc), "
     "liquids on SPH under its legacy coupler; Newton islands lead, reactions feed back.",
     host_engine=True,
+    # There is no CPU Genesis here: the runtime initialises Genesis on its GPU
+    # backend (runtime.py), the SPH liquid with it, and libuipc builds
+    # Engine("cuda"). A CPU scene routes cloth to SuperDex instead, and refuses
+    # water by name (robosimstudio.scene.physics.devices.unserved).
+    devices=("cuda",),
+    cpu_note="Genesis is initialised on its GPU backend here, and IPC's libuipc builds a CUDA engine",
+    extra="genesis",
     # What each builder reads is declared beside it, per kind, in ``bridge.py``.
 )
 

@@ -225,6 +225,7 @@ class RunnerEval:
             }
         ]
         episodes0 = time.perf_counter()
+        device = self.summary.builds[-1]["device"]  # what was built on; job.device may be "auto"
 
         try:
             for episode_id in job.episode_ids:
@@ -235,7 +236,7 @@ class RunnerEval:
                     recorder=recorder,
                     max_steps=job.max_steps,
                 )
-                row = {**result.row, "solution": policy.name, "renderer": job.renderer, "device": job.device}
+                row = {**result.row, "solution": policy.name, "renderer": job.renderer, "device": device}
                 self.store.append_result(row)
                 self.results.append(result)
                 self.summary.rows.append(row)
@@ -269,7 +270,7 @@ class RunnerEval:
                 gripper=env.task.gripper,
                 solution=policy.name,
                 renderer=job.renderer,
-                device=job.device,
+                device=device,
                 started=started,
                 finished=datetime.now(UTC).isoformat(),
                 episodes=len(self.results),

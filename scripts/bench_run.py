@@ -230,7 +230,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--out", default="outputs", help="where run directories go")
     parser.add_argument("--name", default="", help="run directory name; defaults to task+policy")
-    parser.add_argument("--device", default="cuda", help="the device when --devices is not given")
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help=(
+            "the device when --devices is not given: auto (ROBOSIMSTUDIO_DEVICE, else CUDA where there is a GPU "
+            "and the CPU where not), cpu, cuda or cuda:N"
+        ),
+    )
     parser.add_argument("--list", action="store_true", help="list the registered tasks and exit")
 
     group = parser.add_argument_group("many at once")
