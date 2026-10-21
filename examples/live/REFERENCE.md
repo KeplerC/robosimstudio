@@ -100,15 +100,17 @@ whatever **Pause** says, one `next()` per pass, by the studio's rule:
 
 - a routine that takes the page's `session` drives through the arm panels
   (`robosimstudio_studio.routine`'s `reach`, `grip` and `wait`), which stay
-  live;
-- any other routine, and a generator `eval` returns, drives the scene itself:
-  the arm panels are suspended while it plays, so they do not write the
-  joints and the gripper under it, and given back as found when it ends.
+  live: a pass whose `next()` only yielded is stepped by the page, one that
+  stepped the scene itself (`sim.run(30)` to settle) is not, so `reach`, settle,
+  `reach` again works;
+- any other routine drives the scene itself (`sim.run(1)` between yields): the
+  page never steps it, and the arm panels are suspended while it plays, so
+  they do not write the joints and the gripper under it, and given back as
+  found when it ends.
 
-Either way, a pass whose `next()` stepped the scene (`sim.run(1)`) holds the
-page's own stepping, and a pass that only yielded is stepped by the page, so
-`reach`, `sim.run(30)` to settle, then `reach` again works. A routine that
-takes `session` and writes joints itself holds the panels off with
+A generator `eval` returns is taken as the first kind if its first `next()`
+only yields and as the second if it steps the scene. A routine that takes
+`session` and writes joints itself holds the panels off with
 `session.arms[...].suspend()`. The page returns to its previous state when
 the routine ends.
 

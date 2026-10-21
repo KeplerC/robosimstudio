@@ -36,14 +36,14 @@ An exception out of a pass -- a panel's drain, a rebuild -- is reported in the
 A routine plays one ``next()`` per loop pass, whatever the Pause checkbox
 says, by the studio's rule for its Run buttons. One that takes the page's
 ``session`` drives through the arm panels (``robosimstudio_studio.routine``'s
-``reach``, ``grip``, ``wait``); any other routine, and a generator ``eval``
-returned, drives the scene itself, so the arm panels are suspended while it
-plays -- they would write the gripper and the joints under it -- and given back
-as found when it ends. Either way, a pass whose ``next()`` stepped the scene
-holds the studio's own stepping (``LiveSession.steps_held``), and one that
-only yielded is stepped by the page. ``run N`` is refused while a routine
-plays, and a rebuild or a reset under a ``run N`` ends that run with a reply
-saying so.
+``reach``, ``grip``, ``wait``): a pass whose ``next()`` only yielded is
+stepped by the page, one that stepped the scene itself is not. Any other
+routine drives the scene itself: the page never steps it
+(``LiveSession.steps_held``), and the arm panels are suspended while it plays
+-- they would write the gripper and the joints under it -- and given back as
+found when it ends. A generator ``eval`` returns is taken as the one or the
+other by its first step. ``run N`` is refused while a routine plays, and a
+rebuild or a reset under a ``run N`` ends that run with a reply saying so.
 
 The page is served on every interface (viser binds ``0.0.0.0``), not only on
 ``localhost``: anyone who can reach the port can drive it. On a shared network
@@ -156,7 +156,7 @@ class LiveServer:
         self.script: list = []
         """Generators an ``eval`` returned, advanced one ``next()`` per loop pass."""
         self.head_stepped = False
-        """Whether the head script's last ``next()`` stepped the scene; the page steps it on a pass that did not."""
+        """Whether the head script's last ``next()`` stepped the scene."""
         self._head_ready: int | None = None
         """``id`` of the head script once its arm panels are set as its kind asks."""
         self._suspended_arms: list = []
@@ -342,19 +342,21 @@ class LiveServer:
             if self.watch_enabled:
                 self.watch()
             head = self.script[0] if self.script else None
+            paged = False
             if head is not None:
                 serial = (self.script_meta.get(id(head)) or {}).get("serial", 0)
                 sim, before, mark = self.sim, int(self.sim.step_count), checks.reset_mark(self.sim)
                 self._play()
-                own = checks.steps_since(sim, before, mark)  # what its next() took, the last one included
+                own = checks.steps_since(sim, before, mark) if self.sim is sim else 0
+                self._credit(head, serial, own)  # what its next() took, the last one included
+                paged = self.page_steps_script() and self.script[0] is head
+                before, mark = int(sim.step_count), checks.reset_mark(sim)
             if self.session.tick() and self.run_budget > 0:
                 self.run_budget -= 1
                 if self.run_budget == 0:
                     self.session.set_paused(True)
-            if head is not None and self.sim is sim:
-                # the page's step this pass was the routine's if it is still playing; the running page's own, if it ended
-                playing = id(head) in self.script_meta
-                self._credit(head, serial, checks.steps_since(sim, before, mark) if playing else own)
+            if paged and self.sim is sim:
+                self._credit(head, serial, checks.steps_since(sim, before, mark))  # the page's step, taken for it
             self._tick_error = ""
         except Exception as exc:
             # A panel's drain or a rebuild that raised: the page stays up and
@@ -405,7 +407,7 @@ class LiveServer:
         gen,
         *,
         name: str = "eval",
-        drives_page: bool = False,
+        drives_page: bool | None = None,
         record: str = "",
         every: int = 4,
         camera: str = "",
@@ -416,9 +418,11 @@ class LiveServer:
         when the queue empties the page carries on as it was before: held while
         a script that steps the scene itself plays (``LiveSession.steps_held``),
         stepping once per yield for one that does not (``LiveSession.tick``).
-        ``drives_page`` is a routine that took the page's ``session``: it
-        drives through the arm panels, which stay live; any other script has
-        them suspended while it plays. Returns the script's serial, which
+        ``drives_page`` is True for a routine that took the page's ``session``
+        (it drives through the arm panels), False for one that did not (it
+        drives the scene itself), and None for a generator ``eval`` returned,
+        which is taken as the one or the other by whether its first ``next()``
+        stepped the scene. Returns the script's serial, which
         ``status``'s ``last_script`` names once it has ended.
         """
         # an earlier routine's failure is in its last_script; this one starts clean -- what ending or
@@ -429,6 +433,7 @@ class LiveServer:
             # the new take films the new routine alone: what was queued ahead of it is dropped, not filmed into it
             self._end_scripts("dropped: another recording started")
             self._finish_recorder("another recording started")
+            self.last_take = {}  # until this one is written, no take is the last one
             recorder = checks.Recorder(self, record, camera=camera, every=every)
             try:
                 recorder.capture()  # frame 0: the state before anything happened
@@ -441,7 +446,7 @@ class LiveServer:
         self.script_meta[id(gen)] = {
             "serial": self.scripts_started,
             "name": name,
-            "drives_page": bool(drives_page),
+            "drives_page": drives_page,
             "steps": 0,
             "wall": time.perf_counter(),
         }
@@ -458,8 +463,12 @@ class LiveServer:
         self._finish_recorder(why)
 
     def page_steps_script(self) -> bool:
-        """Whether a script is playing that the page steps this pass: one whose last ``next()`` only yielded."""
-        return bool(self.script) and not self.head_stepped
+        """Whether the page steps the playing script this pass: one that drives through the arm panels, whose
+        last ``next()`` only yielded. A script queued that has not played yet is not stepped for."""
+        if not self.script or self._head_ready != id(self.script[0]):
+            return False
+        meta = self.script_meta.get(id(self.script[0])) or {}
+        return meta.get("drives_page") is True and not self.head_stepped
 
     def _suspend_arms(self) -> None:
         """Hold the arm panels off a script that drives the scene itself, as the studio does for ``fn(sim)``."""
@@ -528,10 +537,10 @@ class LiveServer:
         once, as the script's kind asks (:meth:`start_script`).
         """
         gen = self.script[0]
+        meta = self.script_meta.get(id(gen)) or {}
         if self._head_ready != id(gen):
             self._head_ready = id(gen)
-            meta = self.script_meta.get(id(gen)) or {}
-            if not meta.get("drives_page"):
+            if meta.get("drives_page") is False:
                 self._suspend_arms()
         before, mark = int(self.sim.step_count), checks.reset_mark(self.sim)
         try:
@@ -551,6 +560,10 @@ class LiveServer:
             print(f"[live] script failed:\n{self.last_error}", file=sys.stderr, flush=True)
         else:
             self.head_stepped = checks.steps_since(self.sim, before, mark) > 0
+            if meta.get("drives_page") is None:  # an eval's generator: its first step says which it is
+                meta["drives_page"] = not self.head_stepped
+                if self.head_stepped:
+                    self._suspend_arms()
             if self.recorder is not None:
                 try:
                     self.recorder.maybe()
@@ -955,9 +968,7 @@ class LiveServer:
             # instead of freezing for as long as it takes. One that steps the
             # scene itself holds the page while it plays; one that only yields
             # is stepped by the page. The page carries on as it was after.
-            serial = self.start_script(
-                value, name="eval", record=record, every=every, camera=camera
-            )  # drives the scene
+            serial = self.start_script(value, name="eval", record=record, every=every, camera=camera)
             playing, value = True, None
         elif record:
             return {
@@ -974,6 +985,7 @@ class LiveServer:
             reply["serial"] = serial
         if record:
             reply["recording"] = str(self.run_dir / f"{record}.mp4")
+            reply["take"] = record
         return reply
 
     def cmd_snapshot(
@@ -1288,6 +1300,7 @@ class LiveServer:
         reply = {"ok": True, "playing": name, "serial": serial}
         if record:
             reply["recording"] = str(self.run_dir / f"{record}.mp4")
+            reply["take"] = record
         return reply
 
     def cmd_show(self, path: str = "", label: str = "", clear: bool = False) -> dict:

@@ -343,7 +343,7 @@ class RoutineStepping(unittest.TestCase):
                 live.sim.step_count += 1
                 yield
 
-        live.start_script(drive(), name="drive")
+        live.start_script(drive(), name="drive", drives_page=False)
         _pass(live)
         self.assertTrue(live.head_stepped)
         self.assertFalse(live.page_steps_script())
@@ -353,6 +353,52 @@ class RoutineStepping(unittest.TestCase):
         self.assertEqual(live.session.arms["left"].calls, ["suspend", "resume"])
         self.assertEqual(live.session.arms["right"].calls, [])
         self.assertEqual(live.last_script["steps"], 2)
+
+    def test_one_that_drives_the_scene_and_yields_an_extra_time_is_not_stepped_twice(self) -> None:
+        live = _server()
+
+        def drive():
+            for _ in range(3):
+                live.sim.step_count += 1
+                yield
+                yield  # to let the page redraw
+
+        live.start_script(drive(), name="drive", drives_page=False)
+        while live.script:
+            _pass(live)
+        self.assertEqual(live.last_script["steps"], 3)
+
+    def test_an_eval_generator_is_taken_by_its_first_step(self) -> None:
+        live = _server()
+
+        def reach_like():
+            for _ in range(2):
+                yield
+
+        live.start_script(reach_like(), name="eval")
+        _pass(live)
+        self.assertTrue(live.page_steps_script(), "it only yielded: the page drives it")
+        self.assertEqual(live.session.arms["left"].calls, [])
+        while live.script:
+            _pass(live)
+
+        def stepping():
+            for _ in range(2):
+                live.sim.step_count += 1
+                yield
+
+        live.start_script(stepping(), name="eval")
+        _pass(live)
+        self.assertFalse(live.page_steps_script())
+        self.assertEqual(live.session.arms["left"].calls, ["suspend"])
+
+    def test_a_routine_queued_behind_another_is_not_stepped_for_before_it_plays(self) -> None:
+        live = _server()
+        live.start_script(iter(range(1)), name="a", drives_page=False)
+        live.start_script(iter(range(5)), name="b", drives_page=True)
+        live._play()  # a: one step
+        live._play()  # a ends; b is at the head, not played yet
+        self.assertFalse(live.page_steps_script())
 
     def test_a_session_routine_that_reaches_settles_and_reaches_again_is_driven_throughout(self) -> None:
         live = _server()

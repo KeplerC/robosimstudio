@@ -403,6 +403,10 @@ class Recorder:
         """Control steps the take has seen, counted across a reset the routine makes under it."""
         self._raw = int(self.sim.step_count)
         self._mark = reset_mark(self.sim)
+        try:  # read once: a body's centre of mass does not move in it
+            self.com = np.asarray(self.sim.model.body_com.numpy(), dtype=np.float64)
+        except Exception:
+            self.com = None
         self.last_capture = -1
 
     def close(self) -> None:
@@ -455,7 +459,7 @@ class Recorder:
                 "t": round(self.steps / self.control_hz, 4),
                 "objects": objects,
                 "positions": positions,
-                "parts": _part_positions(sim),
+                "parts": _part_positions(sim, self.com),
             }
         )
 
@@ -510,7 +514,7 @@ def steps_since(sim: Any, step: int, mark: int) -> int:
     return now - step
 
 
-def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
+def _part_positions(sim: Any, com: np.ndarray | None = None) -> dict[str, list[list[float]]]:
     """Every body of every thing -- a case and its lid, a lock and its key -- where its centre of mass is now.
 
     A thing's position is its first body's origin, so a jointed thing whose
@@ -539,11 +543,11 @@ def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
         return {}
     try:
         q = np.asarray(sim.state.body_q.numpy(), dtype=np.float64)
-        com = np.asarray(sim.model.body_com.numpy(), dtype=np.float64)
+        com = np.asarray(sim.model.body_com.numpy() if com is None else com, dtype=np.float64)
+        # each body's centre of mass, not its origin: a lid's origin sits on its hinge and does not move as it opens
+        where = q[:, :3] + _rotate(q[:, 3:7], com[: len(q)])
     except Exception:
         return {}
-    # each body's centre of mass, not its origin: a lid's origin sits on its hinge and does not move as it opens
-    where = q[:, :3] + _rotate(q[:, 3:7], com[: len(q)])
     return {
         name: [[round(float(v), 4) for v in where[b]] for b in bodies if 0 <= b < len(q)]
         for name, bodies in jointed.items()
