@@ -66,6 +66,34 @@ class TestTheWriter(unittest.TestCase):
                     writer.append(frame)
                 writer.close()
 
+    def test_an_ffmpeg_that_talks_a_lot_does_not_hang_the_writer(self) -> None:
+        """More than a pipe's 64 KB of messages, and nobody reading them until close, must not stop the encode."""
+        import os
+        import stat
+        import threading
+        from unittest import mock
+
+        from robosimstudio.core.render.video import FFMPEG_ENV, VideoWriter, ffmpeg_exe
+
+        real = ffmpeg_exe()
+        with tempfile.TemporaryDirectory() as tmp:
+            chatty = Path(tmp) / "ffmpeg"
+            chatty.write_text(f'#!/bin/sh\nhead -c 200000 /dev/zero | tr "\\\\0" x >&2\nexec "{real}" "$@"\n')
+            chatty.chmod(chatty.stat().st_mode | stat.S_IEXEC)
+            done = []
+
+            def encode() -> None:
+                with VideoWriter(Path(tmp) / "clip.mp4", fps=10, preset="ultrafast") as writer:
+                    for frame in _frames(40):
+                        writer.append(frame)
+                done.append(writer.frames)
+
+            with mock.patch.dict(os.environ, {FFMPEG_ENV: str(chatty)}):
+                thread = threading.Thread(target=encode, daemon=True)
+                thread.start()
+                thread.join(timeout=60)
+            self.assertEqual(done, [40], "the writer hung on ffmpeg's messages")
+
     def test_a_set_closes_every_writer_before_raising_the_first_failure(self) -> None:
         from robosimstudio.core.render.video import VideoSet, VideoWriter
 

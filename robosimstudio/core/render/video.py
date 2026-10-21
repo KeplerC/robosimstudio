@@ -160,6 +160,7 @@ class VideoWriter:
     def _open(self, height: int, width: int) -> None:
         """Start ffmpeg on the first frame, which is the first time the size is known."""
         import subprocess
+        import tempfile
         import threading
 
         if not 1 <= self.quality <= 10:
@@ -173,7 +174,11 @@ class VideoWriter:
             *(["-threads", str(self.threads)] if self.threads else []),
             str(self.path),
         ]  # fmt: skip
-        self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        # ffmpeg's messages go to a file, not a pipe: a pipe nobody reads until
+        # close fills at 64 KB, ffmpeg stops reading its input to wait on it, and
+        # the feeding thread and then append() wait on ffmpeg -- a hang, not an error.
+        self._log = tempfile.TemporaryFile()
+        self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=self._log)
         self._shape = (height, width)
         self._thread = threading.Thread(target=self._feed, name=f"video:{self.path.name}", daemon=True)
         self._thread.start()
@@ -193,11 +198,22 @@ class VideoWriter:
             while self._queue.get() is not None:  # let a blocked append through
                 pass
         finally:
-            stdin.close()
+            try:
+                stdin.close()  # flushes, and raises again if ffmpeg is already gone
+            except OSError as exc:
+                self._error = self._error or exc
+
+    def _messages(self) -> str:
+        """What ffmpeg has said so far, its last 2000 characters."""
+        log = getattr(self, "_log", None)
+        if log is None:
+            return ""
+        log.seek(0)
+        return log.read().decode(errors="replace").strip()[-2000:]
 
     def _raise(self) -> None:
         if self._error is not None:
-            detail = self._process.stderr.read().decode(errors="replace").strip() if self._process else ""
+            detail = self._messages()
             raise RuntimeError(f"encoding {self.path} failed: {self._error}{': ' + detail if detail else ''}")
 
     def append(self, frame: np.ndarray) -> None:
@@ -221,10 +237,10 @@ class VideoWriter:
         self._queue.put(None)
         self._thread.join()
         code = process.wait()
-        stderr = process.stderr.read().decode(errors="replace").strip()
-        process.stderr.close()
+        messages = self._messages()
+        self._log.close()
         if self._error is not None or code != 0:
-            raise RuntimeError(f"encoding {self.path} failed (ffmpeg exited {code}): {self._error or stderr}")
+            raise RuntimeError(f"encoding {self.path} failed (ffmpeg exited {code}): {messages or self._error}")
 
     def __enter__(self) -> VideoWriter:
         return self
