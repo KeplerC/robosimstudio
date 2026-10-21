@@ -443,6 +443,8 @@ def wait_for_steps(sock: Path, reply: dict, steps: int) -> dict:
         status = request(sock, {"cmd": "status"}, DEFAULT_TIMEOUT)
         if not status.get("ok"):
             break
+        if status.get("busy"):
+            continue  # a rebuild or a render under way: the next poll says how the run fared
         if status.get("generation", reply.get("generation")) != reply.get("generation"):
             return {"ok": False, "error": "the scene was rebuilt during the run; the run ended", "step": status["step"]}
         if status.get("resets", reply.get("resets")) != reply.get("resets") or status["step"] < start:
@@ -487,13 +489,13 @@ def _ref_dir_without_a_page(run_dir: Path) -> Path | None:
     return None
 
 
-def server_log(run_dir: Path) -> Path:
-    """The log the page writes to: where ``up --log`` sent it, else ``<run-dir>/serve.log``."""
-    named = run_dir / "serve.log.path"
+def server_log(sock: Path, run_dir: Path) -> Path:
+    """The log the page writes to, as the page says (``up --log`` sends it elsewhere), else ``<run-dir>/serve.log``."""
     try:
-        return Path(named.read_text().strip())
-    except OSError:
-        return run_dir / "serve.log"
+        named = request(sock, {"cmd": "status"}, 5.0).get("log")
+    except (NoServer, NoReply):
+        named = ""
+    return Path(named) if named else run_dir / "serve.log"
 
 
 def wait_until_free(sock: Path, limit: float) -> dict:
@@ -547,8 +549,8 @@ def wait_for_script(sock: Path, reply: dict, log: Path, offset: int, limit: floa
         if not status.get("ok"):
             return status
         ended = status.get("last_script") or {}
-        if int(ended.get("serial") or 0) >= serial:
-            break
+        if int(ended.get("serial") or 0) >= serial and not (reply.get("recording") and status.get("busy")):
+            break  # ended, and a take it filmed has been written and put beside the clip
         now = time.monotonic()
         if now - start > limit:
             return {"ok": False, "error": f"the routine is still playing after {limit:.0f} s; it carries on"}
@@ -688,7 +690,6 @@ def cmd_up(args: argparse.Namespace, sock: Path) -> int:
     log_path = Path(args.log) if args.log else run_dir / "serve.log"
     proc = spawn_server(serve_argv(args, sock), log_path)
     (run_dir / "serve.pid").write_text(f"{proc.pid}\n")
-    (run_dir / "serve.log.path").write_text(f"{log_path.resolve()}\n")  # where --wait reads the page's output
     try:
         ready = wait_ready(log_path, lambda: proc.poll() is None, time.monotonic() + args.timeout)
     except ServerDied as exc:
@@ -751,9 +752,9 @@ def main(argv=None) -> int:
     if args.cmd == "up":
         return cmd_up(args, sock)
     req, timeout = build_request(args, parser)
-    log = server_log(Path(args.run_dir))
-    offset = _log_size(log)
     waiting = getattr(args, "wait", False)
+    log = server_log(sock, Path(args.run_dir)) if waiting and args.cmd in ("play", "eval") else Path()
+    offset = _log_size(log)
     try:
         if args.cmd == "status" and waiting:
             reply = wait_until_free(sock, args.wait_limit)
