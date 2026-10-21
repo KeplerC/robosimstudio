@@ -139,6 +139,20 @@ class TestTheArmAndACubeOnTheDefaultArrangement(unittest.TestCase):
         self.assertEqual((rgb.shape, rgb.dtype), ((180, 320, 3), np.uint8))
         self.assertGreater(len(np.unique(rgb.reshape(-1, 3), axis=0)), 50, "a single-colour frame drew nothing")
 
+    def test_a_gl_frame_pictures_what_the_tiled_one_does(self) -> None:
+        """The rasteriser a CPU scene's dataset is drawn with: the tiled still's shapes, a hundredfold faster."""
+        try:
+            gl = self.sim.make_renderer("gl", cameras=[self.camera()], channels=("rgb", "seg"))
+        except RuntimeError as exc:
+            self.skipTest(f"no OpenGL context here: {exc}")
+        try:
+            got = gl.render(self.sim.state)["cpu_still"]
+        finally:
+            gl.close()
+        tiled = self.sim.make_renderer("tiled", cameras=[self.camera()], channels=("seg",)).render(self.sim.state)
+        self.assertGreater(len(np.unique(got["rgb"].reshape(-1, 3), axis=0)), 50, "a single-colour frame drew nothing")
+        self.assertGreater((got["seg"] == tiled["cpu_still"]["seg"]).mean(), 0.97)
+
     def test_a_video_is_written_from_the_cpu(self) -> None:
         with tempfile.TemporaryDirectory() as out:
             self.sim.record(out, 6, camera=self.camera(), fps=10)

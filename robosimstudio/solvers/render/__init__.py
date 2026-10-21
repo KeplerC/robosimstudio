@@ -48,6 +48,7 @@ __all__ = [
 RENDERERS: dict[str, str] = {
     "rtx": "robosimstudio.solvers.render.rtx.RendererRTX",
     "tiled": "robosimstudio.solvers.render.tiled.RendererTiled",
+    "gl": "robosimstudio.solvers.render.gl.RendererGL",
 }
 """Alias -> dotted path.
 
@@ -57,6 +58,8 @@ is made with. ``tiled`` -- Newton's tiled ray tracer, colliders only -- stays
 registered as the fallback :func:`choose_renderer` picks where ``rtx`` cannot
 run, and as the thing a test renders through; it is not offered by
 :func:`list_renderers`, though :data:`ENV` and a name in code may ask for it.
+``gl`` -- MuJoCo's rasteriser over the visible shapes -- is a name a fast
+dataset run asks for, for a scene stepped on a CPU; never picked, never offered.
 
 Held as **strings**, which is what keeps the table free: a base install pays
 for nothing until something actually asks for a renderer.
@@ -88,6 +91,9 @@ PUBLIC = "rtx"
 FALLBACK = "tiled"
 """What stands in for it where ``rtx`` cannot run. Never offered by name."""
 
+UNLISTED = (FALLBACK, "gl")
+"""Registered and nameable, never offered: the fallback, and the rasteriser a dataset run names."""
+
 
 def list_renderers() -> tuple[str, ...]:
     """The aliases to offer: ``rtx``, and whatever was registered after import.
@@ -96,7 +102,7 @@ def list_renderers() -> tuple[str, ...]:
     :func:`register_renderer` shows up in a menu that reads this. The fallback
     is left out on purpose -- it is a stand-in, not a choice.
     """
-    return tuple(alias for alias in RENDERERS if alias != FALLBACK)
+    return tuple(alias for alias in RENDERERS if alias not in UNLISTED)
 
 
 AUTO = "auto"
