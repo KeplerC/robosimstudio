@@ -3,8 +3,9 @@
 
 A recorder that buffers frames until close costs memory proportional to the
 episode and loses everything if the run dies, so :class:`VideoWriter` opens the
-file on the first frame and appends. ``imageio`` is imported inside the
-constructor, which keeps a physics-only run from needing it at all.
+file on the first frame and appends, to an ``ffmpeg`` of its own that encodes
+while the caller steps. ``imageio-ffmpeg`` is imported only for its binary, and
+only when a first frame arrives.
 
 Depth and segmentation are written as colourised previews, never as the data: an
 mp4 is 8-bit and lossy, so those videos are for looking at. The metric array and
@@ -20,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-__all__ = ["VideoWriter", "colorize_depth", "colorize_labels", "write_video"]
+__all__ = ["FFMPEG_ENV", "VideoWriter", "colorize_depth", "colorize_labels", "ffmpeg_exe", "write_video"]
 
 # Golden-ratio conjugate: successive multiples of it are maximally spread over
 # the unit interval, which is what keeps consecutive label ids far apart in hue.
@@ -90,36 +91,128 @@ def _hues_to_rgb(hue: np.ndarray, *, saturation: float = 0.65, value: float = 1.
     return (np.stack([r, g, b], axis=-1) * 255.0).round().astype(np.uint8)
 
 
+FFMPEG_ENV = "ROBOSIMSTUDIO_FFMPEG"
+"""An ffmpeg binary to encode with instead of the one ``imageio-ffmpeg`` ships."""
+
+
+def ffmpeg_exe() -> str:
+    """The ffmpeg every writer runs: :data:`FFMPEG_ENV` if set, else ``imageio-ffmpeg``'s."""
+    import os
+
+    named = os.environ.get(FFMPEG_ENV, "").strip()
+    if named:
+        return named
+    import imageio_ffmpeg
+
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
 class VideoWriter:
-    """One mp4, appended a frame at a time.
+    """One mp4, appended a frame at a time, encoded beside the caller rather than in its way.
+
+    Each writer is its own ``ffmpeg`` process fed raw RGB through a pipe by a
+    thread of its own, so :meth:`append` costs a queue put: the encode runs
+    while the simulation steps, and five cameras encode on five processes at
+    once. It used to be imageio's writer, called inline, which held the stepping
+    thread for the whole encode -- 3.8 s of a 20 s demo's 11.8 s for five
+    1280x720 cameras. The bytes are the same: libx264, ``yuv420p``, imageio's
+    mapping from ``quality`` to a CRF.
 
     Args:
         path: Output file. Parent directories are created.
         fps: Frame rate stamped into the container.
-        quality: imageio quality, 1..10.
+        quality: 1..10, imageio's scale: 7 is CRF 15.
+        preset: libx264's speed preset. ``"medium"`` is what imageio used;
+            ``"veryfast"`` encodes about three times as fast for a larger file,
+            and ``"ultrafast"`` faster again.
+        queue: Frames that may wait for the encoder before :meth:`append`
+            blocks, which is what bounds the memory a slow encoder can take.
     """
 
-    def __init__(self, path: str | Path, *, fps: int = 30, quality: int = 7) -> None:
-        import imageio.v2 as imageio
+    def __init__(
+        self, path: str | Path, *, fps: int = 30, quality: int = 7, preset: str = "medium", queue: int = 16
+    ) -> None:
+        import queue as queue_mod
 
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.fps = int(fps)
+        self.quality = int(quality)
+        self.preset = str(preset)
         self.frames = 0
-        # macro_block_size=1 keeps odd resolutions from being silently resized,
-        # which would break the intrinsics recorded alongside the video.
-        self._writer = imageio.get_writer(str(self.path), fps=self.fps, quality=quality, macro_block_size=1)
+        self._queue: queue_mod.Queue = queue_mod.Queue(maxsize=max(1, int(queue)))
+        self._process = None
+        self._thread = None
+        self._error: BaseException | None = None
+        self._shape: tuple[int, int] | None = None
+
+    def _open(self, height: int, width: int) -> None:
+        """Start ffmpeg on the first frame, which is the first time the size is known."""
+        import subprocess
+        import threading
+
+        if not 1 <= self.quality <= 10:
+            raise ValueError(f"quality must be 1..10, got {self.quality}")
+        crf = int((1.0 - self.quality / 10.0) * 51)
+        command = [
+            ffmpeg_exe(), "-y", "-loglevel", "error",
+            "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(self.fps),
+            "-i", "-", "-an",
+            "-vcodec", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf), "-preset", self.preset,
+            str(self.path),
+        ]  # fmt: skip
+        self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        self._shape = (height, width)
+        self._thread = threading.Thread(target=self._feed, name=f"video:{self.path.name}", daemon=True)
+        self._thread.start()
+
+    def _feed(self) -> None:
+        """The writer thread: frames off the queue into ffmpeg's stdin until the sentinel."""
+        stdin = self._process.stdin
+        try:
+            while True:
+                frame = self._queue.get()
+                if frame is None:
+                    break
+                # A pipe write releases the GIL; the stepping thread runs on.
+                stdin.write(memoryview(frame).cast("B"))
+        except BaseException as exc:  # surfaced on the caller's next append or close
+            self._error = exc
+            while self._queue.get() is not None:  # let a blocked append through
+                pass
+        finally:
+            stdin.close()
+
+    def _raise(self) -> None:
+        if self._error is not None:
+            detail = self._process.stderr.read().decode(errors="replace").strip() if self._process else ""
+            raise RuntimeError(f"encoding {self.path} failed: {self._error}{': ' + detail if detail else ''}")
 
     def append(self, frame: np.ndarray) -> None:
-        """Append one RGB uint8 frame, top-left origin."""
-        self._writer.append_data(np.ascontiguousarray(np.asarray(frame, dtype=np.uint8)))
+        """Queue one RGB uint8 frame, top-left origin. The writer keeps a reference, never a copy."""
+        frame = np.ascontiguousarray(np.asarray(frame, dtype=np.uint8))
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            raise ValueError(f"a video frame is [H, W, 3] uint8, got {frame.shape}")
+        if self._process is None:
+            self._open(frame.shape[0], frame.shape[1])
+        elif frame.shape[:2] != self._shape:
+            raise ValueError(f"frame {frame.shape[:2]} does not match the video's {self._shape}")
+        self._raise()
+        self._queue.put(frame)
         self.frames += 1
 
     def close(self) -> None:
-        """Finish the container. Idempotent."""
-        if self._writer is not None:
-            self._writer.close()
-            self._writer = None
+        """Finish the container: drain the queue, end ffmpeg, raise if it failed. Idempotent."""
+        if self._process is None:
+            return
+        process, self._process = self._process, None
+        self._queue.put(None)
+        self._thread.join()
+        code = process.wait()
+        stderr = process.stderr.read().decode(errors="replace").strip()
+        process.stderr.close()
+        if self._error is not None or code != 0:
+            raise RuntimeError(f"encoding {self.path} failed (ffmpeg exited {code}): {self._error or stderr}")
 
     def __enter__(self) -> VideoWriter:
         return self
@@ -136,18 +229,20 @@ class VideoSet:
         fps: Frame rate.
         suffix: Appended to each camera name, so one run can hold both
             ``wrist.mp4`` and ``wrist_depth.mp4``.
+        preset: libx264's speed preset for every writer; see :class:`VideoWriter`.
     """
 
-    def __init__(self, root: str | Path, *, fps: int = 30, suffix: str = "") -> None:
+    def __init__(self, root: str | Path, *, fps: int = 30, suffix: str = "", preset: str = "medium") -> None:
         self.root = Path(root)
         self.fps = int(fps)
         self.suffix = suffix
+        self.preset = str(preset)
         self.writers: dict[str, VideoWriter] = {}
 
     def append(self, name: str, frame: np.ndarray) -> None:
         writer = self.writers.get(name)
         if writer is None:
-            writer = VideoWriter(self.root / f"{name}{self.suffix}.mp4", fps=self.fps)
+            writer = VideoWriter(self.root / f"{name}{self.suffix}.mp4", fps=self.fps, preset=self.preset)
             self.writers[name] = writer
         writer.append(frame)
 
@@ -166,9 +261,16 @@ class VideoSet:
                 self.append(f"{name}_depth", colorize_depth(frame["depth"]))
 
     def close(self) -> None:
+        """Finish every writer; the first failure is raised once all have been closed."""
+        failures = []
         for writer in self.writers.values():
-            writer.close()
+            try:
+                writer.close()
+            except RuntimeError as exc:
+                failures.append(exc)
         self.writers = {}
+        if failures:
+            raise failures[0]
 
     def __enter__(self) -> VideoSet:
         return self
