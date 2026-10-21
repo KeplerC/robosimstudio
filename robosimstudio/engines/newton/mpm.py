@@ -200,7 +200,9 @@ class SolverMPM(SolverImplicitMPM):
                 wp.copy(dst, src)
 
     # ----------------------------------------------------------------- step
-    def step(self, state_in: newton.State, state_out: newton.State, control, contacts, dt: float) -> None:
+    def step(
+        self, state_in: newton.State, state_out: newton.State, control, contacts, dt: float, *, observables=None
+    ) -> None:
         stride = self._stride_for(dt)
         capturing = bool(getattr(self.model.device, "is_capturing", False))
         if capturing and not self._was_capturing and self._calls % stride:
@@ -218,7 +220,8 @@ class SolverMPM(SolverImplicitMPM):
         step_dt = float(dt) * stride
         self._steps += 1
         self._step_dt = step_dt
-        super().step(state_in, state_out, control, contacts, step_dt)
+        asked = {} if observables is None else {"observables": observables}  # a pre-1.7 parent takes no such keyword
+        super().step(state_in, state_out, control, contacts, step_dt, **asked)
         if self.project_outside_after_step:
             self.project_outside(state_out, state_out, step_dt, gap=self.project_gap)
 
