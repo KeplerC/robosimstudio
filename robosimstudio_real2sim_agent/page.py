@@ -48,8 +48,8 @@ class LiveSession(StudioSession):
         super().adopt(sim, label=label, episode=episode)
 
     def steps_held(self) -> bool:
-        """While a routine that steps the scene itself plays, the studio's own step would double it."""
-        return bool(self.host.script) and self.host.head_stepped
+        """While a routine plays that the page does not step this pass, the studio's own step would double it."""
+        return bool(self.host.script) and not self.host.page_steps_script()
 
     def tick(self) -> bool:
         """One pass; a routine the page steps is stepped whatever Pause says, as one that steps itself plays."""

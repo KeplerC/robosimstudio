@@ -455,7 +455,7 @@ def wait_for_steps(sock: Path, reply: dict, steps: int) -> dict:
         time.sleep(0.2)
         status = request(sock, {"cmd": "status"}, DEFAULT_TIMEOUT)
         if not status.get("ok"):
-            break
+            return status
         busy = status.get("busy", "")
         if busy:
             continue  # a rebuild or a render under way: the next poll says how the run fared
@@ -516,9 +516,10 @@ def server_log(sock: Path, run_dir: Path) -> Path:
     except (NoServer, NoReply):
         named = ""
     if not named:
-        try:
-            named = (run_dir / "serve.log.path").read_text().strip()
-        except OSError:
+        try:  # "<pid> <path>", trusted only for the page that pid still is
+            pid, _, path = (run_dir / "serve.log.path").read_text().strip().partition(" ")
+            named = path if pid == str(request(sock, {"cmd": "status"}, 5.0).get("pid")) else ""
+        except (OSError, NoServer, NoReply):
             named = ""
     return Path(named) if named else run_dir / "serve.log"
 
@@ -557,7 +558,7 @@ def wait_for_script(sock: Path, reply: dict, log: Path, offset: int, limit: floa
     summary land in the page's log, which is printed as it grows.
     """
     serial = int(reply.get("serial") or 0)
-    take = Path(reply["recording"]).stem if reply.get("recording") else ""
+    take = reply.get("take") or (Path(reply["recording"]).stem if reply.get("recording") else "")
     start = said = time.monotonic()
     status: dict = {}
 
@@ -726,7 +727,7 @@ def cmd_up(args: argparse.Namespace, sock: Path) -> int:
     log_path = Path(args.log) if args.log else run_dir / "serve.log"
     proc = spawn_server(serve_argv(args, sock), log_path)
     (run_dir / "serve.pid").write_text(f"{proc.pid}\n")
-    (run_dir / "serve.log.path").write_text(f"{log_path.resolve()}\n")  # for a page with no /proc to say it
+    (run_dir / "serve.log.path").write_text(f"{proc.pid} {log_path.resolve()}\n")  # for a page with no /proc
     try:
         ready = wait_ready(log_path, lambda: proc.poll() is None, time.monotonic() + args.timeout)
     except ServerDied as exc:
