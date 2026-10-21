@@ -142,25 +142,37 @@ class SceneRegistrations:
 
     Installed with :func:`robosimstudio.registry.watch`. A write is the scene's
     when the first frame above the registry that is not library code is the
-    scene file, a module under its directory, or ``<eval>``: a library module
-    registering as it is first imported -- even when the scene's import set it
-    off -- is stopped at by the import machinery's frame and stays.
+    scene file, a module under its directory, or ``<eval>``. Two kinds of
+    write stay: a library module registering as it is first imported -- even
+    when the scene's import set it off -- which the import machinery's frame
+    stops the walk at; and a registry's discovery, run by a lookup the scene
+    made (``rss.robot`` loading the embodiments, the task roots), which
+    :meth:`Registry.load <robosimstudio.registry.Registry.load>`'s frame stops
+    it at. Either, taken back, would never be registered again: the module is
+    imported and the registry loaded.
     """
 
     root: Path
-    writes: list[tuple[Any, str, Any, str]] = field(default_factory=list)
+    writes: list[tuple[Any, ...]] = field(default_factory=list)
+    """``(registry, name, value, origin, previous, previous_origin)`` per write, oldest first."""
     _library: tuple[Path, ...] = ()
+    _load_code: Any = None
 
     def __post_init__(self) -> None:
+        from robosimstudio.registry import Registry
+
         self.root = Path(self.root).resolve()
         self._library = _package_dirs(LIBRARY)
+        self._load_code = Registry.load.__code__
 
-    def __call__(self, registry: Any, name: str, previous: Any, origin: str) -> None:
+    def __call__(self, registry: Any, name: str, value: Any, origin: str, previous: Any, previous_origin: str) -> None:
         if self._made_by_scene(sys._getframe(1)):
-            self.writes.append((registry, name, previous, origin))
+            self.writes.append((registry, name, value, origin, previous, previous_origin))
 
     def _made_by_scene(self, frame: Any) -> bool:
         while frame is not None:
+            if frame.f_code is self._load_code:
+                return False  # a registry's discovery, whoever's lookup set it off
             filename = frame.f_code.co_filename
             if filename == "<eval>":
                 return True
@@ -172,16 +184,21 @@ class SceneRegistrations:
             frame = frame.f_back
         return False
 
-    def undo(self) -> list[str]:
-        """Take back every noted write, newest first; returns ``kind name`` for each."""
+    def undo(self) -> list[tuple[Any, ...]]:
+        """Take back every noted write, newest first, and forget them; returns them, for :meth:`redo`."""
         from robosimstudio.registry import MISSING
 
-        undone = []
-        for registry, name, previous, origin in reversed(self.writes):
+        taken = list(self.writes)
+        for registry, name, _value, _origin, previous, previous_origin in reversed(taken):
             if previous is MISSING:
                 registry.forget(name)
             else:
-                registry.restore(name, previous, origin)
-            undone.append(f"{registry.kind} {name}")
+                registry.restore(name, previous, previous_origin)
         self.writes.clear()
-        return undone
+        return taken
+
+    def redo(self, taken: list[tuple[Any, ...]]) -> None:
+        """Put back writes :meth:`undo` took, oldest first, and note them again: a run that failed gives way."""
+        for registry, name, value, origin, _previous, _previous_origin in taken:
+            registry.restore(name, value, origin)
+        self.writes[:0] = taken

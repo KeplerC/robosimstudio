@@ -154,8 +154,8 @@ class LiveServer:
         """Steps left before the page pauses again; -1 is no limit."""
         self.script: list = []
         """Generators an ``eval`` returned, advanced one ``next()`` per loop pass."""
-        self.head_steps_itself = False
-        """Whether the script at the head of the queue has stepped the scene itself; until it does, the page steps it."""
+        self.head_stepped = False
+        """Whether the script at the head of the queue stepped the scene during its last ``next()``; if not, the page steps it."""
         self._suspended_arms: list = []
         """Arm panels suspended for a script that steps the scene itself, given back when it ends."""
         self.recorder: checks.Recorder | None = None
@@ -166,6 +166,9 @@ class LiveServer:
         """What the file, its helpers and ``eval`` registered since the last rebuild; taken back before the next."""
         self.busy = ""
         """What the main thread is doing that a ``status`` would otherwise wait out; empty between commands."""
+        self._status_lock = threading.Lock()
+        self._status_pending: dict | None = None
+        """The one ``status`` queued for the main thread, which every caller meanwhile waits on."""
         self.busy_since = 0.0
         self.rendered = False
         """Whether a still has been rendered in this process; the first one compiles the path tracer."""
@@ -201,11 +204,18 @@ class LiveServer:
         What the last run registered is taken back first, so an edited entity
         class, cell or gripper is registered as edited rather than kept as it
         was (a registry keeps the first of two from the same source) or refused
-        (two that differ).
+        (two that differ). A file that does not build gives them back, since
+        the scene before it stays up.
         """
-        self.registrations.undo()
+        taken = self.registrations.undo()
         self.evict_helpers()
-        return run_scene_file(self.path)
+        try:
+            return run_scene_file(self.path)
+        except BaseException:
+            # the scene before it stays up: what this run registered goes, and what that scene registered comes back
+            self.registrations.undo()
+            self.registrations.redo(taken)
+            raise
 
     def evict_helpers(self) -> list[str]:
         """Forget the modules the scene file imported from its own directory, so they are read again.
@@ -421,8 +431,8 @@ class LiveServer:
         self._finish_recorder(why)
 
     def page_steps_script(self) -> bool:
-        """Whether a script is playing that the page steps: one that has only yielded so far."""
-        return bool(self.script) and not self.head_steps_itself
+        """Whether a script is playing that the page steps this pass: one whose last ``next()`` only yielded."""
+        return bool(self.script) and not self.head_stepped
 
     def _suspend_arms(self) -> None:
         """Hold the arm panels off a script that drives the scene itself, as the studio does for ``fn(sim)``."""
@@ -432,14 +442,30 @@ class LiveServer:
                 panel.suspend()
                 self._suspended_arms.append(panel)
 
+    def _resume_arms(self) -> None:
+        """Give back the arm panels this page held off, as found; one held off by anyone else stays so."""
+        panels, self._suspended_arms = self._suspended_arms, []
+        for panel in panels:
+            try:
+                panel.resume()
+            except Exception:  # a panel of a scene since rebuilt
+                pass
+
     def _end_scripts(self, how: str) -> None:
         """End every queued script, the head first, each reported ``how``."""
         while self.script:
             gen = self.script.pop(0)
+            error = ""
             close = getattr(gen, "close", None)  # a generator; a plain iterator has nothing to close
             if close is not None:
-                close()
-            self._ended(gen, how)
+                try:
+                    close()
+                except Exception:
+                    # its own `finally` raised or stepped: the rest still ends, and the rebuild or reset still happens
+                    error = traceback.format_exc()[-3000:]
+                    self.last_error = error
+                    print(f"[live] a script raised as it was stopped:\n{error}", file=sys.stderr, flush=True)
+            self._ended(gen, how, error)
         self._next_script()
 
     def _ended(self, gen, how: str, error: str = "") -> None:
@@ -455,26 +481,23 @@ class LiveServer:
 
     def _next_script(self) -> None:
         """The head script is gone: give the arms back, and let the next one show how it steps."""
-        self.head_steps_itself = False
-        panels, self._suspended_arms = self._suspended_arms, []
-        for panel in panels:
-            try:
-                panel.resume()
-            except Exception:  # a panel of a scene since rebuilt
-                pass
+        self.head_stepped = False
+        self._resume_arms()
 
     def _play(self) -> None:
         """One step of the script at the head of the queue.
 
-        A script that stepped the scene during this ``next()`` steps itself:
-        the studio's own stepping is held from then on, so nothing doubles it,
-        and the arm panels are suspended. One that only yielded is stepped by
+        Decided again on every pass, so one routine may do both. A ``next()``
+        that stepped the scene itself holds the studio's own stepping for this
+        pass, so nothing doubles it, and the arm panels are suspended while it
+        does; one that only yielded gets the arm panels back and is stepped by
         the page (``LiveSession.tick``).
         """
         gen = self.script[0]
         before = int(self.sim.step_count)
         try:
-            next(gen)
+            with self._busy("playing one step of a routine"):
+                next(gen)
         except StopIteration:
             self.script.pop(0)
             self._ended(gen, "finished")
@@ -488,9 +511,11 @@ class LiveServer:
             self._next_script()
             print(f"[live] script failed:\n{self.last_error}", file=sys.stderr, flush=True)
         else:
-            if not self.head_steps_itself and int(self.sim.step_count) != before:
-                self.head_steps_itself = True
+            self.head_stepped = int(self.sim.step_count) != before
+            if self.head_stepped:
                 self._suspend_arms()
+            else:
+                self._resume_arms()
             if self.recorder is not None:
                 try:
                     self.recorder.maybe()
@@ -530,6 +555,10 @@ class LiveServer:
     def _finish_recorder(self, why: str) -> None:
         if self.recorder is None:
             return
+        with self._busy("writing the take and putting it beside the clip"):
+            self._write_take(why)
+
+    def _write_take(self, why: str) -> None:
         recorder, self.recorder = self.recorder, None
         try:
             summary = recorder.finish()
@@ -682,22 +711,33 @@ class LiveServer:
             return {"ok": False, "error": "server shutting down"}
 
     def _status_now(self) -> dict:
-        box: dict = {}
-        done = threading.Event()
+        """A status off the main thread, or, while it is busy, the busy one; one is ever queued at a time.
 
-        def ask() -> None:
-            try:
-                box["reply"] = self.bus.call(self.dispatch, {"cmd": "status"})
-            except (BusTimeout, BusClosed) as exc:
-                box["reply"] = {"ok": False, "error": f"server busy: {exc}"}
-            finally:
-                done.set()
+        Every caller waits on the one request in flight rather than queueing
+        its own, so a client polling through a five-minute render leaves one
+        status for the main thread to answer after it, not six hundred.
+        """
+        with self._status_lock:
+            pending = self._status_pending
+            if pending is None:
+                pending = self._status_pending = {"done": threading.Event()}
 
-        threading.Thread(target=ask, name="live-status", daemon=True).start()
-        while not done.wait(0.25):
+                def ask(box: dict = pending) -> None:
+                    try:
+                        box["reply"] = self.bus.call(self.dispatch, {"cmd": "status"})
+                    except (BusTimeout, BusClosed) as exc:
+                        box["reply"] = {"ok": False, "error": f"server busy: {exc}"}
+                    finally:
+                        with self._status_lock:
+                            if self._status_pending is box:
+                                self._status_pending = None
+                        box["done"].set()
+
+                threading.Thread(target=ask, name="live-status", daemon=True).start()
+        while not pending["done"].wait(0.25):
             if self.busy:
                 return self.busy_status()
-        return box["reply"]
+        return pending["reply"]
 
     def busy_status(self) -> dict:
         """What ``status`` says while the main thread is busy: no positions, which would wait for it."""
@@ -710,12 +750,17 @@ class LiveServer:
             "pid": os.getpid(),
             "file": str(self.path),
             "run_dir": str(self.run_dir),
-            "pending_save": stamp(self.path) != self._loaded_stamp,
+            "pending_save": self._pending_save(),
             "generation": self.generation,
             "playing": len(self.script),
             "last_script": self.last_script,
             "last_error": self.last_error,
         }
+
+    def _pending_save(self) -> bool:
+        """A save the watcher will build: never on a page that does not watch, or for a file that is gone."""
+        current = stamp(self.path)
+        return bool(self.watch_enabled) and current is not None and current != self._loaded_stamp
 
     @contextmanager
     def _busy(self, what: str):
@@ -785,7 +830,7 @@ class LiveServer:
             "last_script": self.last_script,
             "speed": self.speed(),
             "busy": "",
-            "pending_save": current != self._loaded_stamp,
+            "pending_save": self._pending_save(),
             "generation": self.generation,
             "resets": self.resets,
             "finite": bool(sim.state_is_finite()),

@@ -34,14 +34,18 @@ __all__ = ["MISSING", "Registry", "unwatch", "watch"]
 MISSING: Any = object()
 """What :func:`watch` is told a name held before it was first registered."""
 
-_WATCHERS: list[Callable[[Registry, str, Any, str], None]] = []
+Watcher = Callable[["Registry", str, Any, str, Any, str], None]
+"""``fn(registry, name, value, origin, previous, previous_origin)``."""
+
+_WATCHERS: list[Watcher] = []
 
 
-def watch(fn: Callable[[Registry, str, Any, str], None]) -> Callable[[Registry, str, Any, str], None]:
-    """Call ``fn(registry, name, previous, previous_origin)`` after every write to any registry.
+def watch(fn: Watcher) -> Watcher:
+    """Call ``fn(registry, name, value, origin, previous, previous_origin)`` after every write to any registry.
 
-    ``previous`` is :data:`MISSING` for a name registered for the first time,
-    and the value it replaced for a :meth:`Registry.replace`. A redundant copy
+    ``value`` and ``origin`` are what the name holds now; ``previous`` is
+    :data:`MISSING` for a name registered for the first time, and the value it
+    replaced for a :meth:`Registry.replace`. A redundant copy
     that :meth:`Registry.register` hands back the first for writes nothing and
     is not reported. For a process that runs one file over and over -- the live
     page, rebuilding ``scene.py`` on every save -- and must take back what the
@@ -51,15 +55,16 @@ def watch(fn: Callable[[Registry, str, Any, str], None]) -> Callable[[Registry, 
     return fn
 
 
-def unwatch(fn: Callable[[Registry, str, Any, str], None]) -> None:
+def unwatch(fn: Watcher) -> None:
     """Stop calling ``fn``; a function not watching is ignored."""
     if fn in _WATCHERS:
         _WATCHERS.remove(fn)
 
 
-def _notify(registry: Registry, name: str, previous: Any, origin: str) -> None:
+def _notify(registry: Registry, name: str, previous: Any, previous_origin: str) -> None:
+    value, origin = registry._items[name], registry._origins.get(name, "")
     for fn in list(_WATCHERS):
-        fn(registry, name, previous, origin)
+        fn(registry, name, value, origin, previous, previous_origin)
 
 
 class Registry[T]:

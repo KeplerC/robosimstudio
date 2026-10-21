@@ -49,7 +49,7 @@ class LiveSession(StudioSession):
 
     def steps_held(self) -> bool:
         """While a routine that steps the scene itself plays, the studio's own step would double it."""
-        return bool(self.host.script) and self.host.head_steps_itself
+        return bool(self.host.script) and self.host.head_stepped
 
     def tick(self) -> bool:
         """One pass; a routine the page steps is stepped whatever Pause says, as one that steps itself plays."""

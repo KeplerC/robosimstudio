@@ -43,6 +43,10 @@ class TiledLabels(unittest.TestCase):
         idx = np.array([3, 0xFFFFFFFF, 0xFFFFFFFE], np.int64)
         np.testing.assert_array_equal(_labels(idx, None), [3, 0, SEG_PARTICLES])
 
+    def test_a_shape_past_the_table_is_still_an_error(self) -> None:
+        with self.assertRaisesRegex(IndexError, "not this model's"):
+            _labels(np.array([1, 9], np.int64), np.array([0, 5, 7], np.int32))
+
 
 def _camera() -> CameraSpec:
     return CameraSpec(name="c", width=100, height=80, fov_y=60.0, eye=(0.0, 0.0, 1.0), look_at=(0.0, 0.0, 0.0))
@@ -132,7 +136,7 @@ class GateSeesDeformables(unittest.TestCase):
             result = checks.gate(server, steps=1)
         rest = next(c for c in result["checks"] if c["name"] == "rest")
         self.assertFalse(rest["ok"])
-        self.assertIn("rope drifted 7.9 mm", rest["detail"])
+        self.assertIn("rope drifted 7.90 mm in 1 steps left alone (bar 2 mm)", rest["detail"])
         self.assertIn("not measured (no position to read): ghost", rest["detail"])
 
 
@@ -140,13 +144,13 @@ class RegistryWrites(unittest.TestCase):
     def test_forget_restore_and_watch(self) -> None:
         reg: Registry[int] = Registry("thing")
         seen = []
-        fn = registry.watch(lambda r, name, prev, origin: seen.append((name, prev)))
+        fn = registry.watch(lambda r, name, value, origin, prev, prev_origin: seen.append((name, value, prev)))
         try:
             reg.register("a", 1)
             reg.replace("a", 2)
         finally:
             registry.unwatch(fn)
-        self.assertEqual(seen, [("a", MISSING), ("a", 1)])
+        self.assertEqual(seen, [("a", 1, MISSING), ("a", 2, 1)])
         reg.forget("a")
         self.assertNotIn("a", reg._items)
         reg.restore("a", 1)
@@ -175,10 +179,24 @@ class SceneRegistrationsTakeBack(unittest.TestCase):
         exec(compile(scene.read_text(), str(scene), "exec"), {"__name__": "scene"})
         self.assertIn("lid", self.reg._items)
         self.assertEqual(self.reg._items["library_thing"], str)
-        undone = self.notes.undo()
-        self.assertEqual(sorted(undone), ["entity library_thing", "entity lid"])
+        taken = self.notes.undo()
+        self.assertEqual(sorted(name for _, name, *_ in taken), ["library_thing", "lid"])
         self.assertNotIn("lid", self.reg._items)
         self.assertEqual(self.reg._items["library_thing"], int)
+        self.notes.redo(taken)  # the run after it failed: the scene still up gets them back
+        self.assertEqual(self.reg._items["library_thing"], str)
+        self.assertIn("lid", self.reg._items)
+        self.assertEqual(len(self.notes.writes), 2, "and they are noted again, for the next save to take back")
+
+    def test_a_registry_discovering_on_a_lookup_from_the_scene_keeps_what_it_found(self) -> None:
+        reg: Registry[type] = Registry("suite")
+        reg.add_discover(lambda: reg.register("task_from_a_root", dict))
+        sys.modules["_r2s_test_registry"].REG = reg  # type: ignore[attr-defined]
+        scene = self.tmp / "scene.py"
+        scene.write_text("import _r2s_test_registry as t\nt.REG.get('task_from_a_root')\nt.REG.register('mine', set)\n")
+        exec(compile(scene.read_text(), str(scene), "exec"), {"__name__": "scene"})
+        self.assertEqual([name for _, name, *_ in self.notes.undo()], ["mine"], "the discovery is the library's")
+        self.assertIn("task_from_a_root", reg._items)
 
     def test_a_module_registering_as_it_is_imported_from_outside_the_scene_dir_stays(self) -> None:
         elsewhere = Path(tempfile.mkdtemp())
@@ -211,7 +229,9 @@ def _server() -> LiveServer:
     live = LiveServer.__new__(LiveServer)
     live.path = Path("/nonexistent/scene.py")
     live.script, live.recorder, live.run_budget, live.last_error = [], None, 0, ""
-    live.head_steps_itself, live._suspended_arms = False, []
+    live.head_stepped, live._suspended_arms = False, []
+    live.busy, live.busy_since = "", 0.0
+    live._status_lock, live._status_pending = threading.Lock(), None
     live.script_meta, live.scripts_started, live.last_script = {}, 0, {}
     live.sim = types.SimpleNamespace(step_count=0)
     live.session = types.SimpleNamespace(arms={"left": _Arm(), "right": _Arm()})
@@ -248,7 +268,7 @@ class RoutineStepping(unittest.TestCase):
 
         live.start_script(drive(), name="drive")
         live._play()
-        self.assertTrue(live.head_steps_itself)
+        self.assertTrue(live.head_stepped)
         self.assertFalse(live.page_steps_script())
         self.assertEqual(live.session.arms["left"].calls, ["suspend"])
         live._play()
@@ -256,6 +276,43 @@ class RoutineStepping(unittest.TestCase):
         self.assertEqual(live.session.arms["left"].calls, ["suspend", "resume"])
         self.assertEqual(live.session.arms["right"].calls, [])
         self.assertEqual(live.last_script["steps"], 2)
+
+    def test_a_routine_that_does_both_gets_the_arms_back_when_it_only_yields(self) -> None:
+        live = _server()
+
+        def both():
+            yield  # reach: the page steps
+            live.sim.step_count += 30  # sim.run(30): it steps itself
+            yield
+            yield  # reach again: the page steps, through the arms
+
+        live.start_script(both(), name="both")
+        live._play()
+        self.assertTrue(live.page_steps_script())
+        live._play()
+        self.assertFalse(live.page_steps_script())
+        self.assertTrue(live.session.arms["left"].suspended)
+        live._play()
+        self.assertTrue(live.page_steps_script(), "the page steps it again")
+        self.assertFalse(live.session.arms["left"].suspended, "with the arms given back to drive it")
+
+    def test_a_routine_whose_finally_raises_still_ends_and_the_queue_empties(self) -> None:
+        live = _server()
+
+        def stubborn():
+            try:
+                while True:
+                    yield
+            finally:
+                raise RuntimeError("cleanup failed")
+
+        gen = stubborn()
+        live.start_script(gen, name="stubborn")
+        live.start_script(iter(range(3)), name="next")
+        live._play()
+        live._end_scripts("stopped: the scene was rebuilt")
+        self.assertEqual(live.script, [])
+        self.assertIn("cleanup failed", live.last_error)
 
     def test_a_failure_is_reported_with_its_traceback(self) -> None:
         live = _server()
@@ -274,13 +331,36 @@ class RoutineStepping(unittest.TestCase):
 class BusyStatus(unittest.TestCase):
     def _busy_server(self) -> LiveServer:
         live = _server()
-        live.busy, live.busy_since = "", 0.0
         live.url, live.share_url, live.run_dir, live.generation = "http://x", None, Path("/tmp"), 3
-        live._loaded_stamp = None
+        live._loaded_stamp, live.watch_enabled = None, True
         release = threading.Event()
-        live.bus = types.SimpleNamespace(call=lambda fn, req: release.wait(5) or {"ok": True, "late": True})
+        self.queued = 0
+
+        def call(fn, req):
+            self.queued += 1
+            return release.wait(5) or {"ok": True, "late": True}
+
+        live.bus = types.SimpleNamespace(call=call)
         self.addCleanup(release.set)
         return live
+
+    def test_a_client_polling_through_a_long_render_queues_one_status(self) -> None:
+        live = self._busy_server()
+        live.busy, live.busy_since = "rendering a still", time.perf_counter()
+        for _ in range(5):
+            self.assertEqual(live._on_request({"cmd": "status"})["busy"], "rendering a still")
+        self.assertEqual(self.queued, 1)
+
+    def test_no_save_is_pending_on_a_page_that_does_not_watch(self) -> None:
+        live = self._busy_server()
+        live.path = Path(tempfile.mkdtemp()) / "scene.py"
+        live.path.write_text("x = 1\n")
+        live.watch_enabled = False
+        self.assertFalse(live._pending_save())
+        live.watch_enabled = True
+        self.assertTrue(live._pending_save())
+        live.path.unlink()
+        self.assertFalse(live._pending_save(), "a file that is gone is no save to wait for")
 
     def test_status_is_answered_at_once_while_the_main_thread_builds(self) -> None:
         live = self._busy_server()
@@ -354,6 +434,7 @@ class CtlWaits(unittest.TestCase):
 
     def test_ref_frames_needs_no_page(self) -> None:
         clip = _clip(self.tmp / "c.mp4", 2, "red")
+        (self.tmp / "scene.py").write_text("")  # the page would put ref/ beside it
         run_dir = self.tmp / "run"
         code = ctl.main(["--run-dir", str(run_dir), "--json", "ref", "frames", str(clip), "--at", "0:start,end"])
         self.assertEqual(code, 0)

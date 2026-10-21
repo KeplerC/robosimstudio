@@ -726,7 +726,9 @@ def gate(
         add(
             "penetration",
             worst_mm <= penetration_mm,
-            f"worst overlap {worst_mm:.2f} mm" + (f" between {pairs[0]}" if pairs else ""),
+            f"worst overlap {worst_mm:.2f} mm"
+            + (f" between {pairs[0]}" if pairs else "")
+            + f" (bar {penetration_mm:g} mm)",
         )
 
     # rest: leave the scene alone and see what drifts -- a rigid thing by its centre, a deformable by its
@@ -749,9 +751,9 @@ def gate(
         "rest",
         worst[1] <= settle_mm,
         (
-            f"nothing moved more than {worst[1]:.1f} mm in {steps} steps"
+            f"nothing moved more than {worst[1]:.2f} mm in {steps} steps (bar {settle_mm:g} mm)"
             if worst[1] <= settle_mm
-            else f"{worst[0]} drifted {worst[1]:.1f} mm in {steps} steps left alone"
+            else f"{worst[0]} drifted {worst[1]:.2f} mm in {steps} steps left alone (bar {settle_mm:g} mm)"
         )
         + (f"; not measured (no position to read): {', '.join(unmeasured)}" if unmeasured else ""),
     )

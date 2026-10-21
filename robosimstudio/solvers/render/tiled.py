@@ -501,11 +501,15 @@ def _labels(idx: np.ndarray, lut: np.ndarray | None) -> np.ndarray:
     """Shape indices to labels: a miss is 0, a particle or deformable-mesh hit its reserved label.
 
     Indexing the table with a reserved id -- 0xFFFFFFFE, far past its end --
-    raised for any scene with cloth, rope or a heap in view.
+    raised for any scene with cloth, rope or a heap in view. Any other index
+    past the table's end still raises: it is a table built for another model,
+    and a picture labelled through it would quietly lose things.
     """
-    particles, soft = idx == _PARTICLES_SHAPE, idx == _SOFT_MESH_SHAPE
-    # a miss (_NO_SHAPE) is past the table's end too, and lands on 0 with anything else that is not a shape
-    shapes = (idx >= 0) & (idx < (len(lut) if lut is not None else _SOFT_MESH_SHAPE))
+    particles, soft, miss = idx == _PARTICLES_SHAPE, idx == _SOFT_MESH_SHAPE, idx == _NO_SHAPE
+    shapes = ~(particles | soft | miss)
+    if lut is not None and (shapes & ((idx < 0) | (idx >= len(lut)))).any():
+        worst = int(idx[shapes].max())
+        raise IndexError(f"shape {worst} is past the label table's {len(lut)} rows: the table is not this model's")
     safe = np.where(shapes, idx, 0)
     labels = safe.astype(np.int32) if lut is None else lut[safe]
     labels = np.where(shapes, labels, 0)
