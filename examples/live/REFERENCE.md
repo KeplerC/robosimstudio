@@ -221,8 +221,10 @@ in the take: case_lid went 118 mm and ended 4 mm from its start; case went 3 mm;
 ```
 
 Nothing says whether the take did what the clip did: read that off the strip.
-A jointed thing's motion is its body that moved most: a key turning in a case
-whose base stays put is seen. An anchor pinned past the take's end is held
+Each thing is read at the centre of mass of each of its bodies, or a sample of
+a deformable's particles: "went" is the most any of them went, "ended" the
+most any of them ended from where it started, so a key turning in a case
+whose base stays put, or a lid swinging on its hinge, is seen. An anchor pinned past the take's end is held
 against its last frame, and a line says so.
 The clip and the take need not run the same length. An anchor is matched by
 proportion, or pinned with `"sim_t"` or `"sim_step"` in the timeline. Keys,

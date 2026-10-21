@@ -585,8 +585,9 @@ def take_motion(frames: list[dict]) -> dict[str, dict[str, float]]:
 
     Both, because one alone misleads: a lid that swung open and shut again
     ends where it started, and a box nudged a few millimetres by a passing
-    hand went somewhere and came back. A jointed thing is read off whichever
-    of its bodies moved most -- the key turning in a case whose base stays.
+    hand went somewhere and came back. A thing of several parts -- a case's
+    bodies, a deformable's particles -- gives each the most any part did, so
+    the key turning in a case whose base stays is seen.
     """
     if not frames:
         return {}
