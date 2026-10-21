@@ -140,6 +140,34 @@ class GateSeesDeformables(unittest.TestCase):
         self.assertIn("not measured (no position to read): ghost", rest["detail"])
 
 
+class TakeAccounting(unittest.TestCase):
+    def test_a_reset_under_the_take_does_not_stop_the_count(self) -> None:
+        rec = checks.Recorder.__new__(checks.Recorder)
+        rec.sim = types.SimpleNamespace(step_count=100)
+        rec.steps, rec._raw, rec.last_capture, rec.every = 0, 100, -1, 4
+        captured: list[int] = []
+        rec.capture = lambda: (rec._advance(), captured.append(rec.steps), setattr(rec, "last_capture", rec.steps))
+        for step in (100, 104, 110, 2, 6, 9):  # the routine resets the scene after step 110
+            rec.sim.step_count = step
+            rec.maybe()
+        self.assertEqual(captured, [0, 4, 10, 16], "a frame every four steps, the reset at 12 included")
+        self.assertEqual(rec.steps, 19)
+
+    def test_a_jointed_thing_records_every_body(self) -> None:
+        body_q = np.zeros((4, 7))
+        body_q[2, :3] = (0.1, 0.2, 0.3)
+        handles = types.SimpleNamespace(
+            objects={"case": None, "cube": None},
+            statics={},
+            entity=lambda name: types.SimpleNamespace(bodies=(1, 2) if name == "case" else (3,)),
+        )
+        sim = types.SimpleNamespace(
+            scene=types.SimpleNamespace(handles=handles),
+            state=types.SimpleNamespace(body_q=types.SimpleNamespace(numpy=lambda: body_q)),
+        )
+        self.assertEqual(checks._part_positions(sim), {"case": [[0.0, 0.0, 0.0], [0.1, 0.2, 0.3]]})
+
+
 class RegistryWrites(unittest.TestCase):
     def test_forget_restore_and_watch(self) -> None:
         reg: Registry[int] = Registry("thing")

@@ -398,10 +398,11 @@ class Recorder:
         self.renderer = self.sim.make_renderer("tiled", cameras=[self.cam], channels=["seg"])
         self.frames: list[dict] = []
         self.segs: list[np.ndarray] = []
-        self.last_step = -1
         self.started = time.perf_counter()
-        self.step0 = int(self.sim.step_count)
-        self.time0 = float(self.sim.time)
+        self.steps = 0
+        """Control steps the take has seen, counted across a reset the routine makes under it."""
+        self._raw = int(self.sim.step_count)
+        self.last_capture = -1
 
     def close(self) -> None:
         """Close the video writer and the id renderer; safe to call twice."""
@@ -411,13 +412,20 @@ class Recorder:
             except Exception:
                 pass
 
-    def maybe(self) -> None:
+    def _advance(self) -> None:
+        """Count the steps taken since the last look; a step count that went down is a reset, counted from 0."""
         step = int(self.sim.step_count)
-        if self.last_step < 0 or step - self.last_step >= self.every:
+        self.steps += step - self._raw if step >= self._raw else step
+        self._raw = step
+
+    def maybe(self) -> None:
+        self._advance()
+        if self.last_capture < 0 or self.steps - self.last_capture >= self.every:
             self.capture()
 
     def capture(self) -> None:
         sim = self.sim
+        self._advance()
         sim.sync()
         frame = self.renderer.render(sim.state)[self.cam.name]
         rgb = stills.render_still(sim, self.cam)
@@ -439,20 +447,22 @@ class Recorder:
                 positions[name] = [round(float(v), 4) for v in sim[name].position]
             except Exception:
                 pass
-        self.last_step = int(sim.step_count)
+        self.last_capture = self.steps
         self.frames.append(
             {
                 "i": len(self.frames),
-                "step": self.last_step - self.step0,
-                "t": round(float(sim.time) - self.time0, 4),
+                "step": self.steps,
+                "t": round(self.steps / self.control_hz, 4),
                 "objects": objects,
                 "positions": positions,
+                "parts": _part_positions(sim),
             }
         )
 
     def finish(self) -> dict:
         try:
-            if self.frames and self.last_step != int(self.sim.step_count):
+            self._advance()
+            if self.frames and self.steps != self.last_capture:
                 self.capture()  # the state the script left, which is the "after"
         finally:
             # closed whatever happened above: the writer is an ffmpeg process
@@ -481,6 +491,31 @@ class Recorder:
             "seconds": self.frames[-1]["t"] if self.frames else 0.0,
             "wall_seconds": meta["wall_seconds"],
         }
+
+
+def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
+    """Every body of a thing that owns more than one -- a case and its lid, a lock and its key -- where it is now.
+
+    A thing's position is its first body's, so a jointed thing whose base
+    stays put reads as still while its key turns or its lid opens.
+    """
+    handles = getattr(getattr(sim, "scene", None), "handles", None)
+    body_q = getattr(getattr(sim, "state", None), "body_q", None)
+    if handles is None or body_q is None:
+        return {}
+    q = None
+    out: dict[str, list[list[float]]] = {}
+    for name in [*getattr(handles, "objects", {}), *getattr(handles, "statics", {})]:
+        try:
+            bodies = tuple(handles.entity(name).bodies)
+        except Exception:
+            continue
+        if len(bodies) < 2:
+            continue
+        if q is None:
+            q = np.asarray(body_q.numpy())
+        out[name] = [[round(float(v), 4) for v in q[b, :3]] for b in bodies if 0 <= b < len(q)]
+    return out
 
 
 def load_take(run_dir: str | Path, name: str) -> tuple[dict, np.ndarray | None]:
@@ -714,7 +749,11 @@ def gate(
         not missing,
         f"all of {', '.join(wanted)} are in the scene"
         if wanted and not missing
-        else (f"missing: {', '.join(missing)}" if missing else "no names given to look for"),
+        else (
+            f"missing: {', '.join(missing)}"
+            if missing
+            else f"no names given (--object or --key), so nothing was looked for; the scene has {len(have)} things"
+        ),
     )
 
     # penetration, as the scene stands

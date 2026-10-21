@@ -410,6 +410,8 @@ class LiveServer:
                 recorder.close()
                 raise
             self.recorder = recorder
+        if self.last_error and self.last_error != self.build_error:
+            self.last_error = ""  # an earlier routine's failure is in last_script; this one starts clean
         self.script.append(gen)
         self.scripts_started += 1
         self.script_meta[id(gen)] = {
@@ -780,14 +782,15 @@ class LiveServer:
         if handler is None:
             return {"ok": False, "error": f"unknown command {name!r}"}
         what = BUSY.get(name, "")
-        if what and name in ("snapshot", "compare") and not self.rendered:
+        renders = name in ("snapshot", "compare") or (name in ("play", "eval") and request.get("record"))
+        if what and renders and not self.rendered:
             what += FIRST_RENDER
         try:
             with self._busy(what) if what else _nothing():
                 reply = handler(**{k: v for k, v in request.items() if k != "cmd"})
         except Exception:
             reply = {"ok": False, "error": traceback.format_exc()[-3000:]}
-        if name in ("snapshot", "compare") and reply.get("ok"):
+        if renders and reply.get("ok"):
             self.rendered = True
         if self.build_error and name in ("snapshot", "compare", "check", "eval", "play"):
             # the page still shows the scene before the save that failed: say so, beside whatever this answered
