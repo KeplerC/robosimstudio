@@ -111,19 +111,21 @@ PY
 quoting; what it defines stays in the namespace until the next save.
 
 Rebuilds land running. A routine (from `eval`, `play` or **Run**) plays
-whatever **Pause** says, one `next()` per pass, in one of two ways:
+whatever **Pause** says, one `next()` per pass, by the studio's rule:
 
-- one that steps the scene itself (`sim.run(1)` between yields) holds the
-  page's own stepping while it plays, and the arm panels are suspended so
-  they do not write the joints and the gripper under it;
-- one that only yields, driving through the arm panels with
-  `robosimstudio_studio.routine.reach`, `grip` and `wait`, is stepped by the
-  page, one step per yield;
-- one that does both (`reach`, then `sim.run(30)` to settle, then `reach`)
-  is held while it steps itself and handed back to the page, with the arm
-  panels, once it has only yielded three passes running.
+- a routine that takes the page's `session` drives through the arm panels
+  (`robosimstudio_studio.routine`'s `reach`, `grip` and `wait`), which stay
+  live;
+- any other routine, and a generator `eval` returns, drives the scene itself:
+  the arm panels are suspended while it plays, so they do not write the
+  joints and the gripper under it, and given back as found when it ends.
 
-The page returns to its previous state when the routine ends.
+Either way, a pass whose `next()` stepped the scene (`sim.run(1)`) holds the
+page's own stepping, and a pass that only yielded is stepped by the page, so
+`reach`, `sim.run(30)` to settle, then `reach` again works. A routine that
+takes `session` and writes joints itself holds the panels off with
+`session.arms[...].suspend()`. The page returns to its previous state when
+the routine ends.
 
 ## Readings
 

@@ -479,8 +479,8 @@ PARTS_KEPT = 16
 
 
 def reset_mark(sim: Any) -> int:
-    """Something that changes on every ``Sim.reset``: the settled poses it records anew each time."""
-    return id(getattr(sim, "settled_body_q", None))
+    """Something that changes on every ``Sim.reset``: its count of them."""
+    return int(getattr(sim, "reset_count", 0))
 
 
 def steps_since(sim: Any, step: int, mark: int) -> int:
@@ -499,24 +499,28 @@ def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
     many links keeps :data:`PARTS_KEPT` of them, evenly along it. Best effort:
     a take is never lost for want of these.
     """
-    try:
-        handles = sim.scene.handles
-        names = [*getattr(handles, "objects", {}), *getattr(handles, "statics", {})]
-        jointed = {}
-        for name in names:
+    handles = getattr(getattr(sim, "scene", None), "handles", None)
+    if handles is None:
+        return {}
+    jointed = {}
+    for name in [*getattr(handles, "objects", {}), *getattr(handles, "statics", {})]:
+        try:
             bodies = tuple(getattr(handles.entity(name), "bodies", ()))
-            if len(bodies) >= 2:
-                keep = np.unique(np.linspace(0, len(bodies) - 1, min(len(bodies), PARTS_KEPT)).round().astype(int))
-                jointed[name] = [bodies[i] for i in keep]
-        if not jointed:
-            return {}
+        except Exception:  # one odd handle costs that thing its parts, not every thing
+            continue
+        if len(bodies) >= 2:
+            keep = np.unique(np.linspace(0, len(bodies) - 1, min(len(bodies), PARTS_KEPT)).round().astype(int))
+            jointed[name] = [bodies[i] for i in keep]
+    if not jointed:
+        return {}
+    try:
         q = np.asarray(sim.state.body_q.numpy())
-        return {
-            name: [[round(float(v), 4) for v in q[b, :3]] for b in bodies if 0 <= b < len(q)]
-            for name, bodies in jointed.items()
-        }
     except Exception:
         return {}
+    return {
+        name: [[round(float(v), 4) for v in q[b, :3]] for b in bodies if 0 <= b < len(q)]
+        for name, bodies in jointed.items()
+    }
 
 
 def load_take(run_dir: str | Path, name: str) -> tuple[dict, np.ndarray | None]:

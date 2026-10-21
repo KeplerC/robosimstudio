@@ -58,9 +58,10 @@ a name.
   explain any FAIL you accept, with the number.
 - Bind `routine` or `routines = {"open lid": fn, ...}` in `scene.py` for a
   **Run** button per routine; `./ctl play [name] --record <take> --wait` presses
-  it and films it. A routine that steps the scene itself has the arm panels
-  held off while it plays; one built from `robosimstudio_studio.routine`'s
-  `reach`, `grip` and `wait` is stepped by the page. When a take ends it is put
+  it and films it. A routine that takes the page's `session` drives through
+  the arm panels (`robosimstudio_studio.routine`'s `reach`, `grip`, `wait`);
+  any other has them held off while it plays and steps the scene itself
+  (`sim.run(1)` between yields). When a take ends it is put
   beside the clip: the strip (clip anchors above, take frames below) goes on
   the board, and one line says what moved in the take and how far.
 - `./ctl show <png> --label "<what>"` posts a picture to the board for the

@@ -449,12 +449,14 @@ def wait_for_steps(sock: Path, reply: dict, steps: int) -> dict:
     start = int(reply["step"])
     target = start + int(steps)
     deadline = time.time() + 30.0 + steps / 5.0
+    busy = ""
     while time.time() < deadline:
         time.sleep(0.2)
         status = request(sock, {"cmd": "status"}, DEFAULT_TIMEOUT)
         if not status.get("ok"):
             break
-        if status.get("busy"):
+        busy = status.get("busy", "")
+        if busy:
             continue  # a rebuild or a render under way: the next poll says how the run fared
         if status.get("generation", reply.get("generation")) != reply.get("generation"):
             return {"ok": False, "error": "the scene was rebuilt during the run; the run ended", "step": status["step"]}
@@ -467,6 +469,8 @@ def wait_for_steps(sock: Path, reply: dict, steps: int) -> dict:
                 "time": status["time"],
                 "finite": status["finite"],
             }
+    if busy:
+        return {"ok": False, "error": f"the page was still {busy} when the wait ran out; how the run went is unknown"}
     return reply
 
 
@@ -501,11 +505,20 @@ def _ref_dir_without_a_page(run_dir: Path) -> Path | None:
 
 
 def server_log(sock: Path, run_dir: Path) -> Path:
-    """The log the page writes to, as the page says (``up --log`` sends it elsewhere), else ``<run-dir>/serve.log``."""
+    """The log the page writes to, as the page says (``up --log`` sends it elsewhere), else ``<run-dir>/serve.log``.
+
+    A page that cannot tell (no ``/proc``) leaves the note ``up`` wrote beside
+    it, ``serve.log.path``.
+    """
     try:
         named = request(sock, {"cmd": "status"}, 5.0).get("log")
     except (NoServer, NoReply):
         named = ""
+    if not named:
+        try:
+            named = (run_dir / "serve.log.path").read_text().strip()
+        except OSError:
+            named = ""
     return Path(named) if named else run_dir / "serve.log"
 
 
@@ -543,9 +556,12 @@ def wait_for_script(sock: Path, reply: dict, log: Path, offset: int, limit: floa
     summary land in the page's log, which is printed as it grows.
     """
     serial = int(reply.get("serial") or 0)
+    take = Path(reply["recording"]).stem if reply.get("recording") else ""
     start = said = time.monotonic()
     status: dict = {}
-    while True:
+
+    def stream() -> None:
+        nonlocal offset, said
         size = _log_size(log)
         if size > offset:
             with open(log, "rb") as f:
@@ -556,12 +572,17 @@ def wait_for_script(sock: Path, reply: dict, log: Path, offset: int, limit: floa
             if text:
                 print(text, flush=True)
             said = time.monotonic()
+
+    while True:
+        stream()
         status = request(sock, {"cmd": "status"}, DEFAULT_TIMEOUT)
         if not status.get("ok"):
             return status
         ended = status.get("last_script") or {}
-        if int(ended.get("serial") or 0) >= serial and not (reply.get("recording") and status.get("busy")):
-            break  # ended, and a take it filmed has been written and put beside the clip
+        # ended; and a take it filmed is no longer filming, nor being written and put beside the clip
+        filming = take and (status.get("busy") or status.get("recording") == take)
+        if int(ended.get("serial") or 0) >= serial and not filming:
+            break
         now = time.monotonic()
         if now - start > limit:
             return {"ok": False, "error": f"the routine is still playing after {limit:.0f} s; it carries on"}
@@ -570,6 +591,7 @@ def wait_for_script(sock: Path, reply: dict, log: Path, offset: int, limit: floa
             _say(f"playing: {where} ({now - start:.0f} s)")
             said = now
         time.sleep(0.5)
+    stream()  # what the page printed while the last status was on its way
     how = str(ended.get("how", ""))
     out = {
         "ok": how == "finished",
@@ -578,7 +600,9 @@ def wait_for_script(sock: Path, reply: dict, log: Path, offset: int, limit: floa
         "steps": ended.get("steps"),
         "wall_seconds": ended.get("wall_seconds"),
         "speed": status.get("speed"),
-        "take": status.get("last_take", "") if reply.get("recording") else "",
+        "take": (status.get("last_take") if status.get("last_take") == take else f"{take} (not written; see the log)")
+        if take
+        else "",
         "recording": reply.get("recording", ""),
     }
     if how != "finished":
@@ -701,6 +725,7 @@ def cmd_up(args: argparse.Namespace, sock: Path) -> int:
     log_path = Path(args.log) if args.log else run_dir / "serve.log"
     proc = spawn_server(serve_argv(args, sock), log_path)
     (run_dir / "serve.pid").write_text(f"{proc.pid}\n")
+    (run_dir / "serve.log.path").write_text(f"{log_path.resolve()}\n")  # for a page with no /proc to say it
     try:
         ready = wait_ready(log_path, lambda: proc.poll() is None, time.monotonic() + args.timeout)
     except ServerDied as exc:
