@@ -147,7 +147,10 @@ def step_block(solver: Any, state: Any, control: Any, dt: float, substeps: int) 
     solver = _stepped(solver)
     model = solver.model
     solver._apply_mjc_control(model, state, control, solver.mj_data)
-    if solver.update_data_interval > 0 and solver._step % solver.update_data_interval == 0:
+    # Newton syncs the state in on each step that is a multiple of the interval;
+    # the period syncs once, at its start, if any of its substeps is one.
+    interval = int(solver.update_data_interval)
+    if interval > 0 and (-solver._step) % interval < int(substeps):
         solver._update_mjc_data(solver.mj_data, model, state)
     solver.mj_model.opt.timestep = dt
     mujoco.mj_step(solver.mj_model, solver.mj_data, int(substeps))
