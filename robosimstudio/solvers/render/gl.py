@@ -28,8 +28,11 @@ Each process holds one EGL display, opened on one GPU the first time a context
 is made: ``egl_device`` if given, else ``MUJOCO_EGL_DEVICE_ID``, else the GPU
 the model is on -- for a model on a CPU, the first GPU ``CUDA_VISIBLE_DEVICES``
 leaves the process -- so a worker pinned to a card by ``CUDA_VISIBLE_DEVICES``
-draws on that card. A machine with no GPU rasterises in software with
-``MUJOCO_GL=osmesa``, set before the process starts.
+draws on that card. A process whose ``CUDA_VISIBLE_DEVICES`` hides every one
+of the machine's NVIDIA GPUs is refused rather than drawn on the first of
+them, which may be someone else's.
+A machine with no GPU rasterises in software with ``MUJOCO_GL=osmesa``, set
+before the process starts.
 """
 
 from __future__ import annotations
@@ -52,6 +55,12 @@ _VISION_TO_GL = np.diag([1.0, -1.0, -1.0])
 
 _DRAW_DISTANCE = 1000.0
 """How far colour is drawn [m]: the tiled tracer's ``max_distance``, so the two agree on a horizon."""
+
+_KEY_DIFFUSE = 0.6
+"""A light's diffuse level per unit of intensity: the key's at ``key_intensity`` 1."""
+
+_EGL_CUDA_DEVICE_NV = 0x323A
+_EGL_EXTENSIONS = 0x3055
 
 
 def _quat_wxyz(rotation: np.ndarray) -> np.ndarray:
@@ -78,15 +87,16 @@ def _platform() -> str:
     return "egl"
 
 
-def egl_device_for(cuda_ordinal: int) -> int | None:
-    """The EGL device that is this process's CUDA device ``cuda_ordinal``, or ``None`` if none is.
+def _egl_devices() -> list[tuple[bool, int | None]]:
+    """Each EGL device, in EGL's order: whether it is an NVIDIA GPU, and which CUDA device it is to this process.
 
     EGL lists every GPU on the machine whatever ``CUDA_VISIBLE_DEVICES`` says,
     and MuJoCo takes the first one that opens -- physical GPU 0, someone else's
     card on a shared machine. NVIDIA's ``EGL_CUDA_DEVICE_NV`` says which CUDA
     device an EGL device is, in this process's own numbering, and nothing for
     a GPU the process cannot see: with ``CUDA_VISIBLE_DEVICES=3,5``, EGL device
-    5 is CUDA device 1.
+    5 is CUDA device 1, and EGL device 0 is ``(True, None)``. Empty when the
+    driver cannot say.
     """
     import ctypes
 
@@ -95,17 +105,33 @@ def egl_device_for(cuda_ordinal: int) -> int | None:
         from mujoco.egl import egl_ext
         from OpenGL import EGL
 
-        address = egl_ext.eglGetProcAddress(b"eglQueryDeviceAttribEXT")
-        if not address:
-            return None
-        query = ctypes.CFUNCTYPE(EGL.EGLBoolean, ctypes.c_void_p, EGL.EGLint, ctypes.POINTER(ctypes.c_ssize_t))(address)
-        for index, device in enumerate(egl_ext.eglQueryDevicesEXT()):
+        attribute = egl_ext.eglGetProcAddress(b"eglQueryDeviceAttribEXT")
+        string = egl_ext.eglGetProcAddress(b"eglQueryDeviceStringEXT")
+        if not attribute or not string:
+            return []
+        query = ctypes.CFUNCTYPE(EGL.EGLBoolean, ctypes.c_void_p, EGL.EGLint, ctypes.POINTER(ctypes.c_ssize_t))(
+            attribute
+        )
+        extensions = ctypes.CFUNCTYPE(ctypes.c_char_p, ctypes.c_void_p, EGL.EGLint)(string)
+        found: list[tuple[bool, int | None]] = []
+        for device in egl_ext.eglQueryDevicesEXT():
+            handle = ctypes.cast(device, ctypes.c_void_p)
             value = ctypes.c_ssize_t(-1)
-            if query(ctypes.cast(device, ctypes.c_void_p), 0x323A, ctypes.byref(value)) and value.value == cuda_ordinal:
-                return index
-    except Exception:  # a driver without the extension: MuJoCo's own choice stands
-        return None
-    return None
+            seen = bool(query(handle, _EGL_CUDA_DEVICE_NV, ctypes.byref(value)))
+            nvidia = b"EGL_NV_device_cuda" in (extensions(handle, _EGL_EXTENSIONS) or b"")
+            found.append((nvidia, int(value.value) if seen else None))
+        return found
+    except Exception:  # a driver without the extensions: MuJoCo's own choice stands
+        return []
+
+
+def egl_device_for(cuda_ordinal: int, devices: Sequence[tuple[bool, int | None]] | None = None) -> int | None:
+    """The EGL device that is this process's CUDA device ``cuda_ordinal``, or ``None`` if none is.
+
+    ``devices`` is :func:`_egl_devices`'s list, asked for when not given.
+    """
+    devices = _egl_devices() if devices is None else devices
+    return next((index for index, (_, cuda) in enumerate(devices) if cuda == cuda_ordinal), None)
 
 
 def _context(width: int, height: int, egl_device: int | None, cuda_ordinal: int) -> Any:
@@ -118,17 +144,27 @@ def _context(width: int, height: int, egl_device: int | None, cuda_ordinal: int)
     The EGL device, which the process's one EGL display is opened on the first
     time a context is made: ``egl_device`` if given, else ``MUJOCO_EGL_DEVICE_ID``
     if set, else the GPU that is CUDA device ``cuda_ordinal`` to this process
-    (:func:`egl_device_for`).
+    (:func:`egl_device_for`). A process whose ``CUDA_VISIBLE_DEVICES`` hides
+    every NVIDIA GPU is refused: MuJoCo would take the first of them. Without
+    the variable, a GPU CUDA cannot use -- a graphics-only container -- is
+    still MuJoCo's to choose.
     """
     platform = _platform()
+    if platform == "egl" and egl_device is None and "MUJOCO_EGL_DEVICE_ID" not in os.environ:
+        devices = _egl_devices()
+        egl_device = egl_device_for(cuda_ordinal, devices)
+        hidden = "CUDA_VISIBLE_DEVICES" in os.environ and all(cuda is None for _, cuda in devices)
+        if egl_device is None and hidden and any(nvidia for nvidia, _ in devices):
+            raise RuntimeError(
+                "the gl renderer can see no GPU here (CUDA_VISIBLE_DEVICES="
+                f"{os.environ.get('CUDA_VISIBLE_DEVICES', '')!r}), and EGL would draw on the machine's first, "
+                "which may be someone else's; make one visible, name an EGL device with MUJOCO_EGL_DEVICE_ID, "
+                "or set MUJOCO_GL=osmesa before the process starts"
+            )
     try:
         if platform == "egl":
             if egl_device is not None:
                 os.environ["MUJOCO_EGL_DEVICE_ID"] = str(int(egl_device))
-            elif "MUJOCO_EGL_DEVICE_ID" not in os.environ:
-                found = egl_device_for(cuda_ordinal)
-                if found is not None:
-                    os.environ["MUJOCO_EGL_DEVICE_ID"] = str(found)
             from mujoco.egl import GLContext
         else:
             from mujoco.osmesa import GLContext
@@ -144,16 +180,28 @@ def _context(width: int, height: int, egl_device: int | None, cuda_ordinal: int)
 
 
 def _rgba(mesh: Any) -> tuple[list[float], Any, Any]:
-    """A part's flat colour, and its base-colour texture and UVs when it has both."""
+    """A part's flat colour, and its base-colour texture and UVs when it has both.
+
+    MuJoCo multiplies a texture by its geom's colour, so a textured part's
+    colour is its stated base-colour factor or white -- not trimesh's
+    ``main_color``, which is a 40 % grey when no factor is stated.
+    """
     visual = getattr(mesh, "visual", None)
     material = getattr(visual, "material", None)
     image = getattr(material, "baseColorTexture", None)
     uv = getattr(visual, "uv", None)
-    color = getattr(material, "main_color", None)
-    rgba = [0.6, 0.6, 0.6, 1.0] if color is None else [float(c) / 255.0 for c in np.asarray(color).reshape(-1)[:4]]
     if image is not None and uv is not None and len(uv) == len(mesh.vertices):
+        factor = getattr(material, "baseColorFactor", None)
+        rgba = [1.0, 1.0, 1.0, 1.0] if factor is None else _unit(factor)
         return rgba, image, np.asarray(uv, dtype=np.float64)
-    return rgba, None, None
+    color = getattr(material, "main_color", None)
+    return ([0.6, 0.6, 0.6, 1.0] if color is None else _unit(color)), None, None
+
+
+def _unit(color: Any) -> list[float]:
+    """An RGBA colour in ``[0, 1]``, from trimesh's bytes."""
+    rgba = [float(c) / 255.0 for c in np.asarray(color).reshape(-1)[:4]]
+    return rgba + [1.0] * (4 - len(rgba))
 
 
 class RendererGL(RendererBase):
@@ -166,6 +214,7 @@ class RendererGL(RendererBase):
         shape_labels: ``shape index -> label id`` for ``seg``. Without it
             ``seg`` is Newton's shape indices plus one, so a miss stays 0.
         light_direction: Direction the key light travels.
+        key_intensity: The key light's brightness, on the scale of the fills'.
         fill_lights: ``((direction, intensity), ...)``, drawn without shadows.
         shadows: Whether the key light casts shadows. Off by default, because a
             shadow map is a second pass per light per camera.
@@ -186,6 +235,7 @@ class RendererGL(RendererBase):
         """What this backend takes from a look; see :meth:`RendererBase.look_kwargs`."""
         out: dict[str, Any] = {}
         put(out, "light_direction", look.light_direction)
+        put(out, "key_intensity", look.key_intensity)
         put(out, "fill_lights", look.fill_lights)
         put(out, "background", look.background)
         return out
@@ -198,6 +248,7 @@ class RendererGL(RendererBase):
         channels: Sequence[str] | None = None,
         shape_labels: Mapping[int, int] | None = None,
         light_direction: Sequence[float] = (-1.0, 1.0, -1.0),
+        key_intensity: float = 1.0,
         fill_lights: Sequence[tuple[Sequence[float], float]] = (),
         shadows: bool = False,
         background: Sequence[float] | None = None,
@@ -241,13 +292,13 @@ class RendererGL(RendererBase):
                 name="background", type=mujoco.mjtTexture.mjTEXTURE_SKYBOX,
                 builtin=mujoco.mjtBuiltin.mjBUILTIN_FLAT, rgb1=rgb, rgb2=rgb, width=8, height=8,
             )  # fmt: skip
-        directions = [tuple(light_direction)] + [tuple(direction) for direction, _ in fill_lights]
-        for index, direction in enumerate(directions):
+        rig = [(tuple(light_direction), float(key_intensity))] + [(tuple(d), float(i)) for d, i in fill_lights]
+        for index, (direction, intensity) in enumerate(rig):
             light = spec.worldbody.add_light(
                 name=f"light{index}", dir=list(direction), castshadow=bool(shadows and index == 0)
             )
             light.type = mujoco.mjtLightType.mjLIGHT_DIRECTIONAL
-            light.diffuse = [0.6, 0.6, 0.6] if index == 0 else [0.25, 0.25, 0.25]
+            light.diffuse = [_KEY_DIFFUSE * intensity] * 3
             light.specular = [0.1, 0.1, 0.1]
 
         bodies: dict[int, Any] = {}
@@ -311,6 +362,8 @@ class RendererGL(RendererBase):
                 shape = int(name[len("shape") :])
                 lut[geom + 1] = labels.get(shape, 0) if shape_labels is not None else shape + 1
         self._seg_lut = lut
+        self._seg_geoms: np.ndarray | None = None
+        """A drawn geom's segmentation id back to its model geom plus one; see :meth:`_geoms_by_segid`."""
 
         import warp as wp
 
@@ -325,10 +378,10 @@ class RendererGL(RendererBase):
         self._camera.type = mujoco.mjtCamera.mjCAMERA_FIXED
 
     # ------------------------------------------------------------------ render
-    def _pose(self, body_q: np.ndarray) -> None:
+    def _pose(self, body_q: np.ndarray | None) -> None:
         """Every drawn body and every camera where ``body_q`` puts them, then MuJoCo's kinematics."""
         mujoco, d = self._mujoco, self.mj_data
-        if len(self._bodies):
+        if len(self._bodies) and body_q is not None:
             q = body_q[self._bodies]
             d.mocap_pos[self._body_mocap] = q[:, :3]
             d.mocap_quat[self._body_mocap] = q[:, [6, 3, 4, 5]]  # xyzw -> wxyz
@@ -352,11 +405,26 @@ class RendererGL(RendererBase):
         mujoco.mjr_render(viewport, self._scene, self._gl)
         return viewport
 
+    def _geoms_by_segid(self) -> np.ndarray:
+        """``segid - 1 -> model geom + 1`` (0 for a drawn thing that is not a geom), for the scene just drawn.
+
+        The scene holds the same geoms in the same order every frame for one
+        model and one option, so the table is read off its geoms once rather
+        than per camera per frame, and again only if their count changes.
+        """
+        scene = self._scene
+        if self._seg_geoms is None or len(self._seg_geoms) != scene.ngeom:
+            geoms = scene.geoms[: scene.ngeom]
+            kinds = np.array([g.objtype for g in geoms], dtype=np.int64)
+            objects = np.array([g.objid for g in geoms], dtype=np.int64)
+            self._seg_geoms = np.where(kinds == int(self._mujoco.mjtObj.mjOBJ_GEOM), objects + 1, 0)
+        return self._seg_geoms
+
     def render(self, state: newton.State) -> FrameSet:
         """Every camera for one state. Each array is the caller's to keep."""
         mujoco = self._mujoco
         self._context.make_current()
-        self._pose(state.body_q.numpy())
+        self._pose(state.body_q.numpy() if state.body_q is not None else None)
         extent = float(self.mj_model.stat.extent)
         near = float(self.mj_model.vis.map.znear) * extent
         far = float(self.mj_model.vis.map.zfar) * extent
@@ -386,12 +454,9 @@ class RendererGL(RendererBase):
                 segid = ids[..., 0] + (ids[..., 1] << 8) + (ids[..., 2] << 16)
                 geom = np.zeros_like(segid)
                 hit = segid > 0
-                if hit.any():
-                    objects = np.array([g.objid for g in self._scene.geoms[: self._scene.ngeom]], dtype=np.int64)
-                    kinds = np.array([g.objtype for g in self._scene.geoms[: self._scene.ngeom]], dtype=np.int64)
-                    index = np.clip(segid - 1, 0, max(len(objects) - 1, 0))
-                    is_geom = hit & (kinds[index] == int(mujoco.mjtObj.mjOBJ_GEOM))
-                    geom = np.where(is_geom, objects[index] + 1, 0)
+                table = self._geoms_by_segid() if hit.any() else None
+                if table is not None and len(table):
+                    geom = np.where(hit, table[np.clip(segid - 1, 0, len(table) - 1)], 0)
                 frame["seg"] = self._seg_lut[geom].astype(np.int32)
             frames[cam.name] = frame
         return frames

@@ -38,6 +38,11 @@ import them itself:
   ``act(sim, step)`` returns the next action, or ``None`` to end the episode
   early. It may instead return an object with ``act`` and, optionally,
   ``success(sim) -> bool``, read when the episode ends.
+
+From the shell, with ``--help`` for the rest::
+
+    python -m robosimstudio.record.collect --scene my_demo.py:build \
+        --policy my_demo.py:make_policy --episodes 500 --out outputs/demos
 """
 
 from __future__ import annotations
@@ -79,12 +84,14 @@ class CollectSpec:
         gpus: The GPUs workers render on (and step on, with ``device="cuda"``),
             round-robin, as ``CUDA_VISIBLE_DEVICES`` names them. Empty uses every
             one this process can see. With none at all ``gl`` has no GPU to draw
-            on, and ``MUJOCO_GL=osmesa`` rasterises in software instead.
+            on -- ``auto`` falls back to ``tiled`` -- unless ``MUJOCO_GL=osmesa``
+            rasterises in software or ``MUJOCO_EGL_DEVICE_ID`` names a device.
         preset: libx264's speed preset.
         threads: Encoder threads per camera.
         keep_failures: Keep the files of an episode whose policy reported
-            failure. Its row and its ``meta.json`` are written either way, so a
-            resume does not run it again.
+            failure. Without them, its row is still written, and its meta in a
+            ``dropped.json`` rather than a ``meta.json``: a resume does not run
+            it again, and the store does not list it as an empty episode.
     """
 
     scene: str
@@ -132,8 +139,18 @@ def load_reference(reference: str) -> Any:
 
 
 # ---------------------------------------------------------------------- worker
+_DROPPED = "dropped.json"
+"""A dropped failure's meta, in place of the ``meta.json`` the store lists episodes by."""
+
+
 def _episode_dir(out: Path, episode: int) -> Path:
     return out / f"{int(episode):04d}"
+
+
+def _recorded(out: Path, episode: int) -> bool:
+    """Whether an episode is on disk already, kept or dropped."""
+    path = _episode_dir(out, episode)
+    return (path / "meta.json").exists() or (path / _DROPPED).exists()
 
 
 def _build(spec: CollectSpec):
@@ -172,7 +189,8 @@ def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, 
     physics = render = encode = 0.0
     actions, joint_q, body_q, sim_time, frame_step = [], [], [], [], []
     body_q_reset = sim.state.body_q.numpy().copy()
-    videos = VideoSet(out / "cameras", fps=int(spec.fps), preset=spec.preset, threads=int(spec.threads))
+    # Every frame is a fresh array from the renderer, so the writers keep it rather than a copy.
+    videos = VideoSet(out / "cameras", fps=int(spec.fps), preset=spec.preset, threads=int(spec.threads), copy=False)
     next_frame = 0.0
     try:
         for k in range(-1, steps):
@@ -244,16 +262,16 @@ def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, 
         },
     }
     if success is False and not spec.keep_failures:
-        # The files go and ``meta.json`` stays, written below: it is what a
-        # resume skips an episode by, and a failure it ran again would add a
-        # second row for the same episode.
+        # The files go and the meta stays, as ``dropped.json``: it is what a
+        # resume skips the episode by -- a failure run again would add a second
+        # row for it -- and the store lists only directories with a meta.json.
         import shutil
 
         shutil.rmtree(out / "cameras", ignore_errors=True)
         for name in ("steps.npz", "privileged.npz"):
             (out / name).unlink(missing_ok=True)
         meta["dropped"] = True
-    (out / "meta.json").write_text(json.dumps(meta, indent=2))
+    (out / (_DROPPED if meta.get("dropped") else "meta.json")).write_text(json.dumps(meta, indent=2))
     return row
 
 
@@ -309,8 +327,8 @@ def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
     and the ``gl`` renderer opens its context on the first GPU a process can see
     (:func:`~robosimstudio.solvers.render.gl.egl_device_for`). A CPU build opens
     no CUDA context, so pinning a CPU worker costs it nothing. A
-    ``MUJOCO_EGL_DEVICE_ID`` the caller set is not passed on: it would put every
-    worker's context on one GPU.
+    ``MUJOCO_EGL_DEVICE_ID`` the caller set is passed on only when there is no
+    GPU to pin: it would put every pinned worker's context on one GPU.
     """
     import multiprocessing as mp
 
@@ -321,7 +339,7 @@ def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
     out = Path(spec.out)
     out.mkdir(parents=True, exist_ok=True)
     wanted = list(range(int(spec.first), int(spec.first) + int(spec.episodes)))
-    todo = [e for e in wanted if not (_episode_dir(out, e) / "meta.json").exists()]
+    todo = [e for e in wanted if not _recorded(out, e)]
     gpus = tuple(str(g) for g in spec.gpus) or _visible_gpus()
     if spec.device == "cuda" and not gpus:
         raise ValueError("device='cuda' needs a GPU, and none is visible")
@@ -344,8 +362,9 @@ def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
                 "OPENBLAS_NUM_THREADS": "1",
                 "MKL_NUM_THREADS": "1",
             }
-            env["CUDA_VISIBLE_DEVICES"] = gpus[w % len(gpus)] if gpus else ""
-            env["MUJOCO_EGL_DEVICE_ID"] = None
+            if gpus:
+                env["CUDA_VISIBLE_DEVICES"] = gpus[w % len(gpus)]
+                env["MUJOCO_EGL_DEVICE_ID"] = None
             saved = {k: os.environ.get(k) for k in env}
             for k, v in env.items():
                 if v is None:

@@ -230,6 +230,32 @@ class TestAControlPeriodIsOneCallIntoMuJoCo(unittest.TestCase):
         self.assertLess(float(state.body_q.numpy()[body, 2]), 0.5, "ten steps of gravity moved nothing")
         self.assertFalse(mjdata.can_step_block(object()))
 
+    def test_the_state_is_synced_in_on_the_periods_the_loop_would_sync_it(self) -> None:
+        """Every third step, two to a period: the loop syncs at steps 0, 3, 6 and 9, in periods 0, 1, 3 and 4."""
+        import newton
+        import warp as wp
+
+        from robosimstudio.core import mjdata
+
+        builder = newton.ModelBuilder()
+        body = builder.add_body(xform=wp.transform((0.0, 0.0, 0.5), wp.quat_identity()))
+        builder.add_shape_box(body, hx=0.05, hy=0.05, hz=0.05)
+        model = builder.finalize(device="cpu")
+        solver = newton.solvers.SolverMuJoCo(model, use_mujoco_cpu=True, update_data_interval=3)
+        state, control = model.state(), model.control()
+        synced = []
+        sync = solver._update_mjc_data
+        period = 0
+
+        def counted(*args, **kwargs):
+            synced.append(period)
+            return sync(*args, **kwargs)
+
+        with unittest.mock.patch.object(solver, "_update_mjc_data", counted):
+            for period in range(6):  # noqa: B007 - read by counted
+                mjdata.step_block(solver, state, control, 0.002, 2)
+        self.assertEqual(synced, [0, 1, 3, 4])
+
     def test_a_stage_between_substeps_puts_the_loop_back_while_it_is_there(self) -> None:
         from robosimstudio.core.schedule import Stage
 

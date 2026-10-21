@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -130,6 +131,12 @@ class VideoWriter:
         threads: Encoder threads, 0 for ffmpeg's own choice (about one and a
             half per core). A pool running a writer per camera per worker sets
             it, or the encoders oversubscribe the machine.
+        copy: Copy each frame as it is queued. The encode happens later, so a
+            caller that draws every frame into one buffer needs it; a caller
+            whose every frame is a fresh array -- any renderer's -- can skip it.
+
+    A writer dropped without :meth:`close` still finishes its file once it is
+    collected, as imageio's did; :meth:`close` is what reports a failure.
     """
 
     def __init__(
@@ -141,6 +148,7 @@ class VideoWriter:
         preset: str = "medium",
         queue: int = 16,
         threads: int = 0,
+        copy: bool = True,
     ) -> None:
         import queue as queue_mod
 
@@ -150,11 +158,13 @@ class VideoWriter:
         self.quality = int(quality)
         self.preset = str(preset)
         self.threads = max(0, int(threads))
+        self.copy = bool(copy)
         self.frames = 0
         self._queue: queue_mod.Queue = queue_mod.Queue(maxsize=max(1, int(queue)))
         self._process = None
         self._thread = None
-        self._error: BaseException | None = None
+        self._feed: _Feed | None = None
+        self._finish = None
         self._shape: tuple[int, int] | None = None
 
     def _open(self, height: int, width: int) -> None:
@@ -162,6 +172,7 @@ class VideoWriter:
         import subprocess
         import tempfile
         import threading
+        import weakref
 
         if not 1 <= self.quality <= 10:
             raise ValueError(f"quality must be 1..10, got {self.quality}")
@@ -180,28 +191,16 @@ class VideoWriter:
         self._log = tempfile.TemporaryFile()
         self._process = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=self._log)
         self._shape = (height, width)
-        self._thread = threading.Thread(target=self._feed, name=f"video:{self.path.name}", daemon=True)
+        # The thread holds the feed, never the writer, so a writer dropped
+        # without close() is collected, and its finaliser ends the stream.
+        self._feed = _Feed(self._queue, self._process.stdin)
+        self._finish = weakref.finalize(self, _end_stream, self._queue, self._log)
+        self._thread = threading.Thread(target=self._feed.run, name=f"video:{self.path.name}", daemon=True)
         self._thread.start()
 
-    def _feed(self) -> None:
-        """The writer thread: frames off the queue into ffmpeg's stdin until the sentinel."""
-        stdin = self._process.stdin
-        try:
-            while True:
-                frame = self._queue.get()
-                if frame is None:
-                    break
-                # A pipe write releases the GIL; the stepping thread runs on.
-                stdin.write(memoryview(frame).cast("B"))
-        except BaseException as exc:  # surfaced on the caller's next append or close
-            self._error = exc
-            while self._queue.get() is not None:  # let a blocked append through
-                pass
-        finally:
-            try:
-                stdin.close()  # flushes, and raises again if ffmpeg is already gone
-            except OSError as exc:
-                self._error = self._error or exc
+    @property
+    def _error(self) -> BaseException | None:
+        return self._feed.error if self._feed is not None else None
 
     def _messages(self) -> str:
         """What ffmpeg has said so far, its last 2000 characters."""
@@ -217,8 +216,8 @@ class VideoWriter:
             raise RuntimeError(f"encoding {self.path} failed: {self._error}{': ' + detail if detail else ''}")
 
     def append(self, frame: np.ndarray) -> None:
-        """Queue one RGB uint8 frame, top-left origin. The writer keeps a reference, never a copy."""
-        frame = np.ascontiguousarray(np.asarray(frame, dtype=np.uint8))
+        """Queue one RGB uint8 frame, top-left origin: a copy of it, or with ``copy=False`` the array itself."""
+        frame = np.array(frame, dtype=np.uint8, order="C", copy=True if self.copy else None)
         if frame.ndim != 3 or frame.shape[2] != 3:
             raise ValueError(f"a video frame is [H, W, 3] uint8, got {frame.shape}")
         if self._process is None:
@@ -234,6 +233,7 @@ class VideoWriter:
         if self._process is None:
             return
         process, self._process = self._process, None
+        self._finish.detach()  # this ends the stream instead, and reads the log first
         self._queue.put(None)
         self._thread.join()
         code = process.wait()
@@ -249,6 +249,46 @@ class VideoWriter:
         self.close()
 
 
+def _end_stream(queue: Any, log: Any) -> None:
+    """What a writer collected without :meth:`VideoWriter.close` does: end ffmpeg's input, and let go of its log.
+
+    The end-of-stream goes in from a thread of its own: the queue may be full,
+    and the collector may be running this on the very thread that empties it.
+    """
+    import threading
+
+    threading.Thread(target=queue.put, args=(None,), name="video:end", daemon=True).start()
+    log.close()
+
+
+class _Feed:
+    """A writer's thread: frames off the queue into ffmpeg's stdin until the end-of-stream ``None``."""
+
+    def __init__(self, queue: Any, stdin: Any) -> None:
+        self.queue = queue
+        self.stdin = stdin
+        self.error: BaseException | None = None
+        """Surfaced on the writer's next append or close."""
+
+    def run(self) -> None:
+        try:
+            while True:
+                frame = self.queue.get()
+                if frame is None:
+                    break
+                # A pipe write releases the GIL; the stepping thread runs on.
+                self.stdin.write(memoryview(frame).cast("B"))
+        except BaseException as exc:
+            self.error = exc
+            while self.queue.get() is not None:  # let a blocked append through
+                pass
+        finally:
+            try:
+                self.stdin.close()  # flushes, and raises again if ffmpeg is already gone
+            except OSError as exc:
+                self.error = self.error or exc
+
+
 class VideoSet:
     """A :class:`VideoWriter` per camera, opened lazily on first use.
 
@@ -259,23 +299,36 @@ class VideoSet:
             ``wrist.mp4`` and ``wrist_depth.mp4``.
         preset: libx264's speed preset for every writer; see :class:`VideoWriter`.
         threads: Encoder threads for every writer; see :class:`VideoWriter`.
+        copy: Whether every writer copies its frames; see :class:`VideoWriter`.
     """
 
     def __init__(
-        self, root: str | Path, *, fps: int = 30, suffix: str = "", preset: str = "medium", threads: int = 0
+        self,
+        root: str | Path,
+        *,
+        fps: int = 30,
+        suffix: str = "",
+        preset: str = "medium",
+        threads: int = 0,
+        copy: bool = True,
     ) -> None:
         self.root = Path(root)
         self.fps = int(fps)
         self.suffix = suffix
         self.preset = str(preset)
         self.threads = int(threads)
+        self.copy = bool(copy)
         self.writers: dict[str, VideoWriter] = {}
 
     def append(self, name: str, frame: np.ndarray) -> None:
         writer = self.writers.get(name)
         if writer is None:
             writer = VideoWriter(
-                self.root / f"{name}{self.suffix}.mp4", fps=self.fps, preset=self.preset, threads=self.threads
+                self.root / f"{name}{self.suffix}.mp4",
+                fps=self.fps,
+                preset=self.preset,
+                threads=self.threads,
+                copy=self.copy,
             )
             self.writers[name] = writer
         writer.append(frame)

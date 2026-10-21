@@ -59,6 +59,27 @@ class TestWhatIsRefused(unittest.TestCase):
             RendererGL(model, [_camera(eye=(1, 1, 1), look_at=(0, 0, 0))])
 
 
+class TestColours(unittest.TestCase):
+    def test_a_texture_is_drawn_at_its_own_brightness(self) -> None:
+        """MuJoCo multiplies a texture by its geom's colour; trimesh's default for a texture with no factor is 40 % grey."""
+        import trimesh
+        from PIL import Image
+
+        from robosimstudio.solvers.render.gl import _rgba
+
+        def textured(**factor):
+            mesh = trimesh.creation.box()
+            material = trimesh.visual.material.PBRMaterial(baseColorTexture=Image.new("RGB", (4, 4), "white"), **factor)
+            mesh.visual = trimesh.visual.TextureVisuals(uv=np.zeros((len(mesh.vertices), 2)), material=material)
+            return mesh
+
+        rgba, image, _ = _rgba(textured())
+        self.assertIsNotNone(image)
+        self.assertEqual(rgba, [1.0, 1.0, 1.0, 1.0])
+        rgba, _, _ = _rgba(textured(baseColorFactor=[255, 0, 0, 255]))
+        self.assertEqual(rgba, [1.0, 0.0, 0.0, 1.0])
+
+
 class TestWhichGpuItDrawsOn(unittest.TestCase):
     """EGL lists every GPU whatever ``CUDA_VISIBLE_DEVICES`` says; left to MuJoCo, a context lands on GPU 0."""
 
@@ -100,6 +121,59 @@ class TestWhichGpuItDrawsOn(unittest.TestCase):
         if expected == "None":
             self.skipTest("this driver does not say which EGL device is which CUDA device")
         self.assertEqual(chosen, expected)
+
+    def test_a_process_that_sees_no_gpu_is_refused_rather_than_drawn_on_the_first(self) -> None:
+        """``CUDA_VISIBLE_DEVICES=""`` on a shared machine: EGL would otherwise draw on physical GPU 0."""
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        from robosimstudio.solvers.render.gl import _egl_devices
+
+        if not any(nvidia for nvidia, _ in _egl_devices()):
+            self.skipTest("no NVIDIA GPU is an EGL device here")
+        child = (
+            "import newton\n"
+            "from robosimstudio.core.cameras import CameraSpec\n"
+            "from robosimstudio.solvers.render.gl import RendererGL\n"
+            "b = newton.ModelBuilder(); b.add_ground_plane(); m = b.finalize(device='cpu')\n"
+            "cam = CameraSpec(name='c', width=32, height=24, fov_y=60.0, eye=(1, 1, 1), look_at=(0, 0, 0))\n"
+            "RendererGL(m, [cam]).close()\n"
+        )
+        env = {
+            k: v for k, v in os.environ.items() if k not in ("MUJOCO_EGL_DEVICE_ID", "MUJOCO_GL", "PYOPENGL_PLATFORM")
+        }
+        env["CUDA_VISIBLE_DEVICES"] = ""
+        root = Path(__file__).resolve().parents[1]
+        out = subprocess.run(
+            [sys.executable, "-c", child], env=env, cwd=root, capture_output=True, text=True, timeout=300, check=False
+        )
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("can see no GPU here", out.stderr)
+
+
+class TestASceneWithNoBodies(unittest.TestCase):
+    def test_a_bare_floor_draws(self) -> None:
+        import newton
+
+        from robosimstudio.core.cameras import CameraSpec
+        from robosimstudio.solvers.render.gl import RendererGL
+
+        builder = newton.ModelBuilder()
+        builder.add_ground_plane()
+        model = builder.finalize(device="cpu")
+        cam = CameraSpec(name="c", width=32, height=24, fov_y=60.0, eye=(1, 1, 1), look_at=(0, 0, 0))
+        try:
+            gl = RendererGL(model, [cam], channels=("rgb", "seg"))
+        except RuntimeError as exc:
+            self.skipTest(f"no OpenGL context here: {exc}")
+        try:
+            frame = gl.render(model.state())["c"]
+        finally:
+            gl.close()
+        self.assertEqual(frame["rgb"].shape, (24, 32, 3))
+        self.assertGreater(int((frame["seg"] > 0).sum()), 0, "the floor is not in the picture")
 
 
 class TestItDrawsWhatTiledDraws(unittest.TestCase):
@@ -149,6 +223,17 @@ class TestItDrawsWhatTiledDraws(unittest.TestCase):
             cam = _camera(dx=dx, dy=dy, eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))
             tiled, gl = self._both([cam], channels=("seg",))
             self.assertGreater((tiled["c"]["seg"] == gl["c"]["seg"]).mean(), 0.99, (dx, dy))
+
+    def test_each_light_is_as_bright_as_its_stated_intensity(self) -> None:
+        """The key and the fills on one scale, as the spec's rig puts them."""
+        cam = _camera(eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))
+        rig = (((1.0, 0.0, -0.2), 0.5), ((0.0, 1.0, -0.2), 0.25))
+        gl = self.sim.make_renderer("gl", cameras=[cam], channels=("rgb",), key_intensity=2.0, fill_lights=rig)
+        try:
+            diffuse = gl.mj_model.light_diffuse[:, 0]
+        finally:
+            gl.close()
+        np.testing.assert_allclose(diffuse / diffuse[0], [1.0, 0.25, 0.125], rtol=1e-6)
 
     def test_a_kept_frame_survives_the_next_render(self) -> None:
         cam = _camera(eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))

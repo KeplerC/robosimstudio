@@ -125,6 +125,20 @@ def _unpack_rgb(
     out[row, y, x, 2] = wp.uint8((v >> wp.uint32(16)) & wp.uint32(0xFF))
 
 
+def _read_worlds(buffer: wp.array | None, chosen: Sequence[int]) -> np.ndarray | None:
+    """The chosen worlds of a ``[worlds, ...]`` device buffer on the host, in ``chosen``'s order.
+
+    One copy, of the span from the first world chosen to the last: one world's
+    worth for a fleet's single-world render, never a copy per world.
+    """
+    if buffer is None or not len(chosen):
+        return None
+    lo, hi = min(chosen), max(chosen) + 1
+    span = buffer[lo:hi].numpy()
+    rows = np.asarray(chosen, dtype=np.int64) - lo
+    return span if np.array_equal(rows, np.arange(hi - lo)) else span[rows]
+
+
 class RendererTiled(RendererBase):
     """Every camera in one launch, off the model's BVHs.
 
@@ -397,18 +411,17 @@ class RendererTiled(RendererBase):
                 forward_depth_image=pass_["depth"],
                 shape_index_image=pass_["shape"],
             )
-            # One read-back per channel for the whole fleet, then sliced on the
-            # host: the copy is the cost, and doing it per world would pay it
-            # once per world for the same bytes. Colour is unpacked on the
-            # device first, so only the chosen worlds' RGB bytes cross.
+            # Only the chosen worlds' span crosses, one copy a channel: a fleet's
+            # render() of one world reads one world's depth, not the fleet's.
+            # Colour is unpacked on the device first, so only RGB bytes cross.
             colors = self._read_rgb(pass_, chosen) if pass_["color"] is not None else None
-            depths = pass_["depth"].numpy() if pass_["depth"] is not None else None
-            shapes = pass_["shape"].numpy() if pass_["shape"] is not None else None
+            depths = _read_worlds(pass_["depth"], chosen)
+            shapes = _read_worlds(pass_["shape"], chosen)
 
             for k, world in enumerate(chosen):
                 rgb = colors[k] if colors is not None else None
-                depth = depths[world] if depths is not None else None
-                shape = shapes[world] if shapes is not None else None
+                depth = depths[k] if depths is not None else None
+                shape = shapes[k] if shapes is not None else None
                 for slot, index in enumerate(pass_["members"]):
                     cam = self.cameras[index]
                     frame: dict[str, np.ndarray] = {}

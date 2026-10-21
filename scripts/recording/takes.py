@@ -2898,7 +2898,6 @@ TAKES: tuple[Take, ...] = (
 KEPT: dict[str, str] = {
     "05_studio/01_render": "opens no page: it path traces a still and a video, which is what its clip shows",
     "07_policies/03_many_worlds": "opens no page: a fleet run of every world at once, filmed as a grid of tiles",
-    "10_datasets/00_many_demos": "opens no page: a collection run, its clip one episode's five cameras side by side",
     "live/live_page": "the live page rebuilding on a save of scene.py: a file being edited, not a scene being driven",
 }
 """Clips no take films, each with why its existing file stands. Keyed like :attr:`Take.key`."""
