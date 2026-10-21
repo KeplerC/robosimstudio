@@ -118,7 +118,10 @@ whatever **Pause** says, one `next()` per pass, in one of two ways:
   they do not write the joints and the gripper under it;
 - one that only yields, driving through the arm panels with
   `robosimstudio_studio.routine.reach`, `grip` and `wait`, is stepped by the
-  page, one step per yield.
+  page, one step per yield;
+- one that does both (`reach`, then `sim.run(30)` to settle, then `reach`)
+  is held while it steps itself and handed back to the page, with the arm
+  panels, once it has only yielded three passes running.
 
 The page returns to its previous state when the routine ends.
 
@@ -189,8 +192,9 @@ a named thing with nothing to read is listed as not measured. It steps the
 scene, then resets it to its start: a pose set with
 `eval` or reached with `run N` is not kept. `check` is refused while a routine
 plays. `--steps` (60), `--settle-mm` (2) and `--penetration-mm` (1) set the
-bars; each line prints the bar it was held to. The bars are defaults and
-`check` blocks nothing. The camera line holds the camera to the clip's aspect
+bars; each line prints the bar it was held to. A line given nothing to look
+at (`objects` with no `--key` or `--object`) is a SKIP. The bars are defaults
+and `check` blocks nothing. The camera line holds the camera to the clip's aspect
 from `ref/timeline.json`; against a photo, `compare` says when it had to
 stretch the photo to the camera's aspect.
 
