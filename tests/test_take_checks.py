@@ -370,11 +370,18 @@ class TestTheTakesAimWhereTheirExampleLaysThings(unittest.TestCase):
         )
         np.testing.assert_allclose(takes._stick_far(film), np.array([0.02, -0.145, 0.156]) + ORIGIN, atol=1e-12)
         np.testing.assert_allclose(takes._stick_near(film), np.array([0.02, -0.06, 0.079]) + ORIGIN, atol=1e-12)
-        sheet = takes._sheet(film)
-        self.assertAlmostEqual(-0.33, sheet["crease"], 12)
-        np.testing.assert_allclose(sheet["pinch"], (-0.015, -0.4165), atol=1e-12)
-        np.testing.assert_allclose(sheet["hold"], (0.05, -0.165), atol=1e-12)
-        np.testing.assert_allclose(sheet["stamps"], (0.005, 0.06, 0.115), atol=1e-12)
+        lay = takes._fold_layout(film)
+        # The sheet's near edge at x -0.05 on the bench, 0.20 long in x and 0.30 wide in y; the box's near face
+        # at x -0.03 and its top 0.06 up; in the world, the bench's frame is at ORIGIN.
+        self.assertAlmostEqual(0.55, lay["edge"], 12)
+        self.assertAlmostEqual(0.75, lay["far"], 12)
+        self.assertAlmostEqual(0.65, lay["fold"], 12)
+        self.assertAlmostEqual(0.05, lay["line"], 12)
+        self.assertAlmostEqual(0.55 + takes.FOLD_PINCH, lay["pinch"], 12)
+        self.assertAlmostEqual(-0.43 + takes.FOLD_HANDS, lay["hands"]["right"], 12)
+        self.assertAlmostEqual(-0.13 - takes.FOLD_HANDS, lay["hands"]["left"], 12)
+        self.assertAlmostEqual(0.57, lay["box_edge"], 12)
+        self.assertAlmostEqual(0.81, lay["top"], 12)
 
     def test_the_pegs_and_the_post_are_where_the_example_stands_them(self) -> None:
         along_x = (0.0, np.sqrt(0.5), 0.0, np.sqrt(0.5))

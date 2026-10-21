@@ -1,228 +1,162 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The paper fold example's headline task, done by both of the robot's hands the way its page asks.
+"""The paper fold example's headline task, done by both of the robot's hands the way its take plays it.
 
-``examples/03_materials/05_paper`` promises a gesture and a number. This drives
-the example's own arm panels through :mod:`tests.fixtures.grasp` -- the cursor
-the gizmo writes, the grip the **Close** button and the **Grip amount** slider
-write, the session's own setpoint law -- and reads the same ``crease_angle`` the
-page shows. Nothing is pinned to a hand: the right hand's pads pinch the corner of
-the sheet where it hangs over the bench's edge, carry the edge up and over while
-the hand turns over, and lay it on the middle; the left hand stamps the fold while
-the edge is still held; the right hand opens and leaves past the edge. The fold
-kept 2.52 to 2.67 rad over 22 drives and the sheet lies in thirds.
+``examples/03_materials/05_paper`` promises a gesture and a number. This plays the FOLD take's own drive
+(``scripts/recording/takes.py``'s :func:`fold_drive`) through the example's arm panels, a control step per
+step, with no browser, and reads the same ``crease_angle`` the page shows. Nothing is pinned to a hand: each
+hand presses **Close** on the overhanging edge from its own corner and its fingers stall on the sheet at the
+grip's 10 N cap, the contact forces fed back along each finger's slide; the two carry the edge up to upright
+turning 88 degrees and on over the far half, and open over it; then each runs its lower finger along its half
+of the fold, the sheet pushing that finger up its slide against the same 10 N cap.
 
-The test turns the coupler's contact forces on, so it can also say *how* the edge
-was held: the sheet pushes on both fingers while it is carried, and on neither
-once the hand has gone -- what a pinch is and an attachment is not.
+What it holds the drive to is what made the earlier folds unrealistic: the arms passing into each other, a
+hand turned 180 degrees holding the edge, the edge clamped while the other hand stamped the fold, a position
+vise the sheet read 30 to 120 N in, a 20 N grip the sheet pried open and slipped out of before **Open**, and a
+fingertip that ran under the fold and lifted it. Here the arms, which collide with each other, keep 20 mm
+apart and each to its own side of the middle at every control step; a hand turns at most 90 degrees while it
+holds; no finger of either hand pushes more than 15 N at any control step, holding, letting go or pressing;
+the pads still hold the edge, nearly shut, when **Open** is pressed; nothing but the pressing finger and the
+box touches the sheet while it is creased, and the strokes lift no part of it; the edges end within 10 mm of
+each other and the fold keeps a 2.8 rad crease once the hands have gone, the sheet where it was laid.
 """
 
 from __future__ import annotations
 
+import sys
 import time
 import unittest
+from pathlib import Path
 
 import numpy as np
 
 from tests.fixtures.examples import _run
-from tests.fixtures.grasp import go, open_session, tick
+from tests.fixtures.grasp import open_session, tick
 
 TIER = "medium"
-"""One GPU: the example built once and driven through its page by both arm panels."""
+"""One GPU: the example built once and its take's drive played through its page (about 10,500 control steps)."""
 
 FOLD_PORT = 9734
-BENCH = np.array([0.6, 0.0, 0.728])
-"""``bench_0728``'s surface frame in world [m]; the example's numbers are in it."""
-EDGE_Y = BENCH[1] - 0.435
-"""The sheet's near edge [world y, m]: 35 mm past the bench's right edge."""
-CREASE_Y = EDGE_Y + 0.297 / 3
-LETTER = {"crease": {"axis": 1, "at": CREASE_Y}}
-"""The fold example's crease line: a third of the way along the sheet from its near edge."""
-SHEET_X = BENCH[0] - 0.055
-"""The sheet's near-left corner [world x, m]."""
-PINCH_X = SHEET_X + 0.035
-"""Where the jaws' middle closes along the overhang [world x, m]: 35 mm in from the corner. Further
-in, the palm reaches the sheet's end before the jaws do, and pushes it round (11 degrees at 75 mm)."""
-PINCH_Y = EDGE_Y + 0.0135
-"""Where the jaws' middle closes across the overhang [world y, m]: 13.5 mm in from the edge."""
-HOLD = (BENCH[0] + 0.05, EDGE_Y + 0.262, BENCH[2] + 0.003)
-"""Where the left hand presses the far end [world, m]: its flat underside 3 mm into the bench."""
-STAMPS = (0.60, 0.655, 0.71)
-"""The left hand's tool centre along x for the three stamps [world, m], clear of the right hand."""
-HELD = 150
-"""Control steps the sheet is watched after the hands have gone [2.5 s]."""
-
-
-def _quat(a, b):
-    ax, ay, az, aw = a
-    bx, by, bz, bw = b
-    return np.array(
-        [
-            aw * bx + ax * bw + ay * bz - az * by,
-            aw * by - ax * bz + ay * bw + az * bx,
-            aw * bz + ax * by - ay * bx + az * bw,
-            aw * bw - ax * bx - ay * by - az * bz,
-        ]
-    )
-
-
-def _about(axis, degrees):
-    axis = np.asarray(axis, dtype=np.float64) / np.linalg.norm(axis)
-    half = np.radians(degrees) / 2
-    return np.array([*(axis * np.sin(half)), np.cos(half)])
-
-
-JAWS = _quat(_quat(_about((0, 1, 0), 10.0), np.array([0.0, 0.70710678, 0.0, 0.70710678])), _about((0, 0, 1), 90.0))
-"""The right hand's pinch: the tool along +x tipped 10 degrees down, the jaws closing vertically."""
-STAMP = _quat(_about((0, 0, 1), -30.0), np.array([0.0, 0.70710678, 0.0, 0.70710678]))
-"""The left hand's stamp: the tool along +x turned 30 degrees toward the fold, which it reaches that way."""
-
-
-def _measures(sim) -> tuple[float, float]:
-    from robosimstudio.assetlib.semantics.snapshot import Snapshot
-    from robosimstudio.assetlib.vocabulary.measures import cloth_fold
-    from robosimstudio_materials.paper import crease_angle
-
-    sim["paper"].entity.update_probe(sim.state, sim.step_count)
-    snapshot = Snapshot(sim.make_context())
-    angle = float(crease_angle(snapshot, "paper", LETTER)["angle"])
-    return angle, float(cloth_fold(snapshot.ctx, "paper", axis=1)[0])
-
-
-class _Hand:
-    """The right hand's jaws: where their middle is, read off the finger boxes, and the fingers' contact forces."""
-
-    def __init__(self, sim, arm: str) -> None:
-        import newton
-
-        self.sim = sim
-        index = sim.scene.embodiment.arms[arm]
-        model = sim.model
-        shape_body = model.shape_body.numpy()
-        kinds = model.shape_type.numpy()
-        self.fingers = [np.flatnonzero(np.isin(shape_body, side)) for side in index.finger_bodies]
-        self.boxes = [s for side in self.fingers for s in side if int(kinds[s]) == int(newton.GeoType.BOX)]
-
-    def middle(self) -> np.ndarray:
-        from robosimstudio.core.math import quat_to_mat
-
-        body_q = self.sim.state.body_q.numpy()
-        xform = self.sim.model.shape_transform.numpy()
-        body = self.sim.model.shape_body.numpy()
-        return np.mean(
-            [body_q[body[s]][:3] + quat_to_mat(body_q[body[s]][3:7]) @ xform[s][:3] for s in self.boxes], axis=0
-        )
-
-    def pushes(self) -> list[float]:
-        """The sheet's push on each finger [N]."""
-        forces = self.sim.pipeline.program.solver.shape_contact_forces()
-        return [float(np.linalg.norm(forces[side].sum(axis=0))) for side in self.fingers]
+GAP = 0.020
+"""The closest the two arms' colliders may come [m]."""
+CAP = 10.0
+"""The example's grip cap [N]: the most one hand's motor pushes along its driven finger's slide; the other finger
+follows that one through a joint equality."""
+FINGER = 15.0
+"""The most any one finger may push on the sheet, holding it or pressing it [N]: the realism ceiling."""
 
 
 class TestTheHandsFoldTheSheet(unittest.TestCase):
-    """Pinch the overhang, carry the edge over by contact, stamp the fold, let go: it stays folded."""
+    """Pinch the overhang from both corners, carry it over, open, press the fold: it stays folded in half."""
 
     @classmethod
     def setUpClass(cls) -> None:
+        from robosimstudio.assetlib.semantics.snapshot import Snapshot
+        from robosimstudio.assetlib.vocabulary.measures import cloth_fold
+        from robosimstudio_materials.paper import crease_angle
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        from recording import takes
+        from recording.lockstep import Film
+
+        cls.takes = takes
         cls.sim, kwargs = _run("03_materials/05_paper.py")
         sim = cls.sim
-        sim.pipeline.program.solver.enable_contact_forces()  # before the first step captures the graph
+        solver = sim.pipeline.program.solver
         sim.run(10).sync()
         t = time.perf_counter()
         sim.run(60).sync()
         cls.ms_per_step = 1e3 * (time.perf_counter() - t) / 60
         cls.session = session = open_session(sim, FOLD_PORT, kwargs.get("page"))
-        points = lambda: np.asarray(sim["paper"].particle_q, dtype=np.float64)  # noqa: E731
-        hand = _Hand(sim, "right")
-        right = session.arms["right"]
-        tick(session, 30)
-        rest = points()
-        surface = float(np.median(rest[rest[:, 1] < BENCH[1] - 0.40][:, 2]))
-        cls.far0 = float(rest[:, 1].max())
-        session.arms["left"].grip_request = 1.0
-        tick(session, 30)
-        cls.miss = {
-            "hold": max(
-                go(session, "left", (*HOLD[:2], 0.80), speed=0.15), go(session, "left", HOLD, speed=0.06, steps=60)
-            )
-        }
+        film = Film(takes.find("03_materials/05_paper"), port=0, scratch=None, software=False, probe=False, log=print)
+        film.sim, film.session = sim, session
+        lay = takes._fold_layout(film)
+        line = {"crease": {"axis": 0, "at": lay["line"]}}
+        index = sim.scene.embodiment.arms
+        body = sim.model.shape_body.numpy()
+        fingers = {arm: [np.flatnonzero(np.isin(body, side)) for side in index[arm].finger_bodies] for arm in index}
+        actuator = cls._finger_actuators(solver.rigid)
+        bench_top = float(film.bench((0.0, 0.0, 0.0))[2])
+        cls.rest = rest = np.asarray(sim["paper"].particle_q, dtype=np.float64)
+        base = rest[:, 0] > lay["fold"] + 0.0106
+        cls.pushes, cls.servo, cls.gap, cls.lowest, cls.drift, cls.marks = {}, {}, {}, np.inf, {}, {}
+        cls.highest, cls.others, cls.idle = {}, {}, {}
+        from robosimstudio_materials.cloth import contact_shapes
 
-        def jaws_to(point, speed, steps=120):  # the cursor is the tool centre; put the jaws' middle at ``point``
-            target = np.asarray(point) - (hand.middle() - right.ik.ee_pose(sim.state)[0])
-            return go(session, "right", target, speed=speed, steps=steps, tolerance=0.008)
+        box = contact_shapes(sim, "box")
+        takes._fold_watch(film)
 
-        right.cursor_quat = JAWS
-        go(session, "right", right.ik.ee_pose(sim.state)[0], speed=0.05)
-        jaws_to((SHEET_X - 0.06, PINCH_Y, surface), 0.06)
-        cls.miss["in"] = jaws_to((PINCH_X, PINCH_Y, surface), 0.05)
-        right.grip_request = 1.0
-        tick(session, 60)
-        cls.pushes = {"closed": hand.pushes()}
-        cls.far_closed = float(points()[:, 1].max())
-        # The carry: the edge on an arc about the fold line, the hand turning over with it.
-        radius = CREASE_Y - PINCH_Y
-        arc = []
-        for k in range(1, 13):
-            turn = np.pi * k / 12
-            right.cursor_quat = _quat(JAWS, _about((0, 0, 1), -np.degrees(turn)))
-            # The last waypoint is on the sheet, where the fingers stop: step it briefly.
-            arc.append(
-                jaws_to(
-                    (PINCH_X, CREASE_Y - radius * np.cos(turn), surface + (radius + 0.015) * np.sin(turn)),
-                    0.06,
-                    120 if k < 12 else 60,
-                )
+        def measures():
+            sim["paper"].entity.update_probe(sim.state, sim.step_count)
+            snapshot = Snapshot(sim.make_context())
+            return float(crease_angle(snapshot, "paper", line)["angle"]), float(
+                cloth_fold(snapshot.ctx, "paper", axis=0)[0]
             )
-            if k == 6:
-                cls.pushes["carried"] = hand.pushes()
-                cls.top_of_arc = float(points()[:, 2].max() - BENCH[2])
-        cls.miss["arc"] = max(arc[:-1])
-        cls.far_carried = float(points()[:, 1].max())
-        jaws_to((PINCH_X, CREASE_Y + radius, surface + 0.03), 0.03)
-        # 20 mm up, the turned hand's lowest collider is 3 mm over the sheet (fold_contact.py, hand_bottom).
-        cls.miss["lay"] = jaws_to((PINCH_X, CREASE_Y + radius, surface + 0.020), 0.02, 60)
-        tick(session, 30)
-        # Drawn on 30 mm and up 10, which tightens the loop, then up 20 more: held where it was laid,
-        # 3 mm over the sheet, the open hand drawn out took the whole sheet 58 to 66 mm with it
-        # (fold_counter.py, two drives, GPU 3).
-        jaws_to((PINCH_X, CREASE_Y + radius + 0.03, surface + 0.03), 0.03)
-        tick(session, 20)
-        cls.laid = _measures(sim)
-        cls.far_laid = float(points()[:, 1].max())
-        y = float(points()[:, 1].min()) + 0.02
-        jaws_to((PINCH_X, CREASE_Y + radius + 0.03, surface + 0.05), 0.02)
-        session.arms["left"].cursor_quat = STAMP
-        left = {"steps": 120, "tolerance": 0.008}
-        stamps = [go(session, "left", (*HOLD[:2], BENCH[2] + 0.06), speed=0.08, **left)]
-        for x in STAMPS:
-            stamps.append(go(session, "left", (x, y, BENCH[2] + 0.06), speed=0.10, **left))
-            go(session, "left", (x, y, BENCH[2] + 0.009), speed=0.04, steps=40)  # onto the fold, where it stops
-            tick(session, 15)
-            stamps.append(go(session, "left", (x, y, BENCH[2] + 0.06), speed=0.06, **left))
-        cls.miss["stamps"] = max(stamps)
-        cls.stamped = _measures(sim)
-        cls.shoved = float(points()[:, 1].max()) - cls.far_laid
-        # Let go: up 25 mm, open to half (the lower pad comes back down the 25 mm), out past the edge, up.
-        jaws_to(hand.middle() + np.array([0.0, 0.0, 0.025]), 0.02)
-        right.grip_request = 0.5
-        tick(session, 40)
-        before = points()
-        jaws_to(hand.middle() + np.array([0.0, 0.04, 0.0]), 0.05)
-        cls.dragged = float(np.abs(points() - before).max())
-        jaws_to(hand.middle() + np.array([0.0, 0.0, 0.08]), 0.08)
-        go(session, "left", (STAMPS[-1], -0.15, BENCH[2] + 0.12), speed=0.08, **left)
-        cls.pushes["gone"] = hand.pushes()
-        cls.after = []
-        for _ in range(HELD // 15):
-            tick(session, 15)
-            cls.after.append(_measures(sim))
-        cls.top = float(points()[:, 2].max() - BENCH[2])
-        cls.far_end = float(points()[:, 1].max())
+
+        for phase, script, mark in takes.fold_drive():
+            for _ in script(film):
+                tick(session, 1)
+                points = np.asarray(sim["paper"].particle_q, dtype=np.float64)
+                on_box = points[:, 0] >= lay["box_edge"]
+                under = np.where(on_box, points[:, 2] - lay["top"], points[:, 2] - bench_top)
+                cls.lowest = min(cls.lowest, float(under.min()))
+                cls.highest.setdefault(phase, []).append(float(points[:, 2].max() - lay["top"]))
+                moved = np.abs(points[base, :2].mean(axis=0) - rest[base, :2].mean(axis=0))
+                cls.drift[phase] = np.maximum(cls.drift.get(phase, 0.0), moved)
+                forces = solver.shape_contact_forces()
+                servo = solver.rigid.mjw_data.qfrc_actuator.numpy()[0]
+                for arm in index:
+                    push = [float(np.linalg.norm(forces[side].sum(axis=0))) for side in fingers[arm]]
+                    whole = float(np.linalg.norm(sum(forces[side].sum(axis=0) for side in fingers[arm])))
+                    cls.pushes.setdefault((phase, arm), []).append((max(push), whole))
+                    if phase == f"sweep_{arm}":
+                        rest_of_it = np.ones(len(forces), dtype=bool)
+                        rest_of_it[np.concatenate([*fingers[arm], box])] = False
+                        other = float(np.linalg.norm(forces[rest_of_it], axis=1).max(initial=0.0))
+                        cls.others[phase] = max(cls.others.get(phase, 0.0), other)
+                        cls.idle[phase] = max(cls.idle.get(phase, 0.0), min(push))
+                    cls.servo.setdefault((phase, arm), []).append(abs(float(servo[actuator[arm]])))
+                    if phase in ("pinched", "carry"):
+                        centres, _, normals = takes._fold_pads(film, arm)
+                        apart = abs(float(np.dot(centres[1] - centres[0], normals[0]))) - 0.004  # face to face
+                        cls.gap.setdefault(arm, []).append(apart)
+            if mark:
+                cls.marks[mark] = measures()
+        cls.watch = film.fold_watch
+        cls.points = points = np.asarray(sim["paper"].particle_q, dtype=np.float64)
+        near, far = rest[:, 0] < rest[:, 0].min() + 0.003, rest[:, 0] > rest[:, 0].max() - 0.003
+        cls.edges = [
+            float(points[near & (rest[:, 1] < 0), 0].mean() - points[far & (rest[:, 1] < 0), 0].mean()),
+            float(points[near & (rest[:, 1] > 0), 0].mean() - points[far & (rest[:, 1] > 0), 0].mean()),
+        ]
+        labels = [str(n).rsplit("/", 1)[-1] for n in sim.model.joint_label]
+        cls.effort = sim.model.joint_effort_limit.numpy()[
+            [sim.model.joint_qd_start.numpy()[labels.index(f"{a}_left_finger")] for a in index]
+        ]
         print(
-            f"\n[fold] miss {cls.miss} pushes {cls.pushes} laid {cls.laid} stamped {cls.stamped} "
-            f"after {cls.after[-1]} top {cls.top:.4f} dragged {cls.dragged:.4f} shoved {cls.shoved:.4f} "
+            f"\n[fold] arms {cls.watch['gap'] * 1e3:.1f} mm apart at the closest, reaching "
+            f"{cls.watch['left_y'] * 1e3:+.1f}/{cls.watch['right_y'] * 1e3:+.1f} mm across the middle, turns "
+            f"{cls.watch['turn']}, edges {np.round(np.array(cls.edges) * 1e3, 1)} mm, marks {cls.marks}, lowest "
+            f"{cls.lowest * 1e3:.2f} mm, drift { ({k: np.round(v * 1e3, 1).tolist() for k, v in cls.drift.items()}) }, "
+            f"pushes { ({k: round(max(p for p, _ in v), 1) for k, v in cls.pushes.items()}) }, pad gap "
+            f"{ ({k: (round(min(v) * 1e3, 2), round(max(v) * 1e3, 1)) for k, v in cls.gap.items()}) } mm, "
             f"{cls.ms_per_step:.1f} ms",
             flush=True,
         )
+
+    @staticmethod
+    def _finger_actuators(rigid) -> dict[str, int]:
+        """Each hand's driven finger's DOF in MuJoCo's own model, where its actuator's force is read."""
+        import mujoco
+
+        mj_model = rigid.mj_model
+        out = {}
+        for i in range(mj_model.nu):
+            joint = int(mj_model.actuator_trnid[i, 0])
+            name = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_JOINT, joint) or ""
+            for arm in ("left", "right"):
+                if name.endswith(f"{arm}_left_finger"):
+                    out[arm] = int(mj_model.jnt_dofadr[joint])
+        return out
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -232,55 +166,96 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         self.assertTrue(self.sim.pipeline.captured, self.sim.pipeline.capture_error)
         self.assertLess(self.ms_per_step, 60.0, f"{self.ms_per_step:.1f} ms per control step")
 
-    def test_the_hands_got_where_they_were_dragged(self) -> None:
-        for leg, miss in self.miss.items():
-            self.assertLess(miss, 0.015, f"the {leg} ended {miss * 1e3:.1f} mm short")
+    def test_the_arms_collide_and_never_come_within_20_mm(self) -> None:
+        self.assertTrue(self.sim.scene.embodiment.spec.cross_arm_collisions)
+        self.assertGreaterEqual(self.watch["gap"], GAP, f"the arms came {self.watch['gap'] * 1e3:.1f} mm apart")
 
-    def test_the_pads_carry_the_edge_by_contact(self) -> None:
-        for moment in ("closed", "carried"):
-            left, right = self.pushes[moment]
-            self.assertGreater(
-                min(left, right), 1.0, f"{moment}: the sheet pushes the fingers {left:.1f} and {right:.1f} N"
-            )
-        self.assertGreater(self.top_of_arc, 0.08, "half way round the arc the edge is up over the fold")
-        self.assertEqual(
-            [0.0, 0.0], [round(p, 3) for p in self.pushes["gone"]], "nothing touches the hand once it has gone"
+    def test_each_arm_stays_on_its_own_side_of_the_middle(self) -> None:
+        self.assertGreaterEqual(self.watch["left_y"], 0.0, f"the left arm reached {self.watch['left_y'] * 1e3:.1f} mm")
+        self.assertLessEqual(self.watch["right_y"], 0.0, f"the right arm reached {self.watch['right_y'] * 1e3:.1f} mm")
+
+    def test_a_hand_turns_at_most_90_degrees_while_it_holds(self) -> None:
+        for arm in ("left", "right"):
+            turn = self.watch["turn"].get(arm, 0.0)
+            self.assertGreater(turn, 80.0, f"the {arm} hand carried the edge over")
+            self.assertLessEqual(turn, 90.0, f"the {arm} hand turned {turn:.1f} degrees holding it")
+
+    def test_the_grip_stalls_on_the_sheet_at_its_cap(self) -> None:
+        """Close drives the fingers to shut; the sheet's push, fed back along their slides, stops them short, and
+        the servo asking 100 kN/m of them saturates at its 10 N cap, which one motor spends on both fingers."""
+        np.testing.assert_allclose(self.effort, CAP)
+        for arm in ("left", "right"):
+            pinched = self.servo[("pinched", arm)]
+            self.assertGreater(float(np.median(pinched)), CAP - 0.1, f"the {arm} grip binds at its cap")
+            held = pinched + self.servo[("carry", arm)]
+            # MuJoCo clamps the actuator to its forcerange, so this holds for as long as effort_limit reaches it.
+            self.assertLessEqual(max(held), CAP + 1.0e-3, f"and never passes it ({max(held):.2f} N)")
+            self.assertGreater(np.median([p for p, _ in self.pushes[("carry", arm)]]), 1.0, "the pads hold the edge")
+            # On the sheet, not on each other: the pads' faces stay apart by the sheet between them.
+            narrowest = min(self.gap[arm])
+            self.assertGreater(narrowest, 0.0005, f"the {arm} pads closed to {narrowest * 1e3:.2f} mm, shut")
+
+    def test_no_finger_ever_pushes_more_than_15_n(self) -> None:
+        """Each finger's own contact force, its friction included, at every control step of every phase, the let-go
+        and the strokes among them: at most 15 N, not one step over."""
+        for (phase, arm), rows in self.pushes.items():
+            worst = max(p for p, _ in rows)
+            self.assertLessEqual(worst, FINGER, f"a {arm} finger pushed {worst:.1f} N in the {phase}")
+
+    def test_the_pads_still_pinch_the_edge_when_open_is_pressed(self) -> None:
+        """The edge is let go, not lost: the pads touch it on the carry's last step and stood nearly shut on it."""
+        for arm in ("left", "right"):
+            last = self.pushes[("carry", arm)][-1][1]
+            self.assertGreater(last, 1.0, f"the {arm} pads held {last:.2f} N of the edge as Open was pressed")
+            widest = max(self.gap[arm])
+            self.assertLess(widest, 0.010, f"the {arm} pads stood {widest * 1e3:.1f} mm apart on the sheet")
+
+    def test_only_the_pressing_finger_touches_the_sheet_while_it_is_creased(self) -> None:
+        """While a hand creases, the sheet feels its pressing finger and the box and nothing else: not the other hand,
+        not the pressing hand's other finger, no other link of either arm, not the bench. Read, like every force
+        here, off the coupler's records of the last substep of each control step."""
+        for arm in ("left", "right"):
+            phase = f"sweep_{arm}"
+            self.assertLessEqual(self.others[phase], 1.0e-3, f"something else pushed the sheet in the {phase}")
+            self.assertLessEqual(self.idle[phase], 1.0e-3, f"the {arm} hand's other finger pushed it too")
+            pressed = [i for i, (_, w) in enumerate(self.pushes[(f"sweep_{arm}", arm)]) if w > 1.0]
+            self.assertGreater(len(pressed), 500, f"the {arm} finger pressed the fold")
+            servo = [self.servo[(f"sweep_{arm}", arm)][i] for i in pressed]
+            self.assertGreater(float(np.median(servo)), CAP - 0.1, f"the {arm} press is its grip's cap")
+
+    def test_the_strokes_lift_no_part_of_the_sheet(self) -> None:
+        """The finger runs on top of the fold: nothing of the sheet rises above where it stood when the hands let go."""
+        laid = max(self.highest["let_go"][-30:])
+        for arm in ("left", "right"):
+            top = max(self.highest[f"sweep_{arm}"])
+            self.assertLessEqual(top, laid + 0.001, f"the {arm} strokes raised the sheet to {top * 1e3:.1f} mm")
+
+    def test_nothing_is_pinned(self) -> None:
+        entity = self.sim["paper"].entity
+        lo, hi = entity.range.particles
+        self.assertEqual(0, int((self.sim.model.particle_mass.numpy()[lo:hi] == 0.0).sum()))
+
+    def test_the_edges_are_laid_on_each_other(self) -> None:
+        for name, gap in zip(("right", "left"), self.edges, strict=True):
+            self.assertLess(abs(gap), 0.010, f"the {name} corners ended {gap * 1e3:.1f} mm apart")
+
+    def test_the_creased_fold_stays_once_the_hands_have_gone(self) -> None:
+        gone, later = self.marks["gone"][0], self.marks["plus3s"][0]
+        self.assertGreaterEqual(gone, self.takes.FOLD_CREASE, f"the fold kept {gone:.3f} rad once the hands had gone")
+        self.assertGreaterEqual(later, self.takes.FOLD_CREASE, f"and {later:.3f} three seconds later")
+        self.assertGreater(gone, self.marks["released"][0] + 0.3, "the strokes, not the lay alone, creased it")
+
+    def test_the_sheet_lies_folded_in_half_where_it_was_laid(self) -> None:
+        extent = self.marks["plus3s"][1]
+        self.assertLess(extent, 0.6, f"its span is {extent:.3f} of the flat sheet's")
+        self.assertGreater(extent, 0.45, "half over, not more")
+        # A particle's centre at the surface is the sheet half sunk into it (its contact radius is 0.5 mm); a
+        # press has put one 1.6 um under, which is the solve's tolerance, not the sheet going through.
+        self.assertGreaterEqual(
+            self.lowest, -5.0e-5, f"a particle went {-self.lowest * 1e3:.3f} mm under the surface it lay on"
         )
-
-    def test_the_left_hand_kept_the_sheet_from_sliding(self) -> None:
-        # Held, the far end moved 4.1 mm over the carry in four drives of this path; with the left hand
-        # kept off it, 31.3 to 32.3 mm in four, and the edge was laid with no crease (0 rad), which
-        # stamping afterwards took only to 0.47 and 0.53 rad (fold_counter.py, GPU 3). The bound sits
-        # between, 11 mm over a held sheet and 16 mm under an unheld one, so an unheld sheet fails it.
-        moved = abs(self.far_carried - self.far0)
-        self.assertLess(moved, 0.015, f"the far end moved {moved * 1e3:.1f} mm under the left hand")
-
-    def test_the_stamps_shove_the_folded_sheet_but_leave_it_on_the_bench(self) -> None:
-        # The left hand's three stamps push the whole folded sheet along the bench, away from the edge
-        # it overhung, and the fold rides with it: 42.2 to 55.2 mm in 11 drives of this path over three
-        # review rounds (this test and fold3.py, GPUs 1, 3 and 6).
-        # The bound keeps the sheet's far end on the bench.
-        self.assertGreater(self.shoved, 0.0, f"the far end moved {self.shoved * 1e3:.1f} mm")
-        self.assertLess(self.shoved, 0.08, f"the stamps shoved the sheet {self.shoved * 1e3:.1f} mm along the bench")
-
-    def test_the_hand_leaves_without_the_sheet(self) -> None:
-        self.assertLess(self.dragged, 0.01, f"drawing the open hand out moved the sheet {self.dragged * 1e3:.1f} mm")
-
-    def test_the_stamped_fold_stays(self) -> None:
-        angles = [a for a, _ in self.after]
-        self.assertGreaterEqual(min(angles), 2.2, f"the fold kept {np.round(angles, 3)} rad after the hands left")
-        self.assertLess(max(angles) - min(angles), 0.05, "and does not relax")
-        self.assertGreater(min(angles), self.laid[0] + 0.5, f"the stamps creased it past the {self.laid[0]:.2f} laid")
-
-    def test_the_sheet_lies_folded_in_thirds(self) -> None:
-        # A flat fold in thirds spans 0.67 of the sheet; the loop the stamps leave at the fold, and
-        # what they push the sheet, make it 0.69 to 0.79 over 22 drives (this test, its take, the
-        # take's path in this harness, fold_contact.py; GPUs 3 and 5), where the attachment's carry
-        # left 0.6 to 0.75.
-        extent = self.after[-1][1]
-        self.assertLess(extent, 0.83, f"its span is {extent:.3f} of the flat sheet's")
-        self.assertGreater(extent, 0.6, "a third over, not more")
-        self.assertLess(self.top, 0.03, "and it lies flat: nothing stands up off the bench")
+        worst = max(float(v.max()) for v in self.drift.values())
+        self.assertLess(worst, 0.015, f"the far half slid {worst * 1e3:.1f} mm")
         self.assertTrue(self.sim.state_is_finite())
 
 

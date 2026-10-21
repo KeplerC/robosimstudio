@@ -119,6 +119,70 @@ def _scene(solver, *, stain=(10, 11, 12, 13)):
     )
 
 
+class TestTheSlideFeedback(unittest.TestCase):
+    """``slide_feedback``: each record's push along the slide joint of the body it is on, as a pair across it.
+
+    A hand (body 0) carries a finger (body 1) on a slide whose axis is the finger's local x; the finger is
+    turned a quarter about z, so the slide runs along world y. A record on the finger pushing (3, 4, 5) N
+    gives the finger 4 N along y and the hand the opposite at the finger's centre of mass; a record on the
+    hand, which no slide carries, and a record past the live count give nothing.
+    """
+
+    def test_the_finger_gets_the_push_along_its_slide_and_the_hand_the_reaction(self) -> None:
+        import warp as wp
+
+        from robosimstudio.scene.physics.couplers import _slide_feedback
+
+        def a(values, dtype):
+            return wp.array(values, dtype=dtype, device="cpu")
+
+        rigid, quarter = 2, (0.0, 0.0, float(np.sin(np.pi / 4)), float(np.cos(np.pi / 4)))
+        forces = np.zeros((rigid + 3, 6), dtype=np.float32)
+        forces[rigid] = (3.0, 4.0, 5.0, 9.0, 9.0, 9.0)
+        forces[rigid + 1] = (1.0, 1.0, 1.0, 0.0, 0.0, 0.0)
+        forces[rigid + 2] = (7.0, 7.0, 7.0, 0.0, 0.0, 0.0)
+        body_f = wp.zeros(2, dtype=wp.spatial_vector, device="cpu")
+        wp.launch(
+            _slide_feedback,
+            dim=3,
+            inputs=[
+                a([2], wp.int32),  # live records: the third is past the count
+                a([1, 0, 1], wp.int32),  # each record's shape
+                rigid,
+                a(forces, wp.spatial_vector),
+                a([0, 1], wp.int32),  # shape 0 is on the hand, shape 1 on the finger
+                a([-1, 1], wp.int32),  # body 1 rides joint 1, a slide; body 0 on none
+                a([-1, 0], wp.int32),  # joint 1's parent is the hand
+                a([(0, 0, 0, 0, 0, 0, 1)] * 2, wp.transform),
+                a([(1.0, 0.0, 0.0)] * 2, wp.vec3),
+                a([0, 1], wp.int32),
+                a([(0, 0, 0, 0, 0, 0, 1), (0.1, 0.0, 0.0, *quarter)], wp.transform),
+                a([(0.0, 0.0, 0.0)] * 2, wp.vec3),
+            ],
+            outputs=[body_f],
+            device="cpu",
+        )
+        hand, finger = body_f.numpy()
+        np.testing.assert_allclose(finger, (0.0, 4.0, 0.0, 0.0, 0.0, 0.0), atol=1e-5)
+        # The reaction at the finger's centre, 0.1 m along x from the hand's: no net force, no net moment.
+        np.testing.assert_allclose(hand, (0.0, -4.0, 0.0, 0.0, 0.0, -0.4), atol=1e-5)
+
+
+class TestAResetForgetsTheLastPushes(unittest.TestCase):
+    """The coupler's reset empties the live rigid-soft records, which the next substep would otherwise feed back."""
+
+    def test_a_reset_reads_no_force_and_still_resets_both_solvers(self) -> None:
+        coupler = _coupler([((10,), 1, (0.0, 0.0, 12.0)), ((11, 12), 2, (0.0, 3.0, 0.0))])
+        self.assertGreater(float(np.abs(coupler.shape_contact_forces()).sum()), 0.0)
+        calls = []
+        coupler.rigid = SimpleNamespace(reset=lambda state, world_mask=None: calls.append("rigid"))
+        coupler.soft = SimpleNamespace(reset=lambda state, world_mask=None: calls.append("soft"))
+        coupler.reset(None)
+        np.testing.assert_array_equal(coupler.shape_contact_forces(), 0.0)
+        self.assertEqual(len(coupler.soft_contact_records()[1]), 0)
+        self.assertEqual(calls, ["rigid", "soft"])
+
+
 class _Sim(SimpleNamespace):
     def __getitem__(self, name):
         return getattr(self, name)
