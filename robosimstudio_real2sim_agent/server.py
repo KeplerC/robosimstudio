@@ -17,7 +17,9 @@ scene up, with the traceback in the page's ``Live`` folder and in ``status``;
 one that builds and then fails to go into the page (the old scene is already
 given back by then) leaves a bare scene up instead, with the same report. The
 modules the file imports from its own directory are imported afresh on every
-rebuild, so an edit to a helper beside it lands with the next save.
+rebuild, and what they and the file registered is taken back first
+(:class:`.scenefile.SceneRegistrations`), so an edit to a helper beside it --
+an entity class, a cell -- lands with the next save.
 Saves are noticed by polling the file's stamp once per loop pass and waiting
 for it to hold still for :data:`STABLE_SECONDS`, because editors write in two
 steps and the compile step catches whatever slips through.
@@ -31,10 +33,16 @@ thread, is put on the bus, and runs on the main thread between two passes.
 An exception out of a pass -- a panel's drain, a rebuild -- is reported in the
 ``Live`` folder and in ``status`` and the loop goes on; only ``quit`` stops it.
 
-While a routine plays it steps the scene itself, so the studio's own stepping
-is held for as long as it plays (``LiveSession.steps_held``), whatever the
-Pause checkbox says; ``run N`` is refused while it plays, and a rebuild or a
-reset under a ``run N`` ends that run with a reply saying so.
+A routine plays one ``next()`` per loop pass, in one of two ways, as the
+studio's Run buttons play them. One that steps the scene itself (``sim.run``,
+``sim.step``) holds the studio's own stepping for as long as it plays
+(``LiveSession.steps_held``), and the arm panels are suspended meanwhile, so
+they do not write the gripper and the joints under it; they are given back as
+found when it ends. One that only yields -- driving through the arm panels,
+like :func:`robosimstudio_studio.routine.reach` -- is stepped by the page, one
+step per yield. Either way it plays whatever the Pause checkbox says. ``run N``
+is refused while a routine plays, and a rebuild or a reset under a ``run N``
+ends that run with a reply saying so.
 
 The page is served on every interface (viser binds ``0.0.0.0``), not only on
 ``localhost``: anyone who can reach the port can drive it. On a shared network
@@ -50,15 +58,16 @@ import importlib
 import inspect
 import io
 import json
-import math
 import os
 import queue
 import signal
 import sys
 import sysconfig
+import threading
 import time
 import traceback
-from contextlib import redirect_stdout
+from collections import deque
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +78,7 @@ from robosimstudio_studio.session import StudioConfig
 
 from . import checks, frames, stills
 from .page import LiveSession
-from .scenefile import Loaded, fallback_scene, run_scene_file, stamp
+from .scenefile import Loaded, SceneRegistrations, fallback_scene, run_scene_file, stamp
 from .wire import ControlSocket, ready_line
 
 __all__ = ["REFRESH_SECONDS", "STABLE_SECONDS", "LiveServer"]
@@ -80,6 +89,23 @@ REFRESH_SECONDS = 0.5
 """How often the ``Live`` folder's readouts are rewritten."""
 BOARD_LIMIT = 8
 """Pictures kept on the board; the oldest goes when another comes. The run directory keeps every one."""
+SPEED_WINDOW = 5.0
+"""Seconds of wall clock the ``speed`` reading in ``status`` is taken over."""
+BUSY = {
+    "reload": "rebuilding the scene file",
+    "snapshot": "rendering a still",
+    "compare": "rendering the scene and comparing it with the photograph",
+    "check": "running the gate (it steps the scene, then resets it)",
+    "eval": "running eval code",
+    "play": "starting a routine",
+    "ref": "cutting stills out of the clip",
+    "catalog": "listing the registries",
+}
+"""What the main thread is doing, by command, for a ``status`` asked meanwhile."""
+FIRST_RENDER = (
+    "; the first path-traced picture in a process compiles the renderer's shaders, "
+    "which can take minutes -- later ones take seconds"
+)
 
 
 class LiveServer:
@@ -98,7 +124,8 @@ class LiveServer:
         self.hold = bool(hold)
         """Land every rebuild paused rather than running."""
         self.path = Path(scene_path).resolve()
-        self.sock_path = Path(sock_path)
+        # absolute before the page changes into the scene file's directory (open_page)
+        self.sock_path = Path(sock_path).absolute()
         self.run_dir = Path(run_dir).resolve()
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.config = config
@@ -127,10 +154,28 @@ class LiveServer:
         """Steps left before the page pauses again; -1 is no limit."""
         self.script: list = []
         """Generators an ``eval`` returned, advanced one ``next()`` per loop pass."""
+        self.head_steps_itself = False
+        """Whether the script at the head of the queue has stepped the scene itself; until it does, the page steps it."""
+        self._suspended_arms: list = []
+        """Arm panels suspended for a script that steps the scene itself, given back when it ends."""
         self.recorder: checks.Recorder | None = None
         """Records the script playing, when ``eval --record`` asked for it; finished when the queue empties."""
         self._baseline_modules: set[str] = set()
         """What was imported before the scene file first ran; never evicted on a rebuild."""
+        self.registrations = SceneRegistrations(self.path.parent)
+        """What the file, its helpers and ``eval`` registered since the last rebuild; taken back before the next."""
+        self.busy = ""
+        """What the main thread is doing that a ``status`` would otherwise wait out; empty between commands."""
+        self.busy_since = 0.0
+        self.rendered = False
+        """Whether a still has been rendered in this process; the first one compiles the path tracer."""
+        self.script_meta: dict[int, dict] = {}
+        """Per playing script (by ``id``): its serial, its name, and where it started."""
+        self.scripts_started = 0
+        self.last_script: dict = {}
+        """How the last script to end ended: ``serial``, ``name``, ``how``, ``error``, ``steps``, ``seconds``."""
+        self._speed: deque = deque()
+        """``(wall, sim time)`` samples over the last :data:`SPEED_WINDOW` seconds."""
         self._tick_error = ""
         self.ref_image: np.ndarray | None = None
         self.ref_label = ""
@@ -151,7 +196,14 @@ class LiveServer:
 
     # ------------------------------------------------------------ the file
     def load(self) -> Loaded:
-        """Execute the scene file and build what it declares. Raises on any failure."""
+        """Execute the scene file and build what it declares. Raises on any failure.
+
+        What the last run registered is taken back first, so an edited entity
+        class, cell or gripper is registered as edited rather than kept as it
+        was (a registry keeps the first of two from the same source) or refused
+        (two that differ).
+        """
+        self.registrations.undo()
         self.evict_helpers()
         return run_scene_file(self.path)
 
@@ -193,7 +245,7 @@ class LiveServer:
         old = self.sim
         # before adopt() closes the old sim: a take's last frame is read off it
         self._finish_recorder("the scene was rebuilt")
-        self.script.clear()
+        self._end_scripts("stopped: the scene was rebuilt")
         self.run_budget = 0
         try:
             self._adopt(loaded)
@@ -266,7 +318,8 @@ class LiveServer:
             return
         if now - self._pending_at < STABLE_SECONDS:
             return
-        self.reload("saved")
+        with self._busy("rebuilding the scene file after a save"):
+            self.reload("saved")
 
     # ------------------------------------------------------------ the loop
     def tick_once(self) -> None:
@@ -326,16 +379,19 @@ class LiveServer:
     def routine_names(self) -> list[str]:
         return list(self.routines())
 
-    def start_script(self, gen, *, record: str = "", every: int = 4, camera: str = "") -> None:
+    def start_script(self, gen, *, name: str = "eval", record: str = "", every: int = 4, camera: str = "") -> int:
         """Queue a generator to play one step per loop pass, filming it when asked.
 
-        The page's own stepping is held while anything is queued
-        (``LiveSession.steps_held``) and the Pause checkbox is left as it was,
-        so when the queue empties the page carries on as it was before.
+        It plays whatever the Pause checkbox says, which is left as it was, so
+        when the queue empties the page carries on as it was before: held while
+        a script that steps the scene itself plays (``LiveSession.steps_held``),
+        stepping once per yield for one that does not (``LiveSession.tick``).
+        Returns the script's serial, which ``status``'s ``last_script`` names
+        once it has ended.
         """
         if record:
             # the new take films the new routine alone: what was queued ahead of it is dropped, not filmed into it
-            self.script.clear()
+            self._end_scripts("dropped: another recording started")
             self._finish_recorder("another recording started")
             recorder = checks.Recorder(self, record, camera=camera, every=every)
             try:
@@ -345,32 +401,96 @@ class LiveServer:
                 raise
             self.recorder = recorder
         self.script.append(gen)
+        self.scripts_started += 1
+        self.script_meta[id(gen)] = {
+            "serial": self.scripts_started,
+            "name": name,
+            "step": int(self.sim.step_count),
+            "wall": time.perf_counter(),
+        }
         self.run_budget = 0
+        return self.scripts_started
 
     def stop_scripts(self, why: str) -> None:
         """Drop every queued script and finish the take filming them. Main thread."""
-        self.script.clear()
+        self._end_scripts(f"stopped: {why}")
         if self.run_budget > 0:
             # a `run N` under way ends held, as it would have at its last step, not running on unbounded
             self.session.set_paused(True)
         self.run_budget = 0
         self._finish_recorder(why)
 
+    def page_steps_script(self) -> bool:
+        """Whether a script is playing that the page steps: one that has only yielded so far."""
+        return bool(self.script) and not self.head_steps_itself
+
+    def _suspend_arms(self) -> None:
+        """Hold the arm panels off a script that drives the scene itself, as the studio does for ``fn(sim)``."""
+        arms = getattr(self.session, "arms", None) or {}
+        for panel in arms.values():
+            if not getattr(panel, "suspended", True):
+                panel.suspend()
+                self._suspended_arms.append(panel)
+
+    def _end_scripts(self, how: str) -> None:
+        """End every queued script, the head first, each reported ``how``."""
+        while self.script:
+            gen = self.script.pop(0)
+            close = getattr(gen, "close", None)  # a generator; a plain iterator has nothing to close
+            if close is not None:
+                close()
+            self._ended(gen, how)
+        self._next_script()
+
+    def _ended(self, gen, how: str, error: str = "") -> None:
+        meta = self.script_meta.pop(id(gen), None) or {"serial": 0, "name": "", "step": 0, "wall": time.perf_counter()}
+        self.last_script = {
+            "serial": meta["serial"],
+            "name": meta["name"],
+            "how": how,
+            "error": error,
+            "steps": int(self.sim.step_count) - int(meta["step"]),
+            "wall_seconds": round(time.perf_counter() - meta["wall"], 1),
+        }
+
+    def _next_script(self) -> None:
+        """The head script is gone: give the arms back, and let the next one show how it steps."""
+        self.head_steps_itself = False
+        panels, self._suspended_arms = self._suspended_arms, []
+        for panel in panels:
+            try:
+                panel.resume()
+            except Exception:  # a panel of a scene since rebuilt
+                pass
+
     def _play(self) -> None:
-        """One step of the script at the head of the queue. It steps the sim itself;
-        the studio's own stepping is held meanwhile, so nothing doubles it."""
+        """One step of the script at the head of the queue.
+
+        A script that stepped the scene during this ``next()`` steps itself:
+        the studio's own stepping is held from then on, so nothing doubles it,
+        and the arm panels are suspended. One that only yielded is stepped by
+        the page (``LiveSession.tick``).
+        """
         gen = self.script[0]
+        before = int(self.sim.step_count)
         try:
             next(gen)
         except StopIteration:
             self.script.pop(0)
+            self._ended(gen, "finished")
+            self._next_script()
             print("[live] script finished", flush=True)
         except Exception:
             self.script.pop(0)
             gen.close()
             self.last_error = traceback.format_exc()[-3000:]
+            self._ended(gen, "failed", self.last_error)
+            self._next_script()
             print(f"[live] script failed:\n{self.last_error}", file=sys.stderr, flush=True)
         else:
+            if not self.head_steps_itself and int(self.sim.step_count) != before:
+                self.head_steps_itself = True
+                self._suspend_arms()
             if self.recorder is not None:
                 try:
                     self.recorder.maybe()
@@ -431,8 +551,28 @@ class LiveServer:
                 flush=True,
             )
 
+    def speed(self) -> float | None:
+        """Simulated seconds per wall second over the last :data:`SPEED_WINDOW` s; None before there are two samples."""
+        if len(self._speed) < 2:
+            return None
+        (w0, t0), (w1, t1) = self._speed[0], self._speed[-1]
+        return round((t1 - t0) / (w1 - w0), 3) if w1 > w0 else None
+
+    def _sample_speed(self) -> None:
+        now, t = time.perf_counter(), float(self.sim.time)
+        if self._speed and t < self._speed[-1][1]:
+            self._speed.clear()  # a reset or a rebuild: the clock started over
+        self._speed.append((now, t))
+        while len(self._speed) > 2 and now - self._speed[0][0] > SPEED_WINDOW:
+            self._speed.popleft()
+
     def refresh_live(self, force: bool = False) -> None:
         self._refreshed = time.perf_counter()
+        if self.sim is not None:
+            try:
+                self._sample_speed()
+            except Exception:  # a sim mid-swap
+                pass
         session = self.session
         if session is None or self.sim is None or not session.host_widgets:
             return
@@ -480,6 +620,9 @@ class LiveServer:
             self.socket.close()
             self.bus.close()
             self.session.close()
+            from robosimstudio import registry
+
+            registry.unwatch(self.registrations)
             print("[live] stopped", flush=True)
 
     def open_page(self) -> None:
@@ -488,6 +631,9 @@ class LiveServer:
         # itself resolves -- and so `eval` can import it back the same way.
         sys.path.insert(0, str(self.path.parent))
         self._baseline_modules = set(sys.modules)
+        from robosimstudio import registry
+
+        registry.watch(self.registrations)
         # Stamped before the build, not after: a save made while the first
         # build runs is a change the watcher must still see.
         self._loaded_stamp = stamp(self.path)
@@ -520,7 +666,14 @@ class LiveServer:
 
     # ------------------------------------------------------------ the socket
     def _on_request(self, request: dict) -> dict:
-        """The socket thread's half: put the command on the bus and wait for the main thread's answer."""
+        """The socket thread's half: put the command on the bus and wait for the main thread's answer.
+
+        ``status`` is the exception: while the main thread is busy -- a
+        rebuild, a render, a gate -- it is answered here, at once, with what
+        the page is doing and for how long, instead of waiting it out.
+        """
+        if request.get("cmd") == "status":
+            return self._status_now()
         try:
             return self.bus.call(self.dispatch, request)
         except BusTimeout as exc:
@@ -528,16 +681,77 @@ class LiveServer:
         except BusClosed:
             return {"ok": False, "error": "server shutting down"}
 
+    def _status_now(self) -> dict:
+        box: dict = {}
+        done = threading.Event()
+
+        def ask() -> None:
+            try:
+                box["reply"] = self.bus.call(self.dispatch, {"cmd": "status"})
+            except (BusTimeout, BusClosed) as exc:
+                box["reply"] = {"ok": False, "error": f"server busy: {exc}"}
+            finally:
+                done.set()
+
+        threading.Thread(target=ask, name="live-status", daemon=True).start()
+        while not done.wait(0.25):
+            if self.busy:
+                return self.busy_status()
+        return box["reply"]
+
+    def busy_status(self) -> dict:
+        """What ``status`` says while the main thread is busy: no positions, which would wait for it."""
+        return {
+            "ok": True,
+            "busy": self.busy,
+            "busy_seconds": round(time.perf_counter() - self.busy_since, 1),
+            "url": self.url,
+            "share_url": self.share_url,
+            "pid": os.getpid(),
+            "file": str(self.path),
+            "run_dir": str(self.run_dir),
+            "pending_save": stamp(self.path) != self._loaded_stamp,
+            "generation": self.generation,
+            "playing": len(self.script),
+            "last_script": self.last_script,
+            "last_error": self.last_error,
+        }
+
+    @contextmanager
+    def _busy(self, what: str):
+        outer = self.busy
+        if not outer:
+            self.busy, self.busy_since = what, time.perf_counter()
+        try:
+            yield
+        finally:
+            if not outer:
+                self.busy = ""
+
     def dispatch(self, request: dict) -> dict:
         """Run one command on the main thread, between two loop iterations."""
         name = str(request.get("cmd", ""))
         handler = getattr(self, f"cmd_{name}", None)
         if handler is None:
             return {"ok": False, "error": f"unknown command {name!r}"}
+        what = BUSY.get(name, "")
+        if what and name in ("snapshot", "compare") and not self.rendered:
+            what += FIRST_RENDER
         try:
-            return handler(**{k: v for k, v in request.items() if k != "cmd"})
+            with self._busy(what) if what else _nothing():
+                reply = handler(**{k: v for k, v in request.items() if k != "cmd"})
         except Exception:
-            return {"ok": False, "error": traceback.format_exc()[-3000:]}
+            reply = {"ok": False, "error": traceback.format_exc()[-3000:]}
+        if name in ("snapshot", "compare") and reply.get("ok"):
+            self.rendered = True
+        if self.build_error and name in ("snapshot", "compare", "check", "eval", "play"):
+            # the page still shows the scene before the save that failed: say so, beside whatever this answered
+            last = self.build_error.strip().splitlines()[-1]
+            reply["stale"] = (
+                f"the last save of {self.path.name} did not build ({last}); "
+                "this is the scene before it -- `./ctl status` has the traceback"
+            )
+        return reply
 
     # ------------------------------------------------------------ commands
     def cmd_status(self) -> dict:
@@ -568,6 +782,10 @@ class LiveServer:
             "time": round(float(sim.time), 3),
             "paused": bool(self.session.paused),
             "playing": len(self.script),
+            "last_script": self.last_script,
+            "speed": self.speed(),
+            "busy": "",
+            "pending_save": current != self._loaded_stamp,
             "generation": self.generation,
             "resets": self.resets,
             "finite": bool(sim.state_is_finite()),
@@ -646,12 +864,13 @@ class LiveServer:
             else:
                 value = eval(expression, ns)
         playing = False
+        serial = 0
         if inspect.isgenerator(value):
             # A script: played one step per loop pass so the page draws it,
-            # instead of freezing for as long as it takes. The page is held
-            # while it plays (the script does the stepping) and let go after
-            # if it was running before.
-            self.start_script(value, record=record, every=every, camera=camera)
+            # instead of freezing for as long as it takes. One that steps the
+            # scene itself holds the page while it plays; one that only yields
+            # is stepped by the page. The page carries on as it was after.
+            serial = self.start_script(value, name="eval", record=record, every=every, camera=camera)
             playing, value = True, None
         elif record:
             return {
@@ -664,6 +883,8 @@ class LiveServer:
             "stdout": out.getvalue(),
             "playing": playing,
         }
+        if serial:
+            reply["serial"] = serial
         if record:
             reply["recording"] = str(self.run_dir / f"{record}.mp4")
         return reply
@@ -757,50 +978,7 @@ class LiveServer:
         width: int = 0,
     ) -> dict:
         """Stills out of the clip at the times asked, a contact sheet, and the timeline they anchor."""
-        clip_path = Path(clip)
-        if not clip_path.is_file():
-            return {"ok": False, "error": f"no clip at {clip}"}
-        out_dir = Path(out) if out else self.ref_dir()
-        meta = frames.probe(clip_path)
-        if meta["duration"] <= 0:
-            # ffmpeg read "Duration: N/A" (a raw .h264 stream, some webm): "end" would be 0 and no time can be sought
-            return {
-                "ok": False,
-                "error": f"{clip} has no duration ffmpeg can read; re-mux it (ffmpeg -i {clip} -c copy out.mp4)",
-            }
-        times = frames.parse_times(at, meta["duration"] - 1.0 / (meta["fps"] or 30.0))  # "end" is the last frame
-        # a still is named to the hundredth, so the anchor is that hundredth: two times inside one name are one moment
-        floored: dict[float, tuple[str, str]] = {}  # t -> (label, the time as asked)
-        for t, label in times:
-            moment = math.floor(t * 100 + 1e-6) / 100
-            if moment not in floored:
-                floored[moment] = (label, f"{t:g}")
-                continue
-            kept, asked = floored[moment]
-            if label and kept and label != kept:
-                return {
-                    "ok": False,
-                    "error": f"{asked}:{kept} and {t:g}:{label} fall in one still ({frames._stem(moment)}.jpg); "
-                    "mark them at least 0.01 s apart",
-                }
-            floored[moment] = (kept or label, asked)
-        times = [(t, label) for t, (label, _) in floored.items()]
-        stills_cut = frames.extract(clip_path, [t for t, _ in times], out_dir, width=width)
-        anchors = [{"t": t, "file": p.name, "label": label} for (t, label), p in zip(times, stills_cut, strict=True)]
-        spacing = float(every) if every else max(0.5, round(meta["duration"] / 24.0, 1))
-        sheet, tiles = frames.contact_sheet(clip_path, spacing, out_dir / "contact.jpg")
-        timeline = frames.write_timeline(out_dir, meta, anchors)
-        return {
-            "ok": True,
-            "clip": meta["clip"],
-            "fps": meta["fps"],
-            "size": f"{meta['width']}x{meta['height']}",
-            "duration": meta["duration"],
-            "frames": [str(p) for p in stills_cut],
-            "contact": f"{sheet} ({tiles} tiles, every {spacing} s)",
-            "timeline": str(timeline),
-            "report": "\n".join(f"{a['t']:6.2f} s  {a['file']}  {a['label']}" for a in anchors),
-        }
+        return frames.cut(clip, at=at, every=every, out_dir=Path(out) if out else self.ref_dir(), width=width)
 
     def _keys(self, keys: list | tuple) -> list:
         from .compare import parse_key
@@ -1008,8 +1186,8 @@ class LiveServer:
             return {"ok": False, "error": f"no routine called {name!r}; the scene file binds {', '.join(names)}"}
         fn = found[name]
         try:
-            # a routine that asks for the page's session gets it: the arm panels write the gripper
-            # every tick, and a routine closing a grip has to hold them off while it plays
+            # a routine that asks for the page's session gets it, to drive the arm panels (reach, grip)
+            # or anything else on the page; one that steps the scene itself has the panels held off for it
             wants_session = "session" in inspect.signature(fn).parameters
             gen = fn(self.sim, session=self.session) if wants_session else fn(self.sim)
         except Exception:
@@ -1019,8 +1197,8 @@ class LiveServer:
                 "ok": False,
                 "error": f"routine {name!r} returned {type(gen).__name__}, not a generator: it must yield once per control step",
             }
-        self.start_script(gen, record=record, every=every, camera=camera)
-        reply = {"ok": True, "playing": name}
+        serial = self.start_script(gen, name=name, record=record, every=every, camera=camera)
+        reply = {"ok": True, "playing": name, "serial": serial}
         if record:
             reply["recording"] = str(self.run_dir / f"{record}.mp4")
         return reply
@@ -1085,3 +1263,8 @@ class LiveServer:
         for kind in wanted:
             reply[kind] = sorted(str(name) for name in listers[kind]())
         return reply
+
+
+@contextmanager
+def _nothing():
+    yield
