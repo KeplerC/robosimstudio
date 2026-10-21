@@ -28,8 +28,9 @@ Each process holds one EGL display, opened on one GPU the first time a context
 is made: ``egl_device`` if given, else ``MUJOCO_EGL_DEVICE_ID``, else the GPU
 the model is on -- for a model on a CPU, the first GPU ``CUDA_VISIBLE_DEVICES``
 leaves the process -- so a worker pinned to a card by ``CUDA_VISIBLE_DEVICES``
-draws on that card. A process that can see none of the machine's NVIDIA GPUs
-is refused rather than drawn on the first of them, which may be someone else's.
+draws on that card. A process whose ``CUDA_VISIBLE_DEVICES`` hides every one
+of the machine's NVIDIA GPUs is refused rather than drawn on the first of
+them, which may be someone else's.
 A machine with no GPU rasterises in software with ``MUJOCO_GL=osmesa``, set
 before the process starts.
 """
@@ -56,7 +57,7 @@ _DRAW_DISTANCE = 1000.0
 """How far colour is drawn [m]: the tiled tracer's ``max_distance``, so the two agree on a horizon."""
 
 _KEY_DIFFUSE = 0.6
-"""The key light's diffuse level; a fill's is this times its stated intensity."""
+"""A light's diffuse level per unit of intensity: the key's at ``key_intensity`` 1."""
 
 _EGL_CUDA_DEVICE_NV = 0x323A
 _EGL_EXTENSIONS = 0x3055
@@ -124,9 +125,13 @@ def _egl_devices() -> list[tuple[bool, int | None]]:
         return []
 
 
-def egl_device_for(cuda_ordinal: int) -> int | None:
-    """The EGL device that is this process's CUDA device ``cuda_ordinal``, or ``None`` if none is; see :func:`_egl_devices`."""
-    return next((index for index, (_, cuda) in enumerate(_egl_devices()) if cuda == cuda_ordinal), None)
+def egl_device_for(cuda_ordinal: int, devices: Sequence[tuple[bool, int | None]] | None = None) -> int | None:
+    """The EGL device that is this process's CUDA device ``cuda_ordinal``, or ``None`` if none is.
+
+    ``devices`` is :func:`_egl_devices`'s list, asked for when not given.
+    """
+    devices = _egl_devices() if devices is None else devices
+    return next((index for index, (_, cuda) in enumerate(devices) if cuda == cuda_ordinal), None)
 
 
 def _context(width: int, height: int, egl_device: int | None, cuda_ordinal: int) -> Any:
@@ -139,14 +144,17 @@ def _context(width: int, height: int, egl_device: int | None, cuda_ordinal: int)
     The EGL device, which the process's one EGL display is opened on the first
     time a context is made: ``egl_device`` if given, else ``MUJOCO_EGL_DEVICE_ID``
     if set, else the GPU that is CUDA device ``cuda_ordinal`` to this process
-    (:func:`egl_device_for`). A process that can see none of the machine's
-    NVIDIA GPUs is refused: MuJoCo would take the first of them.
+    (:func:`egl_device_for`). A process whose ``CUDA_VISIBLE_DEVICES`` hides
+    every NVIDIA GPU is refused: MuJoCo would take the first of them. Without
+    the variable, a GPU CUDA cannot use -- a graphics-only container -- is
+    still MuJoCo's to choose.
     """
     platform = _platform()
     if platform == "egl" and egl_device is None and "MUJOCO_EGL_DEVICE_ID" not in os.environ:
         devices = _egl_devices()
-        egl_device = next((index for index, (_, cuda) in enumerate(devices) if cuda == cuda_ordinal), None)
-        if egl_device is None and any(nvidia for nvidia, _ in devices) and all(c is None for _, c in devices):
+        egl_device = egl_device_for(cuda_ordinal, devices)
+        hidden = "CUDA_VISIBLE_DEVICES" in os.environ and all(cuda is None for _, cuda in devices)
+        if egl_device is None and hidden and any(nvidia for nvidia, _ in devices):
             raise RuntimeError(
                 "the gl renderer can see no GPU here (CUDA_VISIBLE_DEVICES="
                 f"{os.environ.get('CUDA_VISIBLE_DEVICES', '')!r}), and EGL would draw on the machine's first, "
@@ -206,8 +214,8 @@ class RendererGL(RendererBase):
         shape_labels: ``shape index -> label id`` for ``seg``. Without it
             ``seg`` is Newton's shape indices plus one, so a miss stays 0.
         light_direction: Direction the key light travels.
-        fill_lights: ``((direction, intensity), ...)``, drawn without shadows,
-            each at its intensity times the key's level.
+        key_intensity: The key light's brightness, on the scale of the fills'.
+        fill_lights: ``((direction, intensity), ...)``, drawn without shadows.
         shadows: Whether the key light casts shadows. Off by default, because a
             shadow map is a second pass per light per camera.
         background: RGB in [0, 1] behind everything; black when ``None``.
@@ -227,6 +235,7 @@ class RendererGL(RendererBase):
         """What this backend takes from a look; see :meth:`RendererBase.look_kwargs`."""
         out: dict[str, Any] = {}
         put(out, "light_direction", look.light_direction)
+        put(out, "key_intensity", look.key_intensity)
         put(out, "fill_lights", look.fill_lights)
         put(out, "background", look.background)
         return out
@@ -239,6 +248,7 @@ class RendererGL(RendererBase):
         channels: Sequence[str] | None = None,
         shape_labels: Mapping[int, int] | None = None,
         light_direction: Sequence[float] = (-1.0, 1.0, -1.0),
+        key_intensity: float = 1.0,
         fill_lights: Sequence[tuple[Sequence[float], float]] = (),
         shadows: bool = False,
         background: Sequence[float] | None = None,
@@ -282,7 +292,7 @@ class RendererGL(RendererBase):
                 name="background", type=mujoco.mjtTexture.mjTEXTURE_SKYBOX,
                 builtin=mujoco.mjtBuiltin.mjBUILTIN_FLAT, rgb1=rgb, rgb2=rgb, width=8, height=8,
             )  # fmt: skip
-        rig = [(tuple(light_direction), 1.0)] + [(tuple(d), float(i)) for d, i in fill_lights]
+        rig = [(tuple(light_direction), float(key_intensity))] + [(tuple(d), float(i)) for d, i in fill_lights]
         for index, (direction, intensity) in enumerate(rig):
             light = spec.worldbody.add_light(
                 name=f"light{index}", dir=list(direction), castshadow=bool(shadows and index == 0)

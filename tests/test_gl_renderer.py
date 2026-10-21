@@ -224,15 +224,16 @@ class TestItDrawsWhatTiledDraws(unittest.TestCase):
             tiled, gl = self._both([cam], channels=("seg",))
             self.assertGreater((tiled["c"]["seg"] == gl["c"]["seg"]).mean(), 0.99, (dx, dy))
 
-    def test_a_fill_light_is_as_bright_as_its_stated_intensity(self) -> None:
+    def test_each_light_is_as_bright_as_its_stated_intensity(self) -> None:
+        """The key and the fills on one scale, as the spec's rig puts them."""
         cam = _camera(eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))
         rig = (((1.0, 0.0, -0.2), 0.5), ((0.0, 1.0, -0.2), 0.25))
-        gl = self.sim.make_renderer("gl", cameras=[cam], channels=("rgb",), fill_lights=rig)
+        gl = self.sim.make_renderer("gl", cameras=[cam], channels=("rgb",), key_intensity=2.0, fill_lights=rig)
         try:
             diffuse = gl.mj_model.light_diffuse[:, 0]
         finally:
             gl.close()
-        np.testing.assert_allclose(diffuse / diffuse[0], [1.0, 0.5, 0.25], rtol=1e-6)
+        np.testing.assert_allclose(diffuse / diffuse[0], [1.0, 0.25, 0.125], rtol=1e-6)
 
     def test_a_kept_frame_survives_the_next_render(self) -> None:
         cam = _camera(eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))
