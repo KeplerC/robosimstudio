@@ -306,6 +306,12 @@ _FAULTY_WARPS = ("1.18.",)
 """The Warp releases the workaround was written against: a lookup there without both lines is said by name."""
 
 
+# _environment_cell_lookup is adapted from NVIDIA Warp 1.18.0 (https://github.com/NVIDIA/warp),
+# NanogridBase.make_filtered_cell_lookup in warp/_src/fem/geometry/nanogrid.py, under the Apache License 2.0:
+# Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Changed here: the environment lookup packs floor(uvw) + env_offset in integers and floors its fallback
+# search window rather than truncating it (the module docstring says why), and a grid of one environment
+# keeps Warp's own lookup.
 def _environment_cell_lookup(grid_geo, filter_func: wp.Function = None):
     """``NanogridBase.make_filtered_cell_lookup`` with the environment lookup floored before it packs.
 

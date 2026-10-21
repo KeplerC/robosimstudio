@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The tape's contact adhesion law against ipc-toolkit itself, on the CPU.
 
-``robosimstudio_materials/tape.py`` ports ipc-toolkit's adhesion model (Fang, Li et al., TVCG 2023;
+``robosimstudio_materials/tape.py`` ports ipc-toolkit's adhesion model (Fang, Li et al., IEEE TVCG 2024;
 ipc-toolkit v1.6.0, ``src/ipc/adhesion/adhesion.cpp``) as warp functions. The numbers below are
 ipc-toolkit's own, from its Python wheel ``ipctk`` 1.6.0 in a scratch environment
 (``gen_ref.py``): the normal adhesion force on a point over a triangle, ``-grad`` of
