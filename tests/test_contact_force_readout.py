@@ -171,17 +171,16 @@ class TestTheSlideFeedback(unittest.TestCase):
 class TestAResetForgetsTheLastPushes(unittest.TestCase):
     """The coupler's reset empties the live rigid-soft records, which the next substep would otherwise feed back."""
 
-    def test_the_live_count_is_zero_after_a_reset(self) -> None:
-        import warp as wp
-
-        from robosimstudio.scene.physics.couplers import SolverOneWay
-
-        coupler = SolverOneWay.__new__(SolverOneWay)
-        coupler.rigid = coupler.soft = SimpleNamespace()  # neither has a reset of its own here
-        coupler.contacts = SimpleNamespace(soft_contact_count=wp.array([7], dtype=wp.int32, device="cpu"))
-        coupler.observables = object()
+    def test_a_reset_reads_no_force_and_still_resets_both_solvers(self) -> None:
+        coupler = _coupler([((10,), 1, (0.0, 0.0, 12.0)), ((11, 12), 2, (0.0, 3.0, 0.0))])
+        self.assertGreater(float(np.abs(coupler.shape_contact_forces()).sum()), 0.0)
+        calls = []
+        coupler.rigid = SimpleNamespace(reset=lambda state, world_mask=None: calls.append("rigid"))
+        coupler.soft = SimpleNamespace(reset=lambda state, world_mask=None: calls.append("soft"))
         coupler.reset(None)
-        self.assertEqual(int(coupler.contacts.soft_contact_count.numpy()[0]), 0)
+        np.testing.assert_array_equal(coupler.shape_contact_forces(), 0.0)
+        self.assertEqual(len(coupler.soft_contact_records()[1]), 0)
+        self.assertEqual(calls, ["rigid", "soft"])
 
 
 class _Sim(SimpleNamespace):

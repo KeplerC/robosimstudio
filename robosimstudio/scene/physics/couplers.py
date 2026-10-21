@@ -317,7 +317,7 @@ class SolverOneWay:
     One solver with the standard ``step`` signature: the rigid solver steps with
     its own contacts, the collision pipeline runs over its new body poses, and
     the deformable solver steps with ``integrate_with_external_rigid_solver=True``
-    -- the robot is a moving boundary it pushes back on only along slides (below).
+    -- the robot is a moving boundary it never pushes back on, but along slides with ``slide_feedback`` (below).
 
     VBD reads the new poses off ``state_out`` and the previous ones off
     ``state_in``, and its friction is the particle's slip against the difference:
@@ -535,7 +535,8 @@ class SolverOneWay:
     def reset(self, state, world_mask=None, flags=None) -> None:
         if self.observables is not None:
             # The last episode's records would otherwise be fed to the fingers, and read as this one's forces,
-            # on the first substep after the reset; the next collide fills the buffers again.
+            # on the first substep after the reset; the next collide fills the buffers again. The count is every
+            # world's, so a reset of some worlds costs the others one substep of feedback and readout too.
             self.contacts.soft_contact_count.zero_()
         for inner in (self.rigid, self.soft):
             reset = getattr(inner, "reset", None)

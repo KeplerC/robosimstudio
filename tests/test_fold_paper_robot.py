@@ -116,8 +116,9 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
                         cls.idle[phase] = max(cls.idle.get(phase, 0.0), min(push))
                     cls.servo.setdefault((phase, arm), []).append(abs(float(servo[actuator[arm]])))
                     if phase in ("pinched", "carry"):
-                        centres = takes._fold_pads(film, arm)[0]
-                        cls.gap.setdefault(arm, []).append(float(np.linalg.norm(centres[1] - centres[0])) - 0.004)
+                        centres, _, normals = takes._fold_pads(film, arm)
+                        apart = abs(float(np.dot(centres[1] - centres[0], normals[0]))) - 0.004  # face to face
+                        cls.gap.setdefault(arm, []).append(apart)
             if mark:
                 cls.marks[mark] = measures()
         cls.watch = film.fold_watch
@@ -137,7 +138,8 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
             f"{cls.watch['turn']}, edges {np.round(np.array(cls.edges) * 1e3, 1)} mm, marks {cls.marks}, lowest "
             f"{cls.lowest * 1e3:.2f} mm, drift { ({k: np.round(v * 1e3, 1).tolist() for k, v in cls.drift.items()}) }, "
             f"pushes { ({k: round(max(p for p, _ in v), 1) for k, v in cls.pushes.items()}) }, pad gap "
-            f"{ ({k: round(max(v) * 1e3, 1) for k, v in cls.gap.items()}) } mm, {cls.ms_per_step:.1f} ms",
+            f"{ ({k: (round(min(v) * 1e3, 2), round(max(v) * 1e3, 1)) for k, v in cls.gap.items()}) } mm, "
+            f"{cls.ms_per_step:.1f} ms",
             flush=True,
         )
 
@@ -185,6 +187,9 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         for arm in ("left", "right"):
             pinched = self.servo[("pinched", arm)]
             self.assertGreater(float(np.median(pinched)), CAP - 0.1, f"the {arm} grip binds at its cap")
+            held = pinched + self.servo[("carry", arm)]
+            # MuJoCo clamps the actuator to its forcerange, so this holds for as long as effort_limit reaches it.
+            self.assertLessEqual(max(held), CAP + 1.0e-3, f"and never passes it ({max(held):.2f} N)")
             self.assertGreater(np.median([p for p, _ in self.pushes[("carry", arm)]]), 1.0, "the pads hold the edge")
             # On the sheet, not on each other: the pads' faces stay apart by the sheet between them.
             narrowest = min(self.gap[arm])
@@ -207,7 +212,8 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
 
     def test_only_the_pressing_finger_touches_the_sheet_while_it_is_creased(self) -> None:
         """While a hand creases, the sheet feels its pressing finger and the box and nothing else: not the other hand,
-        not the pressing hand's other finger, no other link of either arm, not the bench."""
+        not the pressing hand's other finger, no other link of either arm, not the bench. Read, like every force
+        here, off the coupler's records of the last substep of each control step."""
         for arm in ("left", "right"):
             phase = f"sweep_{arm}"
             self.assertLessEqual(self.others[phase], 1.0e-3, f"something else pushed the sheet in the {phase}")

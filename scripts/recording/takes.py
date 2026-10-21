@@ -1667,7 +1667,8 @@ def _fold_layout(film) -> dict:
 
 
 def _fold_pads(film, arm: str):
-    """The hand's two pad boxes (12 x 4 x 80 mm, not the slanted wing boxes beside them): centres and corners [world]."""
+    """The hand's two pad boxes (12 x 4 x 80 mm, not the slanted wing boxes beside them): centres, corners and each
+    one's 4 mm axis, the way it closes [world]."""
     import newton
     import numpy as np
 
@@ -1679,7 +1680,7 @@ def _fold_pads(film, arm: str):
     kinds = sim.model.shape_type.numpy()
     scale = sim.model.shape_scale.numpy()
     body_q, xform = sim.state.body_q.numpy(), sim.model.shape_transform.numpy()
-    centres, corners = [], []
+    centres, corners, normals = [], [], []
     for side in index.finger_bodies:
         for s in np.flatnonzero(np.isin(body, side)):
             if int(kinds[s]) != int(newton.GeoType.BOX) or abs(float(scale[s][2]) - 0.04) > 1.0e-4:
@@ -1689,7 +1690,8 @@ def _fold_pads(film, arm: str):
             r = rot @ quat_to_mat(xform[s][3:7])
             centres.append(c)
             corners += [c + r @ (np.array([i, j, k]) * scale[s][:3]) for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)]
-    return np.array(centres), np.array(corners)
+            normals.append(r[:, int(np.argmin(scale[s][:3]))])
+    return np.array(centres), np.array(corners), np.array(normals)
 
 
 def _fold_jaws(film, arm: str):
@@ -2179,22 +2181,24 @@ def fold_drive() -> list[tuple[str, Any, str]]:
     moment just after a row: ``gone`` once both hands have left the sheet, ``plus3s`` three seconds of scene later."""
     take = find("03_materials/05_paper")
 
-    def scene(seconds: float):
+    def clip(seconds: float, warmup: float = 0.0):
         def script(film):
-            yield from _wait(round(seconds * float(film.session.env.request.physics.control_hz)))
+            hz = float(film.session.env.request.physics.control_hz)
+            frames = round(seconds * take.fps)  # what Film.hold films: frames of hz * speed / fps control steps
+            yield from _wait(round(warmup * hz + frames * hz * take.speed / take.fps))
 
         return script
 
     return [
-        ("settle", scene(take.warmup + FOLD_WAITS[0] * take.speed), ""),  # the warm-up and the opening wait
+        ("settle", clip(FOLD_WAITS[0], take.warmup), ""),  # the warm-up and the opening wait
         ("reach", _fold_reach, ""),
         ("close", _fold_close, ""),
-        ("pinched", scene(FOLD_WAITS[1] * take.speed), ""),  # the scroll and the wait after Close
+        ("pinched", clip(FOLD_WAITS[1]), ""),  # the scroll and the wait after Close
         ("carry", _fold_carry, "laid"),
         ("let_go", _fold_let_go, "released"),
         ("sweep_right", _fold_sweep("right"), "swept_right"),
         ("sweep_left", _fold_sweep("left"), "gone"),
-        ("watch", scene(FOLD_WAITS[2] * take.speed), "plus3s"),  # the closing wait: three seconds of scene
+        ("watch", clip(FOLD_WAITS[2]), "plus3s"),  # the closing wait: three seconds of scene, to a frame
     ]
 
 
@@ -2236,11 +2240,12 @@ def _paper_folded(film) -> tuple[bool, str]:
     near, far = rest[:, 0] < rest[:, 0].min() + 0.003, rest[:, 0] > rest[:, 0].max() - 0.003
     gap = float(now[near, 0].mean() - now[far, 0].mean())
     watch = getattr(film, "fold_watch", None)
-    if watch is None:
+    if watch is None or not np.isfinite(watch["gap"]) or len(watch["turn"]) < 2:
         return False, "the arms were never watched: the take must Do(_fold_watch) before the hands move"
-    turn = max(watch["turn"].values(), default=0.0)
+    turn = max(watch["turn"].values())
     ok = angle >= FOLD_CREASE and abs(gap) <= 0.01 and extent < 0.65
-    ok = ok and watch["gap"] >= 0.020 and watch["left_y"] >= 0.0 and watch["right_y"] <= 0.0 and turn <= 90.0
+    ok = ok and watch["gap"] >= 0.020 and watch["left_y"] >= 0.0 and watch["right_y"] <= 0.0
+    ok = ok and 80.0 < min(watch["turn"].values()) and turn <= 90.0
     return (
         ok,
         f"the fold kept {angle:.2f} rad (need {FOLD_CREASE}), the edges {gap * 1e3:+.1f} mm apart (need 10), "
