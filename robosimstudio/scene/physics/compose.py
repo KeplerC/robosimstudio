@@ -599,9 +599,11 @@ def _check_in_place_rates(arrangement: ArrangementSpec, islands: list[Island]) -
     (:attr:`~robosimstudio.specs.registries.BackendInfo.steps_in_place`). The
     skipping is host-side and a captured graph bakes it in, so it is right only
     when every control step holds the same whole number of its steps: the call
-    rate (``control_hz * substeps``, times the entry's own substeps) must be an
-    integer multiple of ``step_hz``, and that multiple must divide the calls in
-    a control step. A rate above the call rate is a ceiling and steps every call.
+    rate (``control_hz * substeps``, times the entry's own substeps when a
+    coupler steps it; a lone island is built bare and called once a substep)
+    must be an integer multiple of ``step_hz``, and that multiple must divide
+    the calls in a control step. A rate above the call rate is a ceiling and
+    steps every call.
 
     Raises:
         CompositionError: Naming the island, the rates, and the rates that fit.
@@ -613,7 +615,8 @@ def _check_in_place_rates(arrangement: ArrangementSpec, islands: list[Island]) -
         step_hz = params.get("step_hz")
         if step_hz is None:
             continue
-        calls = int(arrangement.substeps) * int(island.backend.substeps)
+        entry = int(island.backend.substeps) if len(islands) > 1 else 1  # build_bare has no entry to substep
+        calls = int(arrangement.substeps) * entry
         call_hz = float(arrangement.control_hz) * calls
         ratio = call_hz / float(step_hz)
         if ratio < 1.0 - 1.0e-6:

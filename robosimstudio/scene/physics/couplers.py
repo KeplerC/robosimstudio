@@ -493,7 +493,7 @@ class SolverOneWay:
         if self._body_q_prev is None:
             self.rigid.step(state_in, state_out, control, None, dt)
             self.collision.collide(state_in, self.contacts)
-            self.soft.step(state_in, state_out, control, self.contacts, dt, observables=self.observables)
+            self.soft.step(state_in, state_out, control, self.contacts, dt, **self._observing())
             return
         wp.copy(self._body_q_prev, state_in.body_q)
         if self._body_slide is not None and self.contacts.soft_contact_max > 0:
@@ -526,7 +526,12 @@ class SolverOneWay:
         self.collision.collide(state_in, self.contacts)
         # And VBD's friction is the pad's motion from ``state_in`` to ``state_out``, so put it back.
         wp.copy(state_in.body_q, self._body_q_prev)
-        self.soft.step(state_in, state_out, control, self.contacts, dt, observables=self.observables)
+        self.soft.step(state_in, state_out, control, self.contacts, dt, **self._observing())
+
+    def _observing(self) -> dict:
+        """The ``observables`` keyword only when contact forces were asked for: a solver with a pre-1.7 ``step``
+        takes no such keyword, and a scene that reads no forces keeps working with it."""
+        return {} if self.observables is None else {"observables": self.observables}
 
     def notify_model_changed(self, flags) -> None:
         for inner in (self.rigid, self.soft):
