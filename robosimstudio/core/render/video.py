@@ -250,8 +250,14 @@ class VideoWriter:
 
 
 def _end_stream(queue: Any, log: Any) -> None:
-    """What a writer collected without :meth:`VideoWriter.close` does: end ffmpeg's input, and let go of its log."""
-    queue.put(None)
+    """What a writer collected without :meth:`VideoWriter.close` does: end ffmpeg's input, and let go of its log.
+
+    The end-of-stream goes in from a thread of its own: the queue may be full,
+    and the collector may be running this on the very thread that empties it.
+    """
+    import threading
+
+    threading.Thread(target=queue.put, args=(None,), name="video:end", daemon=True).start()
     log.close()
 
 
