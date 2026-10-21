@@ -14,10 +14,10 @@ lines apart rather than two impressions apart.
 ``record`` and ``compare_take``
     A routine played on the page is recorded through a camera -- the video, a
     quarter-size segmentation of every frame, every thing's position -- and
-    then held against the clip's ``timeline.json``: the first frame before
+    then put beside the clip's ``timeline.json``: the first frame before
     anything happened, the last after everything did, and each moment the
-    agent marked in between. What moved in the clip must have moved in the
-    take, by about as much.
+    agent marked in between, in a strip for the eye; and what moved in the
+    take, exactly, off the recorded positions.
 ``gate``
     The checks that do not need a photograph: the file builds, the state is
     finite, the camera the clip was shot through is declared at the clip's
@@ -54,8 +54,8 @@ __all__ = [
 LOG = "log.jsonl"
 SEG_SCALE = 2
 """A recorded take keeps its segmentation at half size: 700 frames of 640x360 ids compress to a few megabytes, and a 20 px part survives."""
-MOVED_FRACTION = 0.02
-"""A centre that shifts by more than this fraction of the frame width between two anchors has moved."""
+TAKE_STILL_MM = 2.0
+"""A thing whose centre never went farther than this from where the take started it stayed put."""
 
 
 # ------------------------------------------------------------------ the log
@@ -91,27 +91,6 @@ def next_number(run_dir: str | Path, prefix: str, seen: int = 0) -> int:
     return highest + 1
 
 
-def motion_summary(motion: dict[str, dict]) -> str:
-    """One line on a take: which things did what the clip did, and which did not."""
-    agreed, differed, missing = [], [], []
-    for name, entry in motion.items():
-        p, s = entry.get("photo"), entry.get("sim")
-        if p is None or s is None:
-            missing.append(name)
-        elif p["moved"] == s["moved"]:
-            agreed.append(name)
-        else:
-            differed.append(
-                f"{name} {'stayed' if not s['moved'] else 'moved'} (clip {'moved' if p['moved'] else 'stayed'})"
-            )
-    parts = [f"{len(agreed)} of {len(motion)} did what the clip did"]
-    if differed:
-        parts.append("; ".join(differed))
-    if missing:
-        parts.append("not found at both ends: " + ", ".join(missing))
-    return "; ".join(parts)
-
-
 def log_append(run_dir: str | Path, entry: dict[str, Any]) -> int:
     path = Path(run_dir) / LOG
     n = 1
@@ -136,18 +115,23 @@ def log_read(run_dir: str | Path) -> list[dict[str, Any]]:
 
 
 def log_report(rows: list[dict[str, Any]]) -> str:
-    """One line per entry: when, what, which scene.py, the score, the note."""
+    """One line per entry: when, what, which scene.py, what it left (PASS/FAIL, the picture or the take), the note.
+
+    The picture is the thing to cite: a report that says it judged a look
+    sheet names ``cmp_012_look.png``, and this line ties that sheet to the
+    ``scene.py`` it measured.
+    """
     if not rows:
-        return "nothing logged yet: compare, check and snapshot --note write here"
-    out = ["  n  at        cmd       scene       score   note"]
+        return "nothing logged yet: compare, check, a take and snapshot --note write here"
+    out = ["  n  at        cmd       scene       left                      note"]
     for r in rows:
-        score = r.get("score")
-        score = f"{score:.3f}" if isinstance(score, (int, float)) else "-"
         passed = r.get("passed")
         if passed is not None:
-            score = "PASS" if passed else "FAIL"
+            left = "PASS" if passed else "FAIL"
+        else:
+            left = next((Path(str(r[k])).name for k in ("strip", "look", "png", "video") if r.get(k)), "-")
         out.append(
-            f"{r['n']:3d}  {r['at']}  {r.get('cmd', ''):<8}  {r.get('scene', '')[:10]:<10}  {score:>6}  {r.get('note', '')}"
+            f"{r['n']:3d}  {r['at']}  {r.get('cmd', ''):<8}  {r.get('scene', '')[:10]:<10}  {left:<24}  {r.get('note', '')}"
         )
     return "\n".join(out)
 
@@ -305,18 +289,16 @@ def compare_still(
         reading = C.compare_masks(pm, sm)
         objects[key.name] = reading
         lines.append(C.advice(key.name, reading, w, key))
-    # a thing the photo shows and the render does not counts as no overlap, not as left out
-    ious = [o["iou"] or 0.0 for o in objects.values() if o["photo"] is not None]
-    score = round(float(np.mean(ious)), 4) if ious else 0.0
     if not keys:
-        lines.append("no --key given: nothing was measured; the look sheet still shows the pair")
+        lines.append(
+            "no --key: the pair and the look sheet are written; key a thing that keys cleanly to read its size, place and overlap"
+        )
     if abs(stretch - 1.0) > 0.02:
         lines.append(
             f"the photo's aspect was stretched {stretch:.2f}x to fit the camera: give the camera the photo's width and height"
         )
     return {
         "objects": objects,
-        "score": score,
         "stretch": round(stretch, 3),
         "lines": lines,
         "pairs": pairs,
@@ -498,6 +480,51 @@ def _nearest_frame(frames: list[dict], t: float) -> dict:
     return min(frames, key=lambda f: abs(float(f["t"]) - t))
 
 
+def take_motion(frames: list[dict]) -> dict[str, dict[str, float]]:
+    """What moved in a take, read off the positions it recorded: per thing, where it ended and how far it went [mm].
+
+    Both, because one alone misleads: a lid that swung open and shut again
+    ends where it started, and a box nudged a few millimetres by a passing
+    hand went somewhere and came back.
+    """
+    if not frames:
+        return {}
+    first = frames[0].get("positions", {})
+    out: dict[str, dict[str, float]] = {}
+    for name, where in first.items():
+        start = np.asarray(where, dtype=np.float64)
+        track = [np.asarray(f["positions"][name], dtype=np.float64) for f in frames if name in f.get("positions", {})]
+        if not track:
+            continue
+        reach = max(float(np.linalg.norm(p - start)) for p in track)
+        out[name] = {
+            "ended_mm": round(1000.0 * float(np.linalg.norm(track[-1] - start)), 1),
+            "farthest_mm": round(1000.0 * reach, 1),
+        }
+    return out
+
+
+def motion_line(moved: dict[str, dict[str, float]], still_mm: float = TAKE_STILL_MM) -> str:
+    """One line on a take: what moved and how, and how many things stayed put."""
+    went = sorted(
+        ((n, m) for n, m in moved.items() if m["farthest_mm"] > still_mm),
+        key=lambda nm: -nm[1]["farthest_mm"],
+    )
+    parts = [
+        f"{n} went {m['farthest_mm']:.0f} mm"
+        + (
+            f" and ended {m['ended_mm']:.0f} mm from its start"
+            if abs(m["ended_mm"] - m["farthest_mm"]) > still_mm
+            else ""
+        )
+        for n, m in went
+    ]
+    stayed = len(moved) - len(went)
+    if stayed:
+        parts.append(f"{stayed} other thing{'s' if stayed != 1 else ''} stayed within {still_mm:.0f} mm")
+    return "in the take: " + ("; ".join(parts) if parts else "nothing recorded a position")
+
+
 def compare_take(
     run_dir: str | Path,
     name: str,
@@ -505,14 +532,19 @@ def compare_take(
     keys: list[C.Key],
     ref_dir: str | Path,
 ) -> dict:
-    """A recorded take against the clip's anchors: the first frame, the last, and each one marked between.
+    """A recorded take beside the clip: each anchor's still above the take's frame at the same point of the action.
 
     An anchor is matched to the take by its own ``sim_t`` (seconds into the
     take) or ``sim_step`` when the agent pinned one, else by proportion: the
     clip's moment at 40 % of its length is held against the take at 40 % of
     its length. The clip and the take need not be the same length -- a robot
-    is slower than a person -- but what moved in one must have moved in the
-    other.
+    is slower than a person.
+
+    The strip is for the eye, which is what reads a clip: what moved in it,
+    what touched what. A colour key cannot -- a handheld phone or a cut moves
+    everything -- so nothing here says whether the take did what the clip did.
+    What the take did is exact, off its recorded positions (:func:`take_motion`).
+    Keys, when given, only outline the things in both rows.
     """
     import imageio.v2 as imageio
 
@@ -531,6 +563,7 @@ def compare_take(
     reader = imageio.get_reader(str(meta["video"]), "ffmpeg")
     rows: list[dict] = []
     tiles: list[tuple[np.ndarray, np.ndarray, str]] = []
+    lines: list[str] = []
     try:
         last = reader.count_frames() - 1
         for anchor in anchors:
@@ -543,24 +576,20 @@ def compare_take(
                 frame = _nearest_frame(frames, t_ref / clip_len * take_len)
             i = int(frame["i"])
             rgb = np.asarray(reader.get_data(min(i, last)))[..., :3].astype(np.uint8)
-            seg = None
-            if segs is not None and i < len(segs):
-                seg = np.asarray(segs[i]).astype(np.int32)
             photo_path = ref_dir / anchor["file"] if not Path(anchor["file"]).is_absolute() else Path(anchor["file"])
             photo = C.load_photo(photo_path)
             fitted, _ = C.fit_photo(photo, w, h)
-            objects: dict[str, dict] = {}
-            pairs: dict[str, tuple] = {}
-            found = photo_masks(photo, keys)
-            masks = C.sim_masks(seg, names, [k.name for k in keys]) if seg is not None else {}
-            for key in keys:
-                pm = found[key.name]
-                pm = C.fit_mask(pm, w, h) if pm is not None else None
-                sm = masks.get(key.name)
-                sm = C.fit_mask(sm, w, h) if sm is not None else None
-                reading = C.compare_masks(pm, sm)
-                objects[key.name] = reading
-                pairs[key.name] = (pm, sm)
+            top, bottom = fitted, rgb
+            if keys:
+                seg = np.asarray(segs[i]).astype(np.int32) if segs is not None and i < len(segs) else None
+                found = photo_masks(photo, keys)
+                masks = C.sim_masks(seg, names, [k.name for k in keys]) if seg is not None else {}
+                outlined_photo, outlined_take = {}, {}
+                for key in keys:
+                    pm = C.fit_mask(found[key.name], w, h) if found[key.name] is not None else None
+                    sm = C.fit_mask(masks[key.name], w, h) if masks.get(key.name) is not None else None
+                    outlined_photo[key.name], outlined_take[key.name] = (pm, None), (None, sm)
+                top, bottom = C.overlay(fitted, outlined_photo), C.overlay(rgb, outlined_take)
             rows.append(
                 {
                     "t": t_ref,
@@ -569,71 +598,18 @@ def compare_take(
                     "frame": i,
                     "sim_t": frame["t"],
                     "sim_step": frame["step"],
-                    "objects": objects,
                 }
             )
             label = f"{anchor.get('label') or ''} {t_ref:.1f}s / sim {float(frame['t']):.1f}s".strip()
-            tiles.append(
-                (
-                    C.overlay(fitted, {k: (p, None) for k, (p, s) in pairs.items()}),
-                    C.overlay(rgb, {k: (None, s) for k, (p, s) in pairs.items()}),
-                    label,
-                )
+            tiles.append((top, bottom, label))
+            lines.append(
+                f"{anchor.get('label') or 'anchor':<12} clip {t_ref:5.1f}s = take {float(frame['t']):5.1f}s (step {frame['step']})"
             )
     finally:
         reader.close()
-    # what moved, in each
-    motion: dict[str, dict] = {}
-    lines: list[str] = []
-    for key in keys:
-        p_first, p_last = (
-            rows[0]["objects"][key.name]["photo"],
-            rows[-1]["objects"][key.name]["photo"],
-        )
-        s_first, s_last = (
-            rows[0]["objects"][key.name]["sim"],
-            rows[-1]["objects"][key.name]["sim"],
-        )
-        entry: dict[str, Any] = {}
-        for side, a, b in (("photo", p_first, p_last), ("sim", s_first, s_last)):
-            if a is None or b is None:
-                entry[side] = None
-                continue
-            dx, dy = b["centre"][0] - a["centre"][0], b["centre"][1] - a["centre"][1]
-            entry[side] = {
-                "dx": round(dx, 1),
-                "dy": round(dy, 1),
-                "moved": bool(np.hypot(dx, dy) > MOVED_FRACTION * w),
-            }
-        motion[key.name] = entry
-        p, s = entry["photo"], entry["sim"]
-        if p is None or s is None:
-            lines.append(f"{key.name}: not found at both ends in {'the photo' if p is None else 'the take'}")
-        elif p["moved"] != s["moved"]:
-            lines.append(
-                f"{key.name}: {'moved' if p['moved'] else 'stayed'} in the clip but {'moved' if s['moved'] else 'stayed'} in the take"
-            )
-        else:
-            lines.append(
-                f"{key.name}: {'moved' if p['moved'] else 'stayed'} in both; clip ({p['dx']:+.0f}, {p['dy']:+.0f}) px, take ({s['dx']:+.0f}, {s['dy']:+.0f}) px"
-            )
-    ious = [o["iou"] or 0.0 for r in rows for o in r["objects"].values() if o["photo"] is not None]
-    score = round(float(np.mean(ious)), 4) if ious else 0.0
-    for r in rows:
-        per = ", ".join(
-            f"{n} IoU {o['iou']:.2f}" if o["iou"] is not None else f"{n} missing" for n, o in r["objects"].items()
-        )
-        lines.append(
-            f"{r['label'] or 'anchor':<12} clip {r['t']:5.1f}s = take {r['sim_t']:5.1f}s (step {r['sim_step']}): {per}"
-        )
-    return {
-        "take": name,
-        "anchors": rows,
-        "motion": motion,
-        "score": score,
-        "lines": lines,
-        "tiles": tiles,
-    }
+    moved = take_motion(frames)
+    lines.append(motion_line(moved))
+    return {"take": name, "anchors": rows, "moved": moved, "lines": lines, "tiles": tiles}
 
 
 def write_strip(base: Path, tiles: list[tuple[np.ndarray, np.ndarray, str]], tile_width: int = 426) -> str:

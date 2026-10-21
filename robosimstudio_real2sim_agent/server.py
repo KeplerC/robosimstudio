@@ -187,7 +187,7 @@ class LiveServer:
         self.cmp_n = 0
         self.last_take: dict = {}
         self.last_keys: list[str] = []
-        """The keys of the last still comparison; a take that ends is held against the clip with them."""
+        """The keys of the last still comparison; a take that ends outlines its things with them."""
         self._loaded_stamp = None
         self._pending = None
         self._pending_at = 0.0
@@ -505,27 +505,24 @@ class LiveServer:
         if not self.script:
             self._finish_recorder("the script ended")
 
-    def _hold_take_against_clip(self, take: str) -> None:
-        """Every take is judged: held against the clip's timeline with the last comparison's keys.
+    def _show_take(self, take: str) -> None:
+        """Every take is put beside the clip as it ends, on the board and in the log, and what moved in it is said.
 
-        The strip and its verdict go on the board and into the log, so the
-        before and the after are in front of the agent and the person watching
-        without anyone asking. No timeline or no keys yet: one line says so.
+        The strip -- the clip's anchors above, the take's frames at the same
+        point of the action below -- is for the eye of the agent and of the
+        person watching; nothing here says whether the take did what the clip
+        did, because nothing that keys colours can tell. With no timeline the
+        take's own motion is said, off its recorded positions.
         """
         if not self._timeline().get("anchors"):
-            print(f"[live] take {take!r} not held against a clip: no ref/timeline.json yet", flush=True)
+            meta, _ = checks.load_take(self.run_dir, take)
+            print(f"[live] take {take!r}: {checks.motion_line(checks.take_motion(meta['frames']))}", flush=True)
             return
-        if not self.last_keys:
-            print(
-                f"[live] take {take!r} not held against the clip: no `compare --key` yet to say which things to follow",
-                flush=True,
-            )
-            return
-        reply = self.cmd_compare(keys=self.last_keys, take=take, note="held against the clip as the take ended")
+        reply = self.cmd_compare(keys=self.last_keys, take=take, note="the take beside the clip as it ended")
         if reply.get("ok"):
-            print(f"[live] take {take!r} against the clip: {reply['verdict']}\n{reply['report']}", flush=True)
+            print(f"[live] take {take!r} beside the clip: {reply['strip']}\n{reply['report']}", flush=True)
         else:
-            print(f"[live] take {take!r} could not be held against the clip: {reply.get('error')}", flush=True)
+            print(f"[live] take {take!r} could not be put beside the clip: {reply.get('error')}", flush=True)
 
     def _finish_recorder(self, why: str) -> None:
         if self.recorder is None:
@@ -542,7 +539,7 @@ class LiveServer:
                 f"[live] take {summary['take']!r} written ({why}): {summary['frames']} frames, {summary['seconds']:.1f} s",
                 flush=True,
             )
-            self._hold_take_against_clip(summary["take"])
+            self._show_take(summary["take"])
         except Exception:
             self.last_error = traceback.format_exc()[-3000:]
             print(
@@ -1024,44 +1021,27 @@ class LiveServer:
                     "ok": False,
                     "error": "no timeline: `ref frames <clip> --at 0,end` writes ref/timeline.json, or give --timeline",
                 }
-            if not parsed:
-                return {
-                    "ok": False,
-                    "error": "a take is compared thing by thing: give at least one --key",
-                }
             try:
                 result = checks.compare_take(self.run_dir, take, line, parsed, self._timeline_dir(timeline))
             except Exception as exc:
                 return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
             strip = checks.write_strip(base, result.pop("tiles"))
-            verdict = checks.motion_summary(result["motion"])
-            self.cmd_show(strip, label=f"take {take} against the clip: {verdict}")
-            entry = {
-                "cmd": "compare",
-                "scene": checks.scene_hash(self.path),
-                "score": result["score"],
-                "note": note,
-                "take": take,
-                "strip": strip,
-            }
-            n = checks.log_append(self.run_dir, entry)
+            self.cmd_show(strip, label=f"take {take}: the clip above, the take below")
+            n = checks.log_append(
+                self.run_dir,
+                {"cmd": "compare", "scene": checks.scene_hash(self.path), "note": note, "take": take, "strip": strip},
+            )
             (base.with_suffix(".json")).write_text(
-                json.dumps(
-                    {k: v for k, v in result.items() if k != "lines"},
-                    default=checks._plain,
-                    indent=1,
-                )
+                json.dumps({k: v for k, v in result.items() if k != "lines"}, default=checks._plain, indent=1)
             )
             return {
                 "ok": True,
                 "take": take,
-                "score": result["score"],
                 "strip": strip,
-                "verdict": verdict,
                 "report": "\n".join(result["lines"]),
                 "logged": n,
                 "anchors": result["anchors"],
-                "motion": result["motion"],
+                "moved": result["moved"],
             }
         ref = self._default_ref(ref, line, timeline)
         if not ref:
@@ -1094,7 +1074,6 @@ class LiveServer:
             {
                 "cmd": "compare",
                 "scene": checks.scene_hash(self.path),
-                "score": result["score"],
                 "note": note,
                 "ref": Path(ref).name,
                 "look": pictures["look"],
@@ -1104,7 +1083,6 @@ class LiveServer:
             "ok": True,
             "camera": cam.name,
             "ref": ref,
-            "score": result["score"],
             "report": "\n".join(result["lines"]),
             **pictures,
             "logged": n,
