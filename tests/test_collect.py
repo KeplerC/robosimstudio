@@ -116,20 +116,25 @@ class TestACollection(unittest.TestCase):
             self.assertIn("no plan for episode 3", summary["errors"][0])
             self.assertEqual(EpisodeStore(out).episode_ids(), ["0002"])
 
-    def test_a_dropped_failure_is_not_run_again(self) -> None:
-        """Its files go, its meta.json stays: a resume skips it, and its row is not written twice."""
+    def test_a_dropped_failure_is_not_run_again_nor_read_as_an_episode(self) -> None:
+        """Its files go and its meta stays as dropped.json: a resume skips it, and the store does not list it."""
+        import json
+
         from robosimstudio.record.collect import collect
         from robosimstudio.record.store import EpisodeStore
 
         with tempfile.TemporaryDirectory() as out:
-            spec = self._spec(out, episodes=1, first=1, keep_failures=False)  # episode 1 reports failure
+            spec = self._spec(out, episodes=2, first=0, keep_failures=False)  # episode 1 reports failure
             collect(spec, verbose=False)
             again = collect(spec, verbose=False)
             store = EpisodeStore(out)
-            self.assertEqual((again["ran"], again["skipped"]), (0, 1))
-            self.assertEqual(len(store.results()), 1)
-            self.assertEqual(store.episode(1).videos(), {})
-            self.assertTrue(store.episode(1).meta["dropped"])
+            self.assertEqual((again["ran"], again["skipped"]), (0, 2))
+            self.assertEqual(len(store.results()), 2)
+            self.assertEqual(store.episode_ids(), ["0000"])
+            self.assertEqual([e.meta["episode_id"] for e in store.episodes()], [0])
+            dropped = Path(out) / "0001"
+            self.assertEqual(sorted(p.name for p in dropped.iterdir()), ["dropped.json"])
+            self.assertTrue(json.loads((dropped / "dropped.json").read_text())["dropped"])
 
     def test_a_worker_that_cannot_build_counts_every_episode_it_held(self) -> None:
         from robosimstudio.record.collect import collect
