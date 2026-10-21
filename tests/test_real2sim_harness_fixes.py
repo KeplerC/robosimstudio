@@ -390,29 +390,20 @@ class RoutineStepping(unittest.TestCase):
             _pass(live)
         self.assertEqual(live.last_script["steps"], 3)
 
-    def test_an_eval_generator_is_taken_by_its_first_step(self) -> None:
+    def test_one_that_drives_the_scene_and_never_steps_it_is_stopped_saying_why(self) -> None:
         live = _server()
 
-        def reach_like():
-            for _ in range(2):
-                yield
+        def waiting():
+            while True:
+                yield  # waits on a page that does not step for it
 
-        live.start_script(reach_like(), name="eval")
-        _pass(live)
-        self.assertTrue(live.page_steps_script(), "it only yielded: the page drives it")
-        self.assertEqual(live.session.arms["left"].calls, [])
-        while live.script:
-            _pass(live)
-
-        def stepping():
-            for _ in range(2):
-                live.sim.step_count += 1
-                yield
-
-        live.start_script(stepping(), name="eval")
-        _pass(live)
-        self.assertFalse(live.page_steps_script())
-        self.assertEqual(live.session.arms["left"].calls, ["suspend"])
+        live.start_script(waiting(), name="lid")
+        for _ in range(server_mod.IDLE_LIMIT + 1):
+            if live.script:
+                _pass(live)
+        self.assertEqual(live.script, [])
+        self.assertEqual(live.last_script["how"], "failed")
+        self.assertIn("give the routine a `session` parameter", live.last_script["error"])
 
     def test_a_routine_queued_behind_another_is_not_stepped_for_before_it_plays(self) -> None:
         live = _server()

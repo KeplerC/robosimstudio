@@ -41,9 +41,12 @@ stepped by the page, one that stepped the scene itself is not. Any other
 routine drives the scene itself: the page never steps it
 (``LiveSession.steps_held``), and the arm panels are suspended while it plays
 -- they would write the gripper and the joints under it -- and given back as
-found when it ends. A generator ``eval`` returns is taken as the one or the
-other by its first step. ``run N`` is refused while a routine plays, and a
-rebuild or a reset under a ``run N`` ends that run with a reply saying so.
+found when it ends; one that yields :data:`IDLE_LIMIT` times running without
+stepping is stopped, saying why. A generator ``eval`` returns is the second
+kind: to drive through the page, bind the routine in the scene file with a
+``session`` parameter and ``play`` it. ``run N`` is refused while a routine
+plays, and a rebuild or a reset under a ``run N`` ends that run with a reply
+saying so.
 
 The page is served on every interface (viser binds ``0.0.0.0``), not only on
 ``localhost``: anyone who can reach the port can drive it. On a shared network
@@ -90,6 +93,8 @@ REFRESH_SECONDS = 0.5
 """How often the ``Live`` folder's readouts are rewritten."""
 BOARD_LIMIT = 8
 """Pictures kept on the board; the oldest goes when another comes. The run directory keeps every one."""
+IDLE_LIMIT = 300
+"""Passes in a row a routine that drives the scene itself may yield without stepping it before it is stopped."""
 SPEED_WINDOW = 5.0
 """Seconds of wall clock the ``speed`` reading in ``status`` is taken over."""
 BUSY = {
@@ -407,7 +412,7 @@ class LiveServer:
         gen,
         *,
         name: str = "eval",
-        drives_page: bool | None = None,
+        drives_page: bool = False,
         record: str = "",
         every: int = 4,
         camera: str = "",
@@ -419,10 +424,8 @@ class LiveServer:
         a script that steps the scene itself plays (``LiveSession.steps_held``),
         stepping once per yield for one that does not (``LiveSession.tick``).
         ``drives_page`` is True for a routine that took the page's ``session``
-        (it drives through the arm panels), False for one that did not (it
-        drives the scene itself), and None for a generator ``eval`` returned,
-        which is taken as the one or the other by whether its first ``next()``
-        stepped the scene. Returns the script's serial, which
+        (it drives through the arm panels) and False for anything else (it
+        drives the scene itself). Returns the script's serial, which
         ``status``'s ``last_script`` names once it has ended.
         """
         # an earlier routine's failure is in its last_script; this one starts clean -- what ending or
@@ -433,7 +436,6 @@ class LiveServer:
             # the new take films the new routine alone: what was queued ahead of it is dropped, not filmed into it
             self._end_scripts("dropped: another recording started")
             self._finish_recorder("another recording started")
-            self.last_take = {}  # until this one is written, no take is the last one
             recorder = checks.Recorder(self, record, camera=camera, every=every)
             try:
                 recorder.capture()  # frame 0: the state before anything happened
@@ -441,12 +443,14 @@ class LiveServer:
                 recorder.close()
                 raise
             self.recorder = recorder
+            self.last_take = {}  # filming now: until this one is written, no take is the last one
         self.script.append(gen)
         self.scripts_started += 1
         self.script_meta[id(gen)] = {
             "serial": self.scripts_started,
             "name": name,
-            "drives_page": drives_page,
+            "drives_page": bool(drives_page),
+            "idle": 0,
             "steps": 0,
             "wall": time.perf_counter(),
         }
@@ -531,16 +535,18 @@ class LiveServer:
     def _play(self) -> None:
         """One step of the script at the head of the queue.
 
-        A ``next()`` that stepped the scene itself holds the studio's own
-        stepping for this pass, so nothing doubles it; one that only yielded
-        is stepped by the page (``LiveSession.tick``). The arm panels are set
-        once, as the script's kind asks (:meth:`start_script`).
+        Whether the page steps it is the script's kind (:meth:`start_script`,
+        :meth:`page_steps_script`): a routine that drives through the arm
+        panels is stepped by the page on a pass whose ``next()`` only yielded;
+        one that drives the scene itself never is, and is stopped once it has
+        yielded :data:`IDLE_LIMIT` times running without stepping, which is a
+        routine waiting on a page that will not step for it.
         """
         gen = self.script[0]
         meta = self.script_meta.get(id(gen)) or {}
         if self._head_ready != id(gen):
             self._head_ready = id(gen)
-            if meta.get("drives_page") is False:
+            if not meta.get("drives_page"):
                 self._suspend_arms()
         before, mark = int(self.sim.step_count), checks.reset_mark(self.sim)
         try:
@@ -560,10 +566,21 @@ class LiveServer:
             print(f"[live] script failed:\n{self.last_error}", file=sys.stderr, flush=True)
         else:
             self.head_stepped = checks.steps_since(self.sim, before, mark) > 0
-            if meta.get("drives_page") is None:  # an eval's generator: its first step says which it is
-                meta["drives_page"] = not self.head_stepped
-                if self.head_stepped:
-                    self._suspend_arms()
+            if not meta.get("drives_page"):
+                meta["idle"] = 0 if self.head_stepped else meta.get("idle", 0) + 1
+                if meta["idle"] >= IDLE_LIMIT:
+                    self.script.pop(0)
+                    gen.close()
+                    self.last_error = (
+                        f"{meta.get('name') or 'the routine'} yielded {IDLE_LIMIT} times running without stepping the "
+                        "scene, and the page does not step a routine that drives the scene itself: step it between "
+                        "yields (sim.run(1)), or give the routine a `session` parameter and play it so the page "
+                        "steps it through the arm panels"
+                    )
+                    self._ended(gen, "failed", self.last_error)
+                    self._next_script()
+                    print(f"[live] script stopped: {self.last_error}", file=sys.stderr, flush=True)
+                    return
             if self.recorder is not None:
                 try:
                     self.recorder.maybe()
@@ -962,9 +979,10 @@ class LiveServer:
         serial = 0
         if inspect.isgenerator(value):
             # A script: played one step per loop pass so the page draws it,
-            # instead of freezing for as long as it takes. One that steps the
-            # scene itself holds the page while it plays; one that only yields
-            # is stepped by the page. The page carries on as it was after.
+            # instead of freezing for as long as it takes. It drives the scene
+            # itself (sim.run between yields), with the arm panels held off; a
+            # routine that drives through them is bound with a `session` and
+            # played. The page carries on as it was after.
             serial = self.start_script(value, name="eval", record=record, every=every, camera=camera)
             playing, value = True, None
         elif record:
