@@ -6,7 +6,8 @@ CPU device: about two seconds a 1280x720 frame, a thousand seconds for a 20 s
 demo's five cameras. A rasteriser on the machine's GPU draws the same frame in
 about a millisecond, which is what a dataset of hundreds of demos needs. This
 backend is that rasteriser: MuJoCo's own, through EGL (OSMesa where there is no
-GPU at all), so it needs nothing the install does not already have.
+GPU at all, named by ``MUJOCO_GL=osmesa``), so it needs nothing the install
+does not already have.
 
 **What it draws is the model's visible shapes.** :func:`model_visual_parts`
 turns each into a mesh in its body's frame; each becomes a render-only geom on a
@@ -23,9 +24,12 @@ is refused by name, pointing at ``tiled``, which draws them natively; a frame
 that silently left the towel out would be worse than no frame. The room and
 the path tracer's materials are ``rtx``'s, as they are for ``tiled``.
 
-Each process holds one EGL display, on the GPU ``MUJOCO_EGL_DEVICE_ID`` names
-the first time a context is made; ``egl_device`` sets that variable when nothing
-has. A worker pool gives each worker its own GPU through it.
+Each process holds one EGL display, opened on one GPU the first time a context
+is made: ``egl_device`` if given, else ``MUJOCO_EGL_DEVICE_ID``, else the GPU
+the model is on -- for a model on a CPU, the first GPU ``CUDA_VISIBLE_DEVICES``
+leaves the process -- so a worker pinned to a card by ``CUDA_VISIBLE_DEVICES``
+draws on that card. A machine with no GPU rasterises in software with
+``MUJOCO_GL=osmesa``, set before the process starts.
 """
 
 from __future__ import annotations
@@ -41,7 +45,7 @@ from robosimstudio.core.cameras import CameraSpec
 from robosimstudio.core.render.base import FrameSet, RendererBase
 from robosimstudio.core.render.spec import put
 
-__all__ = ["RendererGL"]
+__all__ = ["RendererGL", "egl_device_for"]
 
 # CameraSpec looks down +z with +y down; a MuJoCo camera looks down -z with +y up.
 _VISION_TO_GL = np.diag([1.0, -1.0, -1.0])
@@ -58,28 +62,85 @@ def _quat_wxyz(rotation: np.ndarray) -> np.ndarray:
     return quat
 
 
-def _context(width: int, height: int, egl_device: int | None) -> Any:
-    """A current GL context: EGL on a GPU, else OSMesa in software.
+def _platform() -> str:
+    """``egl`` or ``osmesa``, decided once for the process.
+
+    PyOpenGL binds one platform the first time it is imported, and importing
+    ``mujoco.egl`` sets ``PYOPENGL_PLATFORM=egl`` before it can fail -- after
+    which ``mujoco.osmesa`` refuses to import. So there is no falling back from
+    one to the other inside a process: the platform is what
+    ``PYOPENGL_PLATFORM`` or ``MUJOCO_GL`` already names, and EGL otherwise.
+    """
+    for variable in ("PYOPENGL_PLATFORM", "MUJOCO_GL"):
+        named = os.environ.get(variable, "").strip().lower()
+        if named in ("egl", "osmesa"):
+            return named
+    return "egl"
+
+
+def egl_device_for(cuda_ordinal: int) -> int | None:
+    """The EGL device that is this process's CUDA device ``cuda_ordinal``, or ``None`` if none is.
+
+    EGL lists every GPU on the machine whatever ``CUDA_VISIBLE_DEVICES`` says,
+    and MuJoCo takes the first one that opens -- physical GPU 0, someone else's
+    card on a shared machine. NVIDIA's ``EGL_CUDA_DEVICE_NV`` says which CUDA
+    device an EGL device is, in this process's own numbering, and nothing for
+    a GPU the process cannot see: with ``CUDA_VISIBLE_DEVICES=3,5``, EGL device
+    5 is CUDA device 1.
+    """
+    import ctypes
+
+    os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+    try:
+        from mujoco.egl import egl_ext
+        from OpenGL import EGL
+
+        address = egl_ext.eglGetProcAddress(b"eglQueryDeviceAttribEXT")
+        if not address:
+            return None
+        query = ctypes.CFUNCTYPE(EGL.EGLBoolean, ctypes.c_void_p, EGL.EGLint, ctypes.POINTER(ctypes.c_ssize_t))(address)
+        for index, device in enumerate(egl_ext.eglQueryDevicesEXT()):
+            value = ctypes.c_ssize_t(-1)
+            if query(ctypes.cast(device, ctypes.c_void_p), 0x323A, ctypes.byref(value)) and value.value == cuda_ordinal:
+                return index
+    except Exception:  # a driver without the extension: MuJoCo's own choice stands
+        return None
+    return None
+
+
+def _context(width: int, height: int, egl_device: int | None, cuda_ordinal: int) -> Any:
+    """A current GL context on the platform :func:`_platform` names.
 
     Not ``mujoco.Renderer``'s, which takes its platform from ``MUJOCO_GL`` as
     ``import mujoco`` runs -- before any scene is built -- and is GLFW, which
     needs a display, when the variable is unset.
+
+    The EGL device, which the process's one EGL display is opened on the first
+    time a context is made: ``egl_device`` if given, else ``MUJOCO_EGL_DEVICE_ID``
+    if set, else the GPU that is CUDA device ``cuda_ordinal`` to this process
+    (:func:`egl_device_for`).
     """
-    if egl_device is not None:
-        os.environ.setdefault("MUJOCO_EGL_DEVICE_ID", str(int(egl_device)))
-    errors = []
-    for platform in ("egl", "osmesa"):
-        try:
-            if platform == "egl":
-                from mujoco.egl import GLContext
-            else:
-                from mujoco.osmesa import GLContext
-            context = GLContext(width, height)
-            context.make_current()
-            return context
-        except Exception as exc:  # the next platform, and both reasons if neither works
-            errors.append(f"{platform}: {type(exc).__name__}: {exc}")
-    raise RuntimeError("the gl renderer could not open an OpenGL context (" + "; ".join(errors) + ")")
+    platform = _platform()
+    try:
+        if platform == "egl":
+            if egl_device is not None:
+                os.environ["MUJOCO_EGL_DEVICE_ID"] = str(int(egl_device))
+            elif "MUJOCO_EGL_DEVICE_ID" not in os.environ:
+                found = egl_device_for(cuda_ordinal)
+                if found is not None:
+                    os.environ["MUJOCO_EGL_DEVICE_ID"] = str(found)
+            from mujoco.egl import GLContext
+        else:
+            from mujoco.osmesa import GLContext
+        context = GLContext(width, height)
+        context.make_current()
+        return context
+    except Exception as exc:
+        other = "osmesa" if platform == "egl" else "egl"
+        raise RuntimeError(
+            f"the gl renderer could not open an OpenGL context on {platform} ({type(exc).__name__}: {exc}); "
+            f"MUJOCO_GL={other}, set before the process starts, tries {other} instead"
+        ) from exc
 
 
 def _rgba(mesh: Any) -> tuple[list[float], Any, Any]:
@@ -110,8 +171,9 @@ class RendererGL(RendererBase):
             shadow map is a second pass per light per camera.
         background: RGB in [0, 1] behind everything; black when ``None``.
         msaa: Multisample count for the offscreen buffer, 0 for none.
-        egl_device: The EGL device to render on, set into
-            ``MUJOCO_EGL_DEVICE_ID`` when the process has not chosen one.
+        egl_device: The EGL device to render on, over ``MUJOCO_EGL_DEVICE_ID``
+            and the model's GPU. The process's first context fixes the device
+            for every later one.
     """
 
     name = "gl"
@@ -250,7 +312,11 @@ class RendererGL(RendererBase):
                 lut[geom + 1] = labels.get(shape, 0) if shape_labels is not None else shape + 1
         self._seg_lut = lut
 
-        self._context = _context(width, height, egl_device)
+        import warp as wp
+
+        device = wp.get_device(model.device)
+        # A CPU model has no CUDA device of its own; it draws on the first the process can see.
+        self._context = _context(width, height, egl_device, int(device.ordinal) if device.is_cuda else 0)
         self._gl = mujoco.MjrContext(self.mj_model, mujoco.mjtFontScale.mjFONTSCALE_150)
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, self._gl)
         self._scene = mujoco.MjvScene(self.mj_model, maxgeom=self.mj_model.ngeom + 16)

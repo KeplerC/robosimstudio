@@ -59,6 +59,49 @@ class TestWhatIsRefused(unittest.TestCase):
             RendererGL(model, [_camera(eye=(1, 1, 1), look_at=(0, 0, 0))])
 
 
+class TestWhichGpuItDrawsOn(unittest.TestCase):
+    """EGL lists every GPU whatever ``CUDA_VISIBLE_DEVICES`` says; left to MuJoCo, a context lands on GPU 0."""
+
+    def test_each_visible_gpu_is_its_own_egl_device(self) -> None:
+        import warp as wp
+
+        from robosimstudio.solvers.render.gl import egl_device_for
+
+        found = [egl_device_for(k) for k in range(wp.get_cuda_device_count())]
+        if not found or None in found:
+            self.skipTest(f"this driver does not say which EGL device is which CUDA device: {found}")
+        self.assertEqual(len(set(found)), len(found))
+
+    def test_a_cpu_scene_draws_on_the_first_gpu_its_process_sees(self) -> None:
+        """A collection worker is pinned to a card by ``CUDA_VISIBLE_DEVICES`` alone, so this is what places it."""
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        child = (
+            "import os, newton, warp as wp\n"
+            "from robosimstudio.core.cameras import CameraSpec\n"
+            "from robosimstudio.solvers.render.gl import RendererGL, egl_device_for\n"
+            "b = newton.ModelBuilder(); b.add_ground_plane(); m = b.finalize(device='cpu')\n"
+            "cam = CameraSpec(name='c', width=32, height=24, fov_y=60.0, eye=(1, 1, 1), look_at=(0, 0, 0))\n"
+            "RendererGL(m, [cam]).close()\n"
+            "print(os.environ.get('MUJOCO_EGL_DEVICE_ID'), egl_device_for(0))\n"
+        )
+        env = {k: v for k, v in os.environ.items() if k != "MUJOCO_EGL_DEVICE_ID"}
+        root = Path(__file__).resolve().parents[1]
+        out = subprocess.run(
+            [sys.executable, "-c", child], env=env, cwd=root, capture_output=True, text=True, timeout=300, check=False
+        )
+        if out.returncode != 0 and "could not open an OpenGL context" in out.stderr:
+            self.skipTest("no OpenGL context here")
+        self.assertEqual(out.returncode, 0, out.stderr[-2000:])
+        chosen, expected = out.stdout.strip().splitlines()[-1].split()
+        if expected == "None":
+            self.skipTest("this driver does not say which EGL device is which CUDA device")
+        self.assertEqual(chosen, expected)
+
+
 class TestItDrawsWhatTiledDraws(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
