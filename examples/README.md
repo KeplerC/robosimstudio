@@ -96,12 +96,6 @@
 |---|---|
 | <img src="09_teleop/media/00_leader_arm.webp" width="240"> | <img src="09_teleop/media/01_force_feedback.webp" width="240"> |
 
-## [10 Datasets](10_datasets/README.md)
-
-| [Many demos](10_datasets/00_many_demos.py) |
-|---|
-| <img src="10_datasets/media/00_many_demos.webp" width="240"> |
-
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |

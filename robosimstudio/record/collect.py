@@ -38,6 +38,11 @@ import them itself:
   ``act(sim, step)`` returns the next action, or ``None`` to end the episode
   early. It may instead return an object with ``act`` and, optionally,
   ``success(sim) -> bool``, read when the episode ends.
+
+From the shell, with ``--help`` for the rest::
+
+    python -m robosimstudio.record.collect --scene my_demo.py:build \
+        --policy my_demo.py:make_policy --episodes 500 --out outputs/demos
 """
 
 from __future__ import annotations
