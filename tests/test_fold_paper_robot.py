@@ -14,10 +14,10 @@ hand turned 180 degrees holding the edge, the edge clamped while the other hand 
 vise the sheet read 30 to 120 N in, a 20 N grip the sheet pried open and slipped out of before **Open**, and a
 fingertip that ran under the fold and lifted it. Here the arms, which collide with each other, keep 20 mm
 apart and each to its own side of the middle at every control step; a hand turns at most 90 degrees while it
-holds; no finger of either hand pushes more than 15 N, holding or pressing, but at a touch; the pads still
-hold the edge, nearly shut, when **Open** is pressed; nothing but the pressing finger and the box touches the
-sheet while it is creased, and the strokes lift no part of it; the edges end within 10 mm of each other and
-the fold keeps a 2.8 rad crease once the hands have gone, the sheet where it was laid.
+holds; no finger of either hand pushes more than 15 N at any control step, holding, letting go or pressing;
+the pads still hold the edge, nearly shut, when **Open** is pressed; nothing but the pressing finger and the
+box touches the sheet while it is creased, and the strokes lift no part of it; the edges end within 10 mm of
+each other and the fold keeps a 2.8 rad crease once the hands have gone, the sheet where it was laid.
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ FOLD_PORT = 9734
 GAP = 0.020
 """The closest the two arms' colliders may come [m]."""
 CAP = 10.0
-"""The example's grip cap [N]: one motor drives a hand's two fingers, so it is the most either pushes along its
-slide."""
+"""The example's grip cap [N]: the most one hand's motor pushes along its driven finger's slide; the other finger
+follows that one through a joint equality."""
 FINGER = 15.0
 """The most any one finger may push on the sheet, holding it or pressing it [N]: the realism ceiling."""
 
@@ -180,15 +180,12 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
             self.assertLessEqual(max(held), CAP + 1.0e-3, f"and never passes it ({max(held):.2f} N)")
             self.assertGreater(np.median([p for p, _ in self.pushes[("carry", arm)]]), 1.0, "the pads hold the edge")
 
-    def test_no_finger_pushes_more_than_15_n_but_at_a_touch(self) -> None:
-        """Each finger's own contact force, its friction included, at the control steps a hand holds or presses: at
-        most 15 N but on a step or two where a finger meets the sheet, which in 8 drives read up to 17.2 N."""
-        for phase in ("close", "pinched", "carry", "sweep_right", "sweep_left"):
-            for arm in ("left", "right"):
-                pushes = np.array([p for p, _ in self.pushes[(phase, arm)]])
-                over = int((pushes > FINGER).sum())
-                self.assertLessEqual(over, max(2, len(pushes) // 500), f"a {arm} finger passed 15 N {over} times")
-                self.assertLessEqual(pushes.max(), 20.0, f"a {arm} finger pushed {pushes.max():.1f} N in the {phase}")
+    def test_no_finger_ever_pushes_more_than_15_n(self) -> None:
+        """Each finger's own contact force, its friction included, at every control step of every phase, the let-go
+        and the strokes among them: at most 15 N, not one step over."""
+        for (phase, arm), rows in self.pushes.items():
+            worst = max(p for p, _ in rows)
+            self.assertLessEqual(worst, FINGER, f"a {arm} finger pushed {worst:.1f} N in the {phase}")
 
     def test_the_pads_still_pinch_the_edge_when_open_is_pressed(self) -> None:
         """The edge is let go, not lost: the pads touch it on the carry's last step and stood nearly shut on it."""

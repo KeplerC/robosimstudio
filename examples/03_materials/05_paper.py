@@ -47,6 +47,11 @@ def main():
     scene.add(rss.paper(name="paper", size=size, cells=cells, at=corner, material=sheet))
     sim = scene.build(control_mode="joint_position")
     sim.model.shape_material_mu.assign(np.minimum(sim.model.shape_material_mu.numpy(), nubs))  # mixed per contact
+    # The fingers touch the sheet with its own contact damping. The YAM's colliders carry MuJoCo's 4 ms solref as
+    # 500 N s/m, which VBD averages with the sheet's 0.01 to 250: an edge falling past a pad at 77 mm/s read 19 N.
+    fingers = [b for arm in sim.scene.embodiment.arms.values() for side in arm.finger_bodies for b in side]
+    pads = np.isin(sim.model.shape_body.numpy(), fingers)
+    sim.model.shape_material_kd.assign(np.where(pads, sheet.contact_kd, sim.model.shape_material_kd.numpy()))
     folded = sim["paper"].entity
     line = {"crease": {"axis": 0, "at": corner[0] + size[0] / 2}}  # the fold line, half way along the sheet
 
