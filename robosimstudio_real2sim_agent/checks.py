@@ -1,16 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """What a twin is held to before anyone says it matches: a still against the photograph, a take against the clip, a gate.
 
-The page used to answer one question, "what does it look like beside the
-photo", and the agent answered the rest by eye. Three more are answered here
-with numbers, and every answer is written to ``run/log.jsonl`` with the hash
-of the ``scene.py`` that produced it, so before and after an edit are two
-lines apart rather than two impressions apart.
+The eye on a picture is the instrument: every reading here makes the pictures
+an agent judges, and adds a number only where one is exact. Every reading is
+written to ``run/log.jsonl`` with the hash of the ``scene.py`` that produced
+it and the picture it left, so before and after an edit are two lines apart.
 
 ``compare_still``
-    The scene as it stands, through a camera, against one photograph: per keyed
-    thing, where it is in each and how big (:mod:`.compare`); overall, how much
-    of the render's structure the photograph has.
+    The scene as it stands, through a camera, beside one photograph, as a pair
+    and a look sheet; per keyed thing, where it is in each and how big
+    (:mod:`.compare`).
 ``record`` and ``compare_take``
     A routine played on the page is recorded through a camera -- the video, a
     quarter-size segmentation of every frame, every thing's position -- and
@@ -502,6 +501,7 @@ def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
     handles = getattr(getattr(sim, "scene", None), "handles", None)
     if handles is None:
         return {}
+    out = _deformable_samples(sim, handles)
     jointed = {}
     for name in [*getattr(handles, "objects", {}), *getattr(handles, "statics", {})]:
         try:
@@ -512,15 +512,38 @@ def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
             keep = np.unique(np.linspace(0, len(bodies) - 1, min(len(bodies), PARTS_KEPT)).round().astype(int))
             jointed[name] = [bodies[i] for i in keep]
     if not jointed:
-        return {}
+        return out
     try:
         q = np.asarray(sim.state.body_q.numpy())
     except Exception:
+        return out
+    out.update(
+        {
+            name: [[round(float(v), 4) for v in q[b, :3]] for b in bodies if 0 <= b < len(q)]
+            for name, bodies in jointed.items()
+        }
+    )
+    return out
+
+
+def _deformable_samples(sim: Any, handles: Any) -> dict[str, list[list[float]]]:
+    """:data:`PARTS_KEPT` particles of each deformable, evenly through it: a knot tied or a bag opened in place
+    leaves its centre where it was."""
+    deformables = getattr(handles, "deformables", None) or {}
+    if not deformables:
         return {}
-    return {
-        name: [[round(float(v), 4) for v in q[b, :3]] for b in bodies if 0 <= b < len(q)]
-        for name, bodies in jointed.items()
-    }
+    try:
+        q = np.asarray(sim.state.particle_q.numpy())
+    except Exception:
+        return {}
+    out = {}
+    for name, handle in deformables.items():
+        idx = np.asarray(getattr(handle, "particles", ()), dtype=np.int64)
+        idx = idx[(idx >= 0) & (idx < len(q))]
+        if len(idx):
+            pick = idx[np.unique(np.linspace(0, len(idx) - 1, min(len(idx), PARTS_KEPT)).round().astype(int))]
+            out[name] = [[round(float(v), 4) for v in q[i, :3]] for i in pick]
+    return out
 
 
 def load_take(run_dir: str | Path, name: str) -> tuple[dict, np.ndarray | None]:
@@ -561,7 +584,8 @@ def take_motion(frames: list[dict]) -> dict[str, dict[str, float]]:
                 continue
             path = np.asarray(track, dtype=np.float64)
             moved = np.linalg.norm(path - path[0], axis=1)
-            ended, farthest = max(ended, float(moved[-1])), max(farthest, float(moved.max()))
+            if float(moved.max()) > farthest:  # the body that went farthest, and where that one ended
+                ended, farthest = float(moved[-1]), float(moved.max())
         out[name] = {"ended_mm": round(1000.0 * ended, 1), "farthest_mm": round(1000.0 * farthest, 1)}
     return out
 
@@ -606,7 +630,9 @@ def compare_take(
     what touched what. A colour key cannot -- a handheld phone or a cut moves
     everything -- so nothing here says whether the take did what the clip did.
     What the take did is exact, off its recorded positions (:func:`take_motion`).
-    Keys, when given, only outline the things in both rows.
+    Keys, when given, only outline the things: a colour key in both rows; a
+    seed or a mask, drawn on one still, in the take's row alone, since the thing
+    may have moved by the next anchor.
     """
     import imageio.v2 as imageio
 
@@ -656,7 +682,8 @@ def compare_take(
                 masks = C.sim_masks(seg, names, [k.name for k in keys]) if seg is not None else {}
                 outlined_photo, outlined_take = {}, {}
                 for key in keys:
-                    pm = C.fit_mask(found[key.name], w, h) if found[key.name] is not None else None
+                    one_still = key.seed is not None or bool(key.mask)
+                    pm = C.fit_mask(found[key.name], w, h) if found[key.name] is not None and not one_still else None
                     sm = C.fit_mask(masks[key.name], w, h) if masks.get(key.name) is not None else None
                     outlined_photo[key.name], outlined_take[key.name] = (pm, None), (None, sm)
                 top, bottom = C.overlay(fitted, outlined_photo), C.overlay(rgb, outlined_take)

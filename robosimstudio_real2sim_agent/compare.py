@@ -238,11 +238,12 @@ def _mask_file(path: str, shape: tuple[int, int]) -> np.ndarray:
     """A mask PNG at the photograph's size: any pixel that is not black is the thing."""
     from PIL import Image
 
-    image = Image.open(path).convert("L")
+    image = Image.open(path).convert("RGBA")
     h, w = shape
     if image.size != (w, h):
         image = image.resize((w, h), Image.NEAREST)
-    return np.asarray(image) > 0
+    pixels = np.asarray(image)
+    return (pixels[..., :3].max(axis=-1) > 0) & (pixels[..., 3] > 0)
 
 
 def sim_masks(seg: np.ndarray, names_by_id: dict[int, str], wanted: list[str]) -> dict[str, np.ndarray | None]:
@@ -355,6 +356,8 @@ def advice(name: str, reading: dict[str, Any], frame_width: int, key: Key | None
     how = f" (keyed {key.describe()})" if key is not None else ""
     if p is None and s is None:
         return f"{name}: found in neither picture{how}"
+    if p is None and key is not None and key.mask:
+        return f"{name}: the mask is empty{how}: no pixel in it that is not black"
     if p is None:
         return f"{name}: the key found nothing in the photograph{how}; try another colour, or a seed @x,y on it"
     if s is None:

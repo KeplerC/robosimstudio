@@ -253,7 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
     lg = sub.add_parser(
         "log",
         parents=[common],
-        help="every snapshot, compare, check and take so far, with what it left (PASS/FAIL, the picture) and the scene.py it measured",
+        help="every compare, check, take and snapshot --note so far, with what it left (PASS/FAIL, the picture) "
+        "and the scene.py it measured",
     )
     lg.add_argument("--last", type=int, default=0, help="only the last N")
     run = sub.add_parser("run", parents=[common], help="step N control steps, then hold")

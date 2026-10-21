@@ -576,7 +576,11 @@ class LiveServer:
         """
         if not self._timeline().get("anchors"):
             meta, _ = checks.load_take(self.run_dir, take)
-            print(f"[live] take {take!r}: {checks.motion_line(checks.take_motion(meta['frames']))}", flush=True)
+            print(
+                f"[live] take {take!r} (no ref/timeline.json to put it beside): "
+                f"{checks.motion_line(checks.take_motion(meta['frames']))}",
+                flush=True,
+            )
             return
         reply = self.cmd_compare(keys=self.last_keys, take=take, note="the take beside the clip as it ended")
         if reply.get("ok"):
@@ -595,9 +599,10 @@ class LiveServer:
         try:
             summary = recorder.finish()
             self.last_take = summary
+            moved = checks.motion_line(checks.take_motion(recorder.frames))
             checks.log_append(
                 self.run_dir,
-                {"cmd": "record", "scene": checks.scene_hash(self.path), **summary},
+                {"cmd": "record", "scene": checks.scene_hash(self.path), "note": moved, **summary},
             )
             print(
                 f"[live] take {summary['take']!r} written ({why}): {summary['frames']} frames, {summary['seconds']:.1f} s",
@@ -1020,7 +1025,7 @@ class LiveServer:
                     "cmd": "snapshot",
                     "scene": checks.scene_hash(self.path),
                     "note": note,
-                    "png": str(path),
+                    "png": reply.get("beside") or str(path),  # the pair, when there is one: what was judged
                 },
             )
         return reply
@@ -1146,8 +1151,7 @@ class LiveServer:
         pictures = checks.write_compare_pictures(base, rgb, result)
         self.cmd_show(pictures["beside"], label=f"compare {self.cmp_n}: render | {Path(ref).name}")
         self.cmd_show(pictures["look"], label=f"look {self.cmp_n}: what the photo has that the render lacks")
-        if parsed:
-            self.last_keys = [str(k) for k in keys]
+        self.last_keys = [str(k) for k in keys]  # a compare with none leaves a take unoutlined
         readings = {k: v for k, v in result.items() if k not in ("pairs", "fitted", "lines")}
         base.with_suffix(".json").write_text(
             json.dumps(

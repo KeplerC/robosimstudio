@@ -67,7 +67,7 @@ scene.add(rss.robot("yam_i2rt"))  # a scene needs something that moves before it
 | `compare [--ref PHOTO] [--camera N] [--key NAME=HOW ...] [--note TEXT]` | The scene beside the photograph: the pair at full size and a look sheet; per keyed thing, its size, offset and overlap. |
 | `compare --take NAME [--key ...]` | A recorded take beside the clip's timeline: the clip's anchors above, the take's frames at the same point below, and what moved in the take. |
 | `check [--camera N] [--key ...] [--object NAME ...]` | The gate: builds, finite state, camera at the clip's aspect, every named thing present, penetration and drift at rest under their bars. |
-| `log [--last N]` | Every snapshot, compare, check and take so far: what it left (PASS/FAIL, the picture) and the `scene.py` it measured. |
+| `log [--last N]` | Every compare, check, take and `snapshot --note` so far: what it left (PASS/FAIL, the picture: a snapshot's pair when it made one) and the `scene.py` it measured. |
 | `play [NAME] [--record TAKE --camera N] [--wait]` | Play a routine the scene file binds, as its button on the page does. `--wait` returns when it ends, printing the page's log as it goes, and exits 1 with the traceback if it failed. |
 | `show PATH [--label TEXT]`, `show --clear` | A picture on the page's board for the person watching. |
 | `run N` | Step N control steps, then hold. Refused while a routine plays; ends with an error if the scene is rebuilt or reset during the run. |
@@ -194,8 +194,9 @@ a named thing with nothing to read is listed as not measured. It steps the
 scene, then resets it to its start: a pose set with
 `eval` or reached with `run N` is not kept. `check` is refused while a routine
 plays. `--steps` (60), `--settle-mm` (2) and `--penetration-mm` (1) set the
-bars; each line prints the bar it was held to. A line given nothing to look
-at (`objects` with no `--key` or `--object`) is a SKIP. The bars are defaults
+bars; the penetration and rest lines print the bar they were held to, and the
+camera line holds the aspect within 2%. A line given nothing to look at
+(`objects` with no `--key` or `--object`) is a SKIP. The bars are defaults
 and `check` blocks nothing. The camera line holds the camera to the clip's aspect
 from `ref/timeline.json`; against a photo, `compare` says when it had to
 stretch the photo to the camera's aspect.
@@ -208,7 +209,9 @@ the page puts it beside the clip's `ref/timeline.json` by itself, as
 `compare --take NAME` does: a strip (`cmp_NNN_strip.png`) with the clip's
 anchors above and the take's frames at the same point of the action below,
 posted to the board and logged, and one line on what moved in the take, read
-off its recorded positions:
+off its recorded positions (a jointed thing's moving bodies and a
+deformable's particles included). With no `ref/timeline.json` there is no
+strip: the line is printed and logged with the take.
 
 ```
 in the take: case_lid went 118 mm and ended 4 mm from its start; case went 3 mm; 5 other things stayed within 2 mm
@@ -220,8 +223,9 @@ whose base stays put is seen. An anchor pinned past the take's end is held
 against its last frame, and a line says so.
 The clip and the take need not run the same length. An anchor is matched by
 proportion, or pinned with `"sim_t"` or `"sim_step"` in the timeline. Keys,
-if the last `compare` had any or `--key` gives some, only outline the things
-in both rows.
+if the last `compare` had any or `--key` gives some, only outline the things:
+a colour key in both rows; a seed or a mask, which keys one still, in the
+take's row alone.
 
 ### The board
 

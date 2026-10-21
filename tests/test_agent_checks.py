@@ -368,6 +368,12 @@ class TestATake(unittest.TestCase):
         self.assertTrue(any("pinned past the take's end" in x for x in result["lines"]))
         self.assertEqual(result["anchors"][1]["frame"], n - 1)
 
+    def test_one_body_says_how_far_it_went_and_where_it_ended(self) -> None:
+        swing = [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]  # went 100 mm and came back
+        slide = [[0.0, 0.0, 0.0], [0.0, 0.07, 0.0], [0.0, 0.07, 0.0]]  # went 70 mm and stayed
+        frames_ = [{"positions": {"case": [0, 0, 0]}, "parts": {"case": [swing[i], slide[i]]}} for i in range(3)]
+        self.assertEqual(checks.take_motion(frames_)["case"], {"ended_mm": 0.0, "farthest_mm": 100.0})
+
     def test_a_lid_that_opened_and_shut_went_somewhere(self) -> None:
         track = [{"positions": {"lid": [0.0, 0.0, z]}} for z in (0.0, 0.05, 0.12, 0.05, 0.0)]
         moved = checks.take_motion(track)
@@ -389,10 +395,6 @@ class TestNumbering(unittest.TestCase):
             self.assertEqual(checks.next_number(run, "cmp", seen=7), 8, "and never below what this process wrote")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 def _mask_png(tmp: Path) -> Path:
     """The photo's case as another tool would draw it: white on black, at the photo's size."""
     from PIL import Image
@@ -402,3 +404,7 @@ def _mask_png(tmp: Path) -> Path:
     path = tmp / "case_mask.png"
     Image.fromarray(mask.astype(np.uint8) * 255).save(path)
     return path
+
+
+if __name__ == "__main__":
+    unittest.main()
