@@ -1524,7 +1524,8 @@ FOLD = "examples/03_materials/05_paper.py"
 FOLD_OPEN = 0.79
 """The **Grip amount** the hands come in with: the pads 20 mm apart, the lower one clear of the box. They then
 press **Close**, and each hand's grip stops on the sheet at its 10 N cap (``05_paper``'s ``effort_limit``): one
-motor drives both fingers, so 10 N is the most either finger pushes along its slide."""
+motor pushes the driven finger along its slide with 10 N at most, and the other finger follows it through the
+asset's joint equality."""
 FOLD_HANDS = 0.025
 """How far in from each corner the pads' middle closes [m]: the hands stay 160 mm apart."""
 FOLD_PINCH = 0.013

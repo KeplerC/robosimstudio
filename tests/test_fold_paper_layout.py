@@ -86,9 +86,9 @@ class TestTheFoldIsLaidOutForTwoHands(unittest.TestCase):
 
     def test_the_grip_is_capped_and_feels_the_sheet(self) -> None:
         hands = _keywords(self.source, "ActuationSpec")
-        # One motor drives a hand's two fingers through the asset's joint equality: its cap is what one finger
-        # pushes when the other pushes nothing, so the cap itself is the per-finger ceiling.
-        self.assertLessEqual(hands["effort_limit"], 15.0, "the most either finger can push")
+        # One motor drives a hand's two fingers through the asset's joint equality: its cap bounds the driven
+        # finger's slide, not either finger's contact push, which test_fold_paper_robot holds to 15 N.
+        self.assertLessEqual(hands["effort_limit"], 15.0, "the motor's cap")
         # Stiff enough that a finger held 0.2 mm off shut already asks the whole cap: Close stalls at the cap.
         self.assertGreaterEqual(hands["target_ke"] * 0.0002, hands["effort_limit"])
         coupling = _keywords(self.source, "coupler")

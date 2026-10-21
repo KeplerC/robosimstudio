@@ -144,13 +144,11 @@ Source: [`04_band.py`](04_band.py)
 
 ![Paper: fold a sheet](media/05_paper.webp)
 
-Bring each hand in along the edge of the A4 sheet that runs past the box, from its own corner, with **Grip amount** 0.79, and press **Close**: the fingers stall on the sheet at the grip's 10 N cap. Carry the edge up and over, each hand turning with the flap to 88 degrees and no further, and press **Open** 100 mm over the far half: the flap falls onto it. Then, at **Grip amount** 0.6, run each hand's lower finger along its half of the fold, the sheet pushing it up its slide against the same 10 N cap: the sheet stays folded in half.
+Bring each hand in along the edge of the A4 sheet that runs past the box, from its own corner, with **Grip amount** 0.79, and press **Close**: the fingers stall on the sheet at the grip's 10 N cap. Carry the edge up and over, each hand turning with the flap to 88 degrees and no further, and press **Open** 100 mm over the far half: the flap falls onto it. Then, at **Grip amount** 0.6, run the side of each hand's lower finger along its half of the fold, the sheet pushing it up its slide against the same 10 N cap: the sheet stays folded in half.
 
-In 8 drives of the take's path (`probe2.py`, GPUs 3 and 5) the arms, which collide, came no closer than 79.3 mm
-and kept 9.0 mm on their own sides; each hand turned 88.2 degrees holding the edge, its pads 5.0 mm apart at most,
-and a finger pushed 7.4 N holding and 13.1 N pressing (95th percentile), but over 15 N for a step in 3: 15.6 to 17.2
-at a touch, 67.9 once as an open hand slid off the fallen edge. The edges ended 2.4 mm apart (6.0 at the worst
-corner) and the fold kept 2.89 to 2.90 rad once the hands had gone, unchanged 3 s later, `fold_extent` 0.50.
+In 6 drives (`probe.py`) the arms, which collide, kept 79.3 mm apart and 9.0 mm on their own sides, each hand
+turned 88.0 degrees holding the edge, and no finger pushed over 15 N at any step (9.8 N holding, 5.6 after **Open**,
+13.5 pressing). The edges ended 4.7 to 4.9 mm apart and the fold kept 2.92 to 2.93 rad, unchanged 3 s after the hands.
 
 ```bash
 uv run examples/03_materials/05_paper.py
