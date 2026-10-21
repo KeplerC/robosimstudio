@@ -491,12 +491,14 @@ def steps_since(sim: Any, step: int, mark: int) -> int:
 
 
 def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
-    """Every body of a thing that owns more than one -- a case and its lid, a lock and its key -- where it is now.
+    """Every body of every thing -- a case and its lid, a lock and its key -- where its centre of mass is now.
 
-    A thing's position is its first body's, so a jointed thing whose base
-    stays put reads as still while its key turns or its lid opens. A chain of
-    many links keeps :data:`PARTS_KEPT` of them, evenly along it. Best effort:
-    a take is never lost for want of these.
+    A thing's position is its first body's origin, so a jointed thing whose
+    base stays put reads as still while its key turns, and a lid whose origin
+    is its hinge reads as still while it opens. A centre of mass moves with
+    either. A chain of many links keeps :data:`PARTS_KEPT` of them, evenly
+    along it; each deformable, as many of its particles. Best effort: a take
+    is never lost for want of these.
     """
     handles = getattr(getattr(sim, "scene", None), "handles", None)
     if handles is None:
@@ -505,21 +507,27 @@ def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
     jointed = {}
     for name in [*getattr(handles, "objects", {}), *getattr(handles, "statics", {})]:
         try:
-            bodies = tuple(getattr(handles.entity(name), "bodies", ()))
+            handle = handles.entity(name)
+            bodies = tuple(getattr(handle, "bodies", ())) or (
+                (handle.body,) if getattr(handle, "body", -1) >= 0 else ()
+            )
         except Exception:  # one odd handle costs that thing its parts, not every thing
             continue
-        if len(bodies) >= 2:
+        if bodies:
             keep = np.unique(np.linspace(0, len(bodies) - 1, min(len(bodies), PARTS_KEPT)).round().astype(int))
             jointed[name] = [bodies[i] for i in keep]
     if not jointed:
         return out
     try:
-        q = np.asarray(sim.state.body_q.numpy())
+        q = np.asarray(sim.state.body_q.numpy(), dtype=np.float64)
+        com = np.asarray(sim.model.body_com.numpy(), dtype=np.float64)
     except Exception:
         return out
+    # each body's centre of mass, not its origin: a lid's origin sits on its hinge and does not move as it opens
+    where = q[:, :3] + _rotate(q[:, 3:7], com[: len(q)])
     out.update(
         {
-            name: [[round(float(v), 4) for v in q[b, :3]] for b in bodies if 0 <= b < len(q)]
+            name: [[round(float(v), 4) for v in where[b]] for b in bodies if 0 <= b < len(q)]
             for name, bodies in jointed.items()
         }
     )
@@ -544,6 +552,13 @@ def _deformable_samples(sim: Any, handles: Any) -> dict[str, list[list[float]]]:
             pick = idx[np.unique(np.linspace(0, len(idx) - 1, min(len(idx), PARTS_KEPT)).round().astype(int))]
             out[name] = [[round(float(v), 4) for v in q[i, :3]] for i in pick]
     return out
+
+
+def _rotate(quat: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Rotate each ``v`` by its ``(x, y, z, w)`` quaternion."""
+    xyz, w = quat[:, :3], quat[:, 3:4]
+    t = 2.0 * np.cross(xyz, v)
+    return v + w * t + np.cross(xyz, t)
 
 
 def load_take(run_dir: str | Path, name: str) -> tuple[dict, np.ndarray | None]:

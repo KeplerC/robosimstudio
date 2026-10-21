@@ -167,9 +167,11 @@ class TakeAccounting(unittest.TestCase):
         handles = types.SimpleNamespace(
             objects={"cable": None}, statics={}, entity=lambda name: types.SimpleNamespace(bodies=tuple(range(120)))
         )
+        body_q[:, 6] = 1.0
         sim = types.SimpleNamespace(
             scene=types.SimpleNamespace(handles=handles),
             state=types.SimpleNamespace(body_q=types.SimpleNamespace(numpy=lambda: body_q)),
+            model=types.SimpleNamespace(body_com=types.SimpleNamespace(numpy=lambda: np.zeros((130, 3)))),
         )
         self.assertEqual(len(checks._part_positions(sim)["cable"]), checks.PARTS_KEPT)
         sim.state.body_q = None
@@ -181,13 +183,21 @@ class TakeAccounting(unittest.TestCase):
         handles = types.SimpleNamespace(
             objects={"case": None, "cube": None},
             statics={},
-            entity=lambda name: types.SimpleNamespace(bodies=(1, 2) if name == "case" else (3,)),
+            entity=lambda name: types.SimpleNamespace(bodies=(1, 2) if name == "case" else (), body=3),
         )
+        body_q[:, 6] = 1.0  # unrotated
+        com = np.zeros((4, 3))
         sim = types.SimpleNamespace(
             scene=types.SimpleNamespace(handles=handles),
             state=types.SimpleNamespace(body_q=types.SimpleNamespace(numpy=lambda: body_q)),
+            model=types.SimpleNamespace(body_com=types.SimpleNamespace(numpy=lambda: com)),
         )
-        self.assertEqual(checks._part_positions(sim), {"case": [[0.0, 0.0, 0.0], [0.1, 0.2, 0.3]]})
+        self.assertEqual(
+            checks._part_positions(sim), {"case": [[0.0, 0.0, 0.0], [0.1, 0.2, 0.3]], "cube": [[0.0, 0.0, 0.0]]}
+        )
+        com[2] = (0.1, 0.0, 0.0)  # the lid's mass 100 mm along its own x from the hinge at its origin
+        body_q[2, 3:7] = (0.0, 0.0, np.sin(np.pi / 4), np.cos(np.pi / 4))  # swung 90 degrees about z
+        np.testing.assert_allclose(checks._part_positions(sim)["case"][1], [0.1, 0.3, 0.3], atol=1e-4)
 
 
 class MaskKeys(unittest.TestCase):
