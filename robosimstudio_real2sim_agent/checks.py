@@ -587,7 +587,8 @@ def take_motion(frames: list[dict]) -> dict[str, dict[str, float]]:
     if not frames:
         return {}
     out: dict[str, dict[str, float]] = {}
-    for name in frames[0].get("positions", {}):
+    # a deformable has no position, only the particles sampled for it
+    for name in dict.fromkeys([*frames[0].get("positions", {}), *frames[0].get("parts", {})]):
         tracks = [[f["positions"][name] for f in frames if name in f.get("positions", {})]]
         parts = [f.get("parts", {}).get(name) for f in frames]
         if parts[0]:
@@ -599,8 +600,8 @@ def take_motion(frames: list[dict]) -> dict[str, dict[str, float]]:
                 continue
             path = np.asarray(track, dtype=np.float64)
             moved = np.linalg.norm(path - path[0], axis=1)
-            if float(moved.max()) > farthest:  # the body that went farthest, and where that one ended
-                ended, farthest = float(moved[-1]), float(moved.max())
+            # each the most any of its parts did: one part may have swung out and back while another stayed moved
+            ended, farthest = max(ended, float(moved[-1])), max(farthest, float(moved.max()))
         out[name] = {"ended_mm": round(1000.0 * ended, 1), "farthest_mm": round(1000.0 * farthest, 1)}
     return out
 
@@ -693,12 +694,12 @@ def compare_take(
             top, bottom = fitted, rgb
             if keys:
                 seg = np.asarray(segs[i]).astype(np.int32) if segs is not None and i < len(segs) else None
-                found = photo_masks(photo, keys)
+                # a seed or a mask keys the one still it was drawn on: outlined in the take's row alone
+                found = photo_masks(photo, [k for k in keys if k.seed is None and not k.mask])
                 masks = C.sim_masks(seg, names, [k.name for k in keys]) if seg is not None else {}
                 outlined_photo, outlined_take = {}, {}
                 for key in keys:
-                    one_still = key.seed is not None or bool(key.mask)
-                    pm = C.fit_mask(found[key.name], w, h) if found[key.name] is not None and not one_still else None
+                    pm = C.fit_mask(found[key.name], w, h) if found.get(key.name) is not None else None
                     sm = C.fit_mask(masks[key.name], w, h) if masks.get(key.name) is not None else None
                     outlined_photo[key.name], outlined_take[key.name] = (pm, None), (None, sm)
                 top, bottom = C.overlay(fitted, outlined_photo), C.overlay(rgb, outlined_take)

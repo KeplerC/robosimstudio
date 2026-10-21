@@ -357,7 +357,7 @@ def advice(name: str, reading: dict[str, Any], frame_width: int, key: Key | None
     if p is None and s is None:
         return f"{name}: found in neither picture{how}"
     if p is None and key is not None and key.mask:
-        return f"{name}: the mask is empty{how}: no pixel in it that is not black"
+        return f"{name}: the mask holds nothing at this size{how}: empty, or a line too thin to survive the resize"
     if p is None:
         return f"{name}: the key found nothing in the photograph{how}; try another colour, or a seed @x,y on it"
     if s is None:

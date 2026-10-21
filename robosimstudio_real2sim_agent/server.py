@@ -429,6 +429,7 @@ class LiveServer:
             # the new take films the new routine alone: what was queued ahead of it is dropped, not filmed into it
             self._end_scripts("dropped: another recording started")
             self._finish_recorder("another recording started")
+            self.last_take = {}  # until this one is written, no take is the last one
             recorder = checks.Recorder(self, record, camera=camera, every=every)
             try:
                 recorder.capture()  # frame 0: the state before anything happened
@@ -565,7 +566,7 @@ class LiveServer:
         if not self.script:
             self._finish_recorder("the script ended")
 
-    def _show_take(self, take: str) -> None:
+    def _show_take(self, take: str, moved: str) -> None:
         """Every take is put beside the clip as it ends, on the board and in the log, and what moved in it is said.
 
         The strip -- the clip's anchors above, the take's frames at the same
@@ -575,12 +576,7 @@ class LiveServer:
         take's own motion is said, off its recorded positions.
         """
         if not self._timeline().get("anchors"):
-            meta, _ = checks.load_take(self.run_dir, take)
-            print(
-                f"[live] take {take!r} (no ref/timeline.json to put it beside): "
-                f"{checks.motion_line(checks.take_motion(meta['frames']))}",
-                flush=True,
-            )
+            print(f"[live] take {take!r} (no ref/timeline.json to put it beside): {moved}", flush=True)
             return
         reply = self.cmd_compare(keys=self.last_keys, take=take, note="the take beside the clip as it ended")
         if reply.get("ok"):
@@ -608,7 +604,7 @@ class LiveServer:
                 f"[live] take {summary['take']!r} written ({why}): {summary['frames']} frames, {summary['seconds']:.1f} s",
                 flush=True,
             )
-            self._show_take(summary["take"])
+            self._show_take(summary["take"], moved)
         except Exception:
             self.last_error = traceback.format_exc()[-3000:]
             print(

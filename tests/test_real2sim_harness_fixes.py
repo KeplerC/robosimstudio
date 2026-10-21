@@ -213,7 +213,7 @@ class MaskKeys(unittest.TestCase):
         key = compare.parse_key(f"lid=mask:{tmp / 'm.png'}")
         self.assertEqual(int(compare.photo_mask(np.zeros((4, 4, 3), np.uint8), key).sum()), 1)
         reading = compare.compare_masks(None, np.ones((4, 4), bool))
-        self.assertIn("the mask is empty", compare.advice("lid", reading, 4, key))
+        self.assertIn("the mask holds nothing at this size", compare.advice("lid", reading, 4, key))
 
     def test_a_deformable_is_sampled_for_the_take(self) -> None:
         points = np.arange(300, dtype=float).reshape(100, 3)

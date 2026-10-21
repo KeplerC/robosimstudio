@@ -368,11 +368,18 @@ class TestATake(unittest.TestCase):
         self.assertTrue(any("pinned past the take's end" in x for x in result["lines"]))
         self.assertEqual(result["anchors"][1]["frame"], n - 1)
 
-    def test_one_body_says_how_far_it_went_and_where_it_ended(self) -> None:
-        swing = [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]  # went 100 mm and came back
-        slide = [[0.0, 0.0, 0.0], [0.0, 0.07, 0.0], [0.0, 0.07, 0.0]]  # went 70 mm and stayed
+    def test_a_part_that_swung_back_does_not_hide_one_that_stayed_moved(self) -> None:
+        swing = [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]  # the lid went 100 mm and came back
+        slide = [[0.0, 0.0, 0.0], [0.0, 0.07, 0.0], [0.0, 0.07, 0.0]]  # the base went 70 mm and stayed
         frames_ = [{"positions": {"case": [0, 0, 0]}, "parts": {"case": [swing[i], slide[i]]}} for i in range(3)]
-        self.assertEqual(checks.take_motion(frames_)["case"], {"ended_mm": 0.0, "farthest_mm": 100.0})
+        self.assertEqual(checks.take_motion(frames_)["case"], {"ended_mm": 70.0, "farthest_mm": 100.0})
+
+    def test_a_deformable_with_no_position_is_read_off_its_particles(self) -> None:
+        frames_ = [
+            {"positions": {}, "parts": {"rope": [[0, 0, 0], [0.1, 0, 0]]}},
+            {"positions": {}, "parts": {"rope": [[0, 0, 0.03], [0.1, 0, 0]]}},
+        ]
+        self.assertEqual(checks.take_motion(frames_)["rope"]["farthest_mm"], 30.0)
 
     def test_a_lid_that_opened_and_shut_went_somewhere(self) -> None:
         track = [{"positions": {"lid": [0.0, 0.0, z]}} for z in (0.0, 0.05, 0.12, 0.05, 0.0)]
