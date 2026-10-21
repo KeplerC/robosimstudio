@@ -398,7 +398,7 @@ def crop_pair(
     *,
     height: int = 240,
 ) -> np.ndarray | None:
-    """The thing in the photograph beside the thing in the render, cut from the same box so the scale is the same."""
+    """The thing in the render beside the thing in the photograph, cut from the same box so the scale is the same."""
     from PIL import Image
 
     box = region_box([pm, sm], photo.shape[:2])
@@ -412,7 +412,7 @@ def crop_pair(
     if sm is not None and sm.any():
         right[outline(sm)[y0:y1, x0:x1]] = SIM_COLOUR
     w = max(1, int(round((x1 - x0) * height / max(1, y1 - y0))))
-    tiles = [np.asarray(Image.fromarray(t).resize((w, height), Image.BILINEAR)) for t in (left, right)]
+    tiles = [np.asarray(Image.fromarray(t).resize((w, height), Image.BILINEAR)) for t in (right, left)]
     gap = np.full((height, 6, 3), 40, np.uint8)
     return np.concatenate([tiles[0], gap, tiles[1]], axis=1)
 
@@ -434,15 +434,15 @@ def look_sheet(
     *,
     width: int = 1280,
 ) -> np.ndarray:
-    """One picture to reason about: the pair on top, then every captioned row (each thing up close, the background)."""
+    """One picture to reason about: the pair on top, render left and photo right as in every pair, then each captioned row."""
     from PIL import Image
 
     h = int(round(photo.shape[0] * (width // 2) / photo.shape[1]))
     top = np.concatenate(
-        [np.asarray(Image.fromarray(t).resize((width // 2, h), Image.BILINEAR)) for t in (photo, render)],
+        [np.asarray(Image.fromarray(t).resize((width // 2, h), Image.BILINEAR)) for t in (render, photo)],
         axis=1,
     )
-    blocks: list[np.ndarray] = [_caption("photo  |  render", width), top]
+    blocks: list[np.ndarray] = [_caption("render  |  photo", width), top]
     for caption, given in rows:
         if given is None:
             continue

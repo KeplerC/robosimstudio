@@ -324,16 +324,15 @@ def write_compare_pictures(base: Path, rgb: np.ndarray, result: dict) -> dict[st
 def write_look_sheet(base: Path, rgb: np.ndarray, result: dict) -> str:
     """The sheet, as :func:`write_compare_pictures` describes it."""
     fitted, pairs = result["fitted"], result["pairs"]
-    rows: list[tuple[str, np.ndarray]] = [
-        (
-            "where each thing sits: photo outline yellow, render outline cyan",
-            C.overlay(fitted, pairs),
+    rows: list[tuple[str, np.ndarray]] = []
+    if pairs:
+        rows.append(
+            ("where each thing sits, on the photo: photo outline yellow, render outline cyan", C.overlay(fitted, pairs))
         )
-    ]
     for name, (pm, sm) in pairs.items():
         tile = C.crop_pair(fitted, rgb, pm, sm)
         if tile is not None:
-            rows.append((f"{name} up close: photo | render", tile))
+            rows.append((f"{name} up close: render | photo", tile))
     things = None
     for pm, sm in pairs.values():
         for m in (pm, sm):
@@ -345,12 +344,12 @@ def write_look_sheet(base: Path, rgb: np.ndarray, result: dict) -> str:
         h = 240
         tiles = [
             np.asarray(Image.fromarray(t).resize((int(round(t.shape[1] * h / t.shape[0])), h), Image.BILINEAR))
-            for t in (C.without_things(fitted, things), C.without_things(rgb, things))
+            for t in (C.without_things(rgb, things), C.without_things(fitted, things))
         ]
         gap = np.full((h, 6, 3), 40, np.uint8)
         rows.append(
             (
-                "behind the things: photo | render",
+                "behind the things: render | photo",
                 np.concatenate([tiles[0], gap, tiles[1]], axis=1),
             )
         )
@@ -520,22 +519,26 @@ def take_motion(frames: list[dict]) -> dict[str, dict[str, float]]:
 
     Both, because one alone misleads: a lid that swung open and shut again
     ends where it started, and a box nudged a few millimetres by a passing
-    hand went somewhere and came back.
+    hand went somewhere and came back. A jointed thing is read off whichever
+    of its bodies moved most -- the key turning in a case whose base stays.
     """
     if not frames:
         return {}
-    first = frames[0].get("positions", {})
     out: dict[str, dict[str, float]] = {}
-    for name, where in first.items():
-        start = np.asarray(where, dtype=np.float64)
-        track = [np.asarray(f["positions"][name], dtype=np.float64) for f in frames if name in f.get("positions", {})]
-        if not track:
-            continue
-        reach = max(float(np.linalg.norm(p - start)) for p in track)
-        out[name] = {
-            "ended_mm": round(1000.0 * float(np.linalg.norm(track[-1] - start)), 1),
-            "farthest_mm": round(1000.0 * reach, 1),
-        }
+    for name in frames[0].get("positions", {}):
+        tracks = [[f["positions"][name] for f in frames if name in f.get("positions", {})]]
+        parts = [f.get("parts", {}).get(name) for f in frames]
+        if parts[0]:
+            for b in range(len(parts[0])):
+                tracks.append([p[b] for p in parts if p and b < len(p)])
+        ended = farthest = 0.0
+        for track in tracks:
+            if not track:
+                continue
+            path = np.asarray(track, dtype=np.float64)
+            moved = np.linalg.norm(path - path[0], axis=1)
+            ended, farthest = max(ended, float(moved[-1])), max(farthest, float(moved.max()))
+        out[name] = {"ended_mm": round(1000.0 * ended, 1), "farthest_mm": round(1000.0 * farthest, 1)}
     return out
 
 
@@ -603,6 +606,14 @@ def compare_take(
         last = reader.count_frames() - 1
         for anchor in anchors:
             t_ref = float(anchor["t"])
+            pinned_step, pinned_t = anchor.get("sim_step"), anchor.get("sim_t")
+            if (pinned_step is not None and int(pinned_step) > int(frames[-1]["step"])) or (
+                pinned_t is not None and float(pinned_t) > take_len
+            ):
+                lines.append(
+                    f"{anchor.get('label') or 'anchor'} at {t_ref:.1f}s is pinned past the take's end "
+                    f"(step {frames[-1]['step']}, {take_len:.1f}s): it is held against the last frame"
+                )
             if anchor.get("sim_step") is not None:
                 frame = min(frames, key=lambda f: abs(int(f["step"]) - int(anchor["sim_step"])))
             elif anchor.get("sim_t") is not None:

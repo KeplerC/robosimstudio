@@ -353,6 +353,21 @@ class TestATake(unittest.TestCase):
         unkeyed = checks.compare_take(run, "take", frames.read_timeline(ref), [], ref)
         self.assertEqual(len(unkeyed["tiles"]), 2, "no key needed: the strip is the pictures")
 
+    def test_a_key_turning_in_a_case_whose_base_stays_is_seen(self) -> None:
+        frames_ = [
+            {"positions": {"case": [0.0, 0.0, 0.0]}, "parts": {"case": [[0.0, 0.0, 0.0], [0.05, 0.0, 0.0]]}},
+            {"positions": {"case": [0.0, 0.0, 0.0]}, "parts": {"case": [[0.0, 0.0, 0.0], [0.0, 0.05, 0.0]]}},
+        ]
+        self.assertAlmostEqual(checks.take_motion(frames_)["case"]["farthest_mm"], 70.7, delta=0.1)
+
+    def test_an_anchor_pinned_past_the_end_is_said(self) -> None:
+        run, ref, n = self._take()
+        line = frames.read_timeline(ref)
+        line["anchors"][1]["sim_step"] = 10_000
+        result = checks.compare_take(run, "take", line, [], ref)
+        self.assertTrue(any("pinned past the take's end" in x for x in result["lines"]))
+        self.assertEqual(result["anchors"][1]["frame"], n - 1)
+
     def test_a_lid_that_opened_and_shut_went_somewhere(self) -> None:
         track = [{"positions": {"lid": [0.0, 0.0, z]}} for z in (0.0, 0.05, 0.12, 0.05, 0.0)]
         moved = checks.take_motion(track)

@@ -66,7 +66,7 @@ scene.add(rss.robot("yam_i2rt"))  # a scene needs something that moves before it
 | `ref frames CLIP [--at 0:closed,4.5:lid_open,end] [--every S]` | Stills out of a clip at those seconds, a contact sheet with the seconds burnt in, and `ref/timeline.json` anchoring them. Needs no page. |
 | `compare [--ref PHOTO] [--camera N] [--key NAME=HOW ...] [--note TEXT]` | The scene beside the photograph: the pair at full size and a look sheet; per keyed thing, its size, offset and overlap. |
 | `compare --take NAME [--key ...]` | A recorded take beside the clip's timeline: the clip's anchors above, the take's frames at the same point below, and what moved in the take. |
-| `check [--camera N] --key ... [--object NAME ...]` | The gate: builds, finite state, camera at the clip's aspect, every named thing present, penetration and drift at rest under their bars. |
+| `check [--camera N] [--key ...] [--object NAME ...]` | The gate: builds, finite state, camera at the clip's aspect, every named thing present, penetration and drift at rest under their bars. |
 | `log [--last N]` | Every snapshot, compare, check and take so far: what it left (PASS/FAIL, the picture) and the `scene.py` it measured. |
 | `play [NAME] [--record TAKE --camera N] [--wait]` | Play a routine the scene file binds, as its button on the page does. `--wait` returns when it ends, printing the page's log as it goes, and exits 1 with the traceback if it failed. |
 | `show PATH [--label TEXT]`, `show --clear` | A picture on the page's board for the person watching. |
@@ -156,14 +156,19 @@ socket: sim is 0.81x the photo's size (w 0.44x, h 0.87x), centre 122 px left, 20
 ```
 
 `snapshot --beside ref/<still>` and `compare` (as `cmp_NNN_beside.png`) put
-the render beside the still at full size; open it first after each save. The
-**look sheet** (`cmp_NNN_look.png`) shows the pair; the photograph with each
-thing outlined twice (the photo's outline yellow, the render's cyan); each
-keyed thing cropped from both pictures at one scale; and both pictures with
-the things painted out, which shows what stands behind them. Write down what
+the render beside the still at full size, render on the left, photo on the
+right, as every pair here; open it first after each save. The **look sheet**
+(`cmp_NNN_look.png`) shows the pair; with keys, the photograph with each thing
+outlined twice (the photo's outline yellow, the render's cyan) and each keyed
+thing cropped from both pictures at one scale; and both pictures with the
+things painted out, which shows what stands behind them. Write down what
 the photograph has that the render lacks, per thing and behind them (a lid
 seam, latch tabs, a label, the table top, the couch); that list is the next
 edit.
+
+The render's outlines come off the collider ray tracer, the picture off the
+path tracer: a thing drawn with a skin of its own (grains over a heap's
+particles, a mesh over a simple collider) is outlined by what collides.
 
 ### The gate
 
@@ -183,8 +188,11 @@ off its particle that moved most, so a sagging cloth or a sinking rope fails it;
 a named thing with nothing to read is listed as not measured. It steps the
 scene, then resets it to its start: a pose set with
 `eval` or reached with `run N` is not kept. `check` is refused while a routine
-plays. `--steps`, `--settle-mm` and `--penetration-mm` set the bars. The bars
-are defaults and `check` blocks nothing.
+plays. `--steps` (60), `--settle-mm` (2) and `--penetration-mm` (1) set the
+bars; each line prints the bar it was held to. The bars are defaults and
+`check` blocks nothing. The camera line holds the camera to the clip's aspect
+from `ref/timeline.json`; against a photo, `compare` says when it had to
+stretch the photo to the camera's aspect.
 
 ### The take
 
@@ -201,6 +209,9 @@ in the take: case_lid went 118 mm and ended 4 mm from its start; case went 3 mm;
 ```
 
 Nothing says whether the take did what the clip did: read that off the strip.
+A jointed thing's motion is its body that moved most: a key turning in a case
+whose base stays put is seen. An anchor pinned past the take's end is held
+against its last frame, and a line says so.
 The clip and the take need not run the same length. An anchor is matched by
 proportion, or pinned with `"sim_t"` or `"sim_step"` in the timeline. Keys,
 if the last `compare` had any or `--key` gives some, only outline the things
