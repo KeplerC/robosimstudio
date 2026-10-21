@@ -103,6 +103,28 @@ def _packed_rgba(rgb: Sequence[float]) -> int:
     return (0xFF << 24) | (b << 16) | (g << 8) | r
 
 
+@wp.kernel
+def _unpack_rgb(
+    color: wp.array4d(dtype=wp.uint32),
+    worlds: wp.array(dtype=wp.int32),
+    cameras: int,
+    out: wp.array4d(dtype=wp.uint8),
+):
+    """The packed RGBA of the chosen worlds as ``[world * cameras + camera, H, W, 3]`` bytes.
+
+    The inverse of :func:`_packed_rgba`, R the low byte. On the device because
+    dropping the alpha byte on the host is a strided numpy copy: 14 ms of a
+    15 ms render for five 1280x720 cameras, against microseconds here, and the
+    read-back that follows is three bytes a pixel rather than four.
+    """
+    k, c, y, x = wp.tid()
+    v = color[worlds[k], c, y, x]
+    row = k * cameras + c
+    out[row, y, x, 0] = wp.uint8(v & wp.uint32(0xFF))
+    out[row, y, x, 1] = wp.uint8((v >> wp.uint32(8)) & wp.uint32(0xFF))
+    out[row, y, x, 2] = wp.uint8((v >> wp.uint32(16)) & wp.uint32(0xFF))
+
+
 class RendererTiled(RendererBase):
     """Every camera in one launch, off the model's BVHs.
 
@@ -248,6 +270,15 @@ class RendererTiled(RendererBase):
                     "color": utils.create_color_image_output(width, height, n) if "rgb" in wanted else None,
                     "depth": utils.create_forward_depth_image_output(width, height, n) if "depth" in wanted else None,
                     "shape": utils.create_shape_index_image_output(width, height, n) if "seg" in wanted else None,
+                    # The colour unpacked to RGB bytes on the device, every world's
+                    # cameras one row each, and which worlds the rows hold.
+                    "rgb": (
+                        wp.empty((self.num_worlds * n, height, width, 3), dtype=wp.uint8, device=model.device)
+                        if "rgb" in wanted
+                        else None
+                    ),
+                    "rgb_worlds": wp.zeros(self.num_worlds, dtype=wp.int32, device=model.device),
+                    "rgb_chosen": None,
                 }
             )
 
@@ -280,9 +311,37 @@ class RendererTiled(RendererBase):
                 pass_["host"][slot, world] = xform_from_matrix(pose).astype(np.float32)
         pass_["transforms"].assign(pass_["host"])
 
+    def _read_rgb(self, pass_: dict, chosen: list[int]) -> np.ndarray:
+        """The chosen worlds' colour as ``[len(chosen), cameras, H, W, 3]`` uint8: one launch, one copy.
+
+        A fresh host array each call, so a caller may keep a frame past the
+        next render; every camera's frame is a view into it.
+        """
+        n, height, width = len(pass_["members"]), pass_["height"], pass_["width"]
+        if not chosen:
+            return np.zeros((0, n, height, width, 3), dtype=np.uint8)
+        if pass_["rgb_chosen"] != chosen:
+            index = np.zeros(self.num_worlds, dtype=np.int32)
+            index[: len(chosen)] = chosen
+            pass_["rgb_worlds"].assign(index)
+            pass_["rgb_chosen"] = list(chosen)
+        wp.launch(
+            _unpack_rgb,
+            dim=(len(chosen), n, height, width),
+            inputs=[pass_["color"], pass_["rgb_worlds"], n],
+            outputs=[pass_["rgb"]],
+            device=self.model.device,
+        )
+        host = pass_["rgb"][: len(chosen) * n].numpy()
+        if wp.get_device(self.model.device).is_cpu:
+            # On the CPU ``numpy()`` is the device buffer itself, which the next
+            # render overwrites under a frame its caller kept.
+            host = host.copy()
+        return host.reshape(len(chosen), n, height, width, 3)
+
     def render(self, state: newton.State) -> FrameSet:
         """One world's frames -- :attr:`world`'s. See :meth:`render_worlds`."""
-        frames = self.render_worlds(state)
+        frames = self.render_worlds(state, worlds=[self.world] if self.world < self.num_worlds else [])
         return frames[self.world] if self.world < len(frames) else {}
 
     def render_worlds(self, state: newton.State, worlds: Sequence[int] | None = None) -> list[FrameSet]:
@@ -321,6 +380,10 @@ class RendererTiled(RendererBase):
         # them -- an ``IndexError`` a pass later than the mistake, and only on a
         # rig that mixes resolutions.
         chosen = sorted(set(range(self.num_worlds) if worlds is None else (int(w) for w in worlds)))
+        if chosen and not 0 <= chosen[0] <= chosen[-1] < self.num_worlds:
+            # The unpack reads the colour buffer by these indices on the device,
+            # where an out-of-range world is a stray read rather than an IndexError.
+            raise IndexError(f"worlds {chosen} outside the renderer's {self.num_worlds}")
         out: list[FrameSet] = [{} for _ in range(self.num_worlds)]
         for pass_ in self._passes:
             self._write_transforms(pass_, body_q)
@@ -332,16 +395,16 @@ class RendererTiled(RendererBase):
                 forward_depth_image=pass_["depth"],
                 shape_index_image=pass_["shape"],
             )
-            width, height = pass_["width"], pass_["height"]
             # One read-back per channel for the whole fleet, then sliced on the
             # host: the copy is the cost, and doing it per world would pay it
-            # once per world for the same bytes.
-            colors = pass_["color"].numpy() if pass_["color"] is not None else None
+            # once per world for the same bytes. Colour is unpacked on the
+            # device first, so only the chosen worlds' RGB bytes cross.
+            colors = self._read_rgb(pass_, chosen) if pass_["color"] is not None else None
             depths = pass_["depth"].numpy() if pass_["depth"] is not None else None
             shapes = pass_["shape"].numpy() if pass_["shape"] is not None else None
 
-            for world in chosen:
-                rgb = colors[world] if colors is not None else None
+            for k, world in enumerate(chosen):
+                rgb = colors[k] if colors is not None else None
                 depth = depths[world] if depths is not None else None
                 shape = shapes[world] if shapes is not None else None
                 for slot, index in enumerate(pass_["members"]):
@@ -349,8 +412,7 @@ class RendererTiled(RendererBase):
                     frame: dict[str, np.ndarray] = {}
                     wanted = self.channels[cam.name]
                     if "rgb" in wanted:
-                        # Packed RGBA uint32, little-endian: view as bytes and drop alpha.
-                        frame["rgb"] = np.ascontiguousarray(rgb[slot].view(np.uint8).reshape(height, width, 4)[..., :3])
+                        frame["rgb"] = rgb[slot]
                     if "depth" in wanted:
                         # A miss is already cleared to 0; nan_to_num only guards against
                         # a degenerate ray, which a zero-aperture camera can produce.
