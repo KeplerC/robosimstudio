@@ -22,17 +22,36 @@ view`` -- gets the real thing, and that is its own choice.
 ``build`` is a parameter so the merge of ``BUILD`` over the default can be
 tested with no GPU: the fast tier hands in a function that records what it was
 called with, and a page hands in nothing.
+
+What the file registers -- an entity class, a cell, a gripper, a scenery --
+goes into process-wide registries that outlive the run, and a registry keeps
+the first of two registrations with the same source and refuses two that
+differ. So an edited class would be ignored on the next save and an edited
+cell refused. :class:`SceneRegistrations` notes every registration the file or
+a helper beside it makes, and takes them back before the next run.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["DOORS", "Loaded", "fallback_scene", "run_scene_file", "stamp"]
+__all__ = ["DOORS", "LIBRARY", "Loaded", "SceneRegistrations", "fallback_scene", "run_scene_file", "stamp"]
+
+LIBRARY = (
+    "robosimstudio",
+    "robosimstudio_materials",
+    "robosimstudio_studio",
+    "robosimstudio_bench",
+    "robosimstudio_policy_agent",
+    "robosimstudio_real2sim_agent",
+)
+"""The packages whose code is never the scene's own, wherever the scene file sits."""
 
 DOORS = ("view", "draw", "viewer")
 """The ``rss.`` names that would open a page of their own, held shut while the file runs."""
@@ -103,3 +122,66 @@ def fallback_scene():
     scene = rss.Scene(cell="void", name="live-fallback")
     scene.add(rss.robot("yam_i2rt"))  # a scene needs something that moves before it will build
     return scene
+
+
+def _package_dirs(names: tuple[str, ...]) -> tuple[Path, ...]:
+    dirs = []
+    for name in names:
+        try:
+            spec = importlib.util.find_spec(name)
+        except (ImportError, ValueError):
+            continue
+        for location in (spec.submodule_search_locations or []) if spec else []:
+            dirs.append(Path(location).resolve())
+    return tuple(dirs)
+
+
+@dataclass
+class SceneRegistrations:
+    """Every registry write the scene file, a helper beside it or an ``eval`` made, to take back before a rebuild.
+
+    Installed with :func:`robosimstudio.registry.watch`. A write is the scene's
+    when the first frame above the registry that is not library code is the
+    scene file, a module under its directory, or ``<eval>``: a library module
+    registering as it is first imported -- even when the scene's import set it
+    off -- is stopped at by the import machinery's frame and stays.
+    """
+
+    root: Path
+    writes: list[tuple[Any, str, Any, str]] = field(default_factory=list)
+    _library: tuple[Path, ...] = ()
+
+    def __post_init__(self) -> None:
+        self.root = Path(self.root).resolve()
+        self._library = _package_dirs(LIBRARY)
+
+    def __call__(self, registry: Any, name: str, previous: Any, origin: str) -> None:
+        if self._made_by_scene(sys._getframe(1)):
+            self.writes.append((registry, name, previous, origin))
+
+    def _made_by_scene(self, frame: Any) -> bool:
+        while frame is not None:
+            filename = frame.f_code.co_filename
+            if filename == "<eval>":
+                return True
+            if filename.startswith("<"):
+                return False  # the import machinery: a module registering as it loads
+            path = Path(filename).resolve()
+            if not any(path.is_relative_to(lib) for lib in self._library):
+                return path.is_relative_to(self.root) and "site-packages" not in path.parts
+            frame = frame.f_back
+        return False
+
+    def undo(self) -> list[str]:
+        """Take back every noted write, newest first; returns ``kind name`` for each."""
+        from robosimstudio.registry import MISSING
+
+        undone = []
+        for registry, name, previous, origin in reversed(self.writes):
+            if previous is MISSING:
+                registry.forget(name)
+            else:
+                registry.restore(name, previous, origin)
+            undone.append(f"{registry.kind} {name}")
+        self.writes.clear()
+        return undone
