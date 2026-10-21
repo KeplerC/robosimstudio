@@ -48,12 +48,14 @@ import numpy as np
 
 __all__ = [
     "after_notify",
+    "can_step_block",
     "contacts",
     "host_side",
     "mirror_notify",
     "read_gravcomp",
     "refit_bvh",
     "set_option",
+    "step_block",
     "sync_mocap",
     "write_gravcomp",
 ]
@@ -85,6 +87,74 @@ Newton skips their update on a CPU altogether."""
 def host_side(solver: Any) -> bool:
     """Whether ``solver`` steps MuJoCo's C library (a CPU build) rather than MuJoCo-Warp."""
     return bool(getattr(solver, "use_mujoco_cpu", False))
+
+
+_BLOCK_HOOKS = ("_apply_mjc_control", "_update_mjc_data", "_update_newton_state", "update_data_interval", "_step")
+"""The parts of Newton 1.7's ``SolverMuJoCo.step`` that :func:`step_block` runs once a control period instead of once
+a substep. Private, so asked for by name: a Newton that moved them loses the block step and keeps the substep loop."""
+
+
+def _stepped(solver: Any) -> Any:
+    """The ``SolverMuJoCo`` that ``solver`` steps -- itself, or the Newton side of a cosim wrapper -- else ``None``.
+
+    By type rather than by the attributes it answers to: a wrapper forwards reads
+    to the solver inside it, so it has every hook, but an *assignment* to it --
+    the step counter -- lands on the wrapper and the solver that steps never sees it.
+    """
+    from newton.solvers import SolverMuJoCo
+
+    if isinstance(solver, SolverMuJoCo):
+        return solver
+    inner = getattr(solver, "__dict__", {}).get("newton_solver")
+    return inner if isinstance(inner, SolverMuJoCo) else None
+
+
+def can_step_block(solver: Any) -> bool:
+    """Whether :func:`step_block` can drive ``solver``: MuJoCo's C library, with the hooks it needs."""
+    stepped = _stepped(solver)
+    return stepped is not None and host_side(stepped) and all(hasattr(stepped, name) for name in _BLOCK_HOOKS)
+
+
+def step_block(solver: Any, state: Any, control: Any, dt: float, substeps: int) -> None:
+    """``substeps`` MuJoCo steps of ``dt`` in one call into the C library, the Newton state synced once each way.
+
+    Newton's ``step`` on a CPU is ``mj_step`` once, wrapped in a sync each way --
+    the control and the state written into ``mj_data``, the result converted back
+    and run through forward kinematics -- and on Warp's CPU device that sync is
+    about seventy kernel launches a control period, each paying ~60 us of argument
+    packing. For a bimanual YAM that is 2.2 ms of a 2.3 ms control step around
+    0.14 ms of MuJoCo. Stepping the substeps in one ``mj_step(m, d, nstep)``
+    pays it once.
+
+    Only for a period that runs nothing between substeps (see
+    :meth:`robosimstudio.core.schedule.ScheduleExecutor.substep_block`): then the
+    sync each substep carried nothing in, since the control is constant over a
+    period and the forces were zero. What differs is that MuJoCo's float64 state
+    is no longer rounded through Newton's float32 between substeps.
+
+    Args:
+        solver: A :class:`newton.solvers.SolverMuJoCo` with ``use_mujoco_cpu``,
+            or a cosim wrapper around one (its host engines tick once a
+            period, after the body, either way).
+        state: Read for the control's targets and any edit made since the last
+            period, then overwritten with the result.
+        control: The period's control.
+        dt: One substep [s].
+        substeps: How many.
+    """
+    import mujoco
+
+    solver = _stepped(solver)
+    model = solver.model
+    solver._apply_mjc_control(model, state, control, solver.mj_data)
+    if solver.update_data_interval > 0 and solver._step % solver.update_data_interval == 0:
+        solver._update_mjc_data(solver.mj_data, model, state)
+    solver.mj_model.opt.timestep = dt
+    mujoco.mj_step(solver.mj_model, solver.mj_data, int(substeps))
+    # In place: the previous state is read joint by joint, only for the
+    # coordinates of kinematic joints that MuJoCo does not integrate.
+    solver._update_newton_state(model, state, solver.mj_data, state_prev=state)
+    solver._step += int(substeps)
 
 
 def set_option(solver: Any, param: str, value: Any) -> bool:

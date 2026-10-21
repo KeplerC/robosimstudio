@@ -57,6 +57,7 @@ from typing import Any
 import newton
 import warp as wp
 
+from . import mjdata
 from .builder import assert_even_substeps
 from .streams import capturing
 
@@ -354,6 +355,8 @@ class ScheduleExecutor:
         """Control steps that ran the substep block eagerly."""
         self.recapture_failures = 0
         """How many re-capture attempts failed."""
+        self.steps_in_one_call = 0
+        """Eager control periods stepped as one call into MuJoCo's C library (:meth:`substep_block`)."""
 
     # ------------------------------------------------------------------ shape
     @property
@@ -374,8 +377,32 @@ class ScheduleExecutor:
             if index % stage.cadence == 0:
                 stage.fn(state, dt)
 
+    def _steps_in_one_call(self) -> bool:
+        """Whether the period can be one call into MuJoCo's C library rather than a loop over substeps.
+
+        When nothing runs between substeps but the solve -- no stage in any
+        substep phase, no collision pipeline of the main model's -- the loop only
+        carries the solver's own sync each way between consecutive MuJoCo
+        steps, and :func:`~robosimstudio.core.mjdata.step_block` drops that.
+        Asked each period, so a stage added later (a dragger, a latch) puts the
+        loop back for as long as it is there.
+        """
+        if self.solver is None or (self.collision is not None and self.contacts is not None):
+            return False
+        if any(self.schedule.phases[phase] for phase in SUBSTEP_PHASES):
+            return False
+        return mjdata.can_step_block(self.solver)
+
     def substep_block(self) -> None:
         """One control period of physics, eagerly. The body of the captured graph."""
+        if not self.model.device.is_cuda and self._steps_in_one_call():
+            # Into ``state_0`` directly: the loop's even number of swaps leaves the
+            # result there too, and ``state_1`` is overwritten by its first substep.
+            self.state_0.clear_forces()
+            mjdata.step_block(self.solver, self.state_0, self.control, self.sim_dt, self.substeps)
+            self._substep_index = self.substeps - 1
+            self.steps_in_one_call += 1
+            return
         for index in range(self.substeps):
             self._substep_index = index
             self.state_0.clear_forces()

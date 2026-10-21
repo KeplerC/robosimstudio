@@ -154,6 +154,90 @@ class TestTheArmAndACubeOnTheDefaultArrangement(unittest.TestCase):
         self.assertLess(ik.pose_errors(q, target, quat)[0], 0.002)
 
 
+class TestAControlPeriodIsOneCallIntoMuJoCo(unittest.TestCase):
+    """With nothing between substeps, a period is one ``mj_step(m, d, substeps)``, and it is the loop's physics.
+
+    The loop paid Newton's sync each way around every substep, ~70 Warp launches
+    a period on the CPU: 2.6 ms of a bimanual YAM's step around 0.14 ms of MuJoCo.
+    """
+
+    def _drive(self, *, block: bool, steps: int = 60):
+        from robosimstudio.core.schedule import ScheduleExecutor
+
+        patch = (
+            contextlib.nullcontext()
+            if block
+            else unittest.mock.patch.object(ScheduleExecutor, "_steps_in_one_call", lambda self: False)
+        )
+        with patch:
+            scene, cube = _arm_and_cube(at=(0.2, 0.1, 0.05))
+            sim = scene.build()
+            try:
+                base = np.asarray(sim.idle_action("joint_position"), dtype=np.float32)
+                before = sim.pipeline.steps_in_one_call
+                qs = []
+                for k in range(steps):
+                    sim.step(base + 0.3 * np.sin(0.1 * k + np.arange(len(base))), "joint_position")
+                    qs.append(sim.state.joint_q.numpy().copy())
+                return np.array(qs), float(cube.position[2]), sim.pipeline.steps_in_one_call - before
+            finally:
+                sim.close()
+
+    def test_the_arm_and_cube_step_in_one_call_and_move_as_the_loop_moves_them(self) -> None:
+        loop_q, loop_z, loop_calls = self._drive(block=False)
+        block_q, block_z, block_calls = self._drive(block=True)
+        self.assertEqual((loop_calls, block_calls), (0, len(block_q)))
+        self.assertGreater(np.ptp(block_q, axis=0).max(), 0.1, "the arm did not move, so nothing was compared")
+        # Only float32 rounding between substeps tells them apart.
+        np.testing.assert_allclose(block_q, loop_q, atol=1e-5)
+        self.assertAlmostEqual(block_z, loop_z, delta=1e-4)
+
+    def test_a_cosim_wrapper_is_stepped_through_to_the_solver_inside_it(self) -> None:
+        """A wrapper forwards reads, so it has every hook; the step counter must still land inside it."""
+        import newton
+        import warp as wp
+
+        from robosimstudio.core import mjdata
+        from robosimstudio.scene.physics.couplers import SolverCosim
+
+        builder = newton.ModelBuilder()
+        body = builder.add_body(xform=wp.transform((0.0, 0.0, 0.5), wp.quat_identity()))
+        builder.add_shape_box(body, hx=0.05, hy=0.05, hz=0.05)
+        builder.add_ground_plane()
+        model = builder.finalize(device="cpu")
+        inner = newton.solvers.SolverMuJoCo(model, use_mujoco_cpu=True)
+        wrapper = SolverCosim(model, inner, {})
+        self.assertTrue(mjdata.can_step_block(wrapper))
+        state, control = model.state(), model.control()
+        before = inner._step
+        mjdata.step_block(wrapper, state, control, 0.002, 10)
+        self.assertEqual(inner._step, before + 10)
+        self.assertNotIn("_step", vars(wrapper))
+        self.assertLess(float(state.body_q.numpy()[body, 2]), 0.5, "ten steps of gravity moved nothing")
+        self.assertFalse(mjdata.can_step_block(object()))
+
+    def test_a_stage_between_substeps_puts_the_loop_back_while_it_is_there(self) -> None:
+        from robosimstudio.core.schedule import Stage
+
+        scene, _ = _arm_and_cube()
+        sim = scene.build()
+        try:
+            pipeline = sim.pipeline
+            calls = pipeline.steps_in_one_call
+            sim.run(2)
+            self.assertEqual(pipeline.steps_in_one_call, calls + 2)
+            ran = []
+            stage = pipeline.schedule.add(Stage(name="probe", fn=lambda state, dt: ran.append(dt), phase="post_solve"))
+            sim.run(2)
+            self.assertEqual(pipeline.steps_in_one_call, calls + 2)
+            self.assertEqual(len(ran), 2 * pipeline.substeps, "the stage ran once a substep, as the loop runs it")
+            pipeline.schedule.phases["post_solve"].remove(stage)
+            sim.run(1)
+            self.assertEqual(pipeline.steps_in_one_call, calls + 3)
+        finally:
+            sim.close()
+
+
 class TestLiveTuningOnACpu(unittest.TestCase):
     """A friction or a gain changed while the scene runs reaches the model ``mj_step`` reads.
 
