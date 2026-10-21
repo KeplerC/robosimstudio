@@ -168,6 +168,17 @@ class TestTheSlideFeedback(unittest.TestCase):
         np.testing.assert_allclose(hand, (0.0, -4.0, 0.0, 0.0, 0.0, -0.4), atol=1e-5)
 
 
+class TestTheSoftSolverIsAskedForForcesOnlyWhenTheyAreRead(unittest.TestCase):
+    """A deformable solver whose ``step`` predates Newton 1.7 takes no ``observables``: it is passed only when
+    the coupler reads contact forces."""
+
+    def test_no_keyword_without_forces_and_the_forces_with_them(self) -> None:
+        coupler = _coupler([])
+        self.assertEqual({"observables": coupler.observables}, coupler._observing())
+        coupler.observables = None
+        self.assertEqual({}, coupler._observing())
+
+
 class TestAResetForgetsTheLastPushes(unittest.TestCase):
     """The coupler's reset empties the live rigid-soft records, which the next substep would otherwise feed back."""
 

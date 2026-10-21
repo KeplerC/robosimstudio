@@ -148,6 +148,18 @@ class TestGenericRoutesTheParticleMaterials(unittest.TestCase):
         self.assertEqual("vbd", GENERIC.backend_for("cloth").solver)
 
 
+class TestTheStepKeepsNewtonsSignature(unittest.TestCase):
+    def test_step_takes_the_observables_keyword(self) -> None:
+        """A coupler that asks an entry for observables calls ``step(..., observables=...)``, as Newton 1.7 does."""
+        import inspect
+
+        from robosimstudio.engines.newton.mpm import SolverMPM
+
+        parameter = inspect.signature(SolverMPM.step).parameters["observables"]
+        self.assertIs(parameter.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIsNone(parameter.default)
+
+
 class TestTheInPlaceRateMustFitAControlStep(unittest.TestCase):
     """The host-side stride is baked into a captured graph, so the composer refuses a rate that does not fit."""
 
@@ -165,6 +177,23 @@ class TestTheInPlaceRateMustFitAControlStep(unittest.TestCase):
         for hz in (60.0, 120.0, 240.0, 480.0, 960.0, 1920.0):
             _check_in_place_rates(GENERIC, [self._island(step_hz=hz)])
         _check_in_place_rates(GENERIC, [self._island()])  # the registered default
+
+    def test_a_lone_island_is_called_once_a_substep_and_a_coupled_one_its_entry_s_substeps(self) -> None:
+        """build_bare steps a lone island once a pipeline substep, whatever its own substeps; a coupler steps an
+        entry its substeps a substep. At 60 Hz and 4 substeps, an MPM island of substeps 3 at 180 Hz is called
+        240 times a second alone (1.33 calls a step: refused) and 720 beside a robot (4 a step, 12 a control step)."""
+        from robosimstudio.scene.physics import CompositionError
+        from robosimstudio.scene.physics.compose import _check_in_place_rates
+        from robosimstudio.scene.physics.islands import Island
+        from robosimstudio.specs import backend
+        from robosimstudio.specs.physics import GENERIC, get_backend
+
+        four = GENERIC.with_(control_hz=60.0, substeps=4)
+        mpm = Island(name="mpm", backend=backend("mpm", substeps=3, step_hz=180.0), solver_class=get_backend("mpm").cls)
+        arm = Island(name="rigid", backend=backend("mujoco"), solver_class=get_backend("mujoco").cls)
+        with self.assertRaises(CompositionError):
+            _check_in_place_rates(four, [mpm])
+        _check_in_place_rates(four, [arm, mpm])
 
     def test_a_rate_that_leaves_a_fraction_is_refused_naming_the_ones_that_fit(self) -> None:
         from robosimstudio.scene.physics import CompositionError
