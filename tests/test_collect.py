@@ -88,7 +88,12 @@ class TestACollection(unittest.TestCase):
                 data = store.episode(episode)
                 self.assertEqual(data.success, episode == 0)
                 self.assertEqual(data.length, 50)  # 1 s at 50 Hz
-                self.assertEqual(data.privileged["body_q"].shape[0], 11)  # the reset, then 10 Hz for 1 s
+                # A pose a step, as the store has it, so a replay pairs it with joint_q row for row ...
+                self.assertEqual(data.privileged["body_q"].shape[0], 50)
+                self.assertEqual(len(list(data.replay_steps())), 50)
+                # ... and which step each frame shows: the reset, then 10 Hz for 1 s.
+                np.testing.assert_array_equal(data.privileged["frame_step"], [-1, *range(4, 50, 5)])
+                self.assertEqual(data.privileged["body_q_reset"].shape, data.privileged["body_q"].shape[1:])
                 self.assertEqual(sorted(data.videos()), ["front", "top"])
                 for path in data.videos().values():
                     with imageio.get_reader(str(path)) as reader:
@@ -97,17 +102,64 @@ class TestACollection(unittest.TestCase):
             again = collect(self._spec(out), verbose=False)
             self.assertEqual((again["ran"], again["skipped"]), (0, 2))
             np.testing.assert_array_equal(store.episode(1).steps["action"], first)
+            # A rerun that ran nothing keeps the run's totals rather than writing its own zeroes.
+            self.assertEqual((store.run_meta["episodes"], store.run_meta["successes"]), (2, 1))
+            self.assertEqual(store.run_meta["renderer"], "tiled")
 
     def test_a_policy_that_raises_is_reported_and_the_rest_are_written(self) -> None:
         from robosimstudio.record.collect import collect
         from robosimstudio.record.store import EpisodeStore
 
         with tempfile.TemporaryDirectory() as out:
-            summary = collect(self._spec(out, episodes=2, first=2, keep_failures=False), verbose=False)
+            summary = collect(self._spec(out, episodes=2, first=2), verbose=False)
             self.assertEqual((summary["ran"], summary["failed"]), (1, 1))
             self.assertIn("no plan for episode 3", summary["errors"][0])
+            self.assertEqual(EpisodeStore(out).episode_ids(), ["0002"])
+
+    def test_a_dropped_failure_is_not_run_again(self) -> None:
+        """Its files go, its meta.json stays: a resume skips it, and its row is not written twice."""
+        from robosimstudio.record.collect import collect
+        from robosimstudio.record.store import EpisodeStore
+
+        with tempfile.TemporaryDirectory() as out:
+            spec = self._spec(out, episodes=1, first=1, keep_failures=False)  # episode 1 reports failure
+            collect(spec, verbose=False)
+            again = collect(spec, verbose=False)
             store = EpisodeStore(out)
-            self.assertEqual(store.episode_ids(), ["0002"])
+            self.assertEqual((again["ran"], again["skipped"]), (0, 1))
+            self.assertEqual(len(store.results()), 1)
+            self.assertEqual(store.episode(1).videos(), {})
+            self.assertTrue(store.episode(1).meta["dropped"])
+
+    def test_a_worker_that_cannot_build_counts_every_episode_it_held(self) -> None:
+        from robosimstudio.record.collect import collect
+
+        with tempfile.TemporaryDirectory() as out:
+            here = Path(__file__).resolve()
+            summary = collect(self._spec(out, scene=f"{here}:no_such_scene", episodes=3), verbose=False)
+            self.assertEqual((summary["ran"], summary["failed"]), (0, 3))
+            self.assertIn("no_such_scene", summary["errors"][0])
+
+    def test_frames_faster_than_the_control_rate_are_refused(self) -> None:
+        from robosimstudio.record.collect import collect
+
+        with tempfile.TemporaryDirectory() as out:
+            summary = collect(self._spec(out, episodes=1, fps=60, workers=1), verbose=False)
+            self.assertEqual(summary["failed"], 1)
+            self.assertIn("above the scene's control rate", summary["errors"][0])
+
+
+class TestWhichGpus(unittest.TestCase):
+    def test_a_gpu_is_named_as_cuda_visible_devices_names_it(self) -> None:
+        """A UUID or a MIG slice is a GPU too; dropping it pinned every worker to nothing."""
+        from unittest import mock
+
+        from robosimstudio.record.collect import _visible_gpus
+
+        with mock.patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "GPU-8f3a, 3,MIG-1c2d"}):
+            self.assertEqual(_visible_gpus(), ("GPU-8f3a", "3", "MIG-1c2d"))
+        with mock.patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": ""}):
+            self.assertEqual(_visible_gpus(), ())
 
 
 if __name__ == "__main__":

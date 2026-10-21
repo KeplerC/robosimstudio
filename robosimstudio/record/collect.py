@@ -23,9 +23,9 @@ it between episodes.
 
 Output is the native :mod:`episode store <robosimstudio.record.store>`: an
 episode directory per episode with ``meta.json``, ``steps.npz`` (action,
-joint_q, sim_time per control step), ``privileged.npz`` (body_q per frame, the
-step each frame follows, for an offline re-render) and ``cameras/<name>.mp4``,
-and one row per episode in ``episode_results.jsonl``. An episode already on disk
+joint_q, sim_time per control step), ``privileged.npz`` (body_q per control
+step, the reset's, and the step each frame follows, for an offline re-render)
+and ``cameras/<name>.mp4``, and one row per episode in ``episode_results.jsonl``. An episode already on disk
 is skipped, so an interrupted run resumes.
 
 The two things a collection names are references, ``path/to/file.py:function``
@@ -77,12 +77,14 @@ class CollectSpec:
             without particles, else ``tiled``.
         workers: Worker processes; 0 picks from the cores, about one per six.
         gpus: The GPUs workers render on (and step on, with ``device="cuda"``),
-            round-robin. Empty uses every CUDA device; none at all leaves ``gl``
-            to OSMesa.
+            round-robin, as ``CUDA_VISIBLE_DEVICES`` names them. Empty uses every
+            one this process can see. With none at all ``gl`` has no GPU to draw
+            on, and ``MUJOCO_GL=osmesa`` rasterises in software instead.
         preset: libx264's speed preset.
         threads: Encoder threads per camera.
         keep_failures: Keep the files of an episode whose policy reported
-            failure. Its row is written either way.
+            failure. Its row and its ``meta.json`` are written either way, so a
+            resume does not run it again.
     """
 
     scene: str
@@ -97,7 +99,7 @@ class CollectSpec:
     device: str = "cpu"
     renderer: str = "auto"
     workers: int = 0
-    gpus: tuple[int, ...] = ()
+    gpus: tuple[str, ...] = ()
     preset: str = "veryfast"
     threads: int = 2
     keep_failures: bool = True
@@ -148,7 +150,7 @@ def _build(spec: CollectSpec):
         name = "tiled" if int(sim.model.particle_count) else "gl"
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:  # no context, or a visual MuJoCo will not compile
         if spec.renderer != "auto" or name != "gl":
             raise
         print(f"[collect] gl unavailable ({exc}); rendering with tiled", flush=True)
@@ -168,7 +170,8 @@ def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, 
     hz = float(sim.request.physics.control_hz)
     steps = max(1, round(float(spec.seconds) * hz))
     physics = render = encode = 0.0
-    actions, joint_q, sim_time, body_q, frame_step = [], [], [], [], []
+    actions, joint_q, body_q, sim_time, frame_step = [], [], [], [], []
+    body_q_reset = sim.state.body_q.numpy().copy()
     videos = VideoSet(out / "cameras", fps=int(spec.fps), preset=spec.preset, threads=int(spec.threads))
     next_frame = 0.0
     try:
@@ -182,6 +185,7 @@ def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, 
                 physics += time.perf_counter() - a
                 actions.append(np.asarray(action, dtype=np.float32))
                 joint_q.append(sim.state.joint_q.numpy().copy())
+                body_q.append(sim.state.body_q.numpy().copy())
                 sim_time.append((k + 1) / hz)
             if (k + 1) / hz + 1e-9 < next_frame:
                 continue
@@ -192,7 +196,6 @@ def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, 
             videos.append_frames(frames)
             render += b - a
             encode += time.perf_counter() - b
-            body_q.append(sim.state.body_q.numpy().copy())
             frame_step.append(k)
     finally:
         a = time.perf_counter()
@@ -206,8 +209,15 @@ def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, 
         joint_q=np.array(joint_q, dtype=np.float32),
         sim_time=np.array(sim_time, dtype=np.float64),
     )
+    # ``body_q`` a control step as the store has it, so a replay pairs it with
+    # ``joint_q`` row for row. Frame i shows the state after step
+    # ``frame_step[i]``, ``-1`` being ``body_q_reset``: both are anchors,
+    # recorded once, which a replay leaves out.
     np.savez_compressed(
-        out / "privileged.npz", body_q=np.array(body_q, dtype=np.float32), frame_step=np.array(frame_step)
+        out / "privileged.npz",
+        body_q=np.array(body_q, dtype=np.float32),
+        body_q_reset=np.asarray(body_q_reset, dtype=np.float32),
+        frame_step=np.array(frame_step, dtype=np.int64),
     )
     row = {
         "episode_id": int(episode),
@@ -233,11 +243,17 @@ def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, 
             for c in cameras
         },
     }
-    (out / "meta.json").write_text(json.dumps(meta, indent=2))
     if success is False and not spec.keep_failures:
+        # The files go and ``meta.json`` stays, written below: it is what a
+        # resume skips an episode by, and a failure it ran again would add a
+        # second row for the same episode.
         import shutil
 
-        shutil.rmtree(out, ignore_errors=True)
+        shutil.rmtree(out / "cameras", ignore_errors=True)
+        for name in ("steps.npz", "privileged.npz"):
+            (out / name).unlink(missing_ok=True)
+        meta["dropped"] = True
+    (out / "meta.json").write_text(json.dumps(meta, indent=2))
     return row
 
 
@@ -249,6 +265,11 @@ def _work(spec_fields: dict[str, Any], episodes: list[int], results) -> None:
     store = EpisodeStore(spec.out)
     try:
         sim, renderer, name, cameras = _build(spec)
+        hz = float(sim.request.physics.control_hz)
+        if float(spec.fps) > hz:
+            renderer.close()
+            sim.close()
+            raise ValueError(f"fps {spec.fps} is above the scene's control rate of {hz:g} Hz: a frame per step at most")
     except BaseException as exc:
         results.put({"error": f"{type(exc).__name__}: {exc}", "episodes": episodes})
         return
@@ -267,14 +288,15 @@ def _work(spec_fields: dict[str, Any], episodes: list[int], results) -> None:
 
 
 # ------------------------------------------------------------------ orchestrator
-def _visible_gpus() -> tuple[int, ...]:
+def _visible_gpus() -> tuple[str, ...]:
+    """The GPUs this process may use, as ``CUDA_VISIBLE_DEVICES`` names them -- indices, ``GPU-<uuid>`` or ``MIG-``."""
     named = os.environ.get("CUDA_VISIBLE_DEVICES")
     if named is not None:
-        return tuple(int(g) for g in named.split(",") if g.strip().isdigit())
+        return tuple(g.strip() for g in named.split(",") if g.strip())
     try:
         import warp as wp
 
-        return tuple(range(wp.get_cuda_device_count()))
+        return tuple(str(i) for i in range(wp.get_cuda_device_count()))
     except Exception:
         return ()
 
@@ -282,10 +304,13 @@ def _visible_gpus() -> tuple[int, ...]:
 def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
     """Run a collection; returns its summary, also written into ``run_meta.json``.
 
-    Each worker is a spawned process whose environment pins it before anything
-    imports Warp: ``MUJOCO_EGL_DEVICE_ID`` names its GPU for the GL context, and
-    ``CUDA_VISIBLE_DEVICES`` is that GPU on ``device="cuda"`` and empty on a CPU,
-    where a worker needs no CUDA context of its own.
+    Each worker is a spawned process pinned to one GPU, before anything imports
+    Warp, by ``CUDA_VISIBLE_DEVICES`` alone: it steps there on ``device="cuda"``,
+    and the ``gl`` renderer opens its context on the first GPU a process can see
+    (:func:`~robosimstudio.solvers.render.gl.egl_device_for`). A CPU build opens
+    no CUDA context, so pinning a CPU worker costs it nothing. A
+    ``MUJOCO_EGL_DEVICE_ID`` the caller set is not passed on: it would put every
+    worker's context on one GPU.
     """
     import multiprocessing as mp
 
@@ -297,7 +322,7 @@ def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
     wanted = list(range(int(spec.first), int(spec.first) + int(spec.episodes)))
     todo = [e for e in wanted if not (_episode_dir(out, e) / "meta.json").exists()]
-    gpus = tuple(spec.gpus) or _visible_gpus()
+    gpus = tuple(str(g) for g in spec.gpus) or _visible_gpus()
     if spec.device == "cuda" and not gpus:
         raise ValueError("device='cuda' needs a GPU, and none is visible")
     workers = int(spec.workers) or max(1, (os.cpu_count() or 2) // 6)
@@ -306,24 +331,27 @@ def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
     store = EpisodeStore(out)
     t0 = time.perf_counter()
     done: list[dict[str, Any]] = []
-    errors: list[str] = []
+    errors: list[tuple[str, int]] = []
+    """Each failure's message and how many episodes it cost."""
     if workers:
         context = mp.get_context("spawn")
         results = context.Queue()
         processes = []
         fields = asdict(spec)
         for w in range(workers):
-            env = {
+            env: dict[str, str | None] = {
                 "OMP_NUM_THREADS": "1",
                 "OPENBLAS_NUM_THREADS": "1",
                 "MKL_NUM_THREADS": "1",
             }
-            gpu = gpus[w % len(gpus)] if gpus else None
-            if gpu is not None:
-                env["MUJOCO_EGL_DEVICE_ID"] = str(gpu)
-            env["CUDA_VISIBLE_DEVICES"] = str(gpu) if spec.device == "cuda" else ""
+            env["CUDA_VISIBLE_DEVICES"] = gpus[w % len(gpus)] if gpus else ""
+            env["MUJOCO_EGL_DEVICE_ID"] = None
             saved = {k: os.environ.get(k) for k in env}
-            os.environ.update(env)
+            for k, v in env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
             try:
                 process = context.Process(target=_work, args=(fields, todo[w::workers], results), daemon=True)
                 process.start()
@@ -342,7 +370,7 @@ def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
             except Exception:
                 continue
             if "error" in item:
-                errors.append(item["error"])
+                errors.append((item["error"], len(item["episodes"])))
                 accounted += len(item["episodes"])
                 if verbose:
                     print(f"[collect] {item['error']}", flush=True)
@@ -360,27 +388,32 @@ def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
         for process in processes:
             process.join(timeout=60)
         if accounted < expected:
-            errors.append(f"{expected - accounted} episodes never reported: a worker died without saying why")
+            errors.append(("a worker died without saying why", expected - accounted))
     wall = time.perf_counter() - t0
+    # The run's totals are over every episode the store holds for it -- a
+    # resume or a rerun that finds them all on disk must not overwrite them
+    # with its own -- each episode once, by its last row.
+    rows = {int(r["episode_id"]): r for r in store.results() if int(r.get("episode_id", -1)) in set(wanted)}
     summary = {
         "episodes": len(wanted),
         "ran": len(done),
         "skipped": len(wanted) - len(todo),
-        "failed": len(errors),
-        "successes": sum(1 for r in done if r.get("success")),
+        "failed": sum(n for _, n in errors),
+        "successes": sum(1 for r in rows.values() if r.get("success")),
+        "recorded": len(rows),
         "workers": workers,
         "gpus": list(gpus),
         "wall_s": round(wall, 2),
         "episodes_per_min": round(len(done) / max(wall, 1e-9) * 60.0, 2),
         "frame_sets": sum(int(r["frames"]) for r in done),
-        "errors": errors[:20],
+        "errors": [message for message, _ in errors[:20]],
     }
     store.write_run_meta(
         RunMeta(
             run_name=out.name,
             scene=spec.scene,
             solution=spec.policy,
-            renderer=",".join(sorted({str(r["renderer"]) for r in done})) or spec.renderer,
+            renderer=",".join(sorted({str(r["renderer"]) for r in rows.values() if "renderer" in r})) or spec.renderer,
             device=spec.device,
             started=started,
             finished=time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -418,7 +451,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--device", choices=("cpu", "cuda"), default=defaults.device)
     parser.add_argument("--renderer", default=defaults.renderer, help="gl, tiled or auto")
     parser.add_argument("--workers", type=int, default=defaults.workers, help="0 picks about one per six cores")
-    parser.add_argument("--gpus", default="", help="comma-separated GPU indices; empty uses every one visible")
+    parser.add_argument("--gpus", default="", help="GPUs as CUDA_VISIBLE_DEVICES names them; empty: every one visible")
     parser.add_argument("--preset", default=defaults.preset, help="libx264 preset")
     parser.add_argument("--threads", type=int, default=defaults.threads, help="encoder threads per camera")
     parser.add_argument("--drop-failures", action="store_true", help="delete the files of failed episodes")
@@ -436,7 +469,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         device=args.device,
         renderer=args.renderer,
         workers=args.workers,
-        gpus=tuple(int(g) for g in args.gpus.split(",") if g.strip()),
+        gpus=tuple(g.strip() for g in args.gpus.split(",") if g.strip()),
         preset=args.preset,
         threads=args.threads,
         keep_failures=not args.drop_failures,

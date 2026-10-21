@@ -22,9 +22,9 @@ which gives one `joint_position` action per control step. This one reaches
 the right arm out and back, a little differently every episode, and solves
 nothing: it is where your scripted demo goes. Each episode lands in
 `outputs/many_demos/<episode>/`, with `cameras/<name>.mp4`, the actions and
-joint positions in `steps.npz`, and the body poses behind every frame in
+joint positions in `steps.npz`, and the body poses at every step in
 `privileged.npz`. For hundreds, `python -m robosimstudio.record.collect`
-runs the same two references from the shell; the line is below.
+runs the same two references from the shell; this folder's README has the line.
 
 ```bash
 uv run examples/10_datasets/00_many_demos.py
