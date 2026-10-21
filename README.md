@@ -1,6 +1,6 @@
 # <img alt="" src=".github/media/logo.png" height="44" align="top" /> RoboSimStudio
 
-[Tech report](https://arxiv.org/abs/2610.18835) | [Project Page](https://robosimstudio.github.io/) | [Installation](examples/install.md)
+[Tech report](https://arxiv.org/abs/2610.18835) | [Project Page](https://robosimstudio.github.io/) | [Examples](examples/README.md)
 
 RoboSimStudio is an open, interactive GPU simulation toolkit for rebuilding real
 robot manipulation tasks in simulation, by hand or with a coding agent.
