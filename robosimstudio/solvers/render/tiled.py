@@ -270,13 +270,12 @@ class RendererTiled(RendererBase):
                     "color": utils.create_color_image_output(width, height, n) if "rgb" in wanted else None,
                     "depth": utils.create_forward_depth_image_output(width, height, n) if "depth" in wanted else None,
                     "shape": utils.create_shape_index_image_output(width, height, n) if "seg" in wanted else None,
-                    # The colour unpacked to RGB bytes on the device, every world's
-                    # cameras one row each, and which worlds the rows hold.
-                    "rgb": (
-                        wp.empty((self.num_worlds * n, height, width, 3), dtype=wp.uint8, device=model.device)
-                        if "rgb" in wanted
-                        else None
-                    ),
+                    # The colour unpacked to RGB bytes on the device, a row per camera
+                    # of each world read, and which worlds the rows hold. Allocated on
+                    # the first read and only as large as the worlds read: a fleet's
+                    # render() reads one world, and a buffer for all of them would
+                    # hold every world's frames on the GPU for nothing.
+                    "rgb": None,
                     "rgb_worlds": wp.zeros(self.num_worlds, dtype=wp.int32, device=model.device),
                     "rgb_chosen": None,
                 }
@@ -320,6 +319,9 @@ class RendererTiled(RendererBase):
         n, height, width = len(pass_["members"]), pass_["height"], pass_["width"]
         if not chosen:
             return np.zeros((0, n, height, width, 3), dtype=np.uint8)
+        rows = len(chosen) * n
+        if pass_["rgb"] is None or pass_["rgb"].shape[0] < rows:
+            pass_["rgb"] = wp.empty((rows, height, width, 3), dtype=wp.uint8, device=self.model.device)
         if pass_["rgb_chosen"] != chosen:
             index = np.zeros(self.num_worlds, dtype=np.int32)
             index[: len(chosen)] = chosen

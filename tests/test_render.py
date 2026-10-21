@@ -326,7 +326,7 @@ class TestRenderSpec(unittest.TestCase):
             "height": height,
             "width": width,
             "color": wp.array(packed, dtype=wp.uint32, device="cpu"),
-            "rgb": wp.empty((worlds * cameras, height, width, 3), dtype=wp.uint8, device="cpu"),
+            "rgb": None,
             "rgb_worlds": wp.zeros(worlds, dtype=wp.int32, device="cpu"),
             "rgb_chosen": None,
         }
@@ -340,6 +340,11 @@ class TestRenderSpec(unittest.TestCase):
         np.testing.assert_array_equal(some, expected[[2]])
         np.testing.assert_array_equal(held, expected[0, 1])
         self.assertEqual(RendererTiled._read_rgb(renderer, pass_, []).shape, (0, cameras, height, width, 3))
+        # Sized to the most worlds ever read, not to every world the renderer has.
+        self.assertEqual(pass_["rgb"].shape[0], worlds * cameras)
+        fresh = dict(pass_, rgb=None, rgb_chosen=None)
+        RendererTiled._read_rgb(renderer, fresh, [1])
+        self.assertEqual(fresh["rgb"].shape[0], cameras)
 
     def test_explicit_kwargs_beat_the_spec(self):
         """A kwarg names one renderer; the spec describes the scene."""
