@@ -271,9 +271,7 @@ def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, 
         for name in ("steps.npz", "privileged.npz"):
             (out / name).unlink(missing_ok=True)
         meta["dropped"] = True
-        (out / _DROPPED).write_text(json.dumps(meta, indent=2))
-        return row
-    (out / "meta.json").write_text(json.dumps(meta, indent=2))
+    (out / (_DROPPED if meta.get("dropped") else "meta.json")).write_text(json.dumps(meta, indent=2))
     return row
 
 
@@ -364,8 +362,8 @@ def collect(spec: CollectSpec, *, verbose: bool = True) -> dict[str, Any]:
                 "OPENBLAS_NUM_THREADS": "1",
                 "MKL_NUM_THREADS": "1",
             }
-            env["CUDA_VISIBLE_DEVICES"] = gpus[w % len(gpus)] if gpus else ""
             if gpus:
+                env["CUDA_VISIBLE_DEVICES"] = gpus[w % len(gpus)]
                 env["MUJOCO_EGL_DEVICE_ID"] = None
             saved = {k: os.environ.get(k) for k in env}
             for k, v in env.items():
