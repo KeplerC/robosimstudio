@@ -307,6 +307,45 @@ class TestRenderSpec(unittest.TestCase):
         self.assertEqual(_packed_rgba((1.0, 0.0, 0.0)), 0xFF0000FF)
         self.assertEqual(_packed_rgba((0.0, 0.0, 1.0)), 0xFFFF0000)
 
+    def test_the_device_unpack_is_the_host_conversion_it_replaced(self):
+        """RGB bytes off the device equal dropping alpha on the host, for the worlds asked for only.
+
+        The host conversion was a strided numpy copy, 14 ms of a 15 ms render
+        for five 1280x720 cameras; the unpack must be it byte for byte, keep
+        the chosen worlds in order, and leave a held frame alone on the next read.
+        """
+        import warp as wp
+
+        from robosimstudio.solvers.render.tiled import RendererTiled
+
+        worlds, cameras, height, width = 3, 2, 3, 4
+        packed = np.random.default_rng(0).integers(0, 2**32, size=(worlds, cameras, height, width), dtype=np.uint64)
+        packed = packed.astype(np.uint32)
+        pass_ = {
+            "members": list(range(cameras)),
+            "height": height,
+            "width": width,
+            "color": wp.array(packed, dtype=wp.uint32, device="cpu"),
+            "rgb": None,
+            "rgb_worlds": wp.zeros(worlds, dtype=wp.int32, device="cpu"),
+            "rgb_chosen": None,
+        }
+        renderer = types.SimpleNamespace(num_worlds=worlds, model=types.SimpleNamespace(device="cpu"))
+        expected = packed.view(np.uint8).reshape(worlds, cameras, height, width, 4)[..., :3]
+
+        every = RendererTiled._read_rgb(renderer, pass_, [0, 1, 2])
+        np.testing.assert_array_equal(every, expected)
+        held = every[0, 1]
+        some = RendererTiled._read_rgb(renderer, pass_, [2])
+        np.testing.assert_array_equal(some, expected[[2]])
+        np.testing.assert_array_equal(held, expected[0, 1])
+        self.assertEqual(RendererTiled._read_rgb(renderer, pass_, []).shape, (0, cameras, height, width, 3))
+        # Sized to the most worlds ever read, not to every world the renderer has.
+        self.assertEqual(pass_["rgb"].shape[0], worlds * cameras)
+        fresh = dict(pass_, rgb=None, rgb_chosen=None)
+        RendererTiled._read_rgb(renderer, fresh, [1])
+        self.assertEqual(fresh["rgb"].shape[0], cameras)
+
     def test_explicit_kwargs_beat_the_spec(self):
         """A kwarg names one renderer; the spec describes the scene."""
         spec = RenderSpec(shadows=True)
