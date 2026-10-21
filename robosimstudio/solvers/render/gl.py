@@ -46,6 +46,9 @@ __all__ = ["RendererGL"]
 # CameraSpec looks down +z with +y down; a MuJoCo camera looks down -z with +y up.
 _VISION_TO_GL = np.diag([1.0, -1.0, -1.0])
 
+_DRAW_DISTANCE = 1000.0
+"""How far colour is drawn [m]: the tiled tracer's ``max_distance``, so the two agree on a horizon."""
+
 
 def _quat_wxyz(rotation: np.ndarray) -> np.ndarray:
     import mujoco
@@ -164,7 +167,9 @@ class RendererGL(RendererBase):
         # everything within a metre of a camera.
         spec.stat.extent = 1.0
         spec.visual.map.znear = min(float(c.near) for c in self.cameras)
-        spec.visual.map.zfar = max(float(c.far) for c in self.cameras)
+        # Colour out to the tiled tracer's 1000 m, so a floor runs to the horizon in
+        # both; depth past a camera's own far is still a miss (see render).
+        spec.visual.map.zfar = max(_DRAW_DISTANCE, *(float(c.far) for c in self.cameras))
         spec.visual.headlight.ambient = [0.3, 0.3, 0.3]
         spec.visual.headlight.diffuse = [0.35, 0.35, 0.35]
         spec.visual.headlight.specular = [0.0, 0.0, 0.0]
@@ -303,9 +308,10 @@ class RendererGL(RendererBase):
                     frame["rgb"] = rgb[::-1].copy()  # GL's rows run bottom-up
                 if depth is not None:
                     # The depth buffer, linearised to metres along the view axis;
-                    # the far plane is a miss, and a miss is 0.
+                    # past the far plane, or the camera's own far, is a miss: 0.
                     metres = near / (1.0 - depth[::-1] * (1.0 - near / far))
-                    frame["depth"] = np.where(depth[::-1] >= 1.0, 0.0, metres).astype(np.float32)
+                    miss = (depth[::-1] >= 1.0) | (metres > float(cam.far))
+                    frame["depth"] = np.where(miss, 0.0, metres).astype(np.float32)
             if "seg" in wanted:
                 viewport = self._draw(cam, camera_id, segment=True)
                 ids = np.empty((h, w, 3), dtype=np.uint8)
