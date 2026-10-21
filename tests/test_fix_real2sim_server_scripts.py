@@ -53,7 +53,8 @@ class SceneFileSim(unittest.TestCase):
 def _bare_server(root: Path) -> LiveServer:
     live = LiveServer.__new__(LiveServer)
     live.path = root / "scene.py"
-    live.head_steps_itself = False
+    live.head_stepped = False
+    live.busy, live.busy_since = "", 0.0
     live._suspended_arms = []
     live.script_meta = {}
     live.scripts_started = 0

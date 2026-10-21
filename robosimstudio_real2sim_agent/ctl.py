@@ -486,6 +486,27 @@ def busy_note(sock: Path) -> str:
     )
 
 
+def _ref_dir_without_a_page(run_dir: Path) -> Path | None:
+    """Where the page would put a clip's stills, ``ref/`` beside ``scene.py``, found without asking it.
+
+    The run directory sits beside ``scene.py`` (the ``ctl`` shim pins it
+    there); failing that, the directory ``ctl`` was run from holds the file.
+    """
+    for folder in (run_dir.resolve().parent, Path.cwd()):
+        if (folder / "scene.py").is_file():
+            return folder / "ref"
+    return None
+
+
+def server_log(run_dir: Path) -> Path:
+    """The log the page writes to: where ``up --log`` sent it, else ``<run-dir>/serve.log``."""
+    named = run_dir / "serve.log.path"
+    try:
+        return Path(named.read_text().strip())
+    except OSError:
+        return run_dir / "serve.log"
+
+
 def wait_until_free(sock: Path, limit: float) -> dict:
     """Poll ``status`` until the page is not busy and every save has been built; the last status."""
     start = said = time.monotonic()
@@ -678,6 +699,7 @@ def cmd_up(args: argparse.Namespace, sock: Path) -> int:
     log_path = Path(args.log) if args.log else run_dir / "serve.log"
     proc = spawn_server(serve_argv(args, sock), log_path)
     (run_dir / "serve.pid").write_text(f"{proc.pid}\n")
+    (run_dir / "serve.log.path").write_text(f"{log_path.resolve()}\n")  # where --wait reads the page's output
     try:
         ready = wait_ready(log_path, lambda: proc.poll() is None, time.monotonic() + args.timeout)
     except ServerDied as exc:
@@ -740,7 +762,7 @@ def main(argv=None) -> int:
     if args.cmd == "up":
         return cmd_up(args, sock)
     req, timeout = build_request(args, parser)
-    log = Path(args.run_dir) / "serve.log"
+    log = server_log(Path(args.run_dir))
     offset = _log_size(log)
     waiting = getattr(args, "wait", False)
     try:
@@ -751,13 +773,19 @@ def main(argv=None) -> int:
         if args.cmd == "run" and reply.get("ok") and not args.no_wait:
             reply = wait_for_steps(sock, reply, args.steps)
         if args.cmd in ("play", "eval") and waiting and reply.get("ok") and reply.get("serial"):
+            started = reply
             reply = wait_for_script(sock, reply, log, offset, args.wait_limit)
+            # what the command itself answered stays: an eval's printed output, the note that the scene is stale
+            reply.update({k: started[k] for k in ("stdout", "value", "stale") if started.get(k)})
     except NoServer:
         if args.cmd == "ref" and req.get("op") == "frames":
             # nothing about cutting stills needs the page; the stills go where the page would put them
             from . import frames
 
-            out = req["out"] or Path(args.run_dir).resolve().parent / "ref"
+            out = req["out"] or _ref_dir_without_a_page(Path(args.run_dir))
+            if out is None:
+                print("ctl: no page and no scene.py beside the run directory or here; give --out", file=sys.stderr)
+                return 2
             return show(
                 frames.cut(req["path"], at=req["at"], every=req["every"], out_dir=out, width=req["width"]), args.json
             )
