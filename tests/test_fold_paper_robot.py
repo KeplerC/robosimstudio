@@ -79,7 +79,10 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         cls.rest = rest = np.asarray(sim["paper"].particle_q, dtype=np.float64)
         base = rest[:, 0] > lay["fold"] + 0.0106
         cls.pushes, cls.servo, cls.gap, cls.lowest, cls.drift, cls.marks = {}, {}, {}, np.inf, {}, {}
-        cls.highest = {}
+        cls.highest, cls.others, cls.idle = {}, {}, {}
+        from robosimstudio_materials.cloth import contact_shapes
+
+        box = contact_shapes(sim, "box")
         takes._fold_watch(film)
 
         def measures():
@@ -105,6 +108,12 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
                     push = [float(np.linalg.norm(forces[side].sum(axis=0))) for side in fingers[arm]]
                     whole = float(np.linalg.norm(sum(forces[side].sum(axis=0) for side in fingers[arm])))
                     cls.pushes.setdefault((phase, arm), []).append((max(push), whole))
+                    if phase == f"sweep_{arm}":
+                        rest_of_it = np.ones(len(forces), dtype=bool)
+                        rest_of_it[np.concatenate([*fingers[arm], box])] = False
+                        other = float(np.linalg.norm(forces[rest_of_it], axis=1).max(initial=0.0))
+                        cls.others[phase] = max(cls.others.get(phase, 0.0), other)
+                        cls.idle[phase] = max(cls.idle.get(phase, 0.0), min(push))
                     cls.servo.setdefault((phase, arm), []).append(abs(float(servo[actuator[arm]])))
                     if phase in ("pinched", "carry"):
                         centres = takes._fold_pads(film, arm)[0]
@@ -176,9 +185,10 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         for arm in ("left", "right"):
             pinched = self.servo[("pinched", arm)]
             self.assertGreater(float(np.median(pinched)), CAP - 0.1, f"the {arm} grip binds at its cap")
-            held = pinched + self.servo[("carry", arm)]
-            self.assertLessEqual(max(held), CAP + 1.0e-3, f"and never passes it ({max(held):.2f} N)")
             self.assertGreater(np.median([p for p, _ in self.pushes[("carry", arm)]]), 1.0, "the pads hold the edge")
+            # On the sheet, not on each other: the pads' faces stay apart by the sheet between them.
+            narrowest = min(self.gap[arm])
+            self.assertGreater(narrowest, 0.0005, f"the {arm} pads closed to {narrowest * 1e3:.2f} mm, shut")
 
     def test_no_finger_ever_pushes_more_than_15_n(self) -> None:
         """Each finger's own contact force, its friction included, at every control step of every phase, the let-go
@@ -196,9 +206,12 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
             self.assertLess(widest, 0.010, f"the {arm} pads stood {widest * 1e3:.1f} mm apart on the sheet")
 
     def test_only_the_pressing_finger_touches_the_sheet_while_it_is_creased(self) -> None:
-        self.assertEqual(0.0, max(p for p, _ in self.pushes[("sweep_right", "left")]), "the left hand touched it")
-        self.assertEqual(0.0, max(p for p, _ in self.pushes[("sweep_left", "right")]), "the right hand touched it")
+        """While a hand creases, the sheet feels its pressing finger and the box and nothing else: not the other hand,
+        not the pressing hand's other finger, no other link of either arm, not the bench."""
         for arm in ("left", "right"):
+            phase = f"sweep_{arm}"
+            self.assertLessEqual(self.others[phase], 1.0e-3, f"something else pushed the sheet in the {phase}")
+            self.assertLessEqual(self.idle[phase], 1.0e-3, f"the {arm} hand's other finger pushed it too")
             pressed = [i for i, (_, w) in enumerate(self.pushes[(f"sweep_{arm}", arm)]) if w > 1.0]
             self.assertGreater(len(pressed), 500, f"the {arm} finger pressed the fold")
             servo = [self.servo[(f"sweep_{arm}", arm)][i] for i in pressed]

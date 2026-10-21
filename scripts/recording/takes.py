@@ -2175,27 +2175,26 @@ def _fold_sweep(arm: str):
 
 def fold_drive() -> list[tuple[str, Any, str]]:
     """The FOLD take's drive as ``(phase, script, mark)`` rows, its waits as the control steps they last at its
-    speed: what tests/test_fold_paper_robot.py plays headless. ``mark`` names the moment just after a row:
-    ``gone`` once both hands have left the sheet, ``plus3s`` three seconds of scene later."""
+    speed and the page's control rate: what tests/test_fold_paper_robot.py plays headless. ``mark`` names the
+    moment just after a row: ``gone`` once both hands have left the sheet, ``plus3s`` three seconds of scene later."""
     take = find("03_materials/05_paper")
-    clip = take.speed * 60.0  # control steps a second of clip
 
-    def steps(n: float):
+    def scene(seconds: float):
         def script(film):
-            yield from _wait(round(n))
+            yield from _wait(round(seconds * float(film.session.env.request.physics.control_hz)))
 
         return script
 
     return [
-        ("settle", steps(take.warmup * 60.0 + FOLD_WAITS[0] * clip), ""),  # the warm-up and the opening wait
+        ("settle", scene(take.warmup + FOLD_WAITS[0] * take.speed), ""),  # the warm-up and the opening wait
         ("reach", _fold_reach, ""),
         ("close", _fold_close, ""),
-        ("pinched", steps(FOLD_WAITS[1] * clip), ""),  # the scroll and the wait after Close
+        ("pinched", scene(FOLD_WAITS[1] * take.speed), ""),  # the scroll and the wait after Close
         ("carry", _fold_carry, "laid"),
         ("let_go", _fold_let_go, "released"),
         ("sweep_right", _fold_sweep("right"), "swept_right"),
         ("sweep_left", _fold_sweep("left"), "gone"),
-        ("watch", steps(FOLD_WAITS[2] * clip), "plus3s"),  # the closing wait: three seconds of scene
+        ("watch", scene(FOLD_WAITS[2] * take.speed), "plus3s"),  # the closing wait: three seconds of scene
     ]
 
 
@@ -2236,7 +2235,9 @@ def _paper_folded(film) -> tuple[bool, str]:
     now = np.asarray(sim["paper"].particle_q, dtype=np.float64)
     near, far = rest[:, 0] < rest[:, 0].min() + 0.003, rest[:, 0] > rest[:, 0].max() - 0.003
     gap = float(now[near, 0].mean() - now[far, 0].mean())
-    watch = getattr(film, "fold_watch", {"gap": np.inf, "left_y": 0.0, "right_y": 0.0, "turn": {}})
+    watch = getattr(film, "fold_watch", None)
+    if watch is None:
+        return False, "the arms were never watched: the take must Do(_fold_watch) before the hands move"
     turn = max(watch["turn"].values(), default=0.0)
     ok = angle >= FOLD_CREASE and abs(gap) <= 0.01 and extent < 0.65
     ok = ok and watch["gap"] >= 0.020 and watch["left_y"] >= 0.0 and watch["right_y"] <= 0.0 and turn <= 90.0

@@ -317,7 +317,7 @@ class SolverOneWay:
     One solver with the standard ``step`` signature: the rigid solver steps with
     its own contacts, the collision pipeline runs over its new body poses, and
     the deformable solver steps with ``integrate_with_external_rigid_solver=True``
-    -- the robot is a moving boundary it never pushes back on.
+    -- the robot is a moving boundary it pushes back on only along slides (below).
 
     VBD reads the new poses off ``state_out`` and the previous ones off
     ``state_in``, and its friction is the particle's slip against the difference:
@@ -352,7 +352,7 @@ class SolverOneWay:
     on a sheet then stops where the sheet pushes back with its actuator's force,
     so a hand's ``effort_limit`` is its grip; the arm itself still goes where it
     is told. Measured on the paper fold (``examples/03_materials/05_paper``): jaws
-    servoed at 100 kN/m and capped at 20 N stall on the sheet with the servo at
+    servoed at 100 kN/m and capped at 10 N stall on the sheet with the servo at
     the cap, where without the pair jaws go to their target whatever is between
     them, and a position grip on the same sheet read 30 to 120 N on its pads.
 
@@ -364,7 +364,7 @@ class SolverOneWay:
         names: ``(rigid island name, deformable island name)``.
         contact_forces: Ask the deformable solver for its contact forces every substep.
         slide_feedback: Give every slide (prismatic) joint the soft contacts' push along its axis,
-            the substep after it was pushed. See :meth:`step`.
+            the substep after it was pushed.
     """
 
     def __init__(
@@ -533,6 +533,10 @@ class SolverOneWay:
             inner.notify_model_changed(int(flags))
 
     def reset(self, state, world_mask=None, flags=None) -> None:
+        if self.observables is not None:
+            # The last episode's records would otherwise be fed to the fingers, and read as this one's forces,
+            # on the first substep after the reset; the next collide fills the buffers again.
+            self.contacts.soft_contact_count.zero_()
         for inner in (self.rigid, self.soft):
             reset = getattr(inner, "reset", None)
             if reset is None:
