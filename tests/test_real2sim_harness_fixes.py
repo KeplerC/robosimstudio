@@ -26,6 +26,7 @@ from robosimstudio.core.cameras import CameraSpec
 from robosimstudio.registry import MISSING, Registry
 from robosimstudio.solvers.render.tiled import SEG_PARTICLES, SEG_SOFT_MESH, _labels
 from robosimstudio_real2sim_agent import checks, ctl, wire
+from robosimstudio_real2sim_agent import server as server_mod
 from robosimstudio_real2sim_agent.scenefile import SceneRegistrations
 from robosimstudio_real2sim_agent.server import LiveServer
 from tests.test_fix_real2sim_frames_reset import _clip
@@ -138,6 +139,7 @@ class GateSeesDeformables(unittest.TestCase):
         self.assertFalse(rest["ok"])
         self.assertIn("rope drifted 7.90 mm in 1 steps left alone (bar 2 mm)", rest["detail"])
         self.assertIn("not measured (no position to read): ghost", rest["detail"])
+        self.assertIn("SKIP  objects", result["report"], "no names given: a line that looked at nothing")
 
 
 class TakeAccounting(unittest.TestCase):
@@ -145,6 +147,7 @@ class TakeAccounting(unittest.TestCase):
         rec = checks.Recorder.__new__(checks.Recorder)
         rec.sim = types.SimpleNamespace(step_count=100)
         rec.steps, rec._raw, rec.last_capture, rec.every = 0, 100, -1, 4
+        rec._mark = checks.reset_mark(rec.sim)
         captured: list[int] = []
         rec.capture = lambda: (rec._advance(), captured.append(rec.steps), setattr(rec, "last_capture", rec.steps))
         for step in (100, 104, 110, 2, 6, 9):  # the routine resets the scene after step 110
@@ -152,6 +155,25 @@ class TakeAccounting(unittest.TestCase):
             rec.maybe()
         self.assertEqual(captured, [0, 4, 10, 16], "a frame every four steps, the reset at 12 included")
         self.assertEqual(rec.steps, 19)
+
+    def test_a_reset_then_more_steps_than_before_in_one_go_is_still_a_reset(self) -> None:
+        sim = types.SimpleNamespace(step_count=100, settled_body_q=np.zeros(1))
+        mark = checks.reset_mark(sim)
+        sim.settled_body_q, sim.step_count = np.zeros(1), 500  # sim.reset(); sim.run(500)
+        self.assertEqual(checks.steps_since(sim, 100, mark), 500)
+
+    def test_a_long_chain_keeps_a_sample_of_its_links(self) -> None:
+        body_q = np.zeros((130, 7))
+        handles = types.SimpleNamespace(
+            objects={"cable": None}, statics={}, entity=lambda name: types.SimpleNamespace(bodies=tuple(range(120)))
+        )
+        sim = types.SimpleNamespace(
+            scene=types.SimpleNamespace(handles=handles),
+            state=types.SimpleNamespace(body_q=types.SimpleNamespace(numpy=lambda: body_q)),
+        )
+        self.assertEqual(len(checks._part_positions(sim)["cable"]), checks.PARTS_KEPT)
+        sim.state.body_q = None
+        self.assertEqual(checks._part_positions(sim), {}, "a take is never lost for want of these")
 
     def test_a_jointed_thing_records_every_body(self) -> None:
         body_q = np.zeros((4, 7))
@@ -257,7 +279,8 @@ def _server() -> LiveServer:
     live = LiveServer.__new__(LiveServer)
     live.path = Path("/nonexistent/scene.py")
     live.script, live.recorder, live.run_budget, live.last_error = [], None, 0, ""
-    live.head_stepped, live._suspended_arms = False, []
+    live.head_stepped, live._head_idle, live._suspended_arms = False, 0, []
+    live.build_error, live._tick_error = "", ""
     live.busy, live.busy_since = "", 0.0
     live._status_lock, live._status_pending = threading.Lock(), None
     live.script_meta, live.scripts_started, live.last_script = {}, 0, {}
@@ -312,7 +335,8 @@ class RoutineStepping(unittest.TestCase):
             yield  # reach: the page steps
             live.sim.step_count += 30  # sim.run(30): it steps itself
             yield
-            yield  # reach again: the page steps, through the arms
+            while True:
+                yield  # reach again: the page steps, through the arms
 
         live.start_script(both(), name="both")
         live._play()
@@ -320,6 +344,9 @@ class RoutineStepping(unittest.TestCase):
         live._play()
         self.assertFalse(live.page_steps_script())
         self.assertTrue(live.session.arms["left"].suspended)
+        for _ in range(server_mod.PAGE_AFTER - 1):
+            live._play()
+            self.assertFalse(live.page_steps_script(), "an extra yield after its own step is not stepped twice")
         live._play()
         self.assertTrue(live.page_steps_script(), "the page steps it again")
         self.assertFalse(live.session.arms["left"].suspended, "with the arms given back to drive it")
@@ -340,6 +367,24 @@ class RoutineStepping(unittest.TestCase):
         live._play()
         live._end_scripts("stopped: the scene was rebuilt")
         self.assertEqual(live.script, [])
+        self.assertIn("cleanup failed", live.last_error)
+
+    def test_an_error_raised_ending_the_routines_before_a_new_one_stays(self) -> None:
+        live = _server()
+        live.build_error, live._tick_error, live.last_error = "", "", "an old routine's failure"
+
+        def stubborn():
+            try:
+                while True:
+                    yield
+            finally:
+                raise RuntimeError("cleanup failed")
+
+        live.start_script(stubborn(), name="old")
+        live._play()
+        fake = types.SimpleNamespace(capture=lambda: None, close=lambda: None)
+        with mock.patch.object(server_mod.checks, "Recorder", lambda *a, **k: fake):
+            live.start_script(iter(range(3)), name="new", record="take2")  # ends the old one first
         self.assertIn("cleanup failed", live.last_error)
 
     def test_a_failure_is_reported_with_its_traceback(self) -> None:
@@ -459,6 +504,14 @@ class CtlWaits(unittest.TestCase):
         fake = _FakeStatus(self.sock, [busy, {"ok": True, "busy": "", "pending_save": True}, {"ok": True, "busy": ""}])
         self.addCleanup(fake.close)
         self.assertEqual(ctl.wait_until_free(self.sock, 30.0), {"ok": True, "busy": ""})
+
+    def test_a_run_waits_through_a_busy_page(self) -> None:
+        busy = {"ok": True, "busy": "rebuilding the scene file", "busy_seconds": 2.0}
+        done = {"ok": True, "busy": "", "step": 160, "time": 2.7, "paused": True, "playing": 0, "finite": True}
+        fake = _FakeStatus(self.sock, [busy, busy, {**done, "generation": 1, "resets": 0}])
+        self.addCleanup(fake.close)
+        reply = ctl.wait_for_steps(self.sock, {"step": 40, "generation": 1, "resets": 0}, 120)
+        self.assertEqual(reply["step"], 160)
 
     def test_ref_frames_needs_no_page(self) -> None:
         clip = _clip(self.tmp / "c.mp4", 2, "red")

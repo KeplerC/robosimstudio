@@ -89,6 +89,8 @@ REFRESH_SECONDS = 0.5
 """How often the ``Live`` folder's readouts are rewritten."""
 BOARD_LIMIT = 8
 """Pictures kept on the board; the oldest goes when another comes. The run directory keeps every one."""
+PAGE_AFTER = 3
+"""Passes in a row a routine that has stepped the scene itself must only yield before the page steps it."""
 SPEED_WINDOW = 5.0
 """Seconds of wall clock the ``speed`` reading in ``status`` is taken over."""
 BUSY = {
@@ -155,7 +157,9 @@ class LiveServer:
         self.script: list = []
         """Generators an ``eval`` returned, advanced one ``next()`` per loop pass."""
         self.head_stepped = False
-        """Whether the script at the head of the queue stepped the scene during its last ``next()``; if not, the page steps it."""
+        """Whether the page holds its stepping for the head script: it has stepped the scene itself lately."""
+        self._head_idle = 0
+        """Passes in a row the head script, having stepped the scene itself, only yielded."""
         self._suspended_arms: list = []
         """Arm panels suspended for a script that steps the scene itself, given back when it ends."""
         self.recorder: checks.Recorder | None = None
@@ -390,6 +394,10 @@ class LiveServer:
         return list(self.routines())
 
     def start_script(self, gen, *, name: str = "eval", record: str = "", every: int = 4, camera: str = "") -> int:
+        # an earlier routine's failure is in its last_script; this one starts clean -- what ending or
+        # finishing the ones before it raises below is new, and stays
+        if self.last_error and self.last_error not in (self.build_error, self._tick_error):
+            self.last_error = ""
         """Queue a generator to play one step per loop pass, filming it when asked.
 
         It plays whatever the Pause checkbox says, which is left as it was, so
@@ -410,14 +418,12 @@ class LiveServer:
                 recorder.close()
                 raise
             self.recorder = recorder
-        if self.last_error and self.last_error != self.build_error:
-            self.last_error = ""  # an earlier routine's failure is in last_script; this one starts clean
         self.script.append(gen)
         self.scripts_started += 1
         self.script_meta[id(gen)] = {
             "serial": self.scripts_started,
             "name": name,
-            "step": int(self.sim.step_count),
+            "steps": 0,
             "wall": time.perf_counter(),
         }
         self.run_budget = 0
@@ -471,32 +477,36 @@ class LiveServer:
         self._next_script()
 
     def _ended(self, gen, how: str, error: str = "") -> None:
-        meta = self.script_meta.pop(id(gen), None) or {"serial": 0, "name": "", "step": 0, "wall": time.perf_counter()}
+        meta = self.script_meta.pop(id(gen), None) or {"serial": 0, "name": "", "steps": 0, "wall": time.perf_counter()}
         self.last_script = {
             "serial": meta["serial"],
             "name": meta["name"],
             "how": how,
             "error": error,
-            "steps": int(self.sim.step_count) - int(meta["step"]),
+            "steps": int(meta["steps"]),
             "wall_seconds": round(time.perf_counter() - meta["wall"], 1),
         }
 
     def _next_script(self) -> None:
         """The head script is gone: give the arms back, and let the next one show how it steps."""
-        self.head_stepped = False
+        self.head_stepped, self._head_idle = False, 0
         self._resume_arms()
 
     def _play(self) -> None:
         """One step of the script at the head of the queue.
 
-        Decided again on every pass, so one routine may do both. A ``next()``
-        that stepped the scene itself holds the studio's own stepping for this
-        pass, so nothing doubles it, and the arm panels are suspended while it
-        does; one that only yielded gets the arm panels back and is stepped by
-        the page (``LiveSession.tick``).
+        A ``next()`` that steps the scene itself holds the studio's own
+        stepping, so nothing doubles it, and suspends the arm panels so they
+        do not write the joints under it. One that only yields is stepped by
+        the page (``LiveSession.tick``), through the arm panels: from the
+        start, for a routine that has never stepped the scene; after
+        :data:`PAGE_AFTER` such passes in a row, for one that has, so a routine
+        that reaches, settles with ``sim.run`` and reaches again is driven
+        either way, and one that steps itself and yields an extra time now and
+        then is not stepped twice.
         """
         gen = self.script[0]
-        before = int(self.sim.step_count)
+        before, mark = int(self.sim.step_count), checks.reset_mark(self.sim)
         try:
             with self._busy("playing one step of a routine"):
                 next(gen)
@@ -513,11 +523,18 @@ class LiveServer:
             self._next_script()
             print(f"[live] script failed:\n{self.last_error}", file=sys.stderr, flush=True)
         else:
-            self.head_stepped = int(self.sim.step_count) != before
-            if self.head_stepped:
+            stepped = checks.steps_since(self.sim, before, mark)
+            meta = self.script_meta.get(id(gen))
+            if meta is not None:
+                meta["steps"] += stepped
+            if stepped:
+                self.head_stepped, self._head_idle = True, 0
                 self._suspend_arms()
-            else:
-                self._resume_arms()
+            elif self.head_stepped:
+                self._head_idle += 1
+                if self._head_idle >= PAGE_AFTER:
+                    self.head_stepped = False
+                    self._resume_arms()
             if self.recorder is not None:
                 try:
                     self.recorder.maybe()
@@ -750,6 +767,7 @@ class LiveServer:
             "file": str(self.path),
             "run_dir": str(self.run_dir),
             "pending_save": self._pending_save(),
+            "log": _log_path(),
             "generation": self.generation,
             "playing": len(self.script),
             "last_script": self.last_script,
@@ -830,6 +848,7 @@ class LiveServer:
             "last_script": self.last_script,
             "speed": self.speed(),
             "busy": "",
+            "log": _log_path(),
             "pending_save": self._pending_save(),
             "generation": self.generation,
             "resets": self.resets,
@@ -1294,3 +1313,12 @@ class LiveServer:
 @contextmanager
 def _nothing():
     yield
+
+
+def _log_path() -> str:
+    """The file this process's output goes to (``up`` sends it to ``run/serve.log`` or ``--log``), or ``""``."""
+    try:
+        target = os.readlink("/proc/self/fd/1")
+    except OSError:
+        return ""
+    return target if target.startswith("/") and Path(target).is_file() else ""

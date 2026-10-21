@@ -383,6 +383,7 @@ class Recorder:
         self.steps = 0
         """Control steps the take has seen, counted across a reset the routine makes under it."""
         self._raw = int(self.sim.step_count)
+        self._mark = reset_mark(self.sim)
         self.last_capture = -1
 
     def close(self) -> None:
@@ -394,10 +395,9 @@ class Recorder:
                 pass
 
     def _advance(self) -> None:
-        """Count the steps taken since the last look; a step count that went down is a reset, counted from 0."""
-        step = int(self.sim.step_count)
-        self.steps += step - self._raw if step >= self._raw else step
-        self._raw = step
+        """Count the steps taken since the last look, a reset under the take counted from 0 (:func:`steps_since`)."""
+        self.steps += steps_since(self.sim, self._raw, self._mark)
+        self._raw, self._mark = int(self.sim.step_count), reset_mark(self.sim)
 
     def maybe(self) -> None:
         self._advance()
@@ -474,29 +474,49 @@ class Recorder:
         }
 
 
+PARTS_KEPT = 16
+"""Bodies a take keeps per jointed thing; a chain of more is sampled along its length."""
+
+
+def reset_mark(sim: Any) -> int:
+    """Something that changes on every ``Sim.reset``: the settled poses it records anew each time."""
+    return id(getattr(sim, "settled_body_q", None))
+
+
+def steps_since(sim: Any, step: int, mark: int) -> int:
+    """Control steps taken since ``step`` was read with ``mark``; after a reset, the steps since the reset."""
+    now = int(sim.step_count)
+    if reset_mark(sim) != mark or now < step:
+        return now
+    return now - step
+
+
 def _part_positions(sim: Any) -> dict[str, list[list[float]]]:
     """Every body of a thing that owns more than one -- a case and its lid, a lock and its key -- where it is now.
 
     A thing's position is its first body's, so a jointed thing whose base
-    stays put reads as still while its key turns or its lid opens.
+    stays put reads as still while its key turns or its lid opens. A chain of
+    many links keeps :data:`PARTS_KEPT` of them, evenly along it. Best effort:
+    a take is never lost for want of these.
     """
-    handles = getattr(getattr(sim, "scene", None), "handles", None)
-    body_q = getattr(getattr(sim, "state", None), "body_q", None)
-    if handles is None or body_q is None:
+    try:
+        handles = sim.scene.handles
+        names = [*getattr(handles, "objects", {}), *getattr(handles, "statics", {})]
+        jointed = {}
+        for name in names:
+            bodies = tuple(getattr(handles.entity(name), "bodies", ()))
+            if len(bodies) >= 2:
+                keep = np.unique(np.linspace(0, len(bodies) - 1, min(len(bodies), PARTS_KEPT)).round().astype(int))
+                jointed[name] = [bodies[i] for i in keep]
+        if not jointed:
+            return {}
+        q = np.asarray(sim.state.body_q.numpy())
+        return {
+            name: [[round(float(v), 4) for v in q[b, :3]] for b in bodies if 0 <= b < len(q)]
+            for name, bodies in jointed.items()
+        }
+    except Exception:
         return {}
-    q = None
-    out: dict[str, list[list[float]]] = {}
-    for name in [*getattr(handles, "objects", {}), *getattr(handles, "statics", {})]:
-        try:
-            bodies = tuple(handles.entity(name).bodies)
-        except Exception:
-            continue
-        if len(bodies) < 2:
-            continue
-        if q is None:
-            q = np.asarray(body_q.numpy())
-        out[name] = [[round(float(v), 4) for v in q[b, :3]] for b in bodies if 0 <= b < len(q)]
-    return out
 
 
 def load_take(run_dir: str | Path, name: str) -> tuple[dict, np.ndarray | None]:
@@ -696,8 +716,9 @@ def gate(
     wanted = list(objects or []) or [k.name for k in keys]
     checks: list[dict] = []
 
-    def add(name: str, ok: bool, detail: str) -> None:
-        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+    def add(name: str, ok: bool | None, detail: str) -> None:
+        """``ok`` None is a line that looked at nothing: SKIP, and no part of the verdict."""
+        checks.append({"name": name, "ok": None if ok is None else bool(ok), "detail": detail})
 
     # only a build's own failure: a routine, a click or a take that failed leaves last_error but not this
     build_error = server.build_error
@@ -733,7 +754,7 @@ def gate(
     missing = [n for n in wanted if n not in have]
     add(
         "objects",
-        not missing,
+        (not missing) if wanted else None,
         f"all of {', '.join(wanted)} are in the scene"
         if wanted and not missing
         else (
@@ -786,8 +807,9 @@ def gate(
     finite = bool(sim.state_is_finite())
     add("finite_after", finite, f"still finite after {steps} steps" if finite else f"went nan within {steps} steps")
 
-    passed = all(c["ok"] for c in checks)
-    report = "\n".join(f"{'PASS' if c['ok'] else 'FAIL'}  {c['name']:<12} {c['detail']}" for c in checks)
+    passed = all(c["ok"] is not False for c in checks)
+    word = {True: "PASS", False: "FAIL", None: "SKIP"}
+    report = "\n".join(f"{word[c['ok']]}  {c['name']:<12} {c['detail']}" for c in checks)
     return {
         "passed": passed,
         "checks": checks,
