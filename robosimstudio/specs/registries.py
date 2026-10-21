@@ -803,6 +803,6 @@ register_coupler(
     "one_way",
     summary=(
         "A rigid island leading a deformable one as a moving boundary: the deformable collides with the rigid "
-        "bodies (full-surface contact allowed) and never pushes back."
+        "bodies (full-surface contact allowed) and pushes back only along slide joints, with slide_feedback."
     ),
 )

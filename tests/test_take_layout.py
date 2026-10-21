@@ -114,16 +114,20 @@ class TestTheTakesReadTheNumbersTheyRestated(unittest.TestCase):
         lo, hi = scrubbed.call_args[0]
         self.assertNear(((-0.025, -0.27), (0.075, -0.17)), (_bench(film, (*lo, 0))[:2], _bench(film, (*hi, 0))[:2]))
 
-    def test_the_fold_s_sheet(self) -> None:
+    def test_the_fold_s_sheet_and_box(self) -> None:
         film = _film("03_materials/05_paper.py")
-        edge, sheet = -0.435, takes._sheet(film)  # FOLD_EDGE
-        self.assertNear(edge, sheet["edge"], "FOLD_EDGE")
-        self.assertNear(edge + 0.297 / 3, sheet["crease"], "FOLD_CREASE")
-        self.assertNear((-0.02, edge + 0.0135), sheet["pinch"], "FOLD_PINCH")
-        self.assertNear(-0.055 - 0.06, sheet["short"], "the corner the jaws come in from")
-        self.assertNear((0.05, edge + 0.262), sheet["hold"], "the left hand's hold")
-        self.assertNear((0.0, 0.055, 0.11), sheet["stamps"], "the stamps")
-        self.assertNear(-0.40, _bench(film, (0.0, takes._bench_edge(film), 0.0))[1], "the bench's edge")
+        lay = takes._fold_layout(film)
+        edge = -0.05  # the sheet's near short edge, 35 mm over the box's near edge
+        self.assertNear(edge, _bench(film, (lay["edge"], 0, 0))[0], "the sheet's near edge")
+        self.assertNear(edge + 0.297, _bench(film, (lay["far"], 0, 0))[0], "its far edge")
+        self.assertNear(edge + 0.297 / 2, _bench(film, (lay["fold"], 0, 0))[0], "the fold line")
+        self.assertNear(edge + 0.297 / 2, lay["line"], "the line crease_angle reads, in the bench frame")
+        self.assertNear(edge + 0.013, _bench(film, (lay["pinch"], 0, 0))[0], "where the pads close")
+        self.assertNear(
+            (-0.08, 0.08), [lay["hands"]["right"], lay["hands"]["left"]], "each hand 25 mm in from its corner"
+        )
+        self.assertNear(edge + 0.035, _bench(film, (lay["box_edge"], 0, 0))[0], "the box's near face")
+        self.assertNear(0.08, _bench(film, (0, 0, lay["top"]))[2], "the box's top")
 
     def test_the_rice_tray_and_pusher(self) -> None:
         film = _film("03_materials/11_granular.py", "03_materials/11_granular")
