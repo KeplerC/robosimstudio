@@ -108,11 +108,12 @@ whatever **Pause** says, one `next()` per pass, by the studio's rule:
   they do not write the joints and the gripper under it, and given back as
   found when it ends.
 
-A generator `eval` returns is taken as the first kind if its first `next()`
-only yields and as the second if it steps the scene. A routine that takes
-`session` and writes joints itself holds the panels off with
-`session.arms[...].suspend()`. The page returns to its previous state when
-the routine ends.
+A generator `eval` returns is the second kind; to drive through the page,
+bind the routine in `scene.py` with a `session` parameter and `play` it. A
+routine of the second kind that yields 300 times running without stepping is
+stopped, with a line saying why. A routine that takes `session` and writes
+joints itself holds the panels off with `session.arms[...].suspend()`. The
+page returns to its previous state when the routine ends.
 
 ## Readings
 
