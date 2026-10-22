@@ -309,7 +309,7 @@ class LiveServer:
         # Default bytecode is trusted on the source's whole-second mtime and size: an edit within the second of the
         # one it was compiled from, to the same length, would import the old code. A helper's is made hash-checked
         # instead -- the import checks it against the text, and rewrites it so when it does not match -- once per
-        # file, imported or not.
+        # file that has bytecode, imported now or not (one whose import failed left its own).
         for file in files:
             if file.suffix == ".py":
                 hash_checked(file)
@@ -326,7 +326,8 @@ class LiveServer:
         }
 
     def swap(self, loaded: Loaded) -> bool:
-        """Put a built scene into the page. False when it would not go in; a bare scene stands in then."""
+        """Put a built scene into the page. False when it would not go in: it is let go, ``loaded`` included, and
+        a bare scene stands in for it (:meth:`stand_in`)."""
         old = self.sim
         # before adopt() closes the old sim: a take's last frame is read off it
         self._finish_recorder("the scene was rebuilt")
@@ -337,12 +338,46 @@ class LiveServer:
             self.serving = "scene"
             ok = True
         except Exception as exc:
-            # adopt() closed the old scene before it failed, so there is no
-            # previous scene to keep: serve a bare one, and say why.
+            # adopt() closed the old scene before it failed, so there is no previous scene to keep
             error = traceback.format_exc()[-3000:]
             print(
                 f"[live] {self.path.name} built but would not go into the page:\n{error}", file=sys.stderr, flush=True
             )
+            self.last_error = self.build_error = error
+            self.session.status = f"rebuild failed going into the page: {type(exc).__name__}: {exc}"
+            ok = False
+        del old
+        if not ok:
+            self._let_go(loaded)
+            self.stand_in()
+            return False
+        gc.collect()
+        self.refresh_live(force=True)
+        return True
+
+    def _let_go(self, loaded: Loaded) -> None:
+        """Give back what a scene that would not go into the page holds, before a bare one is built in its place:
+        the page's panels and environment over it, its renderers, and every name for it -- the server's, and
+        ``loaded``'s own, so its model and state can be collected while the caller still holds ``loaded``. The
+        viewer keeps its model until the bare one replaces it: letting go of it there resets the camera."""
+        if self.session is not None:
+            try:
+                self.session.teardown()
+            except Exception:
+                pass
+        try:
+            loaded.sim.close()
+        except Exception:
+            pass
+        loaded.release()
+        self.ns, self.scene, self.sim = {}, None, None
+
+    def stand_in(self) -> None:
+        """A bare scene in the page in place of one that would not go in, keeping why as the error; when the bare
+        scene will not go in either, the page serves nothing, and says so."""
+        error = self.last_error
+        with self._busy("putting a bare scene in place of one that would not go into the page"):
+            gc.collect()  # the failed scene's model and state, now nothing names them
             try:
                 self._adopt(fallback_loaded())
                 self.serving = "stand-in"
@@ -352,13 +387,8 @@ class LiveServer:
                     "\n\nand the bare scene that should have replaced it failed too:\n" + traceback.format_exc()[-2000:]
                 )
                 print(f"[live] the bare scene failed too:\n{error}", file=sys.stderr, flush=True)
-            self.last_error = self.build_error = error
-            self.session.status = f"rebuild failed going into the page: {type(exc).__name__}: {exc}"
-            ok = False
-        del old
-        gc.collect()
+        self.last_error = self.build_error = error
         self.refresh_live(force=True)
-        return ok
 
     def _adopt(self, loaded: Loaded) -> None:
         # the file's names first: adopt() rebuilds the page, and its buttons are the routines the file binds
@@ -390,7 +420,7 @@ class LiveServer:
             self.refresh_live(force=True)
             return {"ok": False, "error": self.last_error}
         if not self.swap(loaded):
-            self.scene_id = "bare"
+            self.scene_id = "bare" if self.serving == "stand-in" else ""
             return {"ok": False, "error": self.last_error}
         self.scene_id = scene_id
         self.session.status = f"loaded {self.path.name} in {loaded.seconds:.1f} s"
@@ -529,8 +559,9 @@ class LiveServer:
         if self.last_error not in (self.build_error, self._tick_error):
             self.last_error = self.build_error or self._tick_error
         if record:
-            # Made and tried first: a camera that is not there, or a frame that will not film, fails before what
-            # plays, and its take, are touched.
+            # Made and tried first: a camera that is not there, a frame that will not film, or a video the encoder
+            # cannot make, fails before what plays, and its take, are touched.
+            dropping = self.recorder is not None or bool(self.script)
             recorder = None
             try:
                 recorder = checks.Recorder(self, record, camera=camera, every=every)
@@ -546,7 +577,8 @@ class LiveServer:
             self._finish_recorder("another recording started")
             self._end_scripts("dropped: another recording started")
             try:
-                recorder.start()  # its step count from here, and frame 0 (a frame like the one just filmed)
+                # its step count from here, and frame 0: the probe's, unless what was dropped may have moved things
+                recorder.start(fresh=dropping)
             except Exception:
                 recorder.close()
                 self._close(gen)
@@ -919,24 +951,22 @@ class LiveServer:
             )
             loaded = fallback_loaded()
         self.ns, self.scene, self.sim = loaded.ns, loaded.scene, loaded.sim
+        refused = ""
         try:
             self.session = LiveSession(loaded.sim, config=self.config, host=self)
         except Exception:
             if error:
                 raise  # the bare scene itself would not go in: nothing to serve
+            refused = traceback.format_exc()[-3000:]
+        if refused:
             # built, but would not go into the page: the bare scene stands in, as it does after a rebuild
-            error = traceback.format_exc()[-3000:]
+            error = refused
             print(
                 f"[live] {self.path.name} built but would not go into the page:\n{error}", file=sys.stderr, flush=True
             )
-            # what the failed scene holds goes before the stand-in is built: its renderers (the page's teardown
-            # has closed what it opened over it), and, once nothing names it, its model and state
-            failed, loaded = loaded, None
-            try:
-                failed.sim.close()
-            except Exception:
-                pass
-            del failed
+            # What the failed scene holds goes before the stand-in is built, out here where no traceback names it
+            # any more (the page's own teardown has closed what it opened over it).
+            self._let_go(loaded)
             gc.collect()
             loaded = fallback_loaded()
             self.ns, self.scene, self.sim = loaded.ns, loaded.scene, loaded.sim
@@ -973,11 +1003,17 @@ class LiveServer:
         try:
             return self.bus.call_starting_within(limit, self.dispatch, request)
         except BusTimeout:
-            busy = self.busy_state[0] or "busy"
+            busy, _, routine = self.busy_state
+            then = (
+                "it goes in between two of the routine's steps, so send it again once the routine ends "
+                "(`play --wait` waits for that), or send `quit`, `reset` or `pause`, which wait 5.5 minutes for a "
+                "step to end; a step that never ends: stop the server by the pid in serve.pid in the run directory"
+                if routine
+                else "`./ctl status --wait`, then send it again"
+            )
             return {
                 "ok": False,
-                "error": f"the page was {busy} past the wait; `{request.get('cmd')}` was not run "
-                "-- `./ctl status --wait`, then send it again",
+                "error": f"the page was {busy or 'busy'} past the wait; `{request.get('cmd')}` was not run -- {then}",
             }
         except BusClosed:
             return {"ok": False, "error": "server shutting down"}
