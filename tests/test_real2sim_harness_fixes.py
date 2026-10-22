@@ -624,7 +624,7 @@ class StartUpStandIn(unittest.TestCase):
                 pass
 
         bare = types.SimpleNamespace(ns={}, scene="bare", sim="the bare scene", seconds=0.0)
-        live.load = lambda files=None: types.SimpleNamespace(ns={}, scene="twin", sim="the twin", seconds=1.0)  # type: ignore[method-assign]
+        live.load = lambda files=None: Loaded(ns={}, scene="twin", sim="the twin", seconds=1.0)  # type: ignore[method-assign]
         live.refresh_live = lambda force=False: None  # type: ignore[method-assign]
         self.addCleanup(registry.unwatch, live.registrations)
         self.addCleanup(lambda: sys.path.remove(str(folder.resolve())) if str(folder.resolve()) in sys.path else None)
@@ -754,7 +754,9 @@ class RoutineStepping(unittest.TestCase):
     def test_a_recording_under_an_old_take_name_does_not_count_as_written(self) -> None:
         live = _server()
         live.takes_written = ["take1", "take0"]
-        fake = types.SimpleNamespace(start=lambda: None, probe=lambda: None, close=lambda: None, name="take1")
+        fake = types.SimpleNamespace(
+            start=lambda fresh=False: None, probe=lambda: None, close=lambda: None, name="take1"
+        )
         with mock.patch.object(server_mod.checks, "Recorder", lambda *a, **k: fake):
             live.start_script(iter(range(3)), name="again", record="take1")
         self.assertEqual(live.takes_written, ["take0"])
@@ -827,7 +829,7 @@ class RoutineStepping(unittest.TestCase):
 
         live.start_script(stubborn(), name="old")
         live._play()
-        fake = types.SimpleNamespace(start=lambda: None, probe=lambda: None, close=lambda: None)
+        fake = types.SimpleNamespace(start=lambda fresh=False: None, probe=lambda: None, close=lambda: None)
         with mock.patch.object(server_mod.checks, "Recorder", lambda *a, **k: fake):
             live.start_script(iter(range(3)), name="new", record="take2")  # ends the old one first
         self.assertIn("cleanup failed", live.last_error)
@@ -1419,10 +1421,6 @@ class TwinFolder(unittest.TestCase):
         self.assertIn(str(self.live / "scene.py"), printed[0])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TheSceneThatWouldNotGoIn(unittest.TestCase):
     """A scene that builds but will not go into the page is given back before the bare one is built in its place."""
 
@@ -1434,7 +1432,8 @@ class TheSceneThatWouldNotGoIn(unittest.TestCase):
         def close(self) -> None:
             self.closed.append("sim")
 
-    def test_a_rebuild_lets_it_go_before_the_stand_in_is_built(self) -> None:
+    def _rebuild(self, bare_builds: bool = True) -> tuple:
+        """A rebuild whose scene will not go in; what the stand-in's build saw, the reply and the server."""
         live = _server()
         made: list = []
         closed: list[str] = []
@@ -1447,6 +1446,8 @@ class TheSceneThatWouldNotGoIn(unittest.TestCase):
         def bare() -> types.SimpleNamespace:
             gc.collect()
             seen.append((made[0]() is None, list(closed), live.sim))
+            if not bare_builds:
+                raise RuntimeError("the bare scene failed")
             return types.SimpleNamespace(ns={}, scene="bare", sim="the bare scene", seconds=0.0)
 
         live.session = types.SimpleNamespace(
@@ -1454,9 +1455,9 @@ class TheSceneThatWouldNotGoIn(unittest.TestCase):
             begin_run=lambda: None,
             status="",
             teardown=lambda: closed.append("teardown"),
-            viewer=types.SimpleNamespace(set_model=lambda model: closed.append(f"viewer {model}")),
+            viewer=types.SimpleNamespace(set_model=lambda model: closed.append("the viewer let go: the camera resets")),
         )
-        live.generation, live.ns, live.scene = 0, {}, None
+        live.generation, live.ns, live.scene = 0, {"routine": None}, None
         live._end_scripts = lambda why: None  # type: ignore[method-assign]
         live._end_run = lambda why, hold=False: None  # type: ignore[method-assign]
         live.refresh_live = lambda force=False: None  # type: ignore[method-assign]
@@ -1468,11 +1469,20 @@ class TheSceneThatWouldNotGoIn(unittest.TestCase):
             mock.patch("builtins.print"),
         ):
             reply = live.reload("saved")
-        self.assertEqual(seen, [(True, ["teardown", "viewer None", "sim"], None)], "nothing of it held while building")
+        return seen, reply, live
+
+    def test_a_rebuild_lets_it_go_before_the_stand_in_is_built(self) -> None:
+        seen, reply, live = self._rebuild()
+        self.assertEqual(seen, [(True, ["teardown", "sim"], None)], "nothing of it held, the camera where it was")
         self.assertEqual(
             (reply["ok"], live.serving, live.scene_id, live.sim), (False, "stand-in", "bare", "the bare scene")
         )
         self.assertIn("adopt failed", live.last_error)
+
+    def test_when_the_bare_scene_fails_too_nothing_is_served_and_the_names_stay_usable(self) -> None:
+        _seen, reply, live = self._rebuild(bare_builds=False)
+        self.assertEqual((reply["ok"], live.serving, live.scene_id, live.ns), (False, "nothing", "", {}))
+        self.assertIn("the bare scene that should have replaced it failed too", live.last_error)
 
     def test_at_start_up_it_is_let_go_before_the_stand_in_is_built(self) -> None:
         from robosimstudio_studio.session import StudioConfig
@@ -1517,34 +1527,39 @@ class TheSceneThatWouldNotGoIn(unittest.TestCase):
 
 
 class TakeProbe(unittest.TestCase):
-    def _recorder(self, height: int = 540) -> checks.Recorder:
+    def _recorder(self) -> checks.Recorder:
         rec = checks.Recorder.__new__(checks.Recorder)
         rec.sim = types.SimpleNamespace(step_count=7, reset_count=0)
-        rec.cam = types.SimpleNamespace(name="side")
         rec._probed = None
-        rec.looks = []
-        rec._look = lambda: (rec.looks.append(1), (np.zeros((height, 960, 3), np.uint8), "seg", None))[1]
-        rec.captured = []
+        rec.looks, rec.encoded, rec.captured = [], [], []
+        rec._look = lambda: (rec.looks.append(1), (np.zeros((540, 960, 3), np.uint8), "seg", None))[1]
+        rec.writer = types.SimpleNamespace(try_encode=lambda frame: rec.encoded.append(frame.shape))
         rec.capture = lambda look=None: rec.captured.append(look)
         return rec
 
-    def test_a_video_the_encoder_cannot_make_fails_the_probe(self) -> None:
-        with mock.patch("robosimstudio.core.render.video.ffmpeg_exe", return_value="/bin/true"):
-            with self.assertRaisesRegex(ValueError, "even width and height"):
-                self._recorder(height=541).probe()
-        with mock.patch("robosimstudio.core.render.video.ffmpeg_exe", return_value="/nonexistent/ffmpeg"):
-            with self.assertRaisesRegex(FileNotFoundError, "no ffmpeg"):
-                self._recorder().probe()
-
-    def test_frame_0_is_the_probes_unless_the_scene_stepped_since(self) -> None:
+    def test_the_probe_encodes_its_frame_once(self) -> None:
         rec = self._recorder()
-        with mock.patch("robosimstudio.core.render.video.ffmpeg_exe", return_value="/bin/true"):
+        rec.probe()
+        self.assertEqual(rec.encoded, [(540, 960, 3)])
+
+        def refuse(frame) -> None:
+            raise RuntimeError("ffmpeg cannot encode take.mp4")
+
+        rec.writer.try_encode = refuse
+        with self.assertRaisesRegex(RuntimeError, "cannot encode"):
             rec.probe()
-            rec.start()
-            self.assertEqual((len(rec.looks), rec.captured[-1][1]), (1, "seg"), "rendered once")
-            rec.probe()
-            rec.sim.step_count += 1  # what was dropped stepped the scene as it cleaned up
-            rec.start()
+
+    def test_frame_0_is_the_probes_unless_the_scene_may_have_moved_since(self) -> None:
+        rec = self._recorder()
+        rec.probe()
+        rec.start()
+        self.assertEqual((len(rec.looks), rec.captured[-1][1]), (1, "seg"), "rendered once")
+        rec.probe()
+        rec.sim.step_count += 1  # what was dropped stepped the scene as it cleaned up
+        rec.start()
+        self.assertIsNone(rec.captured[-1], "filmed afresh")
+        rec.probe()
+        rec.start(fresh=True)  # a dropped routine's cleanup may move things without a step
         self.assertIsNone(rec.captured[-1], "filmed afresh")
 
 
@@ -1584,5 +1599,10 @@ class HeldUpByARoutine(unittest.TestCase):
         reply = live._on_request({"cmd": "quit", "timeout": ctl.TIMEOUTS["quit"]})
         self.assertIn("between two of the routine's steps", reply["error"])
         self.assertNotIn("status --wait", reply["error"], "which does not wait out a routine")
+        self.assertIn("serve.pid", reply["error"], "the way out of a step that never ends")
         for cmd in ("quit", "reset", "pause", "resume"):
             self.assertGreaterEqual(ctl.TIMEOUTS[cmd], ctl.TIMEOUTS["reload"], f"{cmd} waits out a long step")
+
+
+if __name__ == "__main__":
+    unittest.main()

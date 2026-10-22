@@ -82,28 +82,39 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
   the viewer `rss.viewer` returns is not).
 - Poses are in the work-surface frame. See [Frames and units](#frames-and-units).
 - The light is `rss.Scene(..., render=...)`; left out, it is the house room.
-  To light a twin, start from the lab room and change what the path tracer
-  reads -- it draws every `snapshot`, `compare` and take:
+  Which fields count depends on the renderer that draws every `snapshot`,
+  `compare` and take: the path tracer where the GPU has RT cores and ovrtx is
+  installed, else the tiled tracer.
+  - The path tracer, under `environment="lab"`, lights the scene with one
+    soft panel overhead and a neutral dome. Start from the lab room and
+    change what it reads:
 
-  ```python
-  from dataclasses import replace
-  from robosimstudio.core.render.room import LAB
+    ```python
+    from dataclasses import replace
+    from robosimstudio.core.render.room import LAB
 
-  scene = rss.Scene(..., render=replace(LAB, key_intensity=1.6, ambient=(1.2, 1.2, 1.2), scenery=""))
-  ```
+    scene = rss.Scene(..., render=replace(LAB, key_intensity=1.6, ambient=(1.2, 1.2, 1.2)))
+    ```
 
-  Under `LAB` (`environment="lab"`) the light is one soft panel overhead and a
-  neutral dome: `key_intensity` scales the panel and `ambient` the dome, by
-  its mean (the dome stays neutral). `scenery` is what stands past the bench
-  (`"lab"`, this lab's slats and glazing; `""` for nothing), and `quality` is
-  `"preview"` (6 passes a frame) or `"final"` (12, less flicker in a take).
-  The path tracer does not read `light_direction`, `fill_lights`, `shadows`
-  or `background`, and draws nothing from `environment_map`: a window or a
-  backdrop the clip shows is a thing in the scene (a pane, a photo on a
-  slab), and a direction, a warmth or a shadow it cannot make goes in the
-  report. A `RenderSpec` given whole keeps none of the room -- each field it
-  leaves out is the renderer's own default -- hence `replace(LAB, ...)`. The
-  page draws its own way: judge the light on the pair.
+    `key_intensity` scales the panel and `ambient` the dome, by its mean (the
+    dome stays neutral); `quality` is `"preview"` (6 passes a frame) or
+    `"final"` (12, less flicker in a take). It reads no `light_direction`,
+    `fill_lights`, `shadows` or `background`, and draws nothing from
+    `environment_map` (setting one only dims the dome).
+  - `scenery` is the room it draws around the bench. `LAB`'s is this lab's:
+    a gridded mat over the bench top, two white posts at its far corners, a
+    black apron along its near edge, and slats and glazing 60 mm past its far
+    edge -- a camera further out than them sees the back of a wall, black.
+    `""` draws none, and past the bench is then dark. Either way, a wall, a
+    window or a backdrop the clip shows is a thing in the scene (a slab, a
+    pane, a photo on a slab).
+  - The tiled tracer reads `light_direction`, `fill_lights`, `shadows` and
+    `background` instead, and draws no panel, dome or scenery.
+
+  A `RenderSpec` given whole keeps none of the room -- each field it leaves
+  out is the renderer's own default -- hence `replace(LAB, ...)`. A
+  direction, a warmth or a shadow the renderer cannot make goes in the
+  report. The page draws its own way: judge the light on the pair.
 - Bind `routine` (a callable taking the built `sim`, and the page's `session`
   if it declares one, returning a generator), or `routines`, a dict of name to
   such callables, and the page grows a **Run** button per routine with a

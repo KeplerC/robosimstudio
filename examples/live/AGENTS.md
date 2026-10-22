@@ -27,7 +27,7 @@ than guessing a constructor or a name.
   Everything the twin needs goes in that folder -- `scene.py`, its helper
   modules beside it or in a folder of them at most two down (not under
   `run/`, `ref/`, `assets/`, `twins/`, a hidden folder or one named
-  `robosimstudio*`, and not named `robosimstudio*.py` itself: REFERENCE,
+  `robosimstudio*`, and not a `robosimstudio*.py` beside `scene.py`: REFERENCE,
   *How it works*), `assets/`, `ref/` -- and the report in its `REPORT.md`; a
   scratch script goes in its `run/`. Nothing goes in this folder's own files,
   the library, `tests/`, the repository root or `/tmp`: the twin's folder is
@@ -71,10 +71,11 @@ than guessing a constructor or a name.
   (a lid seam, latch tabs, a label, a chamfer, a colour, a texture), what
   stands behind it (table top, floor, wall, furniture, a window) and how it
   is lit (where the light comes from, how bright and how warm, which way the
-  shadows fall, what shines): that list is your next edit. Key what keys
-  cleanly, typically the thing the robot handles; a colour key that outlines
-  a fragment measures nothing, and a mask (`gasket=mask:ref/gasket.png`) is
-  the way round it.
+  shadows fall, what shines): that list is your next edit, the light as far
+  as `render=` reaches it (REFERENCE, *The contract for `scene.py`*) and the
+  rest for the report. Key what keys cleanly, typically the thing the robot
+  handles; a colour key that outlines a fragment measures nothing, and a
+  mask (`gasket=mask:ref/gasket.png`) is the way round it.
 - `./ctl check --camera <name> [--key ...]`: PASS/FAIL with its number for
   builds, finite, camera aspect, things present, worst overlap, and drift
   when left alone. Advisory: explain any FAIL you accept, with the number.
@@ -120,10 +121,11 @@ on every twin so far:
   size and place, through a camera where the clip's was, and to your own eye
   on the pair and the look sheet it looks like the clip: the things in their
   detail and what stands behind them, with their colours and textures, under
-  light as close to the clip's as the renderer can make it -- as bright, a
-  window or a lamp the clip shows built in -- through the scene's `render=`
-  (REFERENCE, *The contract for `scene.py`*). Where the light still differs
-  (its direction, its warmth, the shadows it casts) the report says so.
+  light as close to the clip's as the renderer can make it: as bright,
+  through the scene's `render=`, with a window or a lamp the clip shows
+  built as a thing in the scene (REFERENCE, *The contract for `scene.py`*).
+  Where the light still differs (its direction, its warmth, the shadows it
+  casts) the report says so.
 - The robot moves things only through its fingers' contact: no pose written
   onto a thing, no latch, weld, attachment, dragger or spring, no motor on the
   thing's own joints, no finger colliders added. If the gripper needs

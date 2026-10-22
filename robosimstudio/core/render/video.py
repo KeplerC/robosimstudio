@@ -167,6 +167,46 @@ class VideoWriter:
         self._finish = None
         self._shape: tuple[int, int] | None = None
 
+    def _command(self, height: int, width: int, output: list[str]) -> list[str]:
+        """The ffmpeg command that encodes ``height`` x ``width`` RGB frames from stdin to ``output``. An odd size
+        is padded by a pixel of black to the even one ``yuv420p`` needs, rather than refused by libx264."""
+        if not 1 <= self.quality <= 10:
+            raise ValueError(f"quality must be 1..10, got {self.quality}")
+        crf = int((1.0 - self.quality / 10.0) * 51)
+        return [
+            ffmpeg_exe(), "-y", "-loglevel", "error",
+            "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(self.fps),
+            "-i", "-", "-an",
+            *(["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"] if width % 2 or height % 2 else []),
+            "-vcodec", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf), "-preset", self.preset,
+            *(["-threads", str(self.threads)] if self.threads else []),
+            *output,
+        ]  # fmt: skip
+
+    def try_encode(self, frame: np.ndarray) -> None:
+        """Encode ``frame`` once, to nowhere, and wait for it: an ffmpeg that is missing or cannot make this video
+        raises here, with its own message, instead of after frames were queued (its errors otherwise arrive only
+        at a later :meth:`append` or at :meth:`close`). Writes no file."""
+        import subprocess
+
+        frame = np.ascontiguousarray(frame, dtype=np.uint8)
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            raise ValueError(f"a video frame is [H, W, 3] uint8, got {frame.shape}")
+        height, width = frame.shape[:2]
+        try:
+            done = subprocess.run(
+                self._command(height, width, ["-f", "null", "-"]),
+                input=frame.tobytes(),
+                capture_output=True,
+                timeout=120,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"ffmpeg could not be run to encode {self.path}: {exc}") from exc
+        if done.returncode != 0:
+            detail = done.stderr.decode(errors="replace").strip()[-2000:]
+            raise RuntimeError(f"ffmpeg cannot encode {self.path} ({width}x{height}): {detail or done.returncode}")
+
     def _open(self, height: int, width: int) -> None:
         """Start ffmpeg on the first frame, which is the first time the size is known."""
         import subprocess
@@ -174,17 +214,7 @@ class VideoWriter:
         import threading
         import weakref
 
-        if not 1 <= self.quality <= 10:
-            raise ValueError(f"quality must be 1..10, got {self.quality}")
-        crf = int((1.0 - self.quality / 10.0) * 51)
-        command = [
-            ffmpeg_exe(), "-y", "-loglevel", "error",
-            "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(self.fps),
-            "-i", "-", "-an",
-            "-vcodec", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf), "-preset", self.preset,
-            *(["-threads", str(self.threads)] if self.threads else []),
-            str(self.path),
-        ]  # fmt: skip
+        command = self._command(height, width, [str(self.path)])
         # ffmpeg's messages go to a file, not a pipe: a pipe nobody reads until
         # close fills at 64 KB, ffmpeg stops reading its input to wait on it, and
         # the feeding thread and then append() wait on ffmpeg -- a hang, not an error.

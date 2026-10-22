@@ -179,7 +179,7 @@ class FakeRecorder:
     def capture(self) -> None:
         self.frames.append(-1)
 
-    def start(self) -> None:
+    def start(self, fresh: bool = False) -> None:
         self.capture()
 
     def probe(self) -> None:
@@ -252,9 +252,12 @@ class ScriptQueue(unittest.TestCase):
         self.live._finish_recorder = lambda why: order.append("take")  # type: ignore[method-assign]
         self.live._end_scripts = lambda how: order.append("scripts")  # type: ignore[method-assign]
         started = FakeRecorder.start
-        with mock.patch.object(FakeRecorder, "start", lambda rec: (order.append("start"), started(rec))):
+        with mock.patch.object(
+            FakeRecorder, "start", lambda rec, fresh=False: (order.append(f"start fresh={fresh}"), started(rec, fresh))
+        ):
             self.live.start_script(iter(range(3)), record="t2")
-        self.assertEqual(order, ["take", "scripts", "start"], "the new take starts after their cleanup")
+        # after their cleanup, and filmed afresh: the cleanup may have moved things without a step
+        self.assertEqual(order, ["take", "scripts", "start fresh=True"])
 
     def test_a_routine_whose_cleanup_calls_exit_is_stopped_and_the_page_goes_on(self) -> None:
         def leave():

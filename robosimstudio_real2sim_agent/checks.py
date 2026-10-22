@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -423,30 +422,21 @@ class Recorder:
         return rgb, seg, q
 
     def probe(self) -> None:
-        """Film one frame, before anything the take would replace is touched: a camera, a renderer or an id lookup
-        that fails, fails here, and so does a video the encoder cannot make (ffmpeg is started on frame 0, and its
-        own errors arrive after that). The frame is kept for :meth:`start`."""
-        from robosimstudio.core.render.video import ffmpeg_exe
-
+        """Film one frame and encode it once, before anything the take would replace is touched: a camera, a
+        renderer, an id lookup or a video encoder that fails, fails here. The frame is kept for :meth:`start`."""
         look = self._look()
-        height, width = np.asarray(look[0]).shape[:2]
-        if height % 2 or width % 2:
-            raise ValueError(
-                f"camera {self.cam.name!r} films {width}x{height}: a take's video needs an even width and height "
-                "(libx264 in yuv420p)"
-            )
-        exe = ffmpeg_exe()  # imageio-ffmpeg's raises when it has none
-        if shutil.which(exe) is None:
-            raise FileNotFoundError(f"no ffmpeg at {exe!r} to encode the take")
+        self.writer.try_encode(look[0])
         self._probed = (int(self.sim.step_count), reset_mark(self.sim), look)
 
-    def start(self) -> None:
+    def start(self, fresh: bool = False) -> None:
         """Take the scene as it stands as the take's beginning: its step count from here, and frame 0 -- the
-        probe's, when the scene has not stepped since, rather than the same picture rendered again."""
+        probe's, rather than the same picture rendered again, unless the scene has stepped since or ``fresh``
+        says something else may have moved it (a dropped routine's cleanup moves things without a step)."""
         self._raw, self._mark, self.steps = int(self.sim.step_count), reset_mark(self.sim), 0
         self.started = time.perf_counter()
         probed, self._probed = self._probed, None
-        self.capture(probed[2] if probed is not None and probed[:2] == (self._raw, self._mark) else None)
+        same = not fresh and probed is not None and probed[:2] == (self._raw, self._mark)
+        self.capture(probed[2] if same else None)
 
     def close(self) -> None:
         """Close the video writer and the id renderer; safe to call twice."""

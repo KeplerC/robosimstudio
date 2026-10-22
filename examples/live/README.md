@@ -53,7 +53,7 @@ holds memory on every card), and use `--share` or an SSH tunnel
 (`ssh -L 8080:localhost:8080 <box>`). The page listens on all interfaces
 (viser's default), so on a shared network firewall the port or use the
 tunnel. `./ctl quit` stops the server once a build, a render or a routine's
-step under way ends.
+step under way ends, if that is within 5.5 minutes.
 
 The method is in `AGENTS.md`, so the prompt only has to say what to build; one
 line naming the clip or the photo is enough. The prompts below say more, for

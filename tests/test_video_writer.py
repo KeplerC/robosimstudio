@@ -9,9 +9,11 @@ and an error when the encoder fails rather than a short video.
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -105,6 +107,31 @@ class TestTheWriter(unittest.TestCase):
                 for frame in _frames(40):
                     writer.append(frame)
                 writer.close()
+
+    def test_an_odd_size_is_padded_to_an_even_one_rather_than_refused(self) -> None:
+        import imageio.v2 as imageio
+
+        from robosimstudio.core.render.video import VideoWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "clip.mp4"
+            with VideoWriter(path, fps=10, preset="ultrafast") as writer:
+                writer.try_encode(_frames(1, height=47, width=63)[0])
+                for frame in _frames(5, height=47, width=63):
+                    writer.append(frame)
+            self.assertEqual(imageio.get_reader(str(path)).get_data(0).shape[:2], (48, 64))
+
+    def test_a_trial_encode_raises_what_the_encoder_says_and_writes_nothing(self) -> None:
+        from robosimstudio.core.render.video import VideoWriter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = VideoWriter(Path(tmp) / "clip.mp4", fps=10, preset="no-such-preset")
+            with self.assertRaisesRegex(RuntimeError, "cannot encode .*clip.mp4"):
+                writer.try_encode(_frames(1)[0])
+            with mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_FFMPEG": str(Path(tmp) / "no-ffmpeg")}):
+                with self.assertRaisesRegex(RuntimeError, "could not be run"):
+                    writer.try_encode(_frames(1)[0])
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
     def test_an_ffmpeg_that_talks_a_lot_does_not_hang_the_writer(self) -> None:
         """More than a pipe's 64 KB of messages, and nobody reading them until close, must not stop the encode."""
