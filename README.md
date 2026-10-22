@@ -6,8 +6,25 @@ RoboSimStudio is an open, interactive GPU simulation toolkit for rebuilding real
 robot manipulation tasks in simulation, by hand or with a coding agent.
 
 <p align="center">
-  <img alt="Forty-eight manipulation tasks built with RoboSimStudio, playing side by side" src=".github/media/splash.webp" width="100%" />
+  <img alt="Twenty robot manipulation tasks built with RoboSimStudio, playing side by side" src=".github/media/splash.webp" width="100%" />
 </p>
+
+## News
+
+- **2026/10/22** Real-to-sim with Codex: a coding agent works from
+  [`examples/live/AGENTS.md`](examples/live/AGENTS.md), builds each twin in a
+  folder of its own, and moves things only through the robot's fingers.
+- **2026/10/21** Many demos at once, physics on the CPU and GL rendering: 500
+  demos of 20 s, filmed by five 1280×720 cameras, in 4.2 min on one GPU
+  (a plain MuJoCo + OpenGL setup takes 7.6 min).
+- **2026/10/21** Fifteen kinds of material in `robosimstudio_materials`, each
+  with a robot example in [`examples/03_materials`](examples/03_materials),
+  among them rope, knots, paper, bags, brushes, tape, cutting, granular,
+  liquid, dough and water, on Newton 1.7.
+- **2026/10/18** CPU-only support: the `cpu` extra
+  ([installation](examples/install.md)) runs with no GPU. An arm and a cube
+  step at 9× real time, and a cable grasp at 1.4–1.6× (AMD EPYC 9555).
+- **2026/10/14** First public release.
 
 ## Quick start
 
