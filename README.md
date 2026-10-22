@@ -9,22 +9,12 @@ robot manipulation tasks in simulation, by hand or with a coding agent.
   <img alt="Twenty robot manipulation tasks built with RoboSimStudio, playing side by side" src=".github/media/splash.webp" width="100%" />
 </p>
 
-## News
-
-- **2026/10/22** Real-to-sim with Codex: a coding agent works from
-  [`examples/live/AGENTS.md`](examples/live/AGENTS.md), builds each twin in a
-  folder of its own, and moves things only through the robot's fingers.
-- **2026/10/21** Many demos at once, physics on the CPU and GL rendering: 500
-  demos of 20 s, filmed by five 1280×720 cameras, in 4.2 min on one GPU
-  (a plain MuJoCo + OpenGL setup takes 7.6 min).
-- **2026/10/21** Fifteen kinds of material in `robosimstudio_materials`, each
-  with a robot example in [`examples/03_materials`](examples/03_materials),
-  among them rope, knots, paper, bags, brushes, tape, cutting, granular,
-  liquid, dough and water, on Newton 1.7.
-- **2026/10/18** CPU-only support: the `cpu` extra
-  ([installation](examples/install.md)) runs with no GPU. An arm and a cube
-  step at 9× real time, and a cable grasp at 1.4–1.6× (AMD EPYC 9555).
-- **2026/10/14** First public release.
+---
+### News
+- **[2026/10/21]** 🔥 We have released many-demo collection with physics on the CPU and GL rendering: 500 demos of 20 s, filmed by five 1280×720 cameras, in 4.2 min on one GPU (7.6 min for a plain MuJoCo + OpenGL setup). See [**#12**](https://github.com/robosimstudio/robosimstudio/pull/12).
+- **[2026/10/21]** 🔥 We have added fifteen kinds of material, among them rope, knots, paper, bags, brushes, tape, cutting, granular, liquid, dough and water, each with a robot example at [**Materials**](examples/03_materials).
+- **[2026/10/18]** 🔥 RoboSimStudio runs on CPU-only machines: an arm and a cube step at 9× real time, and a cable grasp at 1.4–1.6× (AMD EPYC 9555). Get started [**Here**](examples/install.md).
+- **[2026/10/14]** 🔥 RoboSimStudio has been released!
 
 ## Quick start
 
@@ -35,6 +25,11 @@ Set up environment for https://github.com/robosimstudio/robosimstudio
 and create a simulation environment for [Your task instruction]
 based on the video at [Your Video Path].
 ```
+
+> [!TIP]
+> 1. Use **Codex Astra** for better scene construction.
+> 2. Use **Claude Code** for better robot motion.
+> 3. Keep a **human in the loop** to check the contacts and to keep the agent from cheating (a weld, a teleport or a spring where a grasp should be).
 
 ## Acknowledgements
 
