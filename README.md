@@ -6,8 +6,15 @@ RoboSimStudio is an open, interactive GPU simulation toolkit for rebuilding real
 robot manipulation tasks in simulation, by hand or with a coding agent.
 
 <p align="center">
-  <img alt="Forty-eight manipulation tasks built with RoboSimStudio, playing side by side" src=".github/media/splash.webp" width="100%" />
+  <img alt="Twenty robot manipulation tasks built with RoboSimStudio, playing side by side" src=".github/media/splash.webp" width="100%" />
 </p>
+
+---
+### News
+- **[2026/10/21]** 🔥 We have released many-demo collection with physics on the CPU and GL rendering: 500 demos in 4.2 min on one GPU. 
+- **[2026/10/20]** 🔥 We have added fifteen kinds of material, among them rope, knots, paper, bags, brushes, tape, cutting, granular, liquid, dough and water, each with a robot example at [**Materials**](examples/03_materials).
+- **[2026/10/18]** 🔥 RoboSimStudio runs on CPU-only machines. Get started [**Here**](examples/install.md).
+- **[2026/10/14]** 🔥 RoboSimStudio has been released!
 
 ## Quick start
 
@@ -18,6 +25,11 @@ Set up environment for https://github.com/robosimstudio/robosimstudio
 and create a simulation environment for [Your task instruction]
 based on the video at [Your Video Path].
 ```
+
+> [!TIP]
+> 1. Use **Codex Astra** for better scene construction.
+> 2. Use **Claude Code** for better robot motion.
+> 3. Keep a **human in the loop** to keep the agent from cheating (a weld, a teleport or a spring where a grasp should be).
 
 ## Acknowledgements
 
