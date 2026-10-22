@@ -357,8 +357,10 @@ class PanelArm(Panel):
             self._take_hand()
         # A move is held while paused rather than consumed: the law would walk
         # its setpoint away from an arm that is not moving, and the whole lead
-        # would be spent the moment you unpaused.
-        elif not self.session.paused and not self.suspended:
+        # would be spent the moment you unpaused -- and so is one on any pass the
+        # page does not step (held for a routine stepping the scene itself);
+        # one it steps though paused (a routine driving through this panel) drives.
+        elif getattr(self.session, "stepping_this_pass", not self.session.paused) and not self.suspended:
             self._drive(env)
         # The fingers go with the arm: a suspended panel is not driving, and a
         # slider that kept writing the hand while a policy (or a leader arm)

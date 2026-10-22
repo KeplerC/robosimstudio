@@ -120,7 +120,10 @@ def parse_key(text: str) -> Key:
         return Key(name=name.strip(), mask=path)
     m = _KEY.match(text)
     if m is None:
-        raise ValueError(f"not a key: {text!r}; write name=red, name=#rrggbb, name=@x,y or name=red@x,y")
+        raise ValueError(
+            f"not a key: {text!r}; a name (letters, digits, _ and -) then =red, =#rrggbb, =@x,y, =red@x,y "
+            "or =mask:path.png"
+        )
     name, how, sx, sy, tol = m.groups()
     how = how.strip().strip("'\"").strip()
     seed = (int(sx), int(sy)) if sx is not None else None
@@ -238,7 +241,8 @@ def _mask_file(path: str, shape: tuple[int, int]) -> np.ndarray:
     """A mask PNG at the photograph's size: any pixel that is not black is the thing."""
     from PIL import Image
 
-    image = Image.open(path).convert("RGBA")
+    with Image.open(path) as opened:
+        image = opened.convert("RGBA")
     h, w = shape
     if image.size != (w, h):
         image = image.resize((w, h), Image.NEAREST)
@@ -297,7 +301,8 @@ def compare_masks(photo: np.ndarray | None, sim: np.ndarray | None) -> dict[str,
 def load_photo(photo_path: str | Path) -> np.ndarray:
     from PIL import Image
 
-    return np.asarray(Image.open(photo_path).convert("RGB"), dtype=np.uint8)
+    with Image.open(photo_path) as opened:
+        return np.asarray(opened.convert("RGB"), dtype=np.uint8)
 
 
 def fit_photo(photo: np.ndarray, width: int, height: int) -> tuple[np.ndarray, float]:
@@ -408,14 +413,14 @@ def crop_pair(
     if box is None:
         return None
     x0, y0, x1, y1 = box
-    left = photo[y0:y1, x0:x1].copy()
-    right = render[y0:y1, x0:x1].copy()
+    photo_crop = photo[y0:y1, x0:x1].copy()
+    render_crop = render[y0:y1, x0:x1].copy()
     if pm is not None and pm.any():
-        left[outline(pm)[y0:y1, x0:x1]] = PHOTO_COLOUR
+        photo_crop[outline(pm)[y0:y1, x0:x1]] = PHOTO_COLOUR
     if sm is not None and sm.any():
-        right[outline(sm)[y0:y1, x0:x1]] = SIM_COLOUR
+        render_crop[outline(sm)[y0:y1, x0:x1]] = SIM_COLOUR
     w = max(1, int(round((x1 - x0) * height / max(1, y1 - y0))))
-    tiles = [np.asarray(Image.fromarray(t).resize((w, height), Image.BILINEAR)) for t in (right, left)]
+    tiles = [np.asarray(Image.fromarray(t).resize((w, height), Image.BILINEAR)) for t in (render_crop, photo_crop)]
     gap = np.full((height, 6, 3), 40, np.uint8)
     return np.concatenate([tiles[0], gap, tiles[1]], axis=1)
 

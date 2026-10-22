@@ -541,6 +541,19 @@ class StudioSession:
             # its one sentence rather than with a server left on the port.
             self._bench(f"opening the studio on the task {getattr(task, 'full_name', task)!r}")
         self.viewer = viewer_studio(port=self.config.port, share=self.config.share)
+        try:
+            self._open(task, episode)
+        except BaseException:
+            # A page that cannot show its first scene is not served: what it made goes -- its panels and writers, and
+            # its viewer, the port and a share tunnel -- so whoever opens another page gets that port.
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise
+
+    def _open(self, task, episode: int) -> None:
+        """The rest of :meth:`__init__`, once the viewer is up: the page's state, and its first scene."""
         if self.config.cloth_look in GARMENT_STYLES:
             self.viewer.set_garment_style(self.config.cloth_look)
         self.server = self.viewer._server
@@ -600,6 +613,9 @@ class StudioSession:
 
         # --- state the loop reads, written only by callbacks -------------------
         self.paused = False
+        self.stepping_this_pass = False
+        """Whether the current pass of :meth:`tick` steps the scene: not paused (or :meth:`steps_forced`) and not
+        :meth:`steps_held`. A panel drives an arm only on such a pass."""
         self.pause_box: Any = None
         """The page's Pause checkbox, once :meth:`build_gui` has made it; :meth:`set_paused` keeps it truthful."""
         self.reset_requested = False
@@ -1330,6 +1346,15 @@ class StudioSession:
         """
         return False
 
+    def steps_forced(self) -> bool:
+        """Whether the loop steps this pass though the page is paused, the Pause checkbox left as it is.
+
+        Nothing does on a plain page; ``robosimstudio_real2sim_agent`` says so on
+        a pass where a routine that drives through the arm panels only yielded,
+        since such a routine plays whatever Pause says and the page is what steps it.
+        """
+        return False
+
     def _show_status(self) -> None:
         """Put :attr:`status` on the page now, rather than at the next rate readout."""
         readout = getattr(self, "_status_readout", None)
@@ -1770,6 +1795,7 @@ class StudioSession:
         paused returns without advancing anything.
         """
         prof = self.profile
+        self.stepping_this_pass = not self.paused  # until the pass decides; a fleet's and a load's keep this
         with prof.phase("iter"):
             with prof.phase("iter.requests"):
                 if self.load_request is not None:
@@ -1826,7 +1852,10 @@ class StudioSession:
                 self.release_all_requested = False
                 self.release_all()
 
-            if self.paused or self.steps_held():
+            held = (self.paused and not self.steps_forced()) or self.steps_held()
+            # what a panel asks before it moves anything: whether this pass steps the scene
+            self.stepping_this_pass = not held
+            if held:
                 # The interaction panels are drained while paused: lining a
                 # grasp up on a held scene is exactly when you want to, and
                 # aiming costs an IK solve rather than a step. The others
@@ -2111,8 +2140,10 @@ class StudioSession:
             self.viewer.end_frame()
 
     def close(self) -> None:
-        self.teardown()
         try:
-            self.viewer.close()
-        except Exception:
-            pass
+            self.teardown()
+        finally:
+            try:
+                self.viewer.close()  # whatever the teardown did: the port and a share tunnel are let go
+            except Exception:
+                pass

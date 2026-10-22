@@ -1,22 +1,37 @@
 # Real to sim on the live page
 
-For any agent rebuilding a real bench, scene or clip in simulation from this
-folder: Codex reads this file by itself when started here, Claude Code through
-`CLAUDE.md` and the `real-to-sim` skill.
+The method for any agent rebuilding a real bench, scene or clip in simulation.
+Codex reads this file by itself when started in this folder or below it, and
+Claude Code through `CLAUDE.md`; the repository's `AGENTS.md` and the
+`real-to-sim` skill point here. This file says how to work and what to deliver; [`REFERENCE.md`](REFERENCE.md)
+says what every command, flag, file and reading is, and how the page behaves.
 
 `scene.py` runs on every save, and the `rss.Scene` it binds is built and
 swapped into the open page without a reload. `./ctl` is the command line onto
 that process. Do not run the scene yourself: edit the file and read what the
-page and its readings show. Every command, output file and reading is in
-[`REFERENCE.md`](REFERENCE.md), with the frames and units; the API is in
-`examples/00_getting_started/README.md` and each example folder's README; the
-names are in `./ctl catalog`. Read those rather than guessing a constructor or
-a name.
+page and its readings show. The API is in
+`examples/00_getting_started/README.md` and each example folder's README, the
+frames and units in REFERENCE, the names in `./ctl catalog`. Read those rather
+than guessing a constructor or a name.
 
 ## Working the page
 
-- `./ctl status` first: a page is up, or `./ctl up` starts one (tell the user
-  its URL). Picking up from an earlier session: `./ctl log`, then open the last
+- **The twin is its own folder.** If you were started in a twin's folder
+  (`twins/<name>/`, with its `REPORT.md`), it is made: work in it. Otherwise,
+  before the first edit, from this folder:
+  `./ctl new <name> --ref <clip or photo> [--ref ...]` makes `twins/<name>/`
+  with a starter `scene.py`, the references copied into `ref/`, an empty
+  `REPORT.md` and the folder's own `ctl`. Work from it: `cd twins/<name>`, and
+  every `./ctl` below is that folder's, its readings landing in its `run/`.
+  Everything the twin needs goes in that folder -- `scene.py`, its helper
+  modules beside it or in a folder of them at most two down (not under
+  `run/`, `ref/`, `assets/`, `twins/`, a hidden folder or one named
+  `robosimstudio*`: REFERENCE, *How it works*), `assets/`, `ref/` -- and the report in
+  its `REPORT.md`; a scratch script goes in its `run/`. Nothing goes
+  in this folder's own files, the library, `tests/`, the repository root or
+  `/tmp`: the twin's folder is what the person zips and hands on.
+- `./ctl status --wait` first: a page is up, or `./ctl up` starts one on the
+  folder's `scene.py` (tell the user its URL). Picking up from an earlier session: `./ctl log`, then open the last
   look sheet it names, before the next edit.
 - Open every picture a command writes with your image viewer (`view_image`
   in Codex): the pair, the look sheet, the strip. The numbers come second.
@@ -24,16 +39,17 @@ a name.
   `./ctl status --wait` after a save (a bag or a rope rebuilds in about a
   minute), `./ctl play NAME --wait` and `./ctl eval "..." --wait` for a routine
   (its output streamed; exit 1 with the traceback if it failed). A command
-  that times out says what the page is busy with; the first path-traced
-  picture in a process compiles for minutes.
+  that times out says what the page is busy with.
 - Several lines of Python go in a heredoc: `./ctl eval - <<'PY' ... PY`.
   `--json` after any command prints the raw reply.
-- Pick the GPU with `BUILD = {"device": "cuda:N"}` in `scene.py` or
-  `ROBOSIMSTUDIO_DEVICE=cuda:N ./ctl up`, never `CUDA_VISIBLE_DEVICES`: the
-  path tracer then finds no GPU and the first picture hangs.
-- Helpers and assets go beside `scene.py`; this folder is the twin you hand
-  over. A twin is not a library change: the test tiers and `tests/` are not
-  for it.
+- Pick the GPU with `CUDA_VISIBLE_DEVICES=N ./ctl up`: the page then sees
+  that card alone. `ROBOSIMSTUDIO_DEVICE=cuda:N` or `BUILD = {"device": ...}`
+  only picks where the scene builds, and the page still holds about 600 MiB
+  on every other card, someone else's included. The first path-traced
+  picture in a process compiles its shaders for minutes: `./ctl status` says
+  so, and it is not a hang.
+- A twin is not a library change: the test tiers and `tests/` are not for
+  it.
 
 ## The tools
 
@@ -47,23 +63,25 @@ a name.
   outlines yellow, render cyan, each keyed thing up close, both pictures with
   the things painted out); per keyed thing its size ratio, offset and overlap.
   On the look sheet, list per thing what the photo has that the render lacks
-  (a lid seam, latch tabs, a label, a chamfer, a colour, a texture) and what
-  stands behind it (table top, floor, wall, furniture): that list is your
-  next edit. Key what keys cleanly, typically the thing the robot handles; a
+  (a lid seam, latch tabs, a label, a chamfer, a colour, a texture), what
+  stands behind it (table top, floor, wall, furniture, a window) and how it
+  is lit (where the light comes from, how bright and how warm, which way the
+  shadows fall, what shines): that list is your next edit. Key what keys cleanly, typically the thing the robot handles; a
   colour key that outlines a fragment measures nothing, and a mask
   (`gasket=mask:ref/gasket.png`) is the way round it.
 - `./ctl check --camera <name> [--key ...]`: PASS/FAIL with its number for
   builds, finite, camera aspect, things present, worst overlap, and drift
-  when left alone (a deformable's by its particle that moved most). Advisory:
-  explain any FAIL you accept, with the number.
+  when left alone. Advisory: explain any FAIL you accept, with the number.
 - Bind `routine` or `routines = {"open lid": fn, ...}` in `scene.py` for a
   **Run** button per routine; `./ctl play [name] --record <take> --wait` presses
-  it and films it. A routine that takes the page's `session` drives through
-  the arm panels (`robosimstudio_studio.routine`'s `reach`, `grip`, `wait`);
-  any other has them held off while it plays and steps the scene itself
-  (`sim.run(1)` between yields). When a take ends it is put
-  beside the clip: the strip (clip anchors above, take frames below) goes on
-  the board, and one line says what moved in the take and how far.
+  it and films it. Write a routine one of two ways (REFERENCE, *Acting*):
+  taking the page's `session` and driving through the arm panels with
+  `robosimstudio_studio.routine`'s `reach`, `grip` and `wait`; or taking only
+  `sim` and stepping the scene itself (`sim.run(1)` between yields), the arm
+  panels held off meanwhile. A generator `eval` returns is the second kind.
+  When a take ends it is put beside the clip: the strip (clip anchors above,
+  take frames below) goes on the board, and one line says what moved in the
+  take and how far.
 - `./ctl show <png> --label "<what>"` posts a picture to the board for the
   person watching. `./ctl log` lists every reading with the picture it left.
 
@@ -95,7 +113,10 @@ on every twin so far:
 - The first frame agrees: each thing the clip shows is in the scene at its
   size and place, through a camera where the clip's was, and to your own eye
   on the pair and the look sheet it looks like the clip: the things in their
-  detail and what stands behind them, with their colours and textures.
+  detail and what stands behind them, with their colours and textures, under
+  the clip's light -- from where it comes, how bright and how warm, with the
+  shadows and highlights it makes. The light is the scene's `render=`
+  (REFERENCE, *The contract for `scene.py`*).
 - The robot moves things only through its fingers' contact: no pose written
   onto a thing, no latch, weld, attachment, dragger or spring, no motor on the
   thing's own joints, no finger colliders added. If the gripper needs
@@ -108,6 +129,9 @@ on every twin so far:
 
 ## The report
 
+In the twin's `REPORT.md`, under its four headings, and in short in your last
+message:
+
 - What still differs from the clip: things, background, light, motion.
 - Every shortcut that remains (anything the contact rule above forbids, a
   scripted motion standing in for physics) and every way the scene or the
@@ -118,17 +142,17 @@ on every twin so far:
 
 ## Rules of the page
 
-- Poses are in the cell's work-surface frame; `snapshot --eye/--look-at` are
-  world metres.
-- `rss.view`, `rss.draw` and `rss.viewer` are no-ops while the file runs, so a
-  script from `examples/` pastes in unchanged.
-- A save re-imports the helpers beside `scene.py` and takes back what they
-  registered, so an edited entity class, cell or gripper lands on the next
-  save. A save that does not build leaves the scene before it up, and every
-  command says so until a save builds.
-- A snapshot is path traced and draws the scenery (a room, a mat, a texture);
-  the page draws the bench and what you added.
-- What the user drags on the page is what your next reading sees; if the
+How the page behaves is in REFERENCE (*How it works*, *The contract for
+`scene.py`*). What changes how you work:
+
+- Save and read; never restart the page to make an edit land. A save that
+  does not build leaves the scene before it up, and every command that acts
+  on the scene (`snapshot`, `compare`, `check`, `eval`, `play`, `run`,
+  `reset`) says so (`stale`) until a save builds; one sent before a save is
+  built says that (`pending`).
+- An example from `examples/` goes in whole, with the body of its `main()`
+  moved to module level (REFERENCE, *The contract for `scene.py`*).
+- What the person drags on the page is what your next reading sees; if the
   scene looks moved, `./ctl reset` before judging it.
-- `run/` holds every picture, take and the log, and is not committed;
-  `scene.py` is your result, so leave it in the state you are reporting.
+- The twin's folder is your result: leave it in the state you report.
+  `twins/` and `run/` are not committed.

@@ -10,7 +10,7 @@ from unittest import mock
 import numpy as np
 
 from robosimstudio_real2sim_agent import server as server_mod
-from robosimstudio_real2sim_agent.scenefile import SceneRegistrations
+from robosimstudio_real2sim_agent.scenefile import ScenePaths, SceneRegistrations
 from robosimstudio_real2sim_agent.server import LiveServer
 
 TIER = "fast"
@@ -20,9 +20,14 @@ def _bare_server() -> LiveServer:
     live = LiveServer.__new__(LiveServer)
     live.path = Path("/nonexistent/scene.py")
     live.head_stepped, live._head_ready = False, None
+    live.ended, live.takes_written, live.serving = {}, [], "scene"
+    live.runs, live.run_target, live.scene_id, live.watch_enabled = 0, 0, "", False
+    live.runs_ended, live._walked = {}, (-1.0, [])
+    live._arms_before, live.resets = {}, 0
+    live.log_path, live._motions = "", {}
+    live.scene_paths = ScenePaths(Path("/nonexistent"))
     live.build_error, live._tick_error = "", ""
-    live.busy, live.busy_since = "", 0.0
-    live._suspended_arms = []
+    live.busy_state = ("", 0.0, False)
     live.script_meta = {}
     live.scripts_started = 0
     live.last_script = {}
