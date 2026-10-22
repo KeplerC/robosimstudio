@@ -11,9 +11,9 @@ robot manipulation tasks in simulation, by hand or with a coding agent.
 
 ---
 ### News
-- **[2026/10/21]** 🔥 We have released many-demo collection with physics on the CPU and GL rendering: 500 demos of 20 s, filmed by five 1280×720 cameras, in 4.2 min on one GPU (7.6 min for a plain MuJoCo + OpenGL setup). See [**#12**](https://github.com/robosimstudio/robosimstudio/pull/12).
-- **[2026/10/21]** 🔥 We have added fifteen kinds of material, among them rope, knots, paper, bags, brushes, tape, cutting, granular, liquid, dough and water, each with a robot example at [**Materials**](examples/03_materials).
-- **[2026/10/18]** 🔥 RoboSimStudio runs on CPU-only machines: an arm and a cube step at 9× real time, and a cable grasp at 1.4–1.6× (AMD EPYC 9555). Get started [**Here**](examples/install.md).
+- **[2026/10/21]** 🔥 We have released many-demo collection with physics on the CPU and GL rendering: 500 demos in 4.2 min on one GPU. 
+- **[2026/10/20]** 🔥 We have added fifteen kinds of material, among them rope, knots, paper, bags, brushes, tape, cutting, granular, liquid, dough and water, each with a robot example at [**Materials**](examples/03_materials).
+- **[2026/10/18]** 🔥 RoboSimStudio runs on CPU-only machines. Get started [**Here**](examples/install.md).
 - **[2026/10/14]** 🔥 RoboSimStudio has been released!
 
 ## Quick start
