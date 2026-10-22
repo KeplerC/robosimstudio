@@ -29,7 +29,7 @@ based on the video at [Your Video Path].
 > [!TIP]
 > 1. Use **Codex Astra** for better scene construction.
 > 2. Use **Claude Code** for better robot motion.
-> 3. Keep a **human in the loop** to check the contacts and to keep the agent from cheating (a weld, a teleport or a spring where a grasp should be).
+> 3. Keep a **human in the loop** to keep the agent from cheating (a weld, a teleport or a spring where a grasp should be).
 
 ## Acknowledgements
 
