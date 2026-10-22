@@ -89,7 +89,7 @@ def scene_folder(name: str) -> bool:
     return not name.startswith(".") and name not in WATCH_SKIP and not library_name(name)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Loaded:
     """What running the file produced: its namespace, the scene, the built sim, and how long it took."""
 
@@ -97,6 +97,11 @@ class Loaded:
     scene: Any
     sim: Any
     seconds: float
+
+    def release(self) -> None:
+        """Name none of it any more, so a scene that would not go into the page can be collected while whoever
+        built it still holds this."""
+        self.ns, self.scene, self.sim = {}, None, None
 
 
 def _noop(*args, **kwargs) -> None:
