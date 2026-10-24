@@ -228,11 +228,12 @@ paused.
 
 Each of these cost a twin a quarter of an hour to find:
 
-- **A downloaded arm drives by torque.** An arm from MuJoCo Menagerie (the
-  UR5e among them) may come with motor or general actuators, which the page's
-  joint targets do not hold up: the hand sags and stops short. Give its joints
-  position servos (`<position kp=... kv=...>`, or a `general` actuator with a
-  position bias) before tuning anything else.
+- **A downloaded arm is not driven the page's way.** An arm from MuJoCo
+  Menagerie (the UR5e among them) brings its own actuators, and under the
+  page's joint targets the hand sags and stops short. Twins replaced them with
+  plain position servos -- `<position kp="2000" kv="400">` on a UR5e's
+  shoulder and elbow, `kp="500" kv="100"` on its wrist -- before tuning
+  anything else.
 - **Linkage fingers travel as they close.** A Robotiq 2F-85's pads swing up
   and in on their four-bar: the grasp height read at open is not the one at
   shut. Read the pads' colliders at the closing value you command.
