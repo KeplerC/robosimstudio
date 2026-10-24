@@ -244,6 +244,22 @@ def cut(
     }
 
 
+def _paint_in(image: Any, hole: Any) -> Any:
+    """``image`` with the ``hole`` pixels filled from around it: the nearest pixel outside, smoothed inside."""
+    import numpy as np
+    from scipy.ndimage import distance_transform_edt, gaussian_filter
+
+    if not hole.any():
+        return image
+    _, (iy, ix) = distance_transform_edt(hole, return_indices=True)
+    filled = image[iy, ix].astype(np.float32)
+    width = float(distance_transform_edt(hole).max())
+    soft = np.stack([gaussian_filter(filled[..., c], sigma=max(1.0, width / 3.0)) for c in range(3)], axis=-1)
+    out = image.astype(np.float32)
+    out[hole] = soft[hole]
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
 def plate(
     clip: str | Path,
     *,
@@ -265,8 +281,8 @@ def plate(
 
     ``windows`` is ``"0:5,36:52"``: the seconds the frames are drawn from, spread
     evenly over them (default: the whole clip). ``paint`` is a mask the size of
-    the clip, white where the plate is to be painted in from around it (OpenCV's
-    inpainting): a robot base that never left, a thing that sat still all along.
+    the clip, white where the plate is to be painted in from around it: a robot
+    base that never left, a thing that sat still all along.
     """
     from PIL import Image
 
@@ -310,11 +326,9 @@ def plate(
     path = out_dir / f"{stem}.png"
     painted = ""
     if paint:
-        import cv2
-
         with Image.open(paint) as opened:
             mask = np.asarray(opened.convert("L").resize((w, h), Image.NEAREST)) > 127
-        med = cv2.inpaint(med, mask.astype(np.uint8) * 255, 9, cv2.INPAINT_TELEA)
+        med = _paint_in(med, mask)
         painted = f"{mask.mean() * 100:.1f}% of the plate painted in from {Path(paint).name}"
     Image.fromarray(med).save(path)
     vis = np.clip(away * 510.0, 0, 255).astype(np.uint8)

@@ -1045,6 +1045,11 @@ def cmd_camera(args: argparse.Namespace) -> int:
     }
     if fit["behind"]:
         reply["warning"] = f"{fit['behind']} point(s) fell behind the camera: a pair is wrong"
+    elif fit["rms_px"] > 0.02 * width:
+        reply["warning"] = (
+            f"an RMS of {fit['rms_px']} px is no camera: a pair is read off wrong, two are crossed, or an axis is "
+            "flipped (+y is to the robot's left when it faces +x); the largest errors name the suspects"
+        )
     if args.ref:
         out = Path(_absolute(args.out)) if args.out else Path(args.run_dir) / f"camfit_{args.name}.png"
         reply["overlay"] = str(

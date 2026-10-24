@@ -141,10 +141,9 @@ def shade(
         seg = np.asarray(seg).reshape(ratio.shape)
         ratio[(seg == LABEL_MOVING) | (seg < 0)] = 1.0
     if soften > 0:
-        import cv2
+        from scipy.ndimage import gaussian_filter
 
-        k = int(soften) * 2 + 1
-        ratio = cv2.GaussianBlur(ratio, (k, k), soften / 2.0)
+        ratio = gaussian_filter(ratio, sigma=soften / 2.0, truncate=2.0)
     return ratio
 
 

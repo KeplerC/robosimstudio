@@ -58,6 +58,35 @@ def _project(params: np.ndarray, world: np.ndarray, cx: float, cy: float, free_c
     return np.stack([f * cam[:, 0] / z + cx, f * cam[:, 1] / z + cy], axis=1)
 
 
+def _sphere(n: int) -> list[tuple[float, float, float]]:
+    """``n`` directions spread evenly over the sphere (a Fibonacci lattice)."""
+    out = []
+    for i in range(n):
+        z = 1.0 - 2.0 * (i + 0.5) / n
+        r = math.sqrt(max(0.0, 1.0 - z * z))
+        a = i * math.pi * (3.0 - math.sqrt(5.0))
+        out.append((r * math.cos(a), r * math.sin(a), z))
+    return out
+
+
+def _look_rotation(eye: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """World -> camera rotation (+z forward, +y down) of a camera at ``eye`` looking at ``target``, world +z up."""
+    forward = target - eye
+    forward = forward / np.linalg.norm(forward)
+    up = np.array([0.0, 0.0, 1.0]) if abs(forward[2]) < 0.99 else np.array([0.0, 1.0, 0.0])
+    right = np.cross(forward, up)
+    right = right / np.linalg.norm(right)
+    down = np.cross(forward, right)
+    return np.stack([right, down, forward])
+
+
+def _rotvec(rot: np.ndarray) -> np.ndarray:
+    """The axis-angle vector of a rotation matrix (the inverse of :func:`_rodrigues`)."""
+    from scipy.spatial.transform import Rotation
+
+    return Rotation.from_matrix(rot).as_rotvec()
+
+
 def fit_camera(
     world: Any,
     pixels: Any,
@@ -74,7 +103,6 @@ def fit_camera(
     spread over the picture). Returns the CameraSpec keywords, the RMS and the
     per-point reprojection error in pixels.
     """
-    import cv2
     from scipy.optimize import least_squares
 
     world = np.asarray(world, dtype=np.float64).reshape(-1, 3)
@@ -86,31 +114,38 @@ def fit_camera(
         raise ValueError(f"{len(world)} points; this fit needs at least {need}")
     cx0, cy0 = 0.5 * width, 0.5 * height
     fixed_f = None if fov_y is None else 0.5 * height / math.tan(math.radians(fov_y) * 0.5)
-    best, mirrored = None, False
-    # the focal length is not convex in the error: start from a spread of fields of view and keep the best
-    for fov in [fov_y] if fov_y else (25.0, 35.0, 45.0, 55.0, 65.0, 80.0, 100.0):
+    centre = world.mean(axis=0)
+    spread = max(float(np.linalg.norm(world - centre, axis=1).max()), 0.05)
+
+    def residual(p: np.ndarray) -> np.ndarray:
+        if fixed_f is not None:
+            p = p.copy()
+            p[0] = math.log(fixed_f)
+        return (_project(p, world, cx0, cy0, free_center) - pixels).ravel()
+
+    best, behind = None, None
+    # Nothing here is convex: start from cameras all round the points, at several distances and fields of
+    # view, each looking at their centre, and keep the best fit that has the points in front of it.
+    directions = [np.array(d, dtype=np.float64) for d in _sphere(26)]
+    for fov in [fov_y] if fov_y else (30.0, 50.0, 75.0):
         f = 0.5 * height / math.tan(math.radians(fov) * 0.5)
-        k = np.array([[f, 0, cx0], [0, f, cy0], [0, 0, 1.0]])
-        flags = cv2.SOLVEPNP_ITERATIVE if len(world) >= 6 else cv2.SOLVEPNP_SQPNP
-        ok, rvec, tvec = cv2.solvePnP(world, pixels, k, None, flags=flags)
-        if not ok:
-            continue
-        x0 = np.concatenate([[math.log(f)], rvec.ravel(), tvec.ravel()] + ([[cx0, cy0]] if free_center else []))
-
-        def residual(p: np.ndarray) -> np.ndarray:
-            if fixed_f is not None:
-                p = p.copy()
-                p[0] = math.log(fixed_f)
-            return (_project(p, world, cx0, cy0, free_center) - pixels).ravel()
-
-        sol = least_squares(residual, x0, method="lm" if len(world) * 2 > len(x0) else "trf")
-        cost = float(np.mean(sol.fun**2))
-        depth = (world @ _rodrigues(sol.x[1:4]).T + sol.x[4:7])[:, 2]
-        if (depth <= 0).mean() > 0.5:
-            mirrored = True  # the points fit seen from behind: one axis of them is flipped, or the pairs are crossed
-            continue
-        if best is None or cost < best[0]:
-            best = (cost, sol.x)
+        for direction in directions:
+            for distance in (2.5, 5.0):
+                eye = centre + direction * spread * distance
+                rot = _look_rotation(eye, centre)
+                x0 = np.concatenate([[math.log(f)], _rotvec(rot), -rot @ eye] + ([[cx0, cy0]] if free_center else []))
+                sol = least_squares(residual, x0, method="lm" if len(world) * 2 > len(x0) else "trf")
+                depth = (world @ _rodrigues(sol.x[1:4]).T + sol.x[4:7])[:, 2]
+                cost = float(np.mean(sol.fun**2))
+                if (depth <= 0).mean() > 0.5:
+                    # seen from behind: a fit there means one axis of the points is flipped, or pairs are crossed
+                    behind = cost if behind is None else min(behind, cost)
+                    continue
+                if best is None or cost < best[0]:
+                    best = (cost, sol.x)
+    mirrored = behind is not None and (best is None or behind < 0.1 * best[0])
+    if mirrored:
+        best = None
     if best is None:
         if mirrored:
             raise ValueError(
