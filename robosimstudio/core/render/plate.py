@@ -122,7 +122,11 @@ def load_plate(path: str | Path, width: int, height: int) -> np.ndarray:
 
 
 def shade(
-    with_moving: np.ndarray, without_moving: np.ndarray, seg: np.ndarray | None = None, soften: float = 0.0
+    with_moving: np.ndarray,
+    without_moving: np.ndarray,
+    seg: np.ndarray | None = None,
+    soften: float = 0.0,
+    strength: float = 1.0,
 ) -> np.ndarray:
     """How much light what moves takes off each pixel: ``with / without``, at most 1, softened.
 
@@ -134,10 +138,13 @@ def shade(
     things were, not where they are. ``soften`` blurs it by that many pixels,
     since a room's light is broader than one lamp; the moving things' own
     pixels (``seg``) count as unshadowed, so the blur leaves no halo round them.
+    ``strength`` takes that share of the lamp's shadow: a room lit as much by
+    its walls as by its lamps casts shadows lighter than one lamp's.
     """
     a = np.asarray(with_moving)[..., :3].astype(np.float32).mean(axis=-1)
     b = np.asarray(without_moving)[..., :3].astype(np.float32).mean(axis=-1)
     ratio = np.clip((a + 1.0) / (b + 1.0), 0.0, 1.0)
+    ratio = 1.0 - strength * (1.0 - ratio)
     if seg is not None:
         seg = np.asarray(seg).reshape(ratio.shape)
         ratio[(seg == LABEL_MOVING) | (seg < 0)] = 1.0
