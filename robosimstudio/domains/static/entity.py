@@ -367,6 +367,8 @@ class EntityStatic(WeldedFixture, Entity):
                 # approximation would erase the task.
                 import trimesh
 
+                from robosimstudio.scene.assets import mesh_texturing
+
                 mesh = trimesh.load(str(path), force="mesh")
                 visual_shape = builder.add_shape_mesh(
                     body=body,
@@ -374,6 +376,8 @@ class EntityStatic(WeldedFixture, Entity):
                     mesh=newton.Mesh(
                         np.asarray(mesh.vertices, dtype=np.float32),
                         np.asarray(mesh.faces, dtype=np.int32).reshape(-1),
+                        # a texture the asset names is drawn at the mesh's own UVs, as load_asset draws it
+                        **mesh_texturing(self.spec.asset, mesh, label=self.spec.name),
                     ),
                     scale=(self.spec.asset.scale,) * 3,
                     label=self.spec.name,
