@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+"""A photograph standing in for everything that never moves, through the camera that took it.
+
+A twin of a fixed camera's clip can be made to look like the clip in two ways.
+One is to model the room -- the wall, the curtain, the desk and its cables -- and
+light it until it reads the same, which no renderer gets to the pixel. The other
+is the one visual-matching benchmarks use: the clip already *is* a picture of
+everything that does not move, so the render draws only what does -- the robot's
+moving links, the things it handles, every deformable -- and every other pixel
+comes from a clean plate of the clip (the clip with what moves taken out).
+Through a calibrated camera the background is then the clip's own pixels, and
+what is left to get right is the camera and what moves.
+
+Which pixels are which is read off the tiled tracer's shape index: a pixel that
+hit nothing, or a shape on the world or on a body held to the world by fixed
+joints only (the bench, a fixture, a robot's base), shows the plate; a pixel
+that hit anything else, a particle or a deformable's mesh shows the render.
+Occlusion comes out right because the index is resolved in 3D: the near wall of
+a static tray in front of a moving reel is a static pixel, so the plate's wall
+is drawn over it.
+
+The static geometry still does its physical job: it is the collider the robot
+and the things touch. A collider that is not under its picture in the plate
+shows as a thing resting on air or sunk into the table -- which is the reading
+that tells a twin its camera or its layout is off.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+__all__ = ["LABEL_MOVING", "LABEL_STATIC", "composite", "load_plate", "shape_labels", "static_shapes"]
+
+LABEL_MOVING = 1
+"""The label a shape that can move takes in the composite's segmentation pass."""
+LABEL_STATIC = 2
+"""The label a shape on the world, or on a body held to it by fixed joints only, takes."""
+
+_PLATES: dict[tuple[str, float, int, int], np.ndarray] = {}
+
+
+def static_shapes(model: Any) -> np.ndarray:
+    """Per shape, whether nothing in the simulation can move it.
+
+    A shape on body ``-1`` is on the world. A body is static when the joint
+    that makes it a child is fixed and its parent is the world or another
+    static body; a free, revolute or prismatic joint anywhere up the chain makes
+    it something that moves.
+    """
+    import newton
+
+    shape_body = np.asarray(model.shape_body.numpy() if hasattr(model.shape_body, "numpy") else model.shape_body)
+    static_body = np.zeros(int(model.body_count), dtype=bool)
+    if int(model.joint_count):
+        jtype = np.asarray(model.joint_type.numpy())
+        parent = np.asarray(model.joint_parent.numpy())
+        child = np.asarray(model.joint_child.numpy())
+        fixed = int(newton.JointType.FIXED)
+        changed = True
+        while changed:
+            changed = False
+            for j in range(len(jtype)):
+                c = int(child[j])
+                if 0 <= c < len(static_body) and not static_body[c] and int(jtype[j]) == fixed:
+                    p = int(parent[j])
+                    if p < 0 or static_body[p]:
+                        static_body[c] = True
+                        changed = True
+    body_static = np.concatenate([static_body, [True]])  # index -1 is the world
+    return body_static[np.where(shape_body < 0, len(static_body), shape_body)]
+
+
+def shape_labels(model: Any) -> dict[int, int]:
+    """``shape -> label`` for the tiled tracer: :data:`LABEL_STATIC` or :data:`LABEL_MOVING`."""
+    static = static_shapes(model)
+    return {int(s): LABEL_STATIC if bool(static[s]) else LABEL_MOVING for s in range(len(static))}
+
+
+def load_plate(path: str | Path, width: int, height: int) -> np.ndarray:
+    """The plate as RGB ``uint8`` at ``width`` x ``height``; read again only when the file changes."""
+    from PIL import Image
+
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"no plate at {path.resolve()} (a CameraSpec's background is read beside scene.py)")
+    key = (str(path.resolve()), path.stat().st_mtime, int(width), int(height))
+    plate = _PLATES.get(key)
+    if plate is None:
+        with Image.open(path) as opened:
+            img = opened.convert("RGB")
+        if img.size != (width, height):
+            w, h = img.size
+            if abs(w / h - width / height) > 0.01:
+                raise ValueError(
+                    f"the plate {path.name} is {w}x{h} and the camera {width}x{height}: another shape of picture, "
+                    "so it was not taken through this camera"
+                )
+            img = img.resize((int(width), int(height)), Image.LANCZOS)
+        plate = np.asarray(img, dtype=np.uint8)
+        _PLATES.clear()  # one plate per camera in use; an edited plate replaces its old copy
+        _PLATES[key] = plate
+    return plate
+
+
+def composite(rgb: np.ndarray, seg: np.ndarray, plate: np.ndarray) -> np.ndarray:
+    """The render where ``seg`` says something that moves, the plate everywhere else."""
+    rgb = np.asarray(rgb)[..., :3]
+    seg = np.asarray(seg).reshape(rgb.shape[:2])
+    moving = (seg == LABEL_MOVING) | (seg < 0)  # negative labels: particles and deformable meshes
+    out = np.array(plate[..., :3], dtype=np.uint8, copy=True)
+    out[moving] = rgb[moving] if rgb.dtype == np.uint8 else np.clip(rgb[moving] * 255.0, 0, 255).astype(np.uint8)
+    return out

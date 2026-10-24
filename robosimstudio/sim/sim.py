@@ -388,7 +388,28 @@ class Sim(EnvBase):
                 self._still_renderer.render(self.state)  # the first frame only builds the stage
         self.sync()
         frame = self._still_renderer.render(self.state)[spec.name]
-        return {c: np.asarray(frame[c]) for c in channels if c in frame}
+        out = {c: np.asarray(frame[c]) for c in channels if c in frame}
+        if spec.background and "rgb" in out:
+            out["rgb"] = self._over_plate(spec, out["rgb"])
+        return out
+
+    def _over_plate(self, spec: CameraSpec, rgb: np.ndarray) -> np.ndarray:
+        """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py)."""
+        from dataclasses import replace
+
+        from robosimstudio.core.render import plate
+
+        key = replace(spec, background="", channels=("seg",))
+        if getattr(self, "_plate_key", None) != key:
+            old = getattr(self, "_plate_renderer", None)
+            if old is not None:
+                old.close()
+            self._plate_renderer = self.make_renderer(
+                "tiled", cameras=[key], channels=["seg"], shape_labels=plate.shape_labels(self.model)
+            )
+            self._plate_key = key
+        seg = self._plate_renderer.render(self.state)[key.name]["seg"]
+        return plate.composite(rgb, seg, plate.load_plate(spec.background, spec.width, spec.height))
 
     def record(
         self,

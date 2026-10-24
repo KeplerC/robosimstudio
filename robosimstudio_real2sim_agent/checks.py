@@ -311,16 +311,64 @@ def compare_still(
         lines.append(
             "no --key: the pair and the look sheet are written; key a thing that keys cleanly to read its size, place and overlap"
         )
+    things = None
+    for pm, sm in pairs.values():
+        for m in (pm, sm):
+            if m is not None:
+                things = m.copy() if things is None else (things | m)
+    picture = picture_reading(rgb, fitted, things)
+    lines.append(
+        f"picture: colour difference {picture['delta_e']} (mean CIE76 dE) over the frame, "
+        f"{picture['delta_e_behind']} behind the keyed things; PSNR {picture['psnr_db']} dB, "
+        f"{picture['psnr_behind_db']} dB behind them (identical pixels read dE 0)"
+    )
     if abs(stretch - 1.0) > 0.02:
         lines.append(
             f"the photo's aspect was stretched {stretch:.2f}x to fit the camera: give the camera the photo's width and height"
         )
     return {
         "objects": objects,
+        "picture": picture,
         "stretch": round(stretch, 3),
         "lines": lines,
         "pairs": pairs,
         "fitted": fitted,
+    }
+
+
+def _lab(rgb: np.ndarray) -> np.ndarray:
+    """sRGB ``uint8`` to CIE L*a*b* under D65."""
+    c = rgb[..., :3].astype(np.float64) / 255.0
+    c = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92)
+    xyz = c @ np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]).T
+    xyz = xyz / np.array([0.95047, 1.0, 1.08883])
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16.0 / 116.0)
+    return np.stack([116.0 * f[..., 1] - 16.0, 500.0 * (f[..., 0] - f[..., 1]), 200.0 * (f[..., 1] - f[..., 2])], -1)
+
+
+def picture_reading(rgb: np.ndarray, photo: np.ndarray, things: np.ndarray | None = None) -> dict:
+    """How far the render's pixels are from the photograph's, over the frame and behind the keyed things.
+
+    The mean CIE76 colour difference (a dE of 2 is about the smallest a person
+    sees side by side, 10 a plainly different colour) and the PSNR. "Behind" is
+    every pixel neither picture's keyed things cover: the room, the table, the
+    background a plate or a model has to get right.
+    """
+    a, b = rgb[..., :3], photo[..., :3]
+    de = np.linalg.norm(_lab(a) - _lab(b), axis=-1)
+    mse = ((a.astype(np.float64) - b.astype(np.float64)) ** 2).mean(axis=-1)
+    behind = np.ones(de.shape, dtype=bool) if things is None else ~things
+    if not behind.any():
+        behind = np.ones(de.shape, dtype=bool)
+
+    def psnr(m: np.ndarray) -> float:
+        return round(float(10.0 * np.log10(255.0**2 / max(float(m.mean()), 1e-6))), 1)
+
+    return {
+        "delta_e": round(float(de.mean()), 1),
+        "delta_e_behind": round(float(de[behind].mean()), 1),
+        "psnr_db": psnr(mse),
+        "psnr_behind_db": psnr(mse[behind]),
     }
 
 

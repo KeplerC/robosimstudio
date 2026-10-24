@@ -352,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="a reference picture in the sidebar, or stills out of a clip",
     )
-    ref.add_argument("op", choices=("show", "hide", "frames"))
+    ref.add_argument("op", choices=("show", "hide", "frames", "plate"))
     ref.add_argument(
         "path",
         nargs="?",
@@ -381,6 +381,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="frames: scale the stills to this width (default: the clip's)",
     )
+    ref.add_argument("--window", default="", help="plate: seconds to draw frames from, 0:5,36:52 (default: all)")
+    ref.add_argument("--paint", default="", help="plate: a mask, white where the plate is painted in from around it")
+    ref.add_argument("--count", type=int, default=60, help="plate: frames the median is taken over (default 60)")
+    ref.add_argument("--name", default="", help="plate: the file's name without .png (default plate_<clip>)")
+    cam = sub.add_parser(
+        "camera",
+        parents=[common],
+        help="solve a camera from points whose world place and pixel are both known (needs no page)",
+    )
+    cam.add_argument("op", choices=("fit",))
+    cam.add_argument(
+        "--point",
+        action="append",
+        default=[],
+        metavar="X,Y,Z=U,V",
+        help="a world point [m, the frame CameraSpec uses] and its pixel in the still; six or more, repeatable",
+    )
+    cam.add_argument(
+        "--ref", default="", help="the still the pixels were read off: its size, and an overlay drawn on it"
+    )
+    cam.add_argument("--size", default="", help="WxH of the picture, when there is no --ref")
+    cam.add_argument("--name", default="camera", help="the camera's name in the printed CameraSpec")
+    cam.add_argument(
+        "--fov", type=float, default=0.0, help="hold the vertical field of view [deg] instead of solving it"
+    )
+    cam.add_argument("--free-center", action="store_true", help="solve the principal point too (ten or more points)")
+    cam.add_argument("--out", default="", help="the overlay's path (default <run-dir>/camfit_<name>.png)")
     play = sub.add_parser(
         "play", parents=[common], help="play a routine the scene file binds, as its button on the page does"
     )
@@ -951,12 +978,91 @@ def cmd_new(args: argparse.Namespace) -> int:
     return show(reply, args.json)
 
 
+def cmd_plate(args: argparse.Namespace) -> int:
+    """``ref plate``: a clean plate of a fixed camera's clip, written beside its stills; needs no page."""
+    from . import frames
+
+    if not args.path:
+        print("ctl: ref plate needs the clip", file=sys.stderr)
+        return 2
+    out = _absolute(args.out) if args.out else _ref_dir_without_a_page(Path(args.run_dir))
+    if out is None:
+        print("ctl: no scene.py beside the run directory or here; give --out", file=sys.stderr)
+        return 2
+    try:
+        reply = frames.plate(
+            _absolute(args.path),
+            windows=args.window,
+            count=args.count,
+            out_dir=out,
+            name=args.name,
+            paint=_absolute(args.paint) if args.paint else "",
+        )
+    except Exception as exc:  # a clip that will not decode: one line
+        print(f"ctl: {exc}", file=sys.stderr)
+        return 1
+    return show(reply, args.json)
+
+
+def cmd_camera(args: argparse.Namespace) -> int:
+    """``camera fit``: the pinhole that puts the given world points on their pixels, and how far each lands."""
+    from . import calib
+
+    try:
+        pairs = [calib.parse_point(p) for p in args.point]
+        if args.ref:
+            from PIL import Image
+
+            with Image.open(_absolute(args.ref)) as opened:
+                width, height = opened.size
+        elif args.size:
+            width, height = (int(v) for v in args.size.lower().split("x"))
+        else:
+            raise ValueError("give --ref (the still the pixels came from) or --size WxH")
+        fit = calib.fit_camera(
+            [w for w, _ in pairs],
+            [p for _, p in pairs],
+            width,
+            height,
+            free_center=args.free_center,
+            fov_y=args.fov or None,
+        )
+    except Exception as exc:
+        print(f"ctl: {exc}", file=sys.stderr)
+        return 1
+    spec = fit["spec"]
+    code = (
+        f'rss.CameraSpec(name="{args.name}", width={spec["width"]}, height={spec["height"]}, '
+        f"fx={spec['fx']}, fy={spec['fy']}, cx={spec['cx']}, cy={spec['cy']}, "
+        f"eye={spec['eye']}, look_at={spec['look_at']}, up={spec['up']})"
+    )
+    reply = {
+        "ok": True,
+        "camera": code,
+        "fov_y": fit["fov_y"],
+        "rms_px": fit["rms_px"],
+        "errors_px": ", ".join(f"{i}: {e}" for i, e in enumerate(fit["errors_px"])),
+    }
+    if fit["behind"]:
+        reply["warning"] = f"{fit['behind']} point(s) fell behind the camera: a pair is wrong"
+    if args.ref:
+        out = Path(_absolute(args.out)) if args.out else Path(args.run_dir) / f"camfit_{args.name}.png"
+        reply["overlay"] = str(
+            calib.overlay(_absolute(args.ref), [p for _, p in pairs], fit["projected"], out, fit["errors_px"])
+        )
+    return show(reply, args.json)
+
+
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     sock = socket_path(args.run_dir, args.sock)
     if args.cmd == "new":
         return cmd_new(args)
+    if args.cmd == "camera":
+        return cmd_camera(args)
+    if args.cmd == "ref" and args.op == "plate":
+        return cmd_plate(args)
     if args.cmd == "up":
         # the scene beside the run directory: `examples/live/ctl` pins run/ beside its scene.py, a twin's ctl beside its own
         args.scene = args.scene or str(Path(os.path.abspath(args.run_dir)).parent / "scene.py")
