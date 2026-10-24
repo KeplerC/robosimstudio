@@ -117,7 +117,7 @@ def fit_camera(
             p[0] = math.log(fixed_f)
         return (_project(p, world, cx0, cy0, free_center) - pixels).ravel()
 
-    best, behind = None, None
+    best, behind, fits = None, None, []
     # Nothing here is convex: start from cameras all round the points, at several distances and fields of
     # view, each looking at their centre, and keep the best fit that has the points in front of it.
     directions = [np.array(d, dtype=np.float64) for d in _sphere(26)]
@@ -135,9 +135,16 @@ def fit_camera(
                     # seen from behind: a fit there means one axis of the points is flipped, or pairs are crossed
                     behind = cost if behind is None else min(behind, cost)
                     continue
-                rank = (int((depth <= 0).sum()), cost)  # every point in front first, then the error
-                if best is None or rank < (best[2], best[0]):
-                    best = (cost, sol.x, rank[0])
+                fits.append((cost, sol.x, int((depth <= 0).sum())))
+    if fits:
+        # the lowest error, unless a fit with every point in front is nearly as good: a point that falls behind is
+        # a wrong pair to name, not a pose to prefer over a whole set that fits
+        best = min(fits, key=lambda fit: fit[0])
+        front = [fit for fit in fits if fit[2] == 0]
+        if best[2] and front:
+            alt = min(front, key=lambda fit: fit[0])
+            if alt[0] <= 2.0 * best[0] + 4.0:
+                best = alt
     # a set on one plane fits as well from behind as from in front: mirrored only when the front fit is poor
     mirrored = behind is not None and (best is None or (best[0] > 1.0 and behind < 0.1 * best[0]))
     if mirrored:

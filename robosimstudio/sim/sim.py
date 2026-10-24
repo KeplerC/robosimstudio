@@ -440,8 +440,11 @@ class Sim(EnvBase):
                 return rgb
             while len(cache) >= 4:  # a twin's plate cameras, at the sizes its stills and viewport ask for
                 cache.pop(next(iter(cache)))[0].close()
+        if entry[2] != self._static_poses():  # a reset re-placed a weld, or a person dragged a fixture
+            entry[0].close()
+            entry = self._plate_passes(key)
         cache[key] = entry  # last in is the most recently used
-        renderer, bare = entry
+        renderer, bare, _ = entry
         try:
             backdrop = plate.load_plate(path, spec.width, spec.height)
             full = renderer.render(self.state)[key.name]
@@ -464,7 +467,11 @@ class Sim(EnvBase):
 
         # A room's light comes from overhead: unless the scene aims its own key, what moves casts its
         # shadow where it stands, not the house look's long 45-degree shadow across the clip's table.
+        from robosimstudio.core.render.look import STUDIO
+
         stated = getattr(getattr(self.request, "render", None), "light_direction", None)
+        if stated is not None and np.allclose(stated, STUDIO.light_direction, atol=1e-3):
+            stated = None  # the house rooms' own 45-degree key (STUDIO, LAB, ...): not aimed by this scene
         look = replace(self.look, shadows=True, light_direction=stated or (0.05, 0.0, -1.0))
         renderer = self.make_renderer(
             "tiled",
@@ -483,10 +490,19 @@ class Sim(EnvBase):
                 p = self.state.particle_q.numpy().copy()
                 p[:, 2] -= 1000.0
                 away.particle_q.assign(p)
-            return renderer, renderer.render(away)[key.name]
+            return renderer, renderer.render(away)[key.name], self._static_poses()
         except Exception:
             renderer.close()
             raise
+
+    def _static_poses(self) -> bytes:
+        """Where the static bodies stand, to the tenth of a millimetre: the static pass is redrawn when it changes."""
+        from robosimstudio.core.render import plate
+
+        if not self.model.body_count:
+            return b""
+        static = plate.static_bodies(self.model)
+        return np.round(self.state.body_q.numpy()[static], 4).tobytes()
 
     def _plate_refused(self, background: str, why: str) -> None:
         """Say once why a camera is drawn without its plate."""
@@ -1203,8 +1219,8 @@ class Sim(EnvBase):
         if self._still_renderer is not None:
             self._still_renderer.close()
             self._still_renderer = None
-        for renderer, _ in self.__dict__.pop("_plates", {}).values():
-            renderer.close()
+        for entry in self.__dict__.pop("_plates", {}).values():
+            entry[0].close()
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({getattr(self.request, 'full_name', '?')!r}, {len(self.names())} things, t={self.time:.3f}s)"

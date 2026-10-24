@@ -46,6 +46,8 @@ class TestPlate(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp(prefix="plate-"))
         background = _clip(tmp / "clip.mp4")
         reply = frames.plate(tmp / "clip.mp4", count=20, out_dir=tmp, name="plate.png")
+        dotted = frames.plate(tmp / "clip.mp4", count=6, out_dir=tmp, name="plate_cam.v2")
+        self.assertEqual(Path(dotted["plate"]).name, "plate_cam.v2.png", "only a trailing .png is dropped")
         self.assertTrue(reply["ok"], reply)
         self.assertEqual(Path(reply["plate"]).name, "plate.png", "a name given with .png keeps one")
         from PIL import Image
@@ -196,6 +198,8 @@ class TestCameraFit(unittest.TestCase):
         argv = ctl._join_points(["camera", "fit", "--point", "-0.3,0.2,0.75=812,455", "--size", "640x480"])
         args = ctl.build_parser().parse_args(argv)
         self.assertEqual(args.point, ["-0.3,0.2,0.75=812,455"])
+        kept = ctl._join_points(["camera", "fit", "--point", "--ref", "still.png"])
+        self.assertEqual(kept[2:], ["--point", "--ref", "still.png"], "an option after --point is left an option")
 
     def test_parse_point(self) -> None:
         self.assertEqual(calib.parse_point("0.6,0.3,0.75=812,455"), ((0.6, 0.3, 0.75), (812.0, 455.0)))

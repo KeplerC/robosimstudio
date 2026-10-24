@@ -119,9 +119,10 @@ def load_plate(path: str | Path, width: int, height: int) -> np.ndarray:
         if img.size != (width, height):
             img = img.resize((int(width), int(height)), Image.LANCZOS)
         plate = np.asarray(img, dtype=np.uint8)
-        stale = [k for k in _PLATES if k[0] == key[0] and k[1] != key[1]]  # an edited plate's old copies
-        for k in stale + list(_PLATES)[: max(0, len(_PLATES) - _PLATES_KEPT + 1)]:
-            _PLATES.pop(k, None)
+        for k in [k for k in _PLATES if k[0] == key[0] and k[1] != key[1]]:  # an edited plate's old copies
+            _PLATES.pop(k)
+        for k in list(_PLATES)[: max(0, len(_PLATES) - _PLATES_KEPT + 1)]:
+            _PLATES.pop(k)
     _PLATES[key] = plate  # last in is the most recently used
     return plate
 

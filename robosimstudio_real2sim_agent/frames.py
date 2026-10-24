@@ -323,8 +323,9 @@ def plate(
     moved = float((away > 0.25).mean())
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = Path(name).stem if name else f"plate_{clip_path.stem}"
+    stem = (name[:-4] if name.lower().endswith(".png") else name) if name else f"plate_{clip_path.stem}"
     path = out_dir / f"{stem}.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
     painted = ""
     if paint:
         with Image.open(paint) as opened:

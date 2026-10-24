@@ -1065,7 +1065,10 @@ def _join_points(argv: list[str]) -> list[str]:
     for arg in it:
         if arg == "--point":
             value = next(it, None)
-            out.append(arg if value is None else f"--point={value}")
+            if value is not None and value[:1] == "-" and value[1:2] in "0123456789.":
+                out.append(f"--point={value}")  # a world point behind the origin, not an option
+            else:
+                out.extend([arg] if value is None else [arg, value])
         else:
             out.append(arg)
     return out
