@@ -118,6 +118,8 @@ gap = [
 # which compiles its kernels at first use.
 curobo = ["nvidia-curobo[cu12]"]
 dev = ["ruff==0.16.1", "pyyaml"]
+# The Microduck example's on-board policies, which are ONNX graphs (examples/10_microduck).
+microduck = ["onnxruntime>=1.20"]
 
 # What `uv sync` and `uv run` install from a checkout without being asked
 # (default-groups below): the [rtx] extra, so a GPU that can path trace does.
