@@ -120,14 +120,26 @@ class TestComposite(unittest.TestCase):
         self.assertEqual(np.argwhere(moving)[:, 0].tolist(), [4] * 5, "the rope's row alone")
         self.assertFalse(moving[0, 0], "the mat is the plate's")
 
-    def test_a_plate_of_another_shape_is_refused(self) -> None:
+    def test_a_rope_in_the_air_keeps_only_its_own_pixels(self) -> None:
+        seg = np.zeros((9, 9), np.int32)
+        seg[2:7, 2:7] = -2  # the rope's collider spheres, half a metre from the camera
+        static_depth = np.zeros((9, 9), np.float32)  # nothing static behind it: the colliders hit nothing
+        own = np.where(seg < 0, 0.5, 0.0).astype(np.float32)
+        depth = np.full((9, 9), 3.0, np.float32)  # the render's own room, three metres off
+        depth[4, 2:7] = 0.502  # the rope's tube
+        out = plate.nearer(seg, depth, static_depth, own, grow=1)
+        moving = (out == plate.LABEL_MOVING) | (out < 0)
+        self.assertEqual(np.argwhere(moving)[:, 0].tolist(), [4] * 5, "the room behind the spheres is the plate's")
+
+    def test_a_plate_takes_any_size_asked(self) -> None:
         from PIL import Image
 
         tmp = Path(tempfile.mkdtemp(prefix="plate-"))
         Image.fromarray(np.zeros((30, 40, 3), np.uint8)).save(tmp / "p.png")
-        self.assertEqual(plate.load_plate(tmp / "p.png", 80, 60).shape, (60, 80, 3), "the same shape is scaled")
-        with self.assertRaises(ValueError):
-            plate.load_plate(tmp / "p.png", 80, 30)
+        self.assertEqual(plate.load_plate(tmp / "p.png", 80, 60).shape, (60, 80, 3))
+        self.assertEqual(plate.load_plate(tmp / "p.png", 64, 64).shape, (64, 64, 3), "a camera scaled to a square")
+        with self.assertRaises(FileNotFoundError):
+            plate.load_plate(tmp / "nothing.png", 80, 60)
 
 
 class TestStatic(unittest.TestCase):

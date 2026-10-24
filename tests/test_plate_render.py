@@ -54,6 +54,10 @@ class TestPlateRender(unittest.TestCase):
         self.assertGreater(b[2], b[0] + 80, "the bench top is the plate's, darkened at most by a shadow")
         bare = sim.render(dataclasses.replace(cam, background=""))["rgb"].astype(int)
         self.assertGreater(np.abs(bare - rgb).mean(), 10.0, "without its plate the camera draws the bench and room")
+        lost = sim.render(dataclasses.replace(cam, background=str(tmp / "nowhere.png")))["rgb"].astype(int)
+        self.assertLess(np.abs(lost - bare).mean(), 3.0, "a plate that is nowhere leaves the picture as rendered")
+        sim.close()
+        self.assertFalse(getattr(sim, "_plates", {}), "close lets the plate passes go")
 
 
 if __name__ == "__main__":

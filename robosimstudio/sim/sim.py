@@ -399,52 +399,77 @@ class Sim(EnvBase):
         """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py).
 
         The collider tracer draws the same camera twice more: with the moving
-        things, and with them sent far below the floor. Its segmentation of the
-        first says where they can be, the plate is darkened where the first is
-        darker -- their shadows -- and, given the render's own ``depth``, a
-        pixel is the render's only where that depth is nearer than the static
-        scene's: the collider of a thin rope is wider than the rope drawn, and
-        around it the render shows its own room, not the clip.
+        things, and with them sent far below the floor (once: nothing static
+        moves). Its segmentation of the first says where they can be, the plate
+        is darkened where the first is darker -- their shadows -- and, given the
+        render's own ``depth``, a pixel is the render's only where that depth is
+        the moving thing's: the collider of a thin rope is wider than the rope
+        drawn, and around it the render shows its own room, not the clip.
+
+        A plate that cannot be read (no file at the path, read beside the
+        working directory or the asset roots) leaves the picture as rendered,
+        and says so once.
         """
         from dataclasses import replace
 
         from robosimstudio.core.render import plate
 
+        path = self._plate_path(spec.background)
+        if path is None:
+            return rgb
         key = replace(spec, background="", channels=("rgb", "seg", "depth"))
-        if getattr(self, "_plate_key", None) != key:
-            old = getattr(self, "_plate_renderer", None)
-            if old is not None:
-                old.close()
+        cache = self.__dict__.setdefault("_plates", {})
+        entry = cache.pop(key, None)
+        if entry is None:
             # A room's light comes from overhead: unless the scene aims its own key, what moves casts its
             # shadow where it stands, not the house look's long 45-degree shadow across the clip's table.
             stated = getattr(getattr(self.request, "render", None), "light_direction", None)
             look = replace(self.look, shadows=True, light_direction=stated or (0.05, 0.0, -1.0))
-            self._plate_renderer = self.make_renderer(
+            renderer = self.make_renderer(
                 "tiled",
                 cameras=[key],
                 channels=["rgb", "seg", "depth"],
                 render=look,
                 shape_labels=plate.shape_labels(self.model),
             )
-            self._plate_key = key
-            self._plate_moving = ~plate.static_bodies(self.model)
-            self._plate_away = self.model.state()
-        full = self._plate_renderer.render(self.state)[key.name]
-        away = self._plate_away
-        if self.model.body_count:
-            q = self.state.body_q.numpy().copy()
-            q[self._plate_moving, 2] -= 1000.0
-            away.body_q.assign(q)
-        if self.model.particle_count:
-            p = self.state.particle_q.numpy().copy()
-            p[:, 2] -= 1000.0
-            away.particle_q.assign(p)
-        bare = self._plate_renderer.render(away)[key.name]
+            away = self.model.state()
+            if self.model.body_count:
+                q = self.state.body_q.numpy().copy()
+                q[~plate.static_bodies(self.model), 2] -= 1000.0
+                away.body_q.assign(q)
+            if self.model.particle_count:
+                p = self.state.particle_q.numpy().copy()
+                p[:, 2] -= 1000.0
+                away.particle_q.assign(p)
+            entry = (renderer, renderer.render(away)[key.name])
+            while len(cache) >= 4:  # a twin's plate cameras, at the sizes its stills and viewport ask for
+                cache.pop(next(iter(cache)))[0].close()
+        cache[key] = entry  # last in is the most recently used
+        renderer, bare = entry
+        full = renderer.render(self.state)[key.name]
         seg = full["seg"]
         shadow = plate.shade(full["rgb"], bare["rgb"], seg, soften=max(2.0, spec.width / 100.0), strength=0.6)
         if depth is not None:
-            seg = plate.nearer(seg, depth, bare["depth"], grow=max(2, spec.width // 320))
-        return plate.composite(rgb, seg, plate.load_plate(spec.background, spec.width, spec.height), shadow)
+            seg = plate.nearer(seg, depth, bare["depth"], full["depth"], grow=max(2, spec.width // 320))
+        return plate.composite(rgb, seg, plate.load_plate(path, spec.width, spec.height), shadow)
+
+    def _plate_path(self, background: str):
+        """The plate's file: as given, else found among the asset roots; None, said once, when it is nowhere."""
+        from pathlib import Path
+
+        from robosimstudio.paths import resolve_path
+
+        path = Path(background)
+        if path.is_file():
+            return path
+        try:
+            return resolve_path(background)
+        except (FileNotFoundError, OSError, ValueError):
+            missing = self.__dict__.setdefault("_plates_missing", set())
+            if background not in missing:
+                missing.add(background)
+                print(f"[rss] no plate at {path.resolve()}: drawing camera pictures without it")
+            return None
 
     def record(
         self,
@@ -1136,6 +1161,8 @@ class Sim(EnvBase):
         if self._still_renderer is not None:
             self._still_renderer.close()
             self._still_renderer = None
+        for renderer, _ in self.__dict__.pop("_plates", {}).values():
+            renderer.close()
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({getattr(self.request, 'full_name', '?')!r}, {len(self.names())} things, t={self.time:.3f}s)"

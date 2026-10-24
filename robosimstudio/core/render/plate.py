@@ -13,7 +13,9 @@ what is left to get right is the camera and what moves.
 
 Which pixels are which is read off the tiled tracer's shape index: a pixel that
 hit nothing, or a shape on the world or on a body held to the world by fixed
-joints only (the bench, a fixture, a robot's base), shows the plate; a pixel
+joints only (the bench, a fixture, a robot's base), shows the plate -- so a
+welded body the scene moves by rewriting its weld counts as static and is not
+drawn over the clip; give a thing that moves a joint that moves -- and a pixel
 that hit anything else, a particle or a deformable's mesh shows the render.
 Occlusion comes out right because the index is resolved in 3D: the near wall of
 a static tray in front of a moving reel is a static pixel, so the plate's wall
@@ -50,6 +52,8 @@ LABEL_STATIC = 2
 """The label a shape on the world, or on a body held to it by fixed joints only, takes."""
 
 _PLATES: dict[tuple[str, float, int, int], np.ndarray] = {}
+_PLATES_KEPT = 8
+"""Plates kept decoded at once: every plate camera of a twin, at the sizes its stills and its viewport ask for."""
 
 
 def static_bodies(model: Any) -> np.ndarray:
@@ -96,28 +100,29 @@ def shape_labels(model: Any) -> dict[int, int]:
 
 
 def load_plate(path: str | Path, width: int, height: int) -> np.ndarray:
-    """The plate as RGB ``uint8`` at ``width`` x ``height``; read again only when the file changes."""
+    """The plate as RGB ``uint8`` at ``width`` x ``height``; read again only when the file changes.
+
+    Scaled to whatever size is asked, aspect and all: a camera rendered at
+    another size (``CameraSpec.scaled``) scales its two focal lengths apart,
+    so the plate stretched to that size is still the picture through it.
+    """
     from PIL import Image
 
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"no plate at {path.resolve()} (a CameraSpec's background is read beside scene.py)")
     key = (str(path.resolve()), path.stat().st_mtime, int(width), int(height))
-    plate = _PLATES.get(key)
+    plate = _PLATES.pop(key, None)
     if plate is None:
         with Image.open(path) as opened:
             img = opened.convert("RGB")
         if img.size != (width, height):
-            w, h = img.size
-            if abs(w / h - width / height) > 0.01:
-                raise ValueError(
-                    f"the plate {path.name} is {w}x{h} and the camera {width}x{height}: another shape of picture, "
-                    "so it was not taken through this camera"
-                )
             img = img.resize((int(width), int(height)), Image.LANCZOS)
         plate = np.asarray(img, dtype=np.uint8)
-        _PLATES.clear()  # one plate per camera in use; an edited plate replaces its old copy
-        _PLATES[key] = plate
+        stale = [k for k in _PLATES if k[0] == key[0] and k[1] != key[1]]  # an edited plate's old copies
+        for k in stale + list(_PLATES)[: max(0, len(_PLATES) - _PLATES_KEPT + 1)]:
+            _PLATES.pop(k, None)
+    _PLATES[key] = plate  # last in is the most recently used
     return plate
 
 
@@ -156,9 +161,14 @@ def shade(
 
 
 def nearer(
-    seg: np.ndarray, depth: np.ndarray, static_depth: np.ndarray, grow: int = 2, slack: float = 0.0015
+    seg: np.ndarray,
+    depth: np.ndarray,
+    static_depth: np.ndarray,
+    moving_depth: np.ndarray | None = None,
+    grow: int = 2,
+    slack: float = 0.0015,
 ) -> np.ndarray:
-    """``seg`` with its moving pixels kept only where the render's ``depth`` is in front of the static scene's.
+    """``seg`` with its moving pixels kept only where the render drew the moving thing itself.
 
     ``seg`` comes off the colliders, ``depth`` off what the render drew: a
     rope's collider spheres are wider than its tube, and a visual mesh can
@@ -166,9 +176,13 @@ def nearer(
     and inside it a pixel is moving where the drawn surface is nearer than the
     static scene (``static_depth``, 0 where nothing static is hit) by more than
     ``slack`` metres plus a thousandth of the range -- under a rope lying on the
-    bench, over the path tracer's own mat (0.75 mm). The rest is static.
+    bench, over the path tracer's own mat (0.75 mm) -- and, given the colliders'
+    own ``moving_depth``, no farther than the nearest moving collider around it
+    by more than 2 cm and 2 % of the range: where nothing static stands behind
+    a rope in the air, the render's own room there is far behind the rope.
+    The rest is static.
     """
-    from scipy.ndimage import binary_dilation
+    from scipy.ndimage import binary_dilation, minimum_filter
 
     seg = np.asarray(seg).reshape(np.shape(depth)[:2])
     moving = (seg == LABEL_MOVING) | (seg < 0)
@@ -177,6 +191,12 @@ def nearer(
     behind = np.asarray(static_depth, dtype=np.float32).reshape(seg.shape)
     behind = np.where(behind > 0, behind, np.inf)
     drawn = region & (d > 0) & (d < behind - (slack + 0.001 * d))
+    if moving_depth is not None:
+        own = np.asarray(moving_depth, dtype=np.float32).reshape(seg.shape)
+        own = np.where(moving & (own > 0), own, np.inf)
+        if grow > 0:
+            own = minimum_filter(own, size=2 * int(grow) + 1)
+        drawn &= d <= own + 0.02 + 0.02 * d
     out = np.where(moving & ~drawn, LABEL_STATIC, seg)
     return np.where(drawn & ~moving, LABEL_MOVING, out).astype(seg.dtype)
 
