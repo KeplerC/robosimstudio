@@ -189,5 +189,17 @@ def composite(rgb: np.ndarray, seg: np.ndarray, plate: np.ndarray, shadow: np.nd
     out = np.array(plate[..., :3], dtype=np.uint8, copy=True)
     if shadow is not None:
         out = np.clip(out.astype(np.float32) * shadow[..., None], 0, 255).astype(np.uint8)
-    out[moving] = rgb[moving] if rgb.dtype == np.uint8 else np.clip(rgb[moving] * 255.0, 0, 255).astype(np.uint8)
+    drawn = rgb if rgb.dtype == np.uint8 else np.clip(rgb * 255.0, 0, 255).astype(np.uint8)
+    # The render's edge pixels are blends with its own room, about two pixels deep: across that band, a
+    # thing broad enough to have an inside fades from the plate into the render, so no pale outline of the
+    # render's room is left round it. A thing a few pixels across (a rope seen from afar) keeps its own.
+    from scipy.ndimage import distance_transform_edt, maximum_filter
+
+    depth_in = distance_transform_edt(moving)
+    broad = maximum_filter(depth_in, size=5) >= 3.0
+    alpha = np.where(broad, np.clip((depth_in - 0.5) / 2.0, 0.0, 1.0), moving.astype(np.float64))
+    alpha = alpha[..., None]
+    out = np.clip(alpha * drawn.astype(np.float64) + (1.0 - alpha) * out.astype(np.float64) + 0.5, 0, 255).astype(
+        np.uint8
+    )
     return out

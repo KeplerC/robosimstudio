@@ -73,15 +73,27 @@ class TestPlate(unittest.TestCase):
 
 class TestComposite(unittest.TestCase):
     def test_moving_pixels_are_the_render_and_the_rest_the_plate(self) -> None:
-        rgb = np.full((4, 6, 3), 10, np.uint8)
-        backdrop = np.full((4, 6, 3), 200, np.uint8)
-        seg = np.zeros((4, 6), np.int32)  # a miss
+        rgb = np.full((6, 6, 3), 10, np.uint8)
+        backdrop = np.full((6, 6, 3), 200, np.uint8)
+        seg = np.zeros((6, 6), np.int32)  # a miss
         seg[0, :] = plate.LABEL_STATIC
         seg[1, :] = plate.LABEL_MOVING
         seg[2, :] = -2  # a particle
         seg[3, :] = -3  # a deformable's mesh
         out = plate.composite(rgb, seg, backdrop)
-        self.assertTrue((out[0] == 200).all() and (out[1:] == 10).all())
+        self.assertTrue((out[0] == 200).all(), "a static row is the plate's")
+        self.assertTrue((out[2, 1:5] == 10).all(), "moving, particle and mesh pixels inside are the render's")
+        thin = np.zeros((6, 6), np.int32)
+        thin[2, :] = -2  # a rope one pixel across is all edge, and keeps its own pixels
+        self.assertTrue((plate.composite(rgb, thin, backdrop)[2] == 10).all())
+        rgb, backdrop = np.full((9, 9, 3), 10, np.uint8), np.full((9, 9, 3), 200, np.uint8)
+        seg = np.zeros((9, 9), np.int32)
+        seg[2:7, 2:7] = plate.LABEL_MOVING
+        out = plate.composite(rgb, seg, backdrop)
+        self.assertEqual(int(out[4, 4, 0]), 10, "a broad thing's inside is the render's")
+        self.assertGreater(int(out[2, 4, 0]), 10, "its outer ring fades into the plate")
+        self.assertLess(int(out[2, 4, 0]), 200)
+        self.assertEqual(int(out[0, 0, 0]), 200)
 
     def test_a_shadow_darkens_only_the_plate_and_leaves_no_halo(self) -> None:
         bare = np.full((20, 20, 3), 200, np.uint8)

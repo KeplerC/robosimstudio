@@ -124,10 +124,10 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
   robot's base, a wall) is the plate's. The background is then the clip's own
   pixels, and what is left is the camera and what moves. The static shapes
   still collide: a collider not under its picture in the plate shows as a
-  thing resting on air or sunk into the table. What moves casts its shadow
-  onto the plate, from `render=`'s `light_direction` (the collider tracer
-  draws it, with and without the moving things), so aim that the way the
-  clip's shadows fall. On the page, the path-traced viewport locked to that
+  thing resting on air or sunk into the table. What moves casts a soft
+  shadow onto the plate (the collider tracer draws the camera with and
+  without the moving things), from overhead unless `render=` states a
+  `light_direction`: aim that the way the clip's shadows fall. On the page, the path-traced viewport locked to that
   camera (its **Lock to** list) draws it over the plate too; the free view
   draws the scene alone.
 - Bind `routine` (a callable taking the built `sim`, and the page's `session`

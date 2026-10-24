@@ -415,11 +415,15 @@ class Sim(EnvBase):
             old = getattr(self, "_plate_renderer", None)
             if old is not None:
                 old.close()
+            # A room's light comes from overhead: unless the scene aims its own key, what moves casts its
+            # shadow where it stands, not the house look's long 45-degree shadow across the clip's table.
+            stated = getattr(getattr(self.request, "render", None), "light_direction", None)
+            look = replace(self.look, shadows=True, light_direction=stated or (0.05, 0.0, -1.0))
             self._plate_renderer = self.make_renderer(
                 "tiled",
                 cameras=[key],
                 channels=["rgb", "seg", "depth"],
-                render=replace(self.look, shadows=True),
+                render=look,
                 shape_labels=plate.shape_labels(self.model),
             )
             self._plate_key = key
