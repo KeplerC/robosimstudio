@@ -455,7 +455,8 @@ class PanelRenderView(Panel):
             look_at=tuple(float(v) for v in look),
             up=tuple(float(v) for v in up),
             channels=("rgb",),
-            background="",  # the free view is no camera's: its plate does not apply
+            # the free view is no camera's, so a plate the borrowed spec carries does not apply
+            **({"background": ""} if hasattr(base, "background") else {}),
         )
 
     def _push(self, client, key: tuple) -> bool:
