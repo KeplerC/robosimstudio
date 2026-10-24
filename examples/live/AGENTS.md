@@ -26,8 +26,8 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
   makes a clean plate of a fixed camera's clip, which a camera takes as its
   `background` so that every picture through it draws what moves over the
   clip's own pixels (REFERENCE). Open the pictures they write and look at
-  them; use the numbers too. Use any other tool you like: your own scripts in the twin's
-  `run/`, OpenCV, numpy, a model you download.
+  them; use the numbers too. Use any other tool you like: your own scripts
+  in the twin's `run/`, OpenCV, numpy, a model you download.
 - The API: `examples/00_getting_started/README.md`, each example folder's
   README, `robosimstudio_materials/` (cloth, rope/rod, soft, bag, paper, tape,
   granular, liquid, dough, ...), and `./ctl catalog` for robots, grippers,
@@ -46,8 +46,10 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
 2. **The physics is real.** The robot moves things only through its fingers'
    contact: no pose written onto a thing, no weld, attachment, latch, spring
    or dragger, no motor on a thing's own joints, no keyframed or scripted
-   motion of a thing. Deformable things are simulated as the material they
-   are and behave like the clip (how they bend, sag and slide).
+   motion of a thing, no collider added to the fingers (if the grip needs
+   purchase, enlarge a real feature of the thing and report it). Deformable
+   things are simulated as the material they are and behave like the clip
+   (how they bend, sag and slide).
 3. **The motion matches.** A `routine` bound in `scene.py` (a Run button on
    the page) does what the clip shows: the same first state, the same last
    state, the same contacts in between.
@@ -66,7 +68,8 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
   elsewhere; paint out what never left) given as the camera's `background`.
   Every static thing still has to be there as a collider under its picture
   (the bench, a box, a tray, a fixture); its look comes from the plate, and
-  the shadows of what moves fall on it from `render=`'s `light_direction`. A
+  the shadows of what moves fall on it from overhead, or from `render=`'s
+  `light_direction` when the clip's light comes from elsewhere. A
   camera that moves (on a wrist) cannot use a plate: what it sees is
   modelled and textured, with the fixed cameras' plates as its reference.
 - **The physics is measured, not assumed.** Decide what each thing is --
