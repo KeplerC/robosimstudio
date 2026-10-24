@@ -432,7 +432,7 @@ class Sim(EnvBase):
             away.particle_q.assign(p)
         bare = self._plate_renderer.render(away)[key.name]
         seg = full["seg"]
-        shadow = plate.shade(full["rgb"], bare["rgb"], seg, soften=max(1.0, spec.width / 320.0))
+        shadow = plate.shade(full["rgb"], bare["rgb"], seg, soften=max(2.0, spec.width / 100.0))
         return plate.composite(rgb, seg, plate.load_plate(spec.background, spec.width, spec.height), shadow)
 
     def record(
