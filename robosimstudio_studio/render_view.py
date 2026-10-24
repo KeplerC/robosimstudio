@@ -455,6 +455,7 @@ class PanelRenderView(Panel):
             look_at=tuple(float(v) for v in look),
             up=tuple(float(v) for v in up),
             channels=("rgb",),
+            background="",  # the free view is no camera's: its plate does not apply
         )
 
     def _push(self, client, key: tuple) -> bool:

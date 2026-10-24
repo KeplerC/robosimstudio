@@ -190,6 +190,13 @@ class TestCameraFit(unittest.TestCase):
         errors = calib.fit_camera(world, pixels, 1280, 720)["errors_px"]
         self.assertEqual(int(np.argmax(errors)), 4)
 
+    def test_a_point_behind_the_origin_parses_on_the_command_line(self) -> None:
+        from robosimstudio_real2sim_agent import ctl
+
+        argv = ctl._join_points(["camera", "fit", "--point", "-0.3,0.2,0.75=812,455", "--size", "640x480"])
+        args = ctl.build_parser().parse_args(argv)
+        self.assertEqual(args.point, ["-0.3,0.2,0.75=812,455"])
+
     def test_parse_point(self) -> None:
         self.assertEqual(calib.parse_point("0.6,0.3,0.75=812,455"), ((0.6, 0.3, 0.75), (812.0, 455.0)))
         with self.assertRaises(ValueError):

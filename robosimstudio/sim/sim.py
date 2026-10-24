@@ -442,12 +442,19 @@ class Sim(EnvBase):
                 cache.pop(next(iter(cache)))[0].close()
         cache[key] = entry  # last in is the most recently used
         renderer, bare = entry
-        full = renderer.render(self.state)[key.name]
+        try:
+            backdrop = plate.load_plate(path, spec.width, spec.height)
+            full = renderer.render(self.state)[key.name]
+        except Exception as exc:  # a plate being rewritten, a contended card: this frame as rendered, said once
+            self._plate_refused(
+                spec.background, f"camera {spec.name!r}'s plate pass failed ({type(exc).__name__}: {exc})"
+            )
+            return rgb
         seg = full["seg"]
         shadow = plate.shade(full["rgb"], bare["rgb"], seg, soften=max(2.0, spec.width / 100.0), strength=0.6)
         if depth is not None:
             seg = plate.nearer(seg, depth, bare["depth"], full["depth"], grow=max(2, spec.width // 320))
-        return plate.composite(rgb, seg, plate.load_plate(path, spec.width, spec.height), shadow)
+        return plate.composite(rgb, seg, backdrop, shadow)
 
     def _plate_passes(self, key: CameraSpec):
         """The collider tracer over ``key``, and its one picture of the static scene alone (nothing static moves)."""

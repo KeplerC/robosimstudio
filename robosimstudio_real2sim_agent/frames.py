@@ -301,12 +301,13 @@ def plate(
         spans.append((t0, t1))
     count = max(3, int(count))
     total = sum(t1 - t0 for t0, t1 in spans)
-    raw = b""
+    chunks: list[bytes] = []
     for t0, t1 in spans:
         rate = max(1, round(count * (t1 - t0) / total)) / (t1 - t0)
         argv = [_ffmpeg(), "-v", "error", "-ss", f"{t0:.3f}", "-t", f"{t1 - t0:.3f}", "-i", str(clip_path)]
         argv += ["-vf", f"fps={rate:.6f}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-        raw += subprocess.run(argv, check=True, stdin=subprocess.DEVNULL, capture_output=True).stdout
+        chunks.append(subprocess.run(argv, check=True, stdin=subprocess.DEVNULL, capture_output=True).stdout)
+    raw = b"".join(chunks)
     n = len(raw) // (w * h * 3)
     if n < 3:
         return {"ok": False, "error": f"only {n} frames came out of {windows or 'the clip'}"}

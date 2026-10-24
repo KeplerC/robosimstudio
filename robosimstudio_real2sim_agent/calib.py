@@ -135,8 +135,9 @@ def fit_camera(
                     # seen from behind: a fit there means one axis of the points is flipped, or pairs are crossed
                     behind = cost if behind is None else min(behind, cost)
                     continue
-                if best is None or cost < best[0]:
-                    best = (cost, sol.x)
+                rank = (int((depth <= 0).sum()), cost)  # every point in front first, then the error
+                if best is None or rank < (best[2], best[0]):
+                    best = (cost, sol.x, rank[0])
     # a set on one plane fits as well from behind as from in front: mirrored only when the front fit is poor
     mirrored = behind is not None and (best is None or (best[0] > 1.0 and behind < 0.1 * best[0]))
     if mirrored:

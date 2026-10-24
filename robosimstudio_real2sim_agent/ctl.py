@@ -1058,9 +1058,22 @@ def cmd_camera(args: argparse.Namespace) -> int:
     return show(reply, args.json)
 
 
+def _join_points(argv: list[str]) -> list[str]:
+    """``--point -0.3,0.2,0.75=812,455`` as ``--point=-0.3,...``: argparse takes a leading minus for an option."""
+    out: list[str] = []
+    it = iter(argv)
+    for arg in it:
+        if arg == "--point":
+            value = next(it, None)
+            out.append(arg if value is None else f"--point={value}")
+        else:
+            out.append(arg)
+    return out
+
+
 def main(argv=None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_join_points(list(sys.argv[1:] if argv is None else argv)))
     sock = socket_path(args.run_dir, args.sock)
     if args.cmd == "new":
         return cmd_new(args)
