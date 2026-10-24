@@ -306,7 +306,7 @@ def plate(
     moved = float((away > 0.25).mean())
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = name or f"plate_{clip_path.stem}"
+    stem = Path(name).stem if name else f"plate_{clip_path.stem}"
     path = out_dir / f"{stem}.png"
     painted = ""
     if paint:

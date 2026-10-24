@@ -86,7 +86,7 @@ def fit_camera(
         raise ValueError(f"{len(world)} points; this fit needs at least {need}")
     cx0, cy0 = 0.5 * width, 0.5 * height
     fixed_f = None if fov_y is None else 0.5 * height / math.tan(math.radians(fov_y) * 0.5)
-    best = None
+    best, mirrored = None, False
     # the focal length is not convex in the error: start from a spread of fields of view and keep the best
     for fov in [fov_y] if fov_y else (25.0, 35.0, 45.0, 55.0, 65.0, 80.0, 100.0):
         f = 0.5 * height / math.tan(math.radians(fov) * 0.5)
@@ -105,9 +105,18 @@ def fit_camera(
 
         sol = least_squares(residual, x0, method="lm" if len(world) * 2 > len(x0) else "trf")
         cost = float(np.mean(sol.fun**2))
+        depth = (world @ _rodrigues(sol.x[1:4]).T + sol.x[4:7])[:, 2]
+        if (depth <= 0).mean() > 0.5:
+            mirrored = True  # the points fit seen from behind: one axis of them is flipped, or the pairs are crossed
+            continue
         if best is None or cost < best[0]:
             best = (cost, sol.x)
     if best is None:
+        if mirrored:
+            raise ValueError(
+                "these points fit only from behind the camera, as a mirror image: one world axis is flipped "
+                "(+y is to the robot's left when it faces +x), or left and right pixels are swapped"
+            )
         raise ValueError("no pose puts these points in front of a camera; check the pairs")
     params = best[1]
     f = fixed_f if fixed_f is not None else math.exp(params[0])
