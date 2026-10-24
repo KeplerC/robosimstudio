@@ -149,7 +149,7 @@ def shade(
 
 
 def nearer(
-    seg: np.ndarray, depth: np.ndarray, static_depth: np.ndarray, grow: int = 2, slack: float = 0.004
+    seg: np.ndarray, depth: np.ndarray, static_depth: np.ndarray, grow: int = 2, slack: float = 0.0015
 ) -> np.ndarray:
     """``seg`` with its moving pixels kept only where the render's ``depth`` is in front of the static scene's.
 
