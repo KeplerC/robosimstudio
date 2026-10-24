@@ -128,9 +128,15 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
   thing resting on air or sunk into the table. What moves casts a soft
   shadow onto the plate (the collider tracer draws the camera with and
   without the moving things), from overhead unless `render=` states a
-  `light_direction`: aim that the way the clip's shadows fall. On the page, the path-traced viewport locked to that
-  camera (its **Lock to** list) draws it over the plate too; the free view
-  draws the scene alone.
+  `light_direction`: aim that the way the clip's shadows fall. On the page,
+  the path-traced viewport locked to that camera (its **Lock to** list)
+  draws it over the plate too, for the price of a collider pass and a few
+  image filters a frame; the free view, the studio's video export and its
+  Cameras panel draw the scene alone. A camera on a body (a wrist) is drawn
+  without its plate, as is a camera whose plate is not found (beside
+  `scene.py` or among the asset roots); each says so once. Anything the path
+  tracer draws that has no collider or particle in the model (a co-simulated
+  actor with no Newton body) is covered by the plate.
 - Bind `routine` (a callable taking the built `sim`, and the page's `session`
   if it declares one, returning a generator), or `routines`, a dict of name to
   such callables, and the page grows a **Run** button per routine with a
