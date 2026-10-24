@@ -39,12 +39,10 @@ def parse_point(text: str) -> tuple[tuple[float, float, float], tuple[float, flo
 
 
 def _rodrigues(r: np.ndarray) -> np.ndarray:
-    theta = float(np.linalg.norm(r))
-    if theta < 1e-12:
-        return np.eye(3)
-    k = r / theta
-    kx = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
-    return np.eye(3) + math.sin(theta) * kx + (1.0 - math.cos(theta)) * (kx @ kx)
+    """The rotation matrix of an axis-angle vector."""
+    from scipy.spatial.transform import Rotation
+
+    return Rotation.from_rotvec(np.asarray(r, dtype=np.float64)).as_matrix()
 
 
 def _project(params: np.ndarray, world: np.ndarray, cx: float, cy: float, free_center: bool) -> np.ndarray:
@@ -70,14 +68,10 @@ def _sphere(n: int) -> list[tuple[float, float, float]]:
 
 
 def _look_rotation(eye: np.ndarray, target: np.ndarray) -> np.ndarray:
-    """World -> camera rotation (+z forward, +y down) of a camera at ``eye`` looking at ``target``, world +z up."""
-    forward = target - eye
-    forward = forward / np.linalg.norm(forward)
-    up = np.array([0.0, 0.0, 1.0]) if abs(forward[2]) < 0.99 else np.array([0.0, 1.0, 0.0])
-    right = np.cross(forward, up)
-    right = right / np.linalg.norm(right)
-    down = np.cross(forward, right)
-    return np.stack([right, down, forward])
+    """World -> camera rotation of a camera at ``eye`` looking at ``target``, in CameraSpec's basis."""
+    from robosimstudio.core.math import look_at_matrix
+
+    return look_at_matrix(eye, target)[:3, :3].T
 
 
 def _rotvec(rot: np.ndarray) -> np.ndarray:
@@ -143,7 +137,8 @@ def fit_camera(
                     continue
                 if best is None or cost < best[0]:
                     best = (cost, sol.x)
-    mirrored = behind is not None and (best is None or behind < 0.1 * best[0])
+    # a set on one plane fits as well from behind as from in front: mirrored only when the front fit is poor
+    mirrored = behind is not None and (best is None or (best[0] > 1.0 and behind < 0.1 * best[0]))
     if mirrored:
         best = None
     if best is None:

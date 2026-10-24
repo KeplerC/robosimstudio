@@ -113,7 +113,16 @@ name; each number the clip could not settle and what you assumed.
 
 - Everything the twin needs lives in its folder (`scene.py`, helper modules,
   `assets/`, `ref/`, `REPORT.md`); scratch goes in its `run/`. It is what the
-  person zips and hands on, so leave it in the state you report.
+  person zips and hands on, so leave it in the state you report. Nothing goes
+  in the library, `tests/`, the repository root or `/tmp`: a twin is not a
+  library change, and the test tiers are not for it.
+- Long commands block until they are done, so never sleep and poll:
+  `./ctl status --wait` after a save, `./ctl play NAME --wait` and
+  `./ctl eval "..." --wait` for a routine. Probe through `./ctl eval` (the
+  page's process and GPU) rather than a second process of your own.
+- Under `CUDA_VISIBLE_DEVICES=N ./ctl up` the page sees that one card as
+  `cuda:0`: leave `ROBOSIMSTUDIO_DEVICE` and `BUILD = {"device": ...}` out, or
+  make them `cuda:0`.
 - The page rebuilds on save; restarting it is not needed for an edit to land.
   A save that does not build leaves the previous scene up and `./ctl status`
   shows the traceback.

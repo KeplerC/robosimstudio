@@ -377,8 +377,10 @@ class Sim(EnvBase):
 
         spec = self._camera_for(camera)
         backend, why = self.platform.renderer_for("")
+        from robosimstudio.solvers.render import supported_channels
+
         asked = tuple(channels)
-        if spec.background and "rgb" in asked and "depth" not in asked:
+        if spec.background and "rgb" in asked and "depth" not in asked and "depth" in supported_channels(backend):
             asked += ("depth",)  # the plate goes wherever the render's own depth is the static scene's
         key = (backend, spec, asked)
         if self._still_renderer is None or self._still_key != key:
@@ -414,34 +416,28 @@ class Sim(EnvBase):
 
         from robosimstudio.core.render import plate
 
+        if spec.parent_body >= 0 or spec.parent_frame:
+            self._plate_refused(
+                spec.background, f"camera {spec.name!r} rides on a body, and a plate is one viewpoint's"
+            )
+            return rgb
         path = self._plate_path(spec.background)
         if path is None:
             return rgb
         key = replace(spec, background="", channels=("rgb", "seg", "depth"))
+        if key in self.__dict__.setdefault("_plates_failed", set()):
+            return rgb
         cache = self.__dict__.setdefault("_plates", {})
         entry = cache.pop(key, None)
         if entry is None:
-            # A room's light comes from overhead: unless the scene aims its own key, what moves casts its
-            # shadow where it stands, not the house look's long 45-degree shadow across the clip's table.
-            stated = getattr(getattr(self.request, "render", None), "light_direction", None)
-            look = replace(self.look, shadows=True, light_direction=stated or (0.05, 0.0, -1.0))
-            renderer = self.make_renderer(
-                "tiled",
-                cameras=[key],
-                channels=["rgb", "seg", "depth"],
-                render=look,
-                shape_labels=plate.shape_labels(self.model),
-            )
-            away = self.model.state()
-            if self.model.body_count:
-                q = self.state.body_q.numpy().copy()
-                q[~plate.static_bodies(self.model), 2] -= 1000.0
-                away.body_q.assign(q)
-            if self.model.particle_count:
-                p = self.state.particle_q.numpy().copy()
-                p[:, 2] -= 1000.0
-                away.particle_q.assign(p)
-            entry = (renderer, renderer.render(away)[key.name])
+            try:
+                entry = self._plate_passes(key)
+            except Exception as exc:  # a contended card, a table for another model: the picture as rendered, said once
+                self._plates_failed.add(key)
+                print(
+                    f"[rss] the plate passes for camera {spec.name!r} failed ({type(exc).__name__}: {exc}); drawing it without its plate"
+                )
+                return rgb
             while len(cache) >= 4:  # a twin's plate cameras, at the sizes its stills and viewport ask for
                 cache.pop(next(iter(cache)))[0].close()
         cache[key] = entry  # last in is the most recently used
@@ -452,6 +448,45 @@ class Sim(EnvBase):
         if depth is not None:
             seg = plate.nearer(seg, depth, bare["depth"], full["depth"], grow=max(2, spec.width // 320))
         return plate.composite(rgb, seg, plate.load_plate(path, spec.width, spec.height), shadow)
+
+    def _plate_passes(self, key: CameraSpec):
+        """The collider tracer over ``key``, and its one picture of the static scene alone (nothing static moves)."""
+        from dataclasses import replace
+
+        from robosimstudio.core.render import plate
+
+        # A room's light comes from overhead: unless the scene aims its own key, what moves casts its
+        # shadow where it stands, not the house look's long 45-degree shadow across the clip's table.
+        stated = getattr(getattr(self.request, "render", None), "light_direction", None)
+        look = replace(self.look, shadows=True, light_direction=stated or (0.05, 0.0, -1.0))
+        renderer = self.make_renderer(
+            "tiled",
+            cameras=[key],
+            channels=["rgb", "seg", "depth"],
+            render=look,
+            shape_labels=plate.shape_labels(self.model),
+        )
+        try:
+            away = self.model.state()
+            if self.model.body_count:
+                q = self.state.body_q.numpy().copy()
+                q[~plate.static_bodies(self.model), 2] -= 1000.0
+                away.body_q.assign(q)
+            if self.model.particle_count:
+                p = self.state.particle_q.numpy().copy()
+                p[:, 2] -= 1000.0
+                away.particle_q.assign(p)
+            return renderer, renderer.render(away)[key.name]
+        except Exception:
+            renderer.close()
+            raise
+
+    def _plate_refused(self, background: str, why: str) -> None:
+        """Say once why a camera is drawn without its plate."""
+        said = self.__dict__.setdefault("_plates_missing", set())
+        if (background, why) not in said:
+            said.add((background, why))
+            print(f"[rss] {why}: drawing it without its plate")
 
     def _plate_path(self, background: str):
         """The plate's file: as given, else found among the asset roots; None, said once, when it is nowhere."""

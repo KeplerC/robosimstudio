@@ -372,9 +372,8 @@ class EntityStatic(WeldedFixture, Entity):
                 mesh = trimesh.load(str(path), force="mesh")
                 try:
                     texturing = mesh_texturing(self.spec.asset, mesh, label=self.spec.name)
-                except (
-                    ValueError
-                ) as exc:  # a texture with no UVs to sample it at: drawn untextured, as before, but said
+                except (ValueError, FileNotFoundError) as exc:
+                    # no UVs to sample it at, or no such image: drawn untextured as before, but said
                     print(f"[rss] {exc}; drawing it untextured")
                     texturing = {}
                 visual_shape = builder.add_shape_mesh(
