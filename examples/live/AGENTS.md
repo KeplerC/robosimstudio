@@ -66,6 +66,9 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
 - **The background is the clip's own pixels.** For a camera that does not
   move, a clean plate (`./ctl ref plate`, with windows in which what moves is
   elsewhere; paint out what never left) given as the camera's `background`.
+  A plate that still holds the robot or the thing it handles matches the
+  first frame perfectly and leaves a ghost the moment they move: look for one
+  on the take's strip, not only on the first frame.
   Every static thing still has to be there as a collider under its picture
   (the bench, a box, a tray, a fixture); its look comes from the plate, and
   the shadows of what moves fall on it from overhead, or from `render=`'s
