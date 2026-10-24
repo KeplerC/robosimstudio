@@ -402,7 +402,9 @@ class PanelRenderView(Panel):
             # rgb alone: the depth channel costs 13 ms a frame to encode and
             # composites nothing. accumulate is set per frame in `drain`.
             extra = {"accumulate": self.passes[0]} if self.backend == PUBLIC else {}
-            renderer = self.env.make_renderer(self.backend, cameras=[spec], channels=["rgb"], **extra)
+            # a camera over a clean plate also wants the depth that says which pixels are what moves
+            channels = ["rgb", "depth"] if getattr(spec, "background", "") else ["rgb"]
+            renderer = self.env.make_renderer(self.backend, cameras=[spec], channels=channels, **extra)
             self._renderers[key] = renderer
             renderer.render(self.env.state)
         except Exception as exc:  # no GPU, a contended card, a GPU the rule misjudged
@@ -453,6 +455,8 @@ class PanelRenderView(Panel):
             look_at=tuple(float(v) for v in look),
             up=tuple(float(v) for v in up),
             channels=("rgb",),
+            # the free view is no camera's, so a plate the borrowed spec carries does not apply
+            **({"background": ""} if hasattr(base, "background") else {}),
         )
 
     def _push(self, client, key: tuple) -> bool:
@@ -470,6 +474,11 @@ class PanelRenderView(Panel):
         name = "viewport" if self._locked_camera() is None else self.locked
         rgb = np.ascontiguousarray(frames[name]["rgb"][..., :3]).astype(np.uint8)
         if self._locked_camera() is not None:
+            if getattr(spec, "background", "") and hasattr(self.env, "over_plate"):
+                try:  # a camera with a clean plate shows the clip's own pixels behind what moves, as its stills do
+                    rgb = self.env.over_plate(spec, rgb, depth=frames[name].get("depth"))
+                except Exception as exc:
+                    self._note = f"the plate would not draw -- {type(exc).__name__}: {exc}"
             rgb = self._letterbox(rgb, client)
         client.scene.set_background_image(rgb, format="jpeg", jpeg_quality=80)
         return True

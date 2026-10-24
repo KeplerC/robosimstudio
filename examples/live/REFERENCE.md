@@ -115,6 +115,28 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
   out is the renderer's own default -- hence `replace(LAB, ...)`. A
   direction, a warmth or a shadow the renderer cannot make goes in the
   report. The page draws its own way: judge the light on the pair.
+- A camera with a `background` -- `rss.CameraSpec(name="cam", ..., background="ref/plate_cam.png")`,
+  a clean plate taken through that camera (`./ctl ref plate`), read beside
+  `scene.py` -- is drawn over that plate in every `snapshot`, `compare`,
+  `check` and take through it: what can move (the robot's moving links, the
+  things it handles, every deformable) is rendered, and every pixel where the
+  render hit nothing or a shape fixed to the world (the bench, a fixture, a
+  robot's base, a wall) is the plate's -- so a thing welded to the world that
+  the scene moves by rewriting its weld counts as static: give it a joint. The background is then the clip's own
+  pixels, and what is left is the camera and what moves. The static shapes
+  still collide: a collider not under its picture in the plate shows as a
+  thing resting on air or sunk into the table. What moves casts a soft
+  shadow onto the plate (the collider tracer draws the camera with and
+  without the moving things), from overhead unless `render=` states a
+  `light_direction`: aim that the way the clip's shadows fall. On the page,
+  the path-traced viewport locked to that camera (its **Lock to** list)
+  draws it over the plate too, for the price of a collider pass and a few
+  image filters a frame; the free view, the studio's video export and its
+  Cameras panel draw the scene alone. A camera on a body (a wrist) is drawn
+  without its plate, as is a camera whose plate is not found (beside
+  `scene.py` or among the asset roots); each says so once. Anything the path
+  tracer draws that has no collider or particle in the model (a co-simulated
+  actor with no Newton body) is covered by the plate.
 - Bind `routine` (a callable taking the built `sim`, and the page's `session`
   if it declares one, returning a generator), or `routines`, a dict of name to
   such callables, and the page grows a **Run** button per routine with a
@@ -133,7 +155,9 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
 | `reload` | Rebuild now. Saving the file does this too. |
 | `snapshot [--camera N] [--beside REF] [--eye x,y,z --look-at x,y,z] [--size WxH] [--note TEXT]` | A path-traced PNG of the current state, with a reference picture beside it. A snapshot draws the room, the mat and the textures; the page draws only the bench and what you added. |
 | `ref frames CLIP [--at 0:closed,4.5:lid_open,end] [--every S] [--out D] [--width W]` | Stills out of a clip at those seconds, a contact sheet with the seconds burnt in, and `ref/timeline.json` anchoring them, in `ref/` beside the scene file or `--out`, at the clip's width or `--width`. Needs no page. |
-| `compare [--ref PHOTO] [--camera N] [--key NAME=HOW ...] [--note TEXT]` | The scene beside the photograph: the pair at full size and a look sheet; per keyed thing, its size, offset and overlap. |
+| `ref plate CLIP [--window 0:5,36:52] [--count N] [--paint MASK] [--name F] [--out D]` | A clean plate of a fixed camera's clip: the per-pixel median of `N` (60) frames drawn from those seconds (default: all of it), so whatever passes through a pixel for under half of them is gone, and `ref/plate_<clip>_spread.png`, the share of frames each pixel differs from the plate in (white: half, where a ghost can be). `--paint` fills the white of a mask the clip's size from around it (the nearest pixel outside, blurred across the hole, so a wide hole comes out smeared: fill a large one from another window instead): a thing that stayed put all along. Needs no page. A camera takes it as its `background` (*The contract*). |
+| `camera fit --point X,Y,Z=U,V ... --ref STILL [--name N] [--fov DEG] [--free-center]` | The pinhole that puts world points (metres, the frame `CameraSpec` uses) on their pixels in the still: six or more, spread over the picture and in depth. Prints the `rss.CameraSpec(...)` to paste, its field of view, and each point's reprojection error in pixels (a point read off wrong is the one far above the rest); `run/camfit_<name>.png` marks each clicked pixel (yellow) and where the fit puts its point (cyan). `--fov` holds the field of view, `--free-center` solves the principal point too (ten or more points). Needs no page. |
+| `compare [--ref PHOTO] [--camera N] [--key NAME=HOW ...] [--note TEXT]` | The scene beside the photograph: the pair at full size and a look sheet; per keyed thing, its size, offset and overlap; and how far the whole picture's colours are from the photo's, over the frame and behind the keyed things. |
 | `compare --take NAME [--key ...]` | A recorded take beside the clip's timeline: the clip's anchors above, the take's frames at the same point below, and what moved in the take. |
 | `check [--camera N] [--key ...] [--object NAME ...]` | The gate: builds, finite state, camera at the clip's aspect, every named thing present, penetration and drift at rest under their bars. |
 | `log [--last N]` | Every compare, check, take and `snapshot --note` so far: what it left (PASS/FAIL, the picture: a snapshot's pair when it made one) and the `scene.py` it measured. |
@@ -159,6 +183,8 @@ continues from the files already in `run/`, across restarts):
   positions), `run/NAME_seg.npz`
 - `run/log.jsonl` (every reading), `run/serve.log` (the server's output)
 - from `ref frames`: `ref/tSSS.SS.jpg`, `ref/contact.jpg`, `ref/timeline.json`
+- from `ref plate`: `ref/plate_<clip>.png`, `ref/plate_<clip>_spread.png`; from
+  `camera fit --ref`: `run/camfit_<name>.png`
 
 ## Acting
 
@@ -205,6 +231,34 @@ page returns to its previous state when the routine ends -- held, if the
 routine cut a `run N` short -- and stays paused through a `reset` while
 paused.
 
+## Pitfalls twins have met
+
+Each of these cost a twin a quarter of an hour to find:
+
+- **A downloaded arm is not driven the page's way.** An arm from MuJoCo
+  Menagerie (the UR5e among them) brings its own actuators, and under the
+  page's joint targets the hand sags and stops short. Twins replaced them with
+  plain position servos -- `<position kp="2000" kv="400">` on a UR5e's
+  shoulder and elbow, `kp="500" kv="100"` on its wrist -- before tuning
+  anything else.
+- **Linkage fingers travel as they close.** A Robotiq 2F-85's pads swing up
+  and in on their four-bar: the grasp height read at open is not the one at
+  shut. Read the pads' colliders at the closing value you command.
+- **The contact gap is 2 mm.** Under `rss.GENERIC` rigid shapes start
+  touching 2 mm apart: a thing a few millimetres thick is held by the gap,
+  not its faces. A thin part wants a smaller gap -- the scene's
+  `rss.CollisionSpec(rigid_gap=...)`, or an asset's `contact_gap`
+  (`examples/08_demos/wipe_the_bar/bar.py` sets both kinds of knob).
+- **Many collider pieces overflow the contact buffers.** A thing built of
+  many convex parts (spokes, a rim of segments) in a pile of contacts runs out
+  of room: raise `rss.backend("mujoco", nconmax=..., njmax=...)` and
+  `CollisionSpec(rigid_contact_max=...)` as `bar.py` does.
+- **IK picks an elbow per call.** Two targets solved apart can land on two
+  branches and swing the arm through the bench between them: seed each solve
+  from the joints of the last one.
+- **The first path-traced picture compiles shaders** for minutes, in each new
+  process; `./ctl status` says so.
+
 ## Readings
 
 `compare` puts the render beside the photograph and writes the look sheet;
@@ -234,7 +288,13 @@ finds what was drawn.
 ```
 case: sim is 0.70x the photo's size (w 0.77x, h 0.60x), centre 5 px left, 78 px high (6.1% of the frame), IoU 0.31
 socket: sim is 0.81x the photo's size (w 0.44x, h 0.87x), centre 122 px left, 20 px low (9.7% of the frame), IoU 0.00
+picture: colour difference 14.2 (mean CIE76 dE) over the frame, 11.8 behind the keyed things; PSNR 17.9 dB, 19.3 dB behind them (identical pixels read dE 0)
 ```
+
+The `picture` line is the whole frame's pixels against the photo's: a dE of
+about 2 is the least a person sees side by side, 10 a plainly different
+colour. Behind the keyed things a camera drawn over its plate reads near 0
+where the camera is right.
 
 `snapshot --beside ref/<still>` and `compare` (as `cmp_NNN_beside.png`) put
 the render beside the still at full size, render on the left, photo on the

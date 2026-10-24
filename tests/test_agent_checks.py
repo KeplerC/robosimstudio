@@ -161,7 +161,12 @@ class TestCompareStill(unittest.TestCase):
         result = checks.compare_still(rgb, seg, names, tmp / "ref.png", keys)
         self.assertEqual(set(result["objects"]), {"case", "bolt"})
         self.assertNotIn("score", result, "no mean over the keys: it said nothing about any one thing")
-        self.assertEqual(len(result["lines"]), 2, "one line per key, nothing else")
+        self.assertEqual(len(result["lines"]), 3, "one line per key, and the picture's")
+        self.assertTrue(result["lines"][-1].startswith("picture: "))
+        picture = result["picture"]
+        self.assertGreater(picture["delta_e"], 0.0, "a render unlike its photo differs in colour")
+        same = checks.picture_reading(result["fitted"], result["fitted"])
+        self.assertEqual((same["delta_e"], same["delta_e_behind"]), (0.0, 0.0), "identical pixels read dE 0")
         pictures = checks.write_compare_pictures(tmp / "cmp_001.png", rgb, result)
         self.assertTrue(Path(pictures["look"]).exists() and pictures["look"].endswith("_look.png"))
         with Image.open(pictures["beside"]) as beside:

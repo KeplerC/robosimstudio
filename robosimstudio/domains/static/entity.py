@@ -367,13 +367,23 @@ class EntityStatic(WeldedFixture, Entity):
                 # approximation would erase the task.
                 import trimesh
 
+                from robosimstudio.scene.assets import mesh_texturing
+
                 mesh = trimesh.load(str(path), force="mesh")
+                try:
+                    texturing = mesh_texturing(self.spec.asset, mesh, label=self.spec.name)
+                except (ValueError, FileNotFoundError) as exc:
+                    # no UVs to sample it at, or no such image: drawn untextured as before, but said
+                    print(f"[rss] {exc}; drawing it untextured")
+                    texturing = {}
                 visual_shape = builder.add_shape_mesh(
                     body=body,
                     xform=xform,
                     mesh=newton.Mesh(
                         np.asarray(mesh.vertices, dtype=np.float32),
                         np.asarray(mesh.faces, dtype=np.int32).reshape(-1),
+                        # a texture the asset names is drawn at the mesh's own UVs, as load_asset draws it
+                        **texturing,
                     ),
                     scale=(self.spec.asset.scale,) * 3,
                     label=self.spec.name,
