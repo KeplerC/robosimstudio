@@ -390,10 +390,10 @@ class Sim(EnvBase):
         frame = self._still_renderer.render(self.state)[spec.name]
         out = {c: np.asarray(frame[c]) for c in channels if c in frame}
         if spec.background and "rgb" in out:
-            out["rgb"] = self._over_plate(spec, out["rgb"])
+            out["rgb"] = self.over_plate(spec, out["rgb"])
         return out
 
-    def _over_plate(self, spec: CameraSpec, rgb: np.ndarray) -> np.ndarray:
+    def over_plate(self, spec: CameraSpec, rgb: np.ndarray) -> np.ndarray:
         """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py).
 
         The collider tracer draws the same camera twice more: with the moving

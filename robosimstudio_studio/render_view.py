@@ -470,6 +470,11 @@ class PanelRenderView(Panel):
         name = "viewport" if self._locked_camera() is None else self.locked
         rgb = np.ascontiguousarray(frames[name]["rgb"][..., :3]).astype(np.uint8)
         if self._locked_camera() is not None:
+            if getattr(spec, "background", "") and hasattr(self.env, "over_plate"):
+                try:  # a camera with a clean plate shows the clip's own pixels behind what moves, as its stills do
+                    rgb = self.env.over_plate(spec, rgb)
+                except Exception as exc:
+                    self._note = f"the plate would not draw -- {type(exc).__name__}: {exc}"
             rgb = self._letterbox(rgb, client)
         client.scene.set_background_image(rgb, format="jpeg", jpeg_quality=80)
         return True

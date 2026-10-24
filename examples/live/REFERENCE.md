@@ -127,7 +127,9 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
   thing resting on air or sunk into the table. What moves casts its shadow
   onto the plate, from `render=`'s `light_direction` (the collider tracer
   draws it, with and without the moving things), so aim that the way the
-  clip's shadows fall. The page itself does not draw the plate.
+  clip's shadows fall. On the page, the path-traced viewport locked to that
+  camera (its **Lock to** list) draws it over the plate too; the free view
+  draws the scene alone.
 - Bind `routine` (a callable taking the built `sim`, and the page's `session`
   if it declares one, returning a generator), or `routines`, a dict of name to
   such callables, and the page grows a **Run** button per routine with a
