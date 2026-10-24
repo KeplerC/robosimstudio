@@ -377,35 +377,40 @@ class Sim(EnvBase):
 
         spec = self._camera_for(camera)
         backend, why = self.platform.renderer_for("")
-        key = (backend, spec, tuple(channels))
+        asked = tuple(channels)
+        if spec.background and "rgb" in asked and "depth" not in asked:
+            asked += ("depth",)  # the plate goes wherever the render's own depth is the static scene's
+        key = (backend, spec, asked)
         if self._still_renderer is None or self._still_key != key:
             if self._still_renderer is not None:
                 self._still_renderer.close()
             self._say_fallback(backend, why)
-            self._still_renderer = self.make_renderer(backend, cameras=[spec], channels=list(channels))
+            self._still_renderer = self.make_renderer(backend, cameras=[spec], channels=list(asked))
             self._still_key = key
             if backend != FALLBACK:
                 self._still_renderer.render(self.state)  # the first frame only builds the stage
         self.sync()
         frame = self._still_renderer.render(self.state)[spec.name]
-        out = {c: np.asarray(frame[c]) for c in channels if c in frame}
-        if spec.background and "rgb" in out:
-            out["rgb"] = self.over_plate(spec, out["rgb"])
-        return out
+        if spec.background and "rgb" in frame:
+            frame = dict(frame, rgb=self.over_plate(spec, frame["rgb"], depth=frame.get("depth")))
+        return {c: np.asarray(frame[c]) for c in channels if c in frame}
 
-    def over_plate(self, spec: CameraSpec, rgb: np.ndarray) -> np.ndarray:
+    def over_plate(self, spec: CameraSpec, rgb: np.ndarray, depth: np.ndarray | None = None) -> np.ndarray:
         """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py).
 
         The collider tracer draws the same camera twice more: with the moving
-        things, and with them sent far below the floor. The plate is darkened
-        where the first is darker -- their shadows -- and the segmentation of
-        the first says which pixels are theirs.
+        things, and with them sent far below the floor. Its segmentation of the
+        first says where they can be, the plate is darkened where the first is
+        darker -- their shadows -- and, given the render's own ``depth``, a
+        pixel is the render's only where that depth is nearer than the static
+        scene's: the collider of a thin rope is wider than the rope drawn, and
+        around it the render shows its own room, not the clip.
         """
         from dataclasses import replace
 
         from robosimstudio.core.render import plate
 
-        key = replace(spec, background="", channels=("rgb", "seg"))
+        key = replace(spec, background="", channels=("rgb", "seg", "depth"))
         if getattr(self, "_plate_key", None) != key:
             old = getattr(self, "_plate_renderer", None)
             if old is not None:
@@ -413,7 +418,7 @@ class Sim(EnvBase):
             self._plate_renderer = self.make_renderer(
                 "tiled",
                 cameras=[key],
-                channels=["rgb", "seg"],
+                channels=["rgb", "seg", "depth"],
                 render=replace(self.look, shadows=True),
                 shape_labels=plate.shape_labels(self.model),
             )
@@ -433,6 +438,8 @@ class Sim(EnvBase):
         bare = self._plate_renderer.render(away)[key.name]
         seg = full["seg"]
         shadow = plate.shade(full["rgb"], bare["rgb"], seg, soften=max(2.0, spec.width / 100.0))
+        if depth is not None:
+            seg = plate.nearer(seg, depth, bare["depth"], grow=max(2, spec.width // 320))
         return plate.composite(rgb, seg, plate.load_plate(spec.background, spec.width, spec.height), shadow)
 
     def record(

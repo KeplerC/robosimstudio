@@ -96,6 +96,18 @@ class TestComposite(unittest.TestCase):
         soft = plate.shade(full, bare, seg, soften=2)
         self.assertGreater(float(soft[17, 10]), 0.99, "no halo of the dark thing under the blur")
 
+    def test_a_thin_thing_is_the_render_only_where_the_render_drew_it(self) -> None:
+        seg = np.zeros((9, 9), np.int32)
+        seg[2:7, 2:7] = -2  # a rope's collider spheres, wider than the rope drawn
+        static_depth = np.full((9, 9), 1.0, np.float32)  # the bench, a metre away
+        depth = static_depth.copy()
+        depth[4, 2:7] = 0.996  # the rope drawn: 4 mm proud of the bench
+        depth[0, 0] = 0.9993  # the path tracer's own mat, 0.7 mm proud, outside the colliders
+        out = plate.nearer(seg, depth, static_depth, grow=1)
+        moving = (out == plate.LABEL_MOVING) | (out < 0)
+        self.assertEqual(np.argwhere(moving)[:, 0].tolist(), [4] * 5, "the rope's row alone")
+        self.assertFalse(moving[0, 0], "the mat is the plate's")
+
     def test_a_plate_of_another_shape_is_refused(self) -> None:
         from PIL import Image
 

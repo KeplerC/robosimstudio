@@ -37,6 +37,7 @@ __all__ = [
     "LABEL_STATIC",
     "composite",
     "load_plate",
+    "nearer",
     "shade",
     "shape_labels",
     "static_bodies",
@@ -145,6 +146,32 @@ def shade(
 
         ratio = gaussian_filter(ratio, sigma=soften / 2.0, truncate=2.0)
     return ratio
+
+
+def nearer(
+    seg: np.ndarray, depth: np.ndarray, static_depth: np.ndarray, grow: int = 2, slack: float = 0.004
+) -> np.ndarray:
+    """``seg`` with its moving pixels kept only where the render's ``depth`` is in front of the static scene's.
+
+    ``seg`` comes off the colliders, ``depth`` off what the render drew: a
+    rope's collider spheres are wider than its tube, and a visual mesh can
+    overhang its collider. So the moving region is grown by ``grow`` pixels,
+    and inside it a pixel is moving where the drawn surface is nearer than the
+    static scene (``static_depth``, 0 where nothing static is hit) by more than
+    ``slack`` metres plus a thousandth of the range -- under a rope lying on the
+    bench, over the path tracer's own mat (0.75 mm). The rest is static.
+    """
+    from scipy.ndimage import binary_dilation
+
+    seg = np.asarray(seg).reshape(np.shape(depth)[:2])
+    moving = (seg == LABEL_MOVING) | (seg < 0)
+    region = binary_dilation(moving, iterations=int(grow)) if grow > 0 else moving
+    d = np.asarray(depth, dtype=np.float32).reshape(seg.shape)
+    behind = np.asarray(static_depth, dtype=np.float32).reshape(seg.shape)
+    behind = np.where(behind > 0, behind, np.inf)
+    drawn = region & (d > 0) & (d < behind - (slack + 0.001 * d))
+    out = np.where(moving & ~drawn, LABEL_STATIC, seg)
+    return np.where(drawn & ~moving, LABEL_MOVING, out).astype(seg.dtype)
 
 
 def composite(rgb: np.ndarray, seg: np.ndarray, plate: np.ndarray, shadow: np.ndarray | None = None) -> np.ndarray:
