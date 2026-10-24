@@ -2881,8 +2881,226 @@ SCORED = (
     ),
 )
 
+# =============================================================================
+# The Microduck: a biped on its own policy, driven from the page and picked up by the mouse
+# =============================================================================
+
+
+def _duck_on_its_feet(film) -> tuple[bool, str]:
+    """The trunk upright and at standing height once it has been let go."""
+    x, y = film.sim["duck"].trunk()[3:5]
+    up = 1.0 - 2.0 * (x * x + y * y)  # the trunk's z axis, read off its quaternion
+    height = float(film.sim["duck"].trunk()[2])
+    return bool(up > 0.8 and height > 0.09), f"trunk up {up:.2f}, {1000 * height:.0f} mm high"
+
+
+def _round_the_spot(film):
+    """120 mm beyond the kicking spot along +x, so the ball comes in from the side, clear of the feet."""
+    x, y, z = film.sim["duck"].kick_spot("left")
+    return (x + 0.12, y, z)
+
+
+def _ball_in_bowl(film) -> tuple[bool, str]:
+    import numpy as np
+
+    ball, bowl = film.sim["ball"].position, film.sim["bowl"].position
+    off = float(np.linalg.norm(ball[:2] - bowl[:2]))
+    return bool(off < 0.08 and ball[2] < bowl[2] + 0.05), f"ball {1000 * off:.0f} mm from the middle of a 90 mm bowl"
+
+
+def _in_goal(film) -> tuple[bool, str]:
+    x, y, z = film.sim["ball"].position
+    return bool(
+        x > 1.0 and abs(y) < 0.4 and z < 0.3
+    ), f"ball at ({x:.2f}, {y:+.2f}, {z:.2f}) m; the goal mouth is x 1.0, y +-0.4"
+
+
+def _to_bowl(film) -> tuple[float, float, float]:
+    """Where the bowl is from the duck's beak: ahead, to the left, and how far [m]."""
+    import numpy as np
+
+    duck = film.sim["duck"]
+    x, y, z, w = duck.trunk()[3:7]
+    fwd = np.array([1 - 2 * (y * y + z * z), 2 * (x * y + z * w)])
+    fwd /= np.linalg.norm(fwd)
+    to = film.sim["bowl"].position[:2] - duck.held_point()[:2]
+    return float(fwd @ to), float(fwd[0] * to[1] - fwd[1] * to[0]), float(np.hypot(*to))
+
+
+def _bearing(film) -> float:
+    import math
+
+    ahead, left, _ = _to_bowl(film)
+    return math.atan2(left, ahead)
+
+
+def _drive_by_hand(film) -> None:
+    """A person at the five buttons: wait for each move to finish, look, press the next.
+
+    Every press is the cursor on the page's own button. Which button is the example's own
+    careful-person rule (``learn.teacher``), read off the scene as a person's eyes would.
+    """
+    from learn import observe, teacher  # the example's module: the take runs with its folder on the path
+
+    duck, bowl = film.sim["duck"], film.sim["bowl"]
+    still = lambda f: not any(duck.brain.twist) and not duck.busy  # noqa: E731
+    for _ in range(40):
+        film.hold(4.0, until=still)
+        button = teacher(observe(duck, bowl.position))
+        film.page.press_button(button)
+        if button == "Drop it":
+            break
+        film.hold(0.1)
+
+
+def _shown_round() -> tuple:
+    """One round done by the page's scripted helper, recorded the same way as a person's."""
+    return (
+        Press(text="New round", label="New round"),
+        Wait(seconds=0.9),
+        Press(text="Show me", label="Show me: the helper presses the buttons"),
+        Wait(seconds=15.0, until=lambda film: not any(film.sim["duck"].brain.twist) and _ball_in_bowl(film)[0]),
+        Wait(seconds=1.0),
+    )
+
+
+def _learned_round() -> tuple:
+    """A fresh round, fetched by the learned policy alone."""
+    return (
+        Press(text="New round", label="a new round"),
+        Wait(seconds=0.9, mark="fresh"),
+        Press(text="Fetch on its own", label="Fetch on its own"),
+        Wait(
+            seconds=40.0,
+            until=lambda film: _ball_in_bowl(film)[0],
+            label="it presses the buttons itself and drops it in",
+        ),
+        Wait(seconds=1.5),
+    )
+
+
+def _demo_round() -> tuple:
+    """One round driven by hand and recorded."""
+    return (
+        Press(text="New round", label="New round: the bowl moves, the ball goes in the beak"),
+        Wait(seconds=0.9),
+        Do(_drive_by_hand, label="driven by hand to the bowl, and dropped"),
+        Wait(seconds=1.6),
+    )
+
+
+DUCK = (
+    Take(
+        "examples/10_microduck/00_walk.py",
+        needs=("microduck",),
+        camera=Camera(eye=(0.3, 0.75, 0.32), look_at=(0.3, -0.05, 0.1), fov=50.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation",)),
+        beats=(
+            Wait(seconds=0.6, label="the duck stands on its policy"),
+            Press(text="Forward", label="Forward"),
+            Wait(seconds=3.0),
+            Press(text="Turn left", label="Turn left"),
+            Wait(seconds=2.0),
+            Press(text="Stop", label="Stop"),
+            Wait(seconds=1.0, mark="walked"),
+            Click(At("duck", dz=0.01), label="click it: a handle on the trunk"),
+            Wait(seconds=0.3),
+            Drag("handle", "z", 0.15, seconds=1.2, label="lift it off the floor"),
+            Wait(seconds=1.0, mark="lifted", label="it hangs and kicks"),
+            Press(text="Release all", label="let go"),
+            Wait(seconds=4.0, label="it lands and finds its feet"),
+        ),
+        expect=(
+            Rose("duck", 0.08, at="lifted", since="walked"),
+            Check(_duck_on_its_feet, "back on its feet:", needs=("duck",)),
+        ),
+    ),
+    Take(
+        "examples/10_microduck/01_fetch.py",
+        needs=("microduck",),
+        camera=Camera(eye=(-0.12, -0.08, 1.22), look_at=(0.62, -0.08, 0.80), fov=50.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation",)),
+        beats=(
+            Wait(seconds=0.5, label="a ball, a bowl, a duck on the lab bench"),
+            Press(text="Open beak", label="Open beak"),
+            Click(At("ball"), label="click the ball: a handle"),
+            Wait(seconds=0.3),
+            DragTo(
+                "handle", lambda film: film.sim["duck"].held_point(ahead=0.08), label="lift it in front of the beak"
+            ),
+            DragTo("handle", lambda film: film.sim["duck"].held_point(), label="and into it"),
+            Wait(seconds=0.4),
+            Press(text="Bite", label="Bite"),
+            Wait(seconds=0.5),
+            Press(text="Release all", label="let go: the beak holds it"),
+            Wait(seconds=0.6, mark="fed"),
+            Press(text="Carry it to the bowl", label="Carry it to the bowl"),
+            Wait(seconds=9.0, until=lambda film: not film.sim["duck"].busy, label="it walks over and drops it in"),
+            Wait(seconds=1.5),
+        ),
+        expect=(
+            Check(_ball_in_bowl, "in the bowl:", needs=("ball", "bowl")),
+            Check(_duck_on_its_feet, "the duck:", needs=("duck",)),
+        ),
+    ),
+    Take(
+        "examples/10_microduck/02_kick.py",
+        needs=("microduck",),
+        camera=Camera(eye=(-0.4, -0.55, 0.32), look_at=(0.45, 0.05, 0.08), fov=50.0),
+        warmup=1.0,
+        layout=Layout(collapse=("Simulation",)),
+        beats=(
+            Wait(seconds=0.5, label="a ball, a duck, a goal"),
+            Click(At("ball"), label="click the ball: a handle"),
+            Wait(seconds=0.3),
+            DragTo("handle", _round_the_spot, label="bring it round"),
+            DragTo("handle", lambda film: film.sim["duck"].kick_spot("left"), label="onto the spot by the left foot"),
+            Press(text="Release all", label="let go"),
+            Wait(seconds=0.6, mark="placed"),
+            Press(text="Kick left", label="Kick left"),
+            Wait(seconds=2.5, mark="kicked"),
+            Press(text="Forward roll", label="and a forward roll"),
+            Wait(seconds=3.0),
+        ),
+        expect=(
+            Check(_in_goal, "goal:", needs=("ball",)),
+            Check(_duck_on_its_feet, "the duck:", needs=("duck",)),
+        ),
+    ),
+)
+
+
+LEARN = (
+    Take(
+        "examples/10_microduck/03_learn_to_fetch.py",
+        needs=("microduck",),
+        camera=Camera(eye=(-0.30, 0.0, 1.70), look_at=(0.62, 0.0, 0.74), fov=50.0),
+        warmup=1.0,
+        speed=6.0,
+        budget=2_600_000,
+        layout=Layout(collapse=("Simulation",)),
+        beats=(
+            Wait(seconds=0.5, label="a round clicked by hand, seven shown by the helper, all recorded"),
+            *_demo_round(),
+            *[beat for _ in range(7) for beat in _shown_round()],
+            Press(text="Train", label="Train on the eight rounds"),
+            Wait(
+                seconds=12.0,
+                until=lambda film: film.page.text("policy").startswith("trained"),
+                label="a second or two of fitting",
+            ),
+            *_learned_round(),
+        ),
+        expect=(Check(_ball_in_bowl, "the learned fetch:", needs=("ball", "bowl")),),
+    ),
+)
+
 TAKES: tuple[Take, ...] = (
     *FINAL,
+    *DUCK,
+    *LEARN,
     *DRAFTS,
     *ROBOT_PARTICLES,
     *ROBOT_BAGS,

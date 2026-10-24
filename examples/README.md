@@ -96,6 +96,16 @@
 |---|---|
 | <img src="09_teleop/media/00_leader_arm.webp" width="240"> | <img src="09_teleop/media/01_force_feedback.webp" width="240"> |
 
+## [10 Microduck](10_microduck/README.md)
+
+| [Walk the duck](10_microduck/00_walk.py) | [Fetch](10_microduck/01_fetch.py) | [Penalty kick](10_microduck/02_kick.py) |
+|---|---|---|
+| <img src="10_microduck/media/00_walk.webp" width="240"> | <img src="10_microduck/media/01_fetch.webp" width="240"> | <img src="10_microduck/media/02_kick.webp" width="240"> |
+
+| [Learn to fetch](10_microduck/03_learn_to_fetch.py) |
+|---|
+| <img src="10_microduck/media/03_learn_to_fetch.webp" width="240"> |
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |
