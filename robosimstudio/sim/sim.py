@@ -394,22 +394,46 @@ class Sim(EnvBase):
         return out
 
     def _over_plate(self, spec: CameraSpec, rgb: np.ndarray) -> np.ndarray:
-        """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py)."""
+        """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py).
+
+        The collider tracer draws the same camera twice more: with the moving
+        things, and with them sent far below the floor. The plate is darkened
+        where the first is darker -- their shadows -- and the segmentation of
+        the first says which pixels are theirs.
+        """
         from dataclasses import replace
 
         from robosimstudio.core.render import plate
 
-        key = replace(spec, background="", channels=("seg",))
+        key = replace(spec, background="", channels=("rgb", "seg"))
         if getattr(self, "_plate_key", None) != key:
             old = getattr(self, "_plate_renderer", None)
             if old is not None:
                 old.close()
             self._plate_renderer = self.make_renderer(
-                "tiled", cameras=[key], channels=["seg"], shape_labels=plate.shape_labels(self.model)
+                "tiled",
+                cameras=[key],
+                channels=["rgb", "seg"],
+                render=replace(self.look, shadows=True),
+                shape_labels=plate.shape_labels(self.model),
             )
             self._plate_key = key
-        seg = self._plate_renderer.render(self.state)[key.name]["seg"]
-        return plate.composite(rgb, seg, plate.load_plate(spec.background, spec.width, spec.height))
+            self._plate_moving = ~plate.static_bodies(self.model)
+            self._plate_away = self.model.state()
+        full = self._plate_renderer.render(self.state)[key.name]
+        away = self._plate_away
+        if self.model.body_count:
+            q = self.state.body_q.numpy().copy()
+            q[self._plate_moving, 2] -= 1000.0
+            away.body_q.assign(q)
+        if self.model.particle_count:
+            p = self.state.particle_q.numpy().copy()
+            p[:, 2] -= 1000.0
+            away.particle_q.assign(p)
+        bare = self._plate_renderer.render(away)[key.name]
+        seg = full["seg"]
+        shadow = plate.shade(full["rgb"], bare["rgb"], seg, soften=max(1.0, spec.width / 320.0))
+        return plate.composite(rgb, seg, plate.load_plate(spec.background, spec.width, spec.height), shadow)
 
     def record(
         self,

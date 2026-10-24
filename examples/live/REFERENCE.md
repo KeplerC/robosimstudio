@@ -124,8 +124,10 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
   robot's base, a wall) is the plate's. The background is then the clip's own
   pixels, and what is left is the camera and what moves. The static shapes
   still collide: a collider not under its picture in the plate shows as a
-  thing resting on air or sunk into the table. The page itself does not draw
-  the plate.
+  thing resting on air or sunk into the table. What moves casts its shadow
+  onto the plate, from `render=`'s `light_direction` (the collider tracer
+  draws it, with and without the moving things), so aim that the way the
+  clip's shadows fall. The page itself does not draw the plate.
 - Bind `routine` (a callable taking the built `sim`, and the page's `session`
   if it declares one, returning a generator), or `routines`, a dict of name to
   such callables, and the page grows a **Run** button per routine with a

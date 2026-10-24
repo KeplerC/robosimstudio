@@ -32,7 +32,16 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["LABEL_MOVING", "LABEL_STATIC", "composite", "load_plate", "shape_labels", "static_shapes"]
+__all__ = [
+    "LABEL_MOVING",
+    "LABEL_STATIC",
+    "composite",
+    "load_plate",
+    "shade",
+    "shape_labels",
+    "static_bodies",
+    "static_shapes",
+]
 
 LABEL_MOVING = 1
 """The label a shape that can move takes in the composite's segmentation pass."""
@@ -42,17 +51,10 @@ LABEL_STATIC = 2
 _PLATES: dict[tuple[str, float, int, int], np.ndarray] = {}
 
 
-def static_shapes(model: Any) -> np.ndarray:
-    """Per shape, whether nothing in the simulation can move it.
-
-    A shape on body ``-1`` is on the world. A body is static when the joint
-    that makes it a child is fixed and its parent is the world or another
-    static body; a free, revolute or prismatic joint anywhere up the chain makes
-    it something that moves.
-    """
+def static_bodies(model: Any) -> np.ndarray:
+    """Per body, whether it is held to the world by fixed joints only (see :func:`static_shapes`)."""
     import newton
 
-    shape_body = np.asarray(model.shape_body.numpy() if hasattr(model.shape_body, "numpy") else model.shape_body)
     static_body = np.zeros(int(model.body_count), dtype=bool)
     if int(model.joint_count):
         jtype = np.asarray(model.joint_type.numpy())
@@ -69,6 +71,19 @@ def static_shapes(model: Any) -> np.ndarray:
                     if p < 0 or static_body[p]:
                         static_body[c] = True
                         changed = True
+    return static_body
+
+
+def static_shapes(model: Any) -> np.ndarray:
+    """Per shape, whether nothing in the simulation can move it.
+
+    A shape on body ``-1`` is on the world. A body is static when the joint
+    that makes it a child is fixed and its parent is the world or another
+    static body; a free, revolute or prismatic joint anywhere up the chain makes
+    it something that moves.
+    """
+    shape_body = np.asarray(model.shape_body.numpy() if hasattr(model.shape_body, "numpy") else model.shape_body)
+    static_body = static_bodies(model)
     body_static = np.concatenate([static_body, [True]])  # index -1 is the world
     return body_static[np.where(shape_body < 0, len(static_body), shape_body)]
 
@@ -105,11 +120,41 @@ def load_plate(path: str | Path, width: int, height: int) -> np.ndarray:
     return plate
 
 
-def composite(rgb: np.ndarray, seg: np.ndarray, plate: np.ndarray) -> np.ndarray:
-    """The render where ``seg`` says something that moves, the plate everywhere else."""
+def shade(
+    with_moving: np.ndarray, without_moving: np.ndarray, seg: np.ndarray | None = None, soften: float = 0.0
+) -> np.ndarray:
+    """How much light what moves takes off each pixel: ``with / without``, at most 1, softened.
+
+    Two renders of the same camera through one light, differing only in
+    whether the moving things are there (they are sent far below the floor
+    for the second): where the first is darker, a moving thing's shadow falls.
+    Debevec's differential rendering, reduced to the shadow term, which is the
+    one a plate cannot have -- the clip's own shadows of what moves are where
+    things were, not where they are. ``soften`` blurs it by that many pixels,
+    since a room's light is broader than one lamp; the moving things' own
+    pixels (``seg``) count as unshadowed, so the blur leaves no halo round them.
+    """
+    a = np.asarray(with_moving)[..., :3].astype(np.float32).mean(axis=-1)
+    b = np.asarray(without_moving)[..., :3].astype(np.float32).mean(axis=-1)
+    ratio = np.clip((a + 1.0) / (b + 1.0), 0.0, 1.0)
+    if seg is not None:
+        seg = np.asarray(seg).reshape(ratio.shape)
+        ratio[(seg == LABEL_MOVING) | (seg < 0)] = 1.0
+    if soften > 0:
+        import cv2
+
+        k = int(soften) * 2 + 1
+        ratio = cv2.GaussianBlur(ratio, (k, k), soften / 2.0)
+    return ratio
+
+
+def composite(rgb: np.ndarray, seg: np.ndarray, plate: np.ndarray, shadow: np.ndarray | None = None) -> np.ndarray:
+    """The render where ``seg`` says something that moves, the plate (darkened by ``shadow``) everywhere else."""
     rgb = np.asarray(rgb)[..., :3]
     seg = np.asarray(seg).reshape(rgb.shape[:2])
     moving = (seg == LABEL_MOVING) | (seg < 0)  # negative labels: particles and deformable meshes
     out = np.array(plate[..., :3], dtype=np.uint8, copy=True)
+    if shadow is not None:
+        out = np.clip(out.astype(np.float32) * shadow[..., None], 0, 255).astype(np.uint8)
     out[moving] = rgb[moving] if rgb.dtype == np.uint8 else np.clip(rgb[moving] * 255.0, 0, 255).astype(np.uint8)
     return out
