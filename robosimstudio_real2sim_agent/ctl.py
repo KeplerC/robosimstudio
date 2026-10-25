@@ -425,10 +425,10 @@ def build_parser() -> argparse.ArgumentParser:
     phys.add_argument("name", nargs="?", default="", help="which, when `routines` binds several (default: the first)")
     phys.add_argument(
         "--only",
-        nargs="+",
+        type=lambda text: [m for m in text.split(",") if m],
         default=[],
-        metavar="REPLAY",
-        help="these replays after `written` (default: frozen open built heavy)",
+        metavar="A,B",
+        help="these replays after `written`, comma-separated (default: frozen,open,built,heavy)",
     )
     phys.add_argument(
         "--settle-mm", type=float, default=None, help="how far a thing may move with the robot frozen (default 2)"

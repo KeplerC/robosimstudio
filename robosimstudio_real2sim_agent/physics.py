@@ -47,7 +47,7 @@ from typing import Any, ClassVar
 import numpy as np
 import warp as wp
 
-from robosimstudio.engines.pose import quat_rotate
+from robosimstudio.engines.pose import compose_many
 
 MODES = ("written", "frozen", "open", "built", "heavy")
 
@@ -142,9 +142,18 @@ def layout(sim: Any) -> dict[str, np.ndarray]:
         arm += list(a.arm_coords if by_coord else a.arm_dofs)
         g = list(a.gripper_coords if by_coord else a.gripper_dofs)
         grip += g
-        o = list(a.gripper_open_q) or [0.0]
-        opened += (o * len(g))[: len(g)]
+        opened += list(a._finger_limits(len(g))[0][: len(g)])  # a mirrored pair opens at (+w, -w), not at 0
+    # every target the robot has, a torso, a rail or a head too: `frozen` holds them all
+    robot = _robot_bodies(sim)
+    child, q0, qd0 = m.joint_child.numpy(), m.joint_q_start.numpy(), m.joint_qd_start.numpy()
+    starts = q0 if by_coord else qd0
+    rows: list[int] = []
+    for j in range(len(child)):
+        if int(child[j]) in robot:
+            end = int(starts[j + 1]) if j + 1 < len(starts) else n
+            rows += list(range(int(starts[j]), min(end, n)))
     return {
+        "robot": np.asarray(sorted(set(rows) | set(arm) | set(grip)), dtype=np.int64),
         "arm": np.asarray(arm, dtype=np.int64),
         "grip": np.asarray(grip, dtype=np.int64),
         "open": np.asarray(opened, dtype=np.float64),
@@ -338,7 +347,14 @@ class Replay:
             self.finger_of[self.fing[a]] = i
         self.robot = np.zeros(n, dtype=bool)
         self.robot[np.asarray(sim.scene.handles.robot_shapes, dtype=np.int64)] = True
-        self.com = sim.model.body_com.numpy()
+        com = sim.model.body_com.numpy()
+        self.pose_names = self.names + [p for p, _ in self.parts]
+        self.pose_bodies = np.asarray(
+            [self.th[n]["bodies"][0] for n in self.names] + [b for _, b in self.parts], dtype=np.int64
+        )
+        self.com_local = np.zeros((len(self.pose_bodies), 7))
+        self.com_local[:, :3] = com[self.pose_bodies]
+        self.com_local[:, 6] = 1.0
         self.rows: list[dict] = []
         self.soft0: dict[str, np.ndarray] = {}
         self.mu_seen: list[float] = []
@@ -348,7 +364,8 @@ class Replay:
         self.held: np.ndarray | None = None
         """The target rows ``frozen`` or ``open`` hold, and what they are held at (``held_to``)."""
         self.held_to: np.ndarray | None = None
-        self.hooks0 = 0
+        self.hooks0: set[int] = set()
+        self.lengths0: tuple[int, ...] = ()
         self.hooks_added = 0
         """Post-solve hooks found on the pipeline beyond those it had at the start: a dragger or a pin attached."""
         self.limit = 0
@@ -361,14 +378,14 @@ class Replay:
         """The most any of those targets moved from where it started: a motor on a thing, if above zero."""
         self.broken = ""
         """Why the replay's own hold failed, if it did: the replay is then not a reading."""
-        self.raise_broken = False
-        """Whether a failed hold raises (the routine steps the scene itself) or is only recorded (the page steps)."""
+        self.inside = False
+        """Whether the step now running was taken inside the routine's own ``next()`` (so may raise into it)."""
 
     def install(self) -> None:
         """Read the start (the first row: what a push-out in the first step moves is measured from it), then hook in."""
         self.start = self.sim.control.joint_target_q.numpy().copy()
         if self.mode == "frozen":
-            self.held = np.concatenate([self.lay["arm"], self.lay["grip"]])
+            self.held = self.lay["robot"]
             self.held_to = self.start[self.held]
         elif self.mode == "open":
             self.held, self.held_to = self.lay["grip"], self.lay["open"]
@@ -384,13 +401,19 @@ class Replay:
             )
             self.sim.pre_step_hooks.append(self._hold_hook)
         self.sim.post_step_hooks.append(self._after_hook)
+        self.lengths0 = self._hook_lengths()
+
+    def _hook_lists(self) -> list:
+        phases = getattr(self.sim.pipeline, "hooks", None)
+        lists = [getattr(phases, phase, ()) for phase in getattr(phases, "PHASES", ())]
+        return [*lists, self.sim.pre_step_hooks, self.sim.post_step_hooks]
+
+    def _hook_lengths(self) -> tuple[int, ...]:
+        return tuple(len(hooks) for hooks in self._hook_lists())
 
     def _hooks(self) -> set[int]:
         """Every hook on the scene now: each substep phase's, and the env's pre- and post-step lists."""
-        phases = getattr(self.sim.pipeline, "hooks", None)
-        lists = [getattr(phases, phase, ()) for phase in getattr(phases, "PHASES", ())]
-        lists += [self.sim.pre_step_hooks, self.sim.post_step_hooks]
-        return {id(fn) for hooks in lists for fn in hooks}
+        return {id(fn) for hooks in self._hook_lists() for fn in hooks}
 
     def remove(self) -> None:
         self.limit = 0
@@ -412,12 +435,12 @@ class Replay:
             )
         except Exception as exc:  # the replay's own fault: not a reading the routine's checks made
             self.broken = self.broken or f"holding the robot's targets: {type(exc).__name__}: {exc}"
-            if self.raise_broken:  # inside the routine's own step; a step the page takes must not raise into it
+            if self.inside:  # a step the routine took itself; one the page takes must not raise into the page
                 raise Broken(self.broken) from exc
 
     def _after(self, _env: Any = None) -> None:
         self.steps += 1
-        if self.limit and self.steps >= self.limit:
+        if self.limit and self.inside and self.steps >= self.limit:
             raise Overrun(self.steps)
         try:
             self.log()
@@ -431,7 +454,7 @@ class Replay:
         hand = np.zeros((n, len(self.arms)))
         robot, near, depth_robot = np.zeros(n), np.zeros(n), np.zeros(n)
         probe = getattr(sim, "contacts", None)
-        if contacts:
+        if contacts and self._hook_lengths() != self.lengths0:
             mine = {id(getattr(self, "_hold_hook", None)), id(getattr(self, "_after_hook", None))}
             self.hooks_added = max(self.hooks_added, len(self._hooks() - self.hooks0 - mine))
         if probe is not None and n and contacts:
@@ -453,13 +476,10 @@ class Replay:
                     np.add.at(hand, (ox[on_finger], self.finger_of[y][on_finger]), force[on_finger])
                 if self.steps % 10 == 0:
                     self._mixed_friction(probe)
-        pose, vel = {}, {}
-        for name in self.names:
-            b = self.th[name]["bodies"][0]
-            pose[name] = [*(bq[b, :3] + quat_rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
-            vel[name] = bqd[b, :3].tolist()
-        for name, b in self.parts:
-            pose[name] = [*(bq[b, :3] + quat_rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
+        rows = self.pose_bodies
+        com = compose_many(bq[rows], self.com_local)[:, :3]  # each body's centre of mass, not its origin
+        pose = {name: [*com[i], *bq[b, 3:]] for i, (name, b) in enumerate(zip(self.pose_names, rows, strict=True))}
+        vel = {name: bqd[self.th[name]["bodies"][0], :3].tolist() for name in self.names}
         soft, jaw = {}, {}
         sampled = self.steps % SAMPLE_EVERY == 0
         if sampled and self.drive0 is not None:
@@ -545,8 +565,9 @@ class Replay:
                 ]
                 t["overlap_with_robot_max_mm"] = round(float(max(r["depth"][i] for r in rows)) * 1000, 2)
                 if name in self.free and t["moved_max_mm"] > 5.0:
-                    near = np.array([r["near"][i] for r in rows]) == 0
-                    v = np.array([r["vel"][name] for r in rows])
+                    stepped = rows[1:]  # row 0 is the start, read without contacts
+                    near = np.array([r["near"][i] for r in stepped]) == 0
+                    v = np.array([r["vel"][name] for r in stepped])
                     free = near[1:-1] & near[:-2] & near[2:] & (np.linalg.norm(v[1:-1], axis=1) > 0.01)
                     acc = (v[2:] - v[1:-1]) / self.dt
                     g = np.ravel(self.sim.model.gravity.numpy())[:3]
@@ -689,16 +710,22 @@ def replay(
     outcome = "finished"
     try:
         tap = Replay(sim, mode)
-        tap.raise_broken = steps_itself
-        if capped and steps_itself:
-            # a routine stepping the scene itself may loop on `sim.step` until a pose is reached, never yielding:
-            # the cap is enforced at the step, raised inside the routine; one the page steps is cut at its yield
+        if capped:
+            # a routine may loop on `sim.run` until a pose is reached, never yielding: the cap is enforced at a step
+            # the routine takes itself, raised into it; a step the page takes between yields is cut at the yield
             tap.limit = limit
         if built is not None:
             built.apply()
         tap.install()
         try:
-            for _ in routine:
+            while True:
+                tap.inside = True  # a step taken now is the routine's own: the cap and a broken hold raise into it
+                try:
+                    next(routine)
+                except StopIteration:
+                    break
+                finally:
+                    tap.inside = False
                 yield
                 if tap.broken:
                     raise Broken(tap.broken)
@@ -742,30 +769,42 @@ def replay(
 
 
 def _moved(run: dict, floor: float = 20.0) -> list[str]:
-    hit = [k for k, t in run.get("things", {}).items() if "#" not in k and t["moved_max_mm"] > floor]
+    """What the run moved: things, a jointed thing's parts (a lid, a door, a key), deformables."""
+    hit = [k for k, t in run.get("things", {}).items() if t["moved_max_mm"] > floor]
     return hit + [k for k, t in run.get("deformables", {}).items() if t["moved_max_mm"] > floor]
 
 
-def _same_end(run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0) -> bool:
-    """Each thing ended where the written run left it, and moved on the way as that run moved it: a mug lifted and
-    set back near its start ends there too, so having moved at least a third as far is part of doing the same."""
+def _ended_elsewhere(run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0) -> str:
+    """What did not end where the written run left it, said in a few words; ``""`` when everything did.
+
+    Each thing has to end within ``mm`` and ``deg`` of its written end, and to have moved on the way at least a
+    third as far as the written run moved it: a mug lifted and set back near its start ends there too.
+    """
     for k in names:
         a = run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
         b = written.get("things", {}).get(k) or written.get("deformables", {}).get(k)
         if not a or not b:
             continue
         if a.get("moved_max_mm", 0.0) < b.get("moved_max_mm", 0.0) / 3:
-            return False
-        if np.linalg.norm(np.subtract(a["end"], b["end"])) * 1000 > mm:
-            return False
+            return (
+                f"{k} moved {a.get('moved_max_mm', 0.0):.0f} mm where the written run moved it {b['moved_max_mm']:.0f}"
+            )
+        off = float(np.linalg.norm(np.subtract(a["end"], b["end"])) * 1000)
+        if off > mm:
+            return f"{k} ended {off:.0f} mm from where the written run left it"
         if abs(a.get("particle_end_mm", 0.0) - b.get("particle_end_mm", 0.0)) > mm / 2:
-            return False
+            return f"{k}'s shape ended unlike the written run's"
         if "end_quat" in a and "end_quat" in b:  # the turn between the two ends, not between the sizes of two turns
-            if _turn_deg(np.asarray(a["end_quat"]), np.asarray(b["end_quat"])) > deg:
-                return False
-        elif abs(a.get("turn_end_deg", 0.0) - b.get("turn_end_deg", 0.0)) > deg:
-            return False
-    return True
+            turn = _turn_deg(np.asarray(a["end_quat"]), np.asarray(b["end_quat"]))
+        else:
+            turn = abs(a.get("turn_end_deg", 0.0) - b.get("turn_end_deg", 0.0))
+        if turn > deg:
+            return f"{k} ended turned {turn:.0f}° from how the written run left it"
+    return ""
+
+
+def _same_end(run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0) -> bool:
+    return not _ended_elsewhere(run, written, names, mm, deg)
 
 
 def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) -> dict[str, Any]:
@@ -820,16 +859,29 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             )
     frozen = runs.get("frozen")
     if frozen:
-        rest = {k: t["moved_max_mm"] for k, t in {**frozen.get("things", {}), **frozen.get("deformables", {})}.items()}
-        worst = max(rest, key=rest.get) if rest else ""
-        moved = rest.get(worst, 0.0)
-        line(
-            moved <= settle_mm,
-            "frozen",
-            f"with the robot frozen nothing moved more than {moved:.1f} mm"
-            if moved <= settle_mm
-            else f"{worst} moved {moved:.1f} mm with the robot frozen: it starts inside something, or something other than the robot pushes it",
-        )
+        # a rigid thing has nothing to settle into; a heap, a liquid or a draped cloth can still be relaxing at the
+        # reset, so its drift is a note for the report, not a fault
+        rigid = {k: t["moved_max_mm"] for k, t in frozen.get("things", {}).items()}
+        soft = {k: t["moved_max_mm"] for k, t in frozen.get("deformables", {}).items()}
+        worst = max(rigid, key=rigid.get) if rigid else ""
+        moved = rigid.get(worst, 0.0)
+        drift = {k: v for k, v in soft.items() if v > settle_mm}
+        if moved > settle_mm:
+            line(
+                False,
+                "frozen",
+                f"{worst} moved {moved:.1f} mm with the robot frozen: it starts inside something, or something other "
+                "than the robot pushes it",
+            )
+        elif drift:
+            k = max(drift, key=drift.get)
+            line(
+                None,
+                "frozen",
+                f"with the robot frozen no rigid thing moved, but {k} drifted {drift[k]:.1f} mm: still settling",
+            )
+        else:
+            line(True, "frozen", f"with the robot frozen nothing moved more than {max([moved, *soft.values()]):.1f} mm")
     opened = runs.get("open")
     if opened and (written.get("outcome") != "finished" or not names):
         line(
@@ -861,11 +913,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             return None, "not read: the written replay did not finish, so there is no end to hold this one to"
         if run["outcome"] != "finished":
             return False, f"with {what} the routine stopped: {run['outcome']}"
-        if not _same_end(run, written, names):
-            return (
-                False,
-                f"with {what} the routine finished, but the things did not end where the written run left them",
-            )
+        elsewhere = _ended_elsewhere(run, written, names)
+        if elsewhere:
+            return False, f"with {what} the routine finished, but {elsewhere}"
         return True, f"finished with {what}, the things ending where the written run left them"
 
     built = runs.get("built")

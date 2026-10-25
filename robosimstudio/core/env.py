@@ -150,7 +150,7 @@ class EnvBase:
 
         self.obs_providers: dict[str, ObsProvider] = {}
         self.post_step_hooks: list[PostStepHook] = []
-        self._episode_hook_floor: tuple[int, int, int] | None = None
+        self._episode_hook_floor: dict[str, int] | None = None
         """How many hooks the *scene* installed, snapshotted at the first reset.
 
         Everything past that mark was installed by a policy during an episode,
@@ -283,18 +283,18 @@ class EnvBase:
         removing one also drops the graph and asks for a re-capture on the next
         step; otherwise the graph would go on replaying the retired hook.
         """
+        hooks = self.pipeline.hooks
+        lists = {phase: getattr(hooks, phase) for phase in getattr(hooks, "PHASES", ("post_solve",))}
+        lists.update(post_step=self.post_step_hooks, pre_step=self.pre_step_hooks)
         floor = self._episode_hook_floor
         if floor is None:
-            self._episode_hook_floor = (
-                len(self.pipeline.hooks.post_solve),
-                len(self.post_step_hooks),
-                len(self.pre_step_hooks),
-            )
+            self._episode_hook_floor = {name: len(hooks) for name, hooks in lists.items()}
             return
-        retired = len(self.pipeline.hooks.post_solve) > floor[0]
-        del self.pipeline.hooks.post_solve[floor[0] :]
-        del self.post_step_hooks[floor[1] :]
-        del self.pre_step_hooks[floor[2] :]
+        # every substep phase, not only post_solve: a pin a tool left on pre_solve holds just as well
+        substep = [name for name in lists if name not in ("post_step", "pre_step")]
+        retired = any(len(lists[name]) > floor.get(name, 0) for name in substep)
+        for name, hooks in lists.items():
+            del hooks[floor.get(name, 0) :]
         invalidate = getattr(self.pipeline, "invalidate_graph", None)
         if retired and invalidate is not None:
             invalidate(recapture=True)

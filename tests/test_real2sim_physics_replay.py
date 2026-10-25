@@ -161,6 +161,26 @@ class Replays(unittest.TestCase):
         self.assertIn("still going when the written replay had long ended", store["frozen"]["outcome"])
         self.assertLessEqual(store["frozen"]["steps"], STEPS + 26)
 
+    def test_a_routine_the_page_steps_that_loops_on_sim_run_is_stopped_too(self) -> None:
+        """A routine played through the arm panels may still call `sim.run` itself; that step is its own."""
+        from robosimstudio_real2sim_agent import physics
+
+        def loops(sim):
+            arm = sim.scene.handles.arms["right"]
+            start = float(sim.state.joint_q.numpy()[arm.arm_coords[0]])
+            q = sim.control.joint_target_q.numpy()
+            q[arm.arm_coords[0]] = start + 0.3
+            while abs(float(sim.state.joint_q.numpy()[arm.arm_coords[0]]) - start) < 0.2:
+                sim.control.joint_target_q.assign(q)
+                sim.run(1)
+            yield
+
+        self.sim.reset()
+        store: dict = {}
+        for _ in physics.replay(self.sim, loops(self.sim), "frozen", store, steps=STEPS, steps_itself=False):
+            pass
+        self.assertIn("still going when the written replay had long ended", store["frozen"]["outcome"])
+
     def test_a_routine_that_swallows_exceptions_is_still_stopped(self) -> None:
         from robosimstudio_real2sim_agent import physics
 

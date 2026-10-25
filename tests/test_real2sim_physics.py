@@ -102,7 +102,7 @@ class Verdict(unittest.TestCase):
         runs["built"] = _run(end=(0.4, 0.0, 0.9), turn=0.0)  # the routine ran out, the crate stayed on the table
         result = physics.verdict(CLEAN, runs)
         self.assertIs(_words(result)["built"], False)
-        self.assertIn("did not end where the written run left them", result["report"])
+        self.assertIn("crate ended 300 mm from where the written run left it", result["report"])
 
     def test_built_is_not_read_when_the_written_run_failed(self) -> None:
         runs = _clean_runs()
@@ -151,6 +151,23 @@ class Verdict(unittest.TestCase):
         runs["written"]["things"]["crate"].update(moved_max_mm=150.0, end=[0.4, 0.0, 0.9])  # lifted and set back
         runs["open"] = _run(moved=0.0, end=(0.4, 0.0, 0.9), turn=0.0)  # finished, never moved, ends in the same place
         self.assertIs(_words(physics.verdict(CLEAN, runs))["open"], True)
+
+    def test_a_lid_opened_is_something_moved(self) -> None:
+        runs = _clean_runs()
+        for run in runs.values():
+            run["things"]["crate"]["moved_max_mm"] = 0.0
+        runs["written"]["things"]["case#1"] = _thing(180.0, end=(0.1, 0.0, 0.9), turn=105.0)
+        runs["built"]["things"]["case#1"] = _thing(2.0, end=(0.0, 0.0, 0.8), turn=0.0)  # the capped arm never opened it
+        result = physics.verdict(CLEAN, runs)
+        self.assertIn("moved case#1", result["report"])
+        self.assertIs(_words(result)["built"], False)
+
+    def test_a_deformable_settling_with_the_robot_frozen_is_a_note(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["deformables"] = {"water": {"moved_max_mm": 3.4, "end": [0.0, 0.0, 0.8]}}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["frozen"])
+        self.assertIn("water drifted 3.4 mm: still settling", result["report"])
 
     def test_heavy_failing_is_a_note(self) -> None:
         runs = _clean_runs()
@@ -246,6 +263,42 @@ class RobotTable(unittest.TestCase):
         self.assertIsNone(physics.real_arm_torque(_sim("arm", ["j1"], thing_labels=("panda_plush/hinge",))))
 
 
+class Layout(unittest.TestCase):
+    def test_a_mirrored_pair_is_held_open_at_plus_and_minus_its_opening(self) -> None:
+        """A Panda's hand has no open targets of its own: open is (+w, -w), and 0 would be shut."""
+        import numpy as np
+
+        from robosimstudio.scene.handles import ArmHandle
+
+        hand = ArmHandle(
+            name="panda",
+            arm_coords=tuple(range(7)),
+            arm_dofs=tuple(range(7)),
+            gripper_coords=(7, 8),
+            gripper_dofs=(7, 8),
+            gripper_open=0.04,
+        )
+        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
+        sim = types.SimpleNamespace(
+            control=types.SimpleNamespace(joint_target_q=types.SimpleNamespace(shape=(9,))),
+            model=types.SimpleNamespace(
+                joint_coord_count=9,
+                joint_dof_count=9,
+                joint_child=arr(range(1, 10)),
+                joint_q_start=arr(range(9)),
+                joint_qd_start=arr(range(9)),
+                shape_body=arr([1]),
+            ),
+            scene=types.SimpleNamespace(
+                handles=types.SimpleNamespace(arms={"panda": hand}, robot_shapes=np.array([0])),
+                embodiment=types.SimpleNamespace(bodies=tuple(range(1, 10))),
+            ),
+        )
+        lay = physics.layout(sim)
+        np.testing.assert_allclose(lay["open"], [0.04, -0.04])
+        self.assertEqual(lay["robot"].tolist(), list(range(9)))
+
+
 def _server(root: Path) -> LiveServer:
     live = LiveServer.__new__(LiveServer)
     live.script, live.scene_id, live.run_dir = [], "abc", root
@@ -325,7 +378,7 @@ class Refusals(unittest.TestCase):
 
 class CommandLine(unittest.TestCase):
     def test_the_replays_parse(self) -> None:
-        args = ctl.build_parser().parse_args(["physics", "routine", "--only", "frozen", "open", "--settle-mm", "3"])
+        args = ctl.build_parser().parse_args(["physics", "--only", "frozen,open", "routine", "--settle-mm", "3"])
         self.assertEqual(
             (args.cmd, args.name, args.only, args.settle_mm), ("physics", "routine", ["frozen", "open"], 3.0)
         )
