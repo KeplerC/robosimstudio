@@ -161,6 +161,48 @@ class Replays(unittest.TestCase):
         self.assertIn("still going when the written replay had long ended", store["frozen"]["outcome"])
         self.assertLessEqual(store["frozen"]["steps"], STEPS + 26)
 
+    def test_a_routine_that_swallows_exceptions_is_still_stopped(self) -> None:
+        from robosimstudio_real2sim_agent import physics
+
+        def stubborn(sim):
+            arm = sim.scene.handles.arms["right"]
+            start = float(sim.state.joint_q.numpy()[arm.arm_coords[0]])
+            q = sim.control.joint_target_q.numpy()
+            q[arm.arm_coords[0]] = start + 0.3
+            while abs(float(sim.state.joint_q.numpy()[arm.arm_coords[0]]) - start) < 0.2:
+                try:
+                    sim.control.joint_target_q.assign(q)
+                    sim.run(1)
+                except Exception:
+                    pass
+            yield
+
+        self.sim.reset()
+        store: dict = {}
+        for _ in physics.replay(self.sim, stubborn(self.sim), "frozen", store, steps=STEPS, steps_itself=True):
+            pass
+        self.assertIn("still going when the written replay had long ended", store["frozen"]["outcome"])
+
+    def test_a_stopped_replay_closes_the_routine_now(self) -> None:
+        from robosimstudio_real2sim_agent import physics
+
+        cleaned = []
+
+        def tidy(sim):
+            try:
+                for _ in range(STEPS):
+                    sim.run(1)
+                    yield
+            finally:
+                cleaned.append(sim.step_count)
+
+        self.sim.reset()
+        gen = physics.replay(self.sim, tidy(self.sim), "frozen", {}, steps=STEPS, steps_itself=True)
+        for _ in range(3):
+            next(gen)
+        gen.close()
+        self.assertEqual(len(cleaned), 1, "the routine's own cleanup did not run when the replay was stopped")
+
     def test_the_robot_as_built_puts_back_only_what_it_changed(self) -> None:
         """A slider moved while `built` plays keeps its value: only the entries the replay changed go back."""
         from robosimstudio_real2sim_agent import physics

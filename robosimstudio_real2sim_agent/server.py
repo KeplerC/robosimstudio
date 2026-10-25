@@ -101,7 +101,7 @@ from .scenefile import (
     run_scene_file,
     stamp,
 )
-from .wire import ControlSocket, ready_line
+from .wire import ROUTINE_PLAYING, ControlSocket, ready_line
 
 __all__ = ["REFRESH_SECONDS", "SCAN_SECONDS", "STABLE_SECONDS", "LiveServer"]
 
@@ -117,8 +117,6 @@ BOARD_LIMIT = 8
 """Pictures kept on the board; the oldest goes when another comes. The run directory keeps every one."""
 RECENT = 32
 """Routines ended and takes written that ``status`` keeps, by serial and by name, for a client waiting on one."""
-ROUTINE_PLAYING = "a routine is playing (`status` lists it under `playing`); let it end, or `reset` to stop it"
-"""What ``run`` and ``check`` answer while a routine plays."""
 IDLE_LIMIT = 300
 """Passes in a row a routine that drives the scene itself may yield without stepping it before it is stopped."""
 SPEED_WINDOW = 5.0

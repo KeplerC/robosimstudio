@@ -165,6 +165,13 @@ class Verdict(unittest.TestCase):
         self.assertIsNone(_words(result)["contact"])
         self.assertTrue(result["passed"])
 
+    def test_a_hook_attached_while_the_routine_played_fails_contact(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["hooks_added"] = 1
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["contact"], False)
+        self.assertIn("attached while the routine played", result["report"])
+
     def test_an_unknown_robot_says_friction_only(self) -> None:
         model = {**CLEAN, "real_arm_torque": None}
         self.assertIn("no torque limits known", physics.verdict(model, _clean_runs())["report"])
@@ -292,6 +299,17 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(
             (args.cmd, args.name, args.only, args.settle_mm), ("physics", "routine", ["frozen", "open"], 3.0)
         )
+
+    def test_refused_while_a_routine_plays_before_any_reset(self) -> None:
+        asked = []
+
+        def page(sock, req, timeout):
+            asked.append(req["cmd"])
+            return {"ok": True, "playing": 1, "paused": False, "resets": 0}
+
+        with mock.patch.object(ctl, "request", side_effect=page), mock.patch("sys.stderr"), mock.patch("sys.stdout"):
+            self.assertEqual(ctl.main(["physics"]), 1)
+        self.assertEqual(asked, ["status"])
 
     def test_an_unknown_replay_is_refused_before_the_page_is_asked(self) -> None:
         with mock.patch.object(ctl, "request", side_effect=AssertionError("asked the page")):

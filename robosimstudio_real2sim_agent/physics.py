@@ -173,8 +173,9 @@ def model_facts(sim: Any) -> dict[str, Any]:
     """
     m, h = sim.model, sim.scene.handles
     mu = m.shape_material_mu.numpy()
-    mass, inv = m.body_mass.numpy(), m.body_inv_mass.numpy()
+    mass = m.body_mass.numpy()
     th, fing = things(sim), fingers(sim)
+    fixed = _fixed_bodies(m)
     owner = {b: name for name, t in th.items() for b in t["bodies"]}
     robot_bodies = {int(b) for b in np.unique(m.shape_body.numpy()[h.robot_shapes]) if b >= 0}
     out: dict[str, Any] = {
@@ -185,7 +186,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
                 "mass_kg": round(float(sum(mass[b] for b in t["bodies"])), 4),
                 "bodies": len(t["bodies"]),
                 "mu": sorted({round(float(v), 3) for v in mu[t["shapes"]]}) if len(t["shapes"]) else [],
-                "kinematic": bool(any(inv[b] == 0.0 for b in t["bodies"])),
+                "kinematic": bool(any(fixed[b] for b in t["bodies"])),
             }
             for name, t in th.items()
         },
@@ -200,6 +201,9 @@ def model_facts(sim: Any) -> dict[str, Any]:
     ties, welds, drives = [], [], []
     for j in range(len(jt)):
         child, parent = int(jc[j]), int(jp[j])
+        if parent in owner and child in robot_bodies:  # a robot link hung off a thing: the same tie the other way
+            ties.append(f"{owner[parent]} by a {kinds.get(int(jt[j]), 'joint')} joint to the robot")
+            continue
         if child not in owner or int(jt[j]) == free:
             continue
         thing, kind = owner[child], kinds.get(int(jt[j]), "joint")
@@ -229,6 +233,20 @@ def model_facts(sim: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------- the replay
 
 
+def _fixed_bodies(model: Any) -> np.ndarray:
+    """Per body, whether nothing but a script moves it: an infinite mass, or Newton's KINEMATIC flag."""
+    fixed = model.body_inv_mass.numpy() == 0.0
+    flags = getattr(model, "body_flags", None)
+    if flags is not None:
+        try:
+            import newton
+
+            fixed |= (flags.numpy() & int(newton.BodyFlags.KINEMATIC)) != 0
+        except Exception:  # pragma: no cover - a Newton without the flag
+            pass
+    return fixed
+
+
 def _joint_kinds() -> dict[str, int]:
     """Newton's joint types by lower-case name (``free``, ``fixed``, ``revolute``, ...)."""
     try:
@@ -244,8 +262,13 @@ def _turn_deg(q0: np.ndarray, q1: np.ndarray) -> float:
     return math.degrees(2 * math.acos(min(1.0, d)))
 
 
-class Overrun(RuntimeError):
-    """A replay's routine was still going well past the written run's length: raised from the step that passed it."""
+class Overrun(BaseException):
+    """A replay's routine was still going well past the written run's length: raised from each step past it.
+
+    A ``BaseException``, and raised again on every step until the replay
+    clears it, so a routine that catches ``Exception`` around its own stepping
+    cannot swallow it and loop on.
+    """
 
 
 class Replay:
@@ -291,14 +314,27 @@ class Replay:
         self.steps = 0
         self.error = ""
         self.start: np.ndarray | None = None
+        self.held: np.ndarray | None = None
+        """The target rows ``frozen`` or ``open`` hold, and what they are held at (``held_to``)."""
+        self.held_to: np.ndarray | None = None
+        self.hooks0 = 0
+        self.hooks_added = 0
+        """Post-solve hooks found on the pipeline beyond those it had at the start: a dragger or a pin attached."""
         self.limit = 0
         """Steps after which a routine that steps the scene itself is stopped, raised from the step; 0 never."""
 
     def install(self) -> None:
         """Read the start (the first row: what a push-out in the first step moves is measured from it), then hook in."""
         self.start = self.sim.control.joint_target_q.numpy().copy()
+        if self.mode == "frozen":
+            self.held = np.concatenate([self.lay["arm"], self.lay["grip"]])
+            self.held_to = self.start[self.held]
+        elif self.mode == "open":
+            self.held, self.held_to = self.lay["grip"], self.lay["open"]
+        self.hooks0 = len(getattr(getattr(self.sim.pipeline, "hooks", None), "post_solve", []))
         self.log()
-        self.sim.pre_step_hooks.append(self._hold)
+        if self.held is not None:
+            self.sim.pre_step_hooks.append(self._hold)
         self.sim.post_step_hooks.append(self._after)
 
     def remove(self) -> None:
@@ -307,21 +343,14 @@ class Replay:
                 hooks.remove(hook)
 
     def _hold(self, _env: Any = None) -> None:
-        if self.mode not in ("frozen", "open"):
-            return
         target = self.sim.control.joint_target_q
         q = target.numpy()
-        if self.mode == "frozen":
-            held = np.concatenate([self.lay["arm"], self.lay["grip"]])
-            q[held] = self.start[held]
-        else:
-            q[self.lay["grip"]] = self.lay["open"]
+        q[self.held] = self.held_to
         target.assign(q)
 
     def _after(self, _env: Any = None) -> None:
         self.steps += 1
         if self.limit and self.steps >= self.limit:
-            self.limit = 0
             raise Overrun(self.steps)
         try:
             self.log()
@@ -335,8 +364,11 @@ class Replay:
         hand = np.zeros((n, len(self.arms)))
         robot, near, depth_robot = np.zeros(n), np.zeros(n), np.zeros(n)
         probe = getattr(sim, "contacts", None)
+        hooks = getattr(getattr(sim.pipeline, "hooks", None), "post_solve", None)
+        if hooks is not None:
+            self.hooks_added = max(self.hooks_added, len(hooks) - self.hooks0)
         if probe is not None and n:
-            probe.update(None)
+            probe.update(sim.step_count)  # the step's read, shared with a panel reading the same frame
             if len(probe.geoms):
                 a, b = probe._shape_pairs()
                 force = np.linalg.norm(probe.impulses, axis=1) / probe.dt
@@ -413,7 +445,13 @@ class Replay:
 
     def summary(self, outcome: str) -> dict[str, Any]:
         rows = self.rows
-        out: dict[str, Any] = {"outcome": outcome, "steps": self.steps, "log_error": self.error, "things": {}}
+        out: dict[str, Any] = {
+            "outcome": outcome,
+            "steps": self.steps,
+            "log_error": self.error,
+            "hooks_added": self.hooks_added,
+            "things": {},
+        }
         if not rows:
             return out
         for name in self.names + [p for p, _ in self.parts]:
@@ -490,11 +528,14 @@ class AsBuilt:
         """Per array: the rows changed, and what they held."""
 
     def _change(self, name: str, rows: np.ndarray, new: np.ndarray) -> None:
+        from robosimstudio.core import tuning
+
         array = getattr(self.sim.model, name)
         values = array.numpy()
         self.saved[name] = (rows, values[rows].copy())
         values[rows] = new
         array.assign(values)
+        tuning.reach_island_copies(self.sim.pipeline, name)  # an island that keeps its own copy sees it too
 
     def apply(self) -> None:
         from robosimstudio.core import tuning
@@ -518,9 +559,9 @@ class AsBuilt:
             self._change("joint_effort_limit", rows, np.minimum(effort[rows], np.asarray(caps, dtype=effort.dtype)))
             flags |= _JOINT_DOF
         if self.heavier != 1.0:
-            inv = m.body_inv_mass.numpy()
+            fixed = _fixed_bodies(m)
             rows = np.asarray(
-                [b for t in things(self.sim).values() for b in t["bodies"] if inv[b] != 0.0], dtype=np.int64
+                [b for t in things(self.sim).values() for b in t["bodies"] if not fixed[b]], dtype=np.int64
             )
             if len(rows):  # a body of infinite mass stays so: giving it an inverse mass would set it free
                 for name in self.MASS:
@@ -539,6 +580,7 @@ class AsBuilt:
             values = array.numpy()
             values[rows] = old
             array.assign(values)
+            tuning.reach_island_copies(self.sim.pipeline, name)
             flags |= self.FLAGS.get(name, _BODY_INERTIAL)
         self.saved = {}
         if flags:
@@ -565,14 +607,15 @@ def replay(
         raise ValueError(f"mode {mode!r} is not one of {', '.join(MODES)}")
     capped = mode != "written" and steps > 0
     limit = steps + max(25, int(OVERRUN * steps))
-    tap = Replay(sim, mode)
-    if capped and steps_itself:
-        # a routine stepping the scene itself may loop on `sim.step` until a pose is reached, never yielding: the
-        # cap is enforced at the step, raised inside the routine; one the page steps is cut at its yield below
-        tap.limit = limit
+    tap: Replay | None = None
     built = AsBuilt(sim, HEAVY if mode == "heavy" else 1.0) if mode in ("built", "heavy") else None
     outcome = "finished"
     try:
+        tap = Replay(sim, mode)
+        if capped and steps_itself:
+            # a routine stepping the scene itself may loop on `sim.step` until a pose is reached, never yielding:
+            # the cap is enforced at the step, raised inside the routine; one the page steps is cut at its yield
+            tap.limit = limit
         if built is not None:
             built.apply()
         tap.install()
@@ -594,15 +637,17 @@ def replay(
             yield
     except GeneratorExit:
         outcome = STOPPED
+        routine.close()  # its own cleanup runs now, on this scene, not at collection on the next one
         raise
     except Exception as exc:
         outcome = f"{FAILED}: {type(exc).__name__}: {str(exc)[:300]}"
         raise
     finally:
-        tap.remove()
+        if tap is not None:
+            tap.remove()
         if built is not None:
             built.restore()
-        store[mode] = tap.summary(outcome)
+        store[mode] = tap.summary(outcome) if tap is not None else {"outcome": outcome, "steps": 0, "things": {}}
 
 
 # --------------------------------------------------------------------------- the verdict
@@ -639,6 +684,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         lines.append({"ok": ok, "name": name, "detail": detail})
 
     found = model.get("ties", []) + model.get("drives", []) + [f"{k} is kinematic" for k in model.get("kinematic", [])]
+    added = (runs.get("written") or {}).get("hooks_added", 0)
+    if added:
+        found.append(f"{added} post-solve hook(s) attached while the routine played (a dragger or a pin)")
     welds = model.get("welds", [])
     if found:
         line(False, "contact", "; ".join(found + welds))

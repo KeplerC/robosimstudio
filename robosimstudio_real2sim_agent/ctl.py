@@ -55,7 +55,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .wire import DEFAULT_RUN_DIR, NoReply, NoServer, parse_ready, request, socket_path
+from .wire import DEFAULT_RUN_DIR, ROUTINE_PLAYING, NoReply, NoServer, parse_ready, request, socket_path
 
 __all__ = [
     "CATALOGS",
@@ -837,7 +837,10 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
         # that starts inside a finger would be pushed out before `frozen` began). The page still steps a routine
         # that drives through it, and one that steps the scene itself steps it anyway.
         # the light status: a busy page answers a full one without `paused`, which would read as running
-        was_paused = bool(ask({"cmd": "status", "light": True}, DEFAULT_TIMEOUT).get("paused"))
+        first = ask({"cmd": "status", "light": True}, DEFAULT_TIMEOUT)
+        if first.get("playing"):  # before the first reset, which would stop it and its take
+            return show({"ok": False, "error": ROUTINE_PLAYING}, args.json)
+        was_paused = bool(first.get("paused"))
         ask({"cmd": "pause"}, TIMEOUTS["pause"])
         try:
             for mode in ["written", *later]:
