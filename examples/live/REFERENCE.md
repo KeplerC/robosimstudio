@@ -376,9 +376,10 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
-- **contact** reads the model: a joint or equality constraint from a thing to
-  the robot, a stiffness driving a thing's own joint, or an infinite mass
-  fails it; a thing welded to the world or to another thing is a NOTE for the
+- **contact** reads the model: a joint or equality constraint between a thing
+  and the robot (either way round), a stiffness driving a thing's own joint, a
+  thing of infinite mass or flagged kinematic, or a post-solve hook attached
+  while the written routine played (a dragger, a pin) fails it; a thing welded to the world or to another thing is a NOTE for the
   report to explain (a hinge or a slide to the world or to furniture is a
   mechanism, and damping alone is not a motor).
 - **flight**, a NOTE when it shows, is a single free body with nothing within
