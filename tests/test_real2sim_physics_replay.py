@@ -69,7 +69,7 @@ class Replays(unittest.TestCase):
         self.sim.run(30)
         arm = self.sim.scene.handles.arms["right"]
         before = self.sim.state.joint_q.numpy().copy()
-        for _ in physics.replay(self.sim, _routine, mode, store, steps=STEPS):
+        for _ in physics.replay(self.sim, _routine(self.sim), mode, store, steps=STEPS, steps_itself=True):
             pass
         after = self.sim.state.joint_q.numpy()
         return {
@@ -110,7 +110,7 @@ class Replays(unittest.TestCase):
         m = self.sim.model
         before = {k: getattr(m, k).numpy().copy() for k in ("shape_material_mu", "body_mass", "body_inv_mass")}
         store: dict = {}
-        gen = physics.replay(self.sim, _routine, "heavy", store, steps=STEPS)
+        gen = physics.replay(self.sim, _routine(self.sim), "heavy", store, steps=STEPS, steps_itself=True)
         for _ in range(5):
             next(gen)
         self.assertLessEqual(float(m.shape_material_mu.numpy().max()), 1.0)
@@ -119,6 +119,27 @@ class Replays(unittest.TestCase):
         for k, v in before.items():
             np.testing.assert_allclose(getattr(m, k).numpy(), v)
         self.assertEqual((self.sim.pre_step_hooks, self.sim.post_step_hooks.count(None)), ([], 0))
+
+    def test_a_routine_waiting_on_a_pose_the_frozen_arm_never_reaches_stops_at_the_written_length(self) -> None:
+        from robosimstudio_real2sim_agent import physics
+
+        def waits(sim):
+            arm = sim.scene.handles.arms["right"]
+            start = float(sim.state.joint_q.numpy()[arm.arm_coords[0]])
+            while abs(float(sim.state.joint_q.numpy()[arm.arm_coords[0]]) - start) < 0.2:
+                q = sim.control.joint_target_q.numpy()
+                q[arm.arm_coords[0]] = start + 0.3
+                sim.control.joint_target_q.assign(q)
+                sim.run(1)
+                yield
+
+        self.sim.reset()
+        store: dict = {}
+        played = sum(
+            1 for _ in physics.replay(self.sim, waits(self.sim), "frozen", store, steps=STEPS, steps_itself=True)
+        )
+        self.assertLessEqual(played, STEPS + 26)
+        self.assertIn("still going when the written replay had long ended", store["frozen"]["outcome"])
 
     def test_the_model_read_finds_a_free_cube_free(self) -> None:
         from robosimstudio_real2sim_agent import physics

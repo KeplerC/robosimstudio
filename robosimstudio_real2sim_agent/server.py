@@ -146,6 +146,12 @@ FIRST_RENDER = (
 )
 
 
+def _read_replay(run: dict) -> bool:
+    """Whether a physics replay ran to a reading: not stopped by the page, not failed in its own code."""
+    outcome = str(run.get("outcome", ""))
+    return outcome != physics.STOPPED and not outcome.startswith(physics.FAILED)
+
+
 class LiveServer:
     """One page, one scene file, one socket. Everything but the accept loop runs on the main thread."""
 
@@ -1592,7 +1598,7 @@ class LiveServer:
         return reply
 
     def cmd_physics(
-        self, op: str = "replay", mode: str = "written", name: str = "", settle_mm: float = 2.0, note: str = ""
+        self, op: str = "replay", mode: str = "written", name: str = "", settle_mm: float | None = None, note: str = ""
     ) -> dict:
         """One physics replay of a routine (``op="replay"``), or the verdict on the ones played (``op="report"``).
 
@@ -1607,13 +1613,15 @@ class LiveServer:
                     "ok": False,
                     "error": "no physics replays of this scene: `./ctl physics` plays them (a save since starts them over)",
                 }
-            stopped = [mode for mode, run in self.physics.items() if run.get("outcome") == physics.STOPPED]
-            if stopped:
+            unread = [mode for mode, run in self.physics.items() if not _read_replay(run)]
+            if unread:
                 return {
                     "ok": False,
-                    "error": f"the {', '.join(stopped)} replay was stopped before it ended: run `./ctl physics` again",
+                    "error": f"the {', '.join(unread)} replay did not run to a reading (stopped, or failed in its own "
+                    f"code: {self.physics[unread[0]].get('outcome')}): run `./ctl physics` again",
                 }
-            result = physics.verdict(self.physics_model, self.physics, float(settle_mm))
+            bar = physics.SETTLE_MM if settle_mm is None else float(settle_mm)
+            result = physics.verdict(self.physics_model, self.physics, bar)
             out = self.run_dir / "physics.json"
             out.write_text(
                 json.dumps(
@@ -1646,17 +1654,25 @@ class LiveServer:
         elif (
             "written" not in self.physics
             or self.physics_scene != self.scene_id
-            or self.physics["written"].get("outcome") == physics.STOPPED
+            or not _read_replay(self.physics["written"])
         ):
             return {
                 "ok": False,
                 "error": "replay `written` first: the others run as long as it did and are read against it",
             }
         wants_session = "session" in inspect.signature(fn).parameters
+        try:
+            routine = fn(self.sim, session=self.session) if wants_session else fn(self.sim)
+        except Exception:
+            return {"ok": False, "error": traceback.format_exc()[-3000:]}
+        if not inspect.isgenerator(routine):
+            return {
+                "ok": False,
+                "error": f"routine {name!r} returned {type(routine).__name__}, not a generator: it yields as it goes "
+                "(REFERENCE, Acting)",
+            }
         steps = int(self.physics.get("written", {}).get("steps") or 0)
-        gen = physics.replay(
-            self.sim, fn, mode, self.physics, session=self.session if wants_session else None, steps=steps
-        )
+        gen = physics.replay(self.sim, routine, mode, self.physics, steps=steps, steps_itself=not wants_session)
         serial = self.start_script(gen, name=f"physics {mode}", drives_page=wants_session)
         return {"ok": True, "playing": f"physics {mode}", "serial": serial}
 

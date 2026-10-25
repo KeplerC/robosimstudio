@@ -150,7 +150,7 @@ class EnvBase:
 
         self.obs_providers: dict[str, ObsProvider] = {}
         self.post_step_hooks: list[PostStepHook] = []
-        self._episode_hook_floor: tuple[int, int] | None = None
+        self._episode_hook_floor: tuple[int, int, int] | None = None
         """How many hooks the *scene* installed, snapshotted at the first reset.
 
         Everything past that mark was installed by a policy during an episode,
@@ -285,11 +285,16 @@ class EnvBase:
         """
         floor = self._episode_hook_floor
         if floor is None:
-            self._episode_hook_floor = (len(self.pipeline.hooks.post_solve), len(self.post_step_hooks))
+            self._episode_hook_floor = (
+                len(self.pipeline.hooks.post_solve),
+                len(self.post_step_hooks),
+                len(self.pre_step_hooks),
+            )
             return
         retired = len(self.pipeline.hooks.post_solve) > floor[0]
         del self.pipeline.hooks.post_solve[floor[0] :]
         del self.post_step_hooks[floor[1] :]
+        del self.pre_step_hooks[floor[2] :]
         invalidate = getattr(self.pipeline, "invalidate_graph", None)
         if retired and invalidate is not None:
             invalidate(recapture=True)

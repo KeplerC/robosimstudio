@@ -430,7 +430,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="REPLAY",
         help="these replays after `written` (default: frozen open built heavy)",
     )
-    phys.add_argument("--settle-mm", type=float, default=2.0, help="how far a thing may move with the robot frozen")
+    phys.add_argument(
+        "--settle-mm", type=float, default=None, help="how far a thing may move with the robot frozen (default 2)"
+    )
     phys.add_argument("--note", default="", help="a line for the log: why this reading")
     phys.add_argument(
         "--wait-limit",
@@ -821,6 +823,13 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
     def ask(req: dict, timeout: float) -> dict:
         return request(sock, {**req, "timeout": timeout}, timeout)
 
+    def reset() -> dict:
+        """Reset, and wait until the page has taken it: `reset` only asks, and the page resets on its next pass."""
+        before = int(ask({"cmd": "status", "light": True}, DEFAULT_TIMEOUT).get("resets", 0))
+        ask({"cmd": "reset"}, TIMEOUTS["reset"])
+        taken = poll(sock, lambda st: int(st.get("resets", 0)) > before, lambda st: "resetting", args.wait_limit)
+        return taken if not taken.get("ok") else wait_until_free(sock, args.wait_limit)
+
     try:
         # Held while the replays play, so each starts at its reset and not after a moment of free running (a thing
         # that starts inside a finger would be pushed out before `frozen` began). The page still steps a routine
@@ -829,8 +838,7 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
         ask({"cmd": "pause"}, TIMEOUTS["pause"])
         try:
             for mode in ["written", *later]:
-                ask({"cmd": "reset"}, TIMEOUTS["reset"])
-                free = wait_until_free(sock, args.wait_limit)
+                free = reset()
                 if not free.get("ok"):
                     return show(free, args.json)
                 started = ask({"cmd": "physics", "op": "replay", "mode": mode, "name": args.name}, TIMEOUTS["physics"])
@@ -840,7 +848,7 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                 ended = wait_for_script(sock, started, quiet, 0, args.wait_limit)
                 if not ended.get("ok"):
                     return show(ended, args.json)
-            ask({"cmd": "reset"}, TIMEOUTS["reset"])
+            reset()
             reply = ask(
                 {"cmd": "physics", "op": "report", "settle_mm": args.settle_mm, "note": args.note}, TIMEOUTS["physics"]
             )

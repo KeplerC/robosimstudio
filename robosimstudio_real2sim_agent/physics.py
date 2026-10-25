@@ -36,18 +36,25 @@ still carries it.
 
 from __future__ import annotations
 
-import inspect
 import math
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
+
+from robosimstudio.engines.pose import quat_rotate
 
 MODES = ("written", "frozen", "open", "built", "heavy")
 
 REAL_MU = 1.0
 """The most friction a real contact here has: rubber pads on plastic, ceramic or metal run 0.5 to 1.0."""
+
+OVERRUN = 0.1
+"""How far past the written run's length a replay whose routine is still going may run, as a share of it."""
+
+SAMPLE_EVERY = 5
+"""Every how many steps a replay reads the jaws and the particles (contacts and poses it reads every step)."""
 
 HEAVY = 2.0
 """How much heavier ``heavy`` makes every handled thing."""
@@ -55,13 +62,20 @@ HEAVY = 2.0
 STOPPED = "stopped before it ended (a reset, a save or Stop)"
 """The outcome of a replay the page stopped: not a reading, so ``./ctl physics`` plays it again."""
 
+FAILED = "the replay itself failed"
+"""The start of the outcome of a replay that failed in its own code (not the routine's): not a reading either."""
+
 SETTLE_MM = 2.0
 """How far a thing may move with the robot frozen: a resting contact settles by a fraction of a millimetre."""
 
-# The real arms' joint torque limits [Nm], from their makers' data sheets, by a word in the robot's name: a robot
-# file's own numbers are a claim (the bimanual YAM's are right; a UR5e built for a twin gave its wrists 150).
+# The real arms' joint torque limits [Nm], from their makers' data sheets, by a word in the robot's name or its own
+# joints' names: a robot file's own numbers are a claim (the bimanual YAM's are right; a UR5e built for a twin gave
+# its wrists 150). A Universal Robots arm whose size the names do not give is left uncapped rather than guessed.
 ARM_TORQUE = {
+    "ur3": (56.0, 56.0, 28.0, 12.0, 12.0, 12.0),
     "ur5": (150.0, 150.0, 150.0, 28.0, 28.0, 28.0),
+    "ur10": (330.0, 330.0, 150.0, 56.0, 56.0, 56.0),
+    "ur16": (330.0, 330.0, 150.0, 56.0, 56.0, 56.0),
     "yam": (27.0, 27.0, 27.0, 10.0, 10.0, 10.0),
     "panda": (87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0),
     "fr3": (87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0),
@@ -80,15 +94,25 @@ def robot_name(sim: Any) -> str:
     return str(getattr(spec, "name", "") or "")
 
 
+def _robot_joint_labels(sim: Any) -> list[str]:
+    """The labels of the robot's own joints: a thing's joint named after a robot must not name the arm."""
+    m = sim.model
+    labels = list(getattr(m, "joint_label", []) or [])
+    if not labels:
+        return []
+    robot = {
+        int(b) for b in np.unique(m.shape_body.numpy()[np.asarray(sim.scene.handles.robot_shapes, dtype=np.int64)])
+    }
+    child = m.joint_child.numpy()
+    return [str(labels[j]) for j in range(min(len(labels), len(child))) if int(child[j]) in robot]
+
+
 def real_arm_torque(sim: Any) -> tuple[float, ...] | None:
     """The real arm's torque limits, per joint from the base, or ``None`` for a robot not in :data:`ARM_TORQUE`."""
-    labels = " ".join(str(x) for x in list(getattr(sim.model, "joint_label", []))[:24])
-    words = f"{robot_name(sim)} {labels}".lower()
-    if "shoulder_pan" in words and "wrist_1" in words:  # a Universal Robots arm by its joints, whatever it is called
-        return ARM_TORQUE["ur5"]
-    for key, limits in ARM_TORQUE.items():
+    words = f"{robot_name(sim)} {' '.join(_robot_joint_labels(sim))}".lower()
+    for key in sorted(ARM_TORQUE, key=len, reverse=True):  # "ur10" before "ur1", should one come
         if key in words:
-            return limits
+            return ARM_TORQUE[key]
     return None
 
 
@@ -209,10 +233,13 @@ def model_facts(sim: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------- the replay
 
 
-def _rotate(q: np.ndarray, v: np.ndarray) -> np.ndarray:
-    x, y, z, w = q
-    u = np.array([x, y, z])
-    return 2 * np.dot(u, v) * u + (w * w - np.dot(u, u)) * np.asarray(v) + 2 * w * np.cross(u, v)
+def _free_joint_type() -> int:
+    try:
+        import newton
+
+        return int(newton.JointType.FREE)
+    except Exception:  # pragma: no cover - newton is always there on a page
+        return -1
 
 
 def _turn_deg(q0: np.ndarray, q1: np.ndarray) -> float:
@@ -238,6 +265,17 @@ class Replay:
         self.owner = np.full(n, -1, dtype=np.int64)
         for i, name in enumerate(self.names):
             self.owner[self.th[name]["shapes"]] = i
+        free_kind = _free_joint_type()
+        jt, jc = sim.model.joint_type.numpy(), sim.model.joint_child.numpy()
+        free_bodies = {int(c) for t, c in zip(jt, jc, strict=False) if int(t) == free_kind}
+        # a thing on a hinge, or one a cloth or a soft body can push (their contacts are not MuJoCo's), does not fall
+        # at g when nothing in MuJoCo's list touches it: free flight is read only where it means something
+        soft_scene = bool(sim.particle_probes())
+        self.free = {
+            name
+            for name in self.names
+            if not soft_scene and len(self.th[name]["bodies"]) == 1 and self.th[name]["bodies"][0] in free_bodies
+        }
         self.parts = [(f"{name}#{k}", b) for name in self.names for k, b in enumerate(self.th[name]["bodies"][1:], 1)]
         self.arms = list(self.fing)
         self.finger_of = np.full(n, -1, dtype=np.int64)
@@ -313,12 +351,13 @@ class Replay:
         pose, vel = {}, {}
         for name in self.names:
             b = self.th[name]["bodies"][0]
-            pose[name] = [*(bq[b, :3] + _rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
+            pose[name] = [*(bq[b, :3] + quat_rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
             vel[name] = bqd[b, :3].tolist()
         for name, b in self.parts:
-            pose[name] = [*(bq[b, :3] + _rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
-        soft = {}
-        for name, p in (sim.particle_probes() or {}).items():
+            pose[name] = [*(bq[b, :3] + quat_rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
+        soft, jaw = {}, {}
+        sampled = self.steps % SAMPLE_EVERY == 0
+        for name, p in (sim.particle_probes() or {}).items() if sampled else ():
             try:
                 p.update(sim.state, None)
                 pts = np.asarray(p.points())
@@ -328,8 +367,7 @@ class Replay:
                 base = self.soft0.setdefault(name, pts.copy())
                 away = np.linalg.norm(pts - base, axis=1)
                 soft[name] = [*pts.mean(0).tolist(), float(away.max()), float(np.median(away))]
-        jaw = {}
-        for a in self.arms:
+        for a in self.arms if sampled else ():
             try:
                 jaw[a] = float(sim.gripper(a).width(sim.state))
             except Exception:
@@ -381,6 +419,7 @@ class Replay:
                 "end": [round(float(v), 4) for v in P[-1, :3]],
                 "rise_max_mm": round(float((P[:, 2] - P[0, 2]).max()) * 1000, 1),
                 "turn_end_deg": round(_turn_deg(P[0, 3:], P[-1, 3:]), 1),
+                "end_quat": [round(float(v), 5) for v in P[-1, 3:]],
             }
             if name in self.names:
                 i = self.names.index(name)
@@ -390,7 +429,7 @@ class Replay:
                     for c in hand.T
                 ]
                 t["overlap_with_robot_max_mm"] = round(float(max(r["depth"][i] for r in rows)) * 1000, 2)
-                if t["moved_max_mm"] > 5.0:
+                if name in self.free and t["moved_max_mm"] > 5.0:
                     near = np.array([r["near"][i] for r in rows]) == 0
                     v = np.array([r["vel"][name] for r in rows])
                     free = near[1:-1] & near[:-2] & near[2:] & (np.linalg.norm(v[1:-1], axis=1) > 0.01)
@@ -417,7 +456,7 @@ class Replay:
         out["jaw_mm"] = {
             a: [round(min(w) * 1000, 1), round(max(w) * 1000, 1)]
             for a in self.arms
-            if (w := [r["jaw"][a] for r in rows[50:] if a in r["jaw"]])
+            if (w := [r["jaw"][a] for r in rows[50:] if a in r["jaw"]] or [r["jaw"][a] for r in rows if a in r["jaw"]])
         }
         if self.mu_seen:
             out["finger_mu"] = [round(min(self.mu_seen), 3), round(max(self.mu_seen), 3)]
@@ -488,21 +527,25 @@ class AsBuilt:
 
 
 def replay(
-    sim: Any, routine: Callable, mode: str, store: dict, *, session: Any = None, steps: int = 0
+    sim: Any, routine: Iterator, mode: str, store: dict, *, steps: int = 0, steps_itself: bool = False
 ) -> Iterator[None]:
-    """The routine played under ``mode``, its summary put in ``store[mode]`` when it ends however it ends.
+    """The routine (the generator it returned) played under ``mode``, its summary in ``store[mode]`` however it ends.
 
-    A replay other than ``written`` runs on to ``steps`` (the written run's
-    length) after the routine stops, so a counterfactual is judged over the same
-    time: a thing that drifts late still shows. A routine that steps the scene
-    itself is stepped here once it has stopped; one driving the arm panels has
-    the page step it, as it always does. A replay the page stops (a reset, a
-    save, Stop) is stored as ``stopped``, and the model is put back whatever
-    ended it.
+    A replay other than ``written`` runs as long as the written run,
+    ``steps``: on past the routine's end when it stops early (a thing that
+    drifts late still shows), and when it is still going, a little past
+    (:data:`OVERRUN`, so a routine whose last lines run on the step after the
+    written one's did is not cut off there) and no further: a routine waiting
+    for a pose the frozen arm never reaches is stopped and read as not done. One that ``steps_itself`` is stepped here once it has
+    stopped; one driving the arm panels has the page step it, as it always
+    does. A replay the page stops (a reset, a save, Stop) is stored as
+    :data:`STOPPED`, one that fails itself as :data:`FAILED`, and the model is
+    put back whatever ended it.
     """
     if mode not in MODES:
         raise ValueError(f"mode {mode!r} is not one of {', '.join(MODES)}")
-    takes_session = "session" in inspect.signature(routine).parameters
+    capped = mode != "written" and steps > 0
+    limit = steps + max(25, int(OVERRUN * steps))
     tap = Replay(sim, mode)
     built = AsBuilt(sim, HEAVY if mode == "heavy" else 1.0) if mode in ("built", "heavy") else None
     outcome = "finished"
@@ -511,15 +554,23 @@ def replay(
             built.apply()
         tap.install()
         try:
-            yield from (routine(sim, session=session) if takes_session else routine(sim))
+            for _ in routine:
+                yield
+                if capped and tap.steps >= limit:
+                    outcome = f"still going when the written replay had long ended ({steps} steps)"
+                    routine.close()
+                    break
         except Exception as exc:  # the routine's own checks stopping it is the reading, not a failure of this
             outcome = f"{type(exc).__name__}: {str(exc)[:300]}"
-        while mode != "written" and steps and tap.steps < steps:
-            if not takes_session:
+        while capped and tap.steps < steps:
+            if steps_itself:
                 sim.run(1)
             yield
     except GeneratorExit:
         outcome = STOPPED
+        raise
+    except Exception as exc:
+        outcome = f"{FAILED}: {type(exc).__name__}: {str(exc)[:300]}"
         raise
     finally:
         tap.remove()
@@ -546,7 +597,10 @@ def _same_end(run: dict, written: dict, names: list[str], mm: float = 50.0, deg:
             return False
         if abs(a.get("particle_end_mm", 0.0) - b.get("particle_end_mm", 0.0)) > mm / 2:
             return False
-        if abs(a.get("turn_end_deg", 0.0) - b.get("turn_end_deg", 0.0)) > deg:
+        if "end_quat" in a and "end_quat" in b:  # the turn between the two ends, not between the sizes of two turns
+            if _turn_deg(np.asarray(a["end_quat"]), np.asarray(b["end_quat"])) > deg:
+                return False
+        elif abs(a.get("turn_end_deg", 0.0) - b.get("turn_end_deg", 0.0)) > deg:
             return False
     return True
 
@@ -575,15 +629,18 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             if t.get("free_flight_not_falling")
         }
         line(
-            written["outcome"] == "finished" and not flew,
+            written["outcome"] == "finished",
             "written",
-            (
-                f"finished; moved {', '.join(names) or 'nothing'}"
-                if written["outcome"] == "finished"
-                else f"stopped: {written['outcome']}"
-            )
-            + (f"; free of every contact but not falling at g: {flew} steps" if flew else ""),
+            f"finished; moved {', '.join(names) or 'nothing'}"
+            if written["outcome"] == "finished"
+            else f"stopped: {written['outcome']}",
         )
+        if flew:
+            line(
+                None,
+                "flight",
+                f"free of every contact but not falling at g, steps: {flew}: say in the report what holds it",
+            )
     frozen = runs.get("frozen")
     if frozen:
         rest = {k: t["moved_max_mm"] for k, t in {**frozen.get("things", {}), **frozen.get("deformables", {})}.items()}

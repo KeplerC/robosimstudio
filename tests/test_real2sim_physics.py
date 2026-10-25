@@ -114,6 +114,24 @@ class Verdict(unittest.TestCase):
         runs = {**_clean_runs(), "written": written, "open": opened}
         self.assertIs(_words(physics.verdict(CLEAN, runs))["open"], True)
 
+    def test_ends_turned_opposite_ways_are_not_the_same_end(self) -> None:
+        import math
+
+        def quat(deg: float) -> list[float]:
+            return [0.0, 0.0, math.sin(math.radians(deg) / 2), math.cos(math.radians(deg) / 2)]
+
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"].update(turn_end_deg=40.0, end_quat=quat(40))
+        runs["built"]["things"]["crate"].update(turn_end_deg=40.0, end_quat=quat(-40))
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+
+    def test_free_flight_is_a_note(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"]["free_flight_not_falling"] = 6
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["flight"])
+        self.assertIs(_words(result)["written"], True)
+
     def test_heavy_failing_is_a_note(self) -> None:
         runs = _clean_runs()
         runs["heavy"] = _run(outcome="RuntimeError: flower 3 slipped")
@@ -145,10 +163,22 @@ class Verdict(unittest.TestCase):
         self.assertIn("no torque limits known", physics.verdict(model, _clean_runs())["report"])
 
 
-def _sim(name: str, labels: list[str]):
+def _sim(name: str, labels: list[str], thing_labels: tuple[str, ...] = ()):
+    """A robot named ``name`` whose joints (children of body 0) carry ``labels``; a thing's joints after them."""
+    import numpy as np
+
+    all_labels = list(labels) + list(thing_labels)
+    child = np.array([0] * len(labels) + [1] * len(thing_labels))
     return types.SimpleNamespace(
-        scene=types.SimpleNamespace(embodiment=types.SimpleNamespace(spec=types.SimpleNamespace(name=name))),
-        model=types.SimpleNamespace(joint_label=labels),
+        scene=types.SimpleNamespace(
+            embodiment=types.SimpleNamespace(spec=types.SimpleNamespace(name=name)),
+            handles=types.SimpleNamespace(robot_shapes=np.array([0])),
+        ),
+        model=types.SimpleNamespace(
+            joint_label=all_labels,
+            joint_child=types.SimpleNamespace(numpy=lambda: child),
+            shape_body=types.SimpleNamespace(numpy=lambda: np.array([0, 1])),
+        ),
     )
 
 
@@ -156,12 +186,20 @@ class RobotTable(unittest.TestCase):
     def test_a_yam_by_name(self) -> None:
         self.assertEqual(physics.real_arm_torque(_sim("yam_bimanual", [])), physics.ARM_TORQUE["yam"])
 
-    def test_a_universal_robots_arm_by_its_joints_whatever_it_is_called(self) -> None:
-        labels = ["pair/left_shoulder_pan_joint", "pair/left_shoulder_lift_joint", "pair/left_wrist_1_joint"]
-        self.assertEqual(physics.real_arm_torque(_sim("autolab_ur_pair", labels)), physics.ARM_TORQUE["ur5"])
+    def test_a_ur10_is_not_capped_as_a_ur5(self) -> None:
+        self.assertEqual(physics.real_arm_torque(_sim("ur10e_pair", [])), physics.ARM_TORQUE["ur10"])
 
-    def test_an_unknown_arm(self) -> None:
-        self.assertIsNone(physics.real_arm_torque(_sim("some_arm", ["j1", "j2"])))
+    def test_a_universal_robots_arm_of_unknown_size_is_left_uncapped(self) -> None:
+        labels = ["pair/left_shoulder_pan_joint", "pair/left_shoulder_lift_joint", "pair/left_wrist_1_joint"]
+        self.assertIsNone(physics.real_arm_torque(_sim("autolab_ur_pair", labels)))
+
+    def test_the_size_from_the_robot_s_own_joints(self) -> None:
+        self.assertEqual(
+            physics.real_arm_torque(_sim("pair", ["ur5e/left_shoulder_pan_joint"])), physics.ARM_TORQUE["ur5"]
+        )
+
+    def test_a_thing_named_after_a_robot_does_not_name_the_arm(self) -> None:
+        self.assertIsNone(physics.real_arm_torque(_sim("arm", ["j1"], thing_labels=("panda_plush/hinge",))))
 
 
 def _server(root: Path) -> LiveServer:
@@ -195,12 +233,29 @@ class Refusals(unittest.TestCase):
             reply = _server(Path(tmp)).cmd_physics(mode="sideways")
         self.assertIn("no physics replay 'sideways'", reply["error"])
 
+    def test_a_routine_that_returns_no_generator_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            live = _server(Path(tmp))
+            live.ns = {"routine": lambda sim: None}
+            live.sim = object()
+            with mock.patch.object(physics, "model_facts", return_value=dict(CLEAN)):
+                reply = live.cmd_physics()
+        self.assertIn("returned NoneType, not a generator", reply["error"])
+
+    def test_a_replay_that_failed_in_its_own_code_is_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            live = _server(Path(tmp))
+            runs = _clean_runs()
+            runs["built"]["outcome"] = f"{physics.FAILED}: RuntimeError: notify"
+            live.physics, live.physics_scene, live.physics_model = runs, "abc", dict(CLEAN)
+            self.assertIn("did not run to a reading", live.cmd_physics(op="report")["error"])
+
     def test_a_stopped_written_replay_is_played_again_not_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             live = _server(Path(tmp))
             live.physics, live.physics_scene = {"written": _run(outcome=physics.STOPPED)}, "abc"
             self.assertIn("replay `written` first", live.cmd_physics(mode="frozen")["error"])
-            self.assertIn("was stopped before it ended", live.cmd_physics(op="report")["error"])
+            self.assertIn("did not run to a reading", live.cmd_physics(op="report")["error"])
 
     def test_refused_while_a_routine_plays(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
