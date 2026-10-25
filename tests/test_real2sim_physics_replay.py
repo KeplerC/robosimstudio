@@ -202,6 +202,33 @@ class Replays(unittest.TestCase):
         self.assertEqual(store["frozen"]["steps"], 10, "the count stopped at the routine's reset")
         self.assertEqual((len(self.sim.pre_step_hooks), len(self.sim.post_step_hooks)), hooks_before)
 
+    def test_frozen_holds_after_any_other_pre_step_hook_writes_targets(self) -> None:
+        from robosimstudio_real2sim_agent import physics
+
+        arm = self.sim.scene.handles.arms["right"]
+
+        def steers(sim):
+            start = float(sim.state.joint_q.numpy()[arm.arm_coords[0]])
+
+            def push(env):  # a scene's own pre-step hook, writing the arm's target after the routine
+                q = env.control.joint_target_q.numpy()
+                q[arm.arm_coords[0]] = start + 0.3
+                env.control.joint_target_q.assign(q)
+
+            sim.pre_step_hooks.append(push)
+            try:
+                for _ in range(STEPS):
+                    sim.run(1)
+                    yield
+            finally:
+                sim.pre_step_hooks.remove(push)
+
+        self.sim.reset()
+        before = float(self.sim.state.joint_q.numpy()[arm.arm_coords[0]])
+        for _ in physics.replay(self.sim, steers(self.sim), "frozen", {}, steps=STEPS, steps_itself=True):
+            pass
+        self.assertLess(abs(float(self.sim.state.joint_q.numpy()[arm.arm_coords[0]]) - before), 0.01)
+
     def test_a_routine_that_swallows_exceptions_is_still_stopped(self) -> None:
         from robosimstudio_real2sim_agent import physics
 

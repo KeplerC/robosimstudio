@@ -300,8 +300,7 @@ class EnvBase:
         if floor is None:
             self._episode_hook_floor = {name: len(hooks) for name, hooks in lists.items()}
             return
-        substep = ["post_solve"]
-        retired = any(len(lists[name]) > floor.get(name, 0) for name in substep)
+        retired = len(lists["post_solve"]) > floor.get("post_solve", 0)
         for name, hooks in lists.items():
             del hooks[floor.get(name, 0) :]
         invalidate = getattr(self.pipeline, "invalidate_graph", None)

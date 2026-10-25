@@ -78,6 +78,15 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(result)["frozen"], False)
         self.assertIn("crate moved 11.5 mm with the robot frozen", result["report"])
 
+    def test_a_hinged_part_that_settles_is_said_so(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["lockbox#2"] = _thing(2.5)
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["frozen"], False)
+        self.assertIn(
+            "lockbox#2 moved 2.5 mm with the robot frozen: a part on a joint swung or settled", result["report"]
+        )
+
     def test_a_task_done_with_the_fingers_open_is_a_note_not_a_fail(self) -> None:
         runs = _clean_runs()
         runs["open"] = _run()  # finished, and the crate ended where the written run left it
@@ -273,6 +282,20 @@ class Verdict(unittest.TestCase):
         self.assertIsNone(_words(result)["contact"])
         self.assertIn("say in the report what each does", result["report"])
 
+    def test_a_massless_link_on_a_hinge_is_moved_by_its_joint(self) -> None:
+        import numpy as np
+
+        kinds = physics._joint_kinds()
+        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
+        model = types.SimpleNamespace(
+            body_count=1, body_inv_mass=arr([0.0]), joint_type=arr([kinds["revolute"]]), joint_child=arr([0])
+        )
+        self.assertEqual(physics._fixed_bodies(model).tolist(), [False])
+
+    def test_yaml_is_not_a_yam(self) -> None:
+        self.assertIsNone(physics.real_arm_torque(_sim("arm_from_yaml", [])))
+        self.assertEqual(physics.real_arm_torque(_sim("dual_ur5e", [])), physics.ARM_TORQUE["ur5"])
+
     def test_a_kinematic_thing_on_a_slide_is_still_kinematic(self) -> None:
         import numpy as np
 
@@ -280,9 +303,10 @@ class Verdict(unittest.TestCase):
         arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
         model = types.SimpleNamespace(
             body_count=2,
-            body_inv_mass=arr([0.0, 0.0]),
+            body_inv_mass=arr([1.0, 0.0]),
             joint_type=arr([kinds["prismatic"], kinds["fixed"]]),
             joint_child=arr([0, 1]),
+            body_flags=arr([int(__import__("newton").BodyFlags.KINEMATIC), 0]),
         )
         self.assertEqual(physics._fixed_bodies(model).tolist(), [True, False])
 

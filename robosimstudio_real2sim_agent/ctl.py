@@ -425,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
     phys.add_argument("name", nargs="?", default="", help="which, when `routines` binds several (default: the first)")
     phys.add_argument(
         "--only",
-        type=lambda text: [m for m in text.split(",") if m],
+        type=lambda text: [m.strip() for m in text.split(",") if m.strip()],
         default=[],
         metavar="A,B",
         help="these replays after `written`, comma-separated (default: frozen,open,built,heavy)",

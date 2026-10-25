@@ -123,7 +123,7 @@ def _robot_joint_labels(sim: Any) -> list[str]:
 
 def _match_arm(words: str) -> tuple[float, ...] | None:
     for key in sorted(ARM_TORQUE, key=len, reverse=True):
-        if re.search(rf"(?<![a-z0-9]){key}(?![0-9])", words.lower()):  # a UR3 is not a UR30, nor "fur3" a UR3
+        if re.search(rf"(?<![a-z0-9]){key}e?(?![a-z0-9])", words.lower()):  # ur5e is a UR5; ur30, fur3, yaml are not
             return ARM_TORQUE[key]
     return None
 
@@ -137,7 +137,8 @@ def real_arm_torque(sim: Any, arm: Any = None) -> tuple[float, ...] | None:
     if arm is not None:
         labels = list(getattr(sim.model, "joint_label", []) or [])
         qd0 = sim.model.joint_qd_start.numpy()
-        mine = [str(labels[j]) for j in range(min(len(labels), len(qd0))) if int(qd0[j]) in set(arm.arm_dofs)]
+        dofs = set(arm.arm_dofs)
+        mine = [str(labels[j]) for j in range(min(len(labels), len(qd0))) if int(qd0[j]) in dofs]
         hit = _match_arm(" ".join(mine))
         if hit is not None:
             return hit
@@ -275,10 +276,13 @@ def model_facts(sim: Any) -> dict[str, Any]:
             # dof's; a ball joint's four coordinates do not line up with its three dofs, and are read as they fall)
             drive_rows += [int(tstart[j]) + (d - int(qd0[j])) for d in stiff]
     rows = equality_rows(sim)
+    enabled = getattr(getattr(m, "mujoco", None), "equality_constraint_enabled", None)
+    on = enabled.numpy() if enabled is not None else None
     for k, (body1, body2, _label) in rows.items():
         pair = {body1, body2}
         hit = next((owner[b] for b in pair if b in owner), None)
-        if hit and not pair & robot_bodies:
+        inside = owner.get(body1) is not None and owner.get(body1) == owner.get(body2)  # a loop closed within a thing
+        if hit and not pair & robot_bodies and not inside and (on is None or bool(on[k])):
             welds.append(f"{hit} by equality constraint {k}")
     # a row between a thing and the robot ties it only while enabled (a suction cup's rows are built off and switch
     # on at a hold): the written replay watches them, and the verdict reads whether one was on
@@ -319,16 +323,21 @@ def equality_rows(sim: Any) -> dict[int, tuple[int, int, str]]:
 
 
 def _fixed_bodies(model: Any) -> np.ndarray:
-    """Per body, whether nothing but a script moves it: Newton's KINEMATIC flag, or an infinite mass on a body
-    free to move (a free joint, or none). A body held by a joint (a cabinet's carcass welded to the world, flagged or
-    massless) is fixed by its joint, not moved by a script, and is not counted."""
-    held = np.zeros(int(model.body_count), dtype=bool)
+    """Per body, whether nothing but a script moves it: Newton's KINEMATIC flag (on a hinge or a slide too: a drawer
+    flagged so opens only by script), or an infinite mass on a body free to move (a free joint, or none). A body
+    welded in place (a cabinet's carcass, flagged or massless) is a weld, and a massless link on a joint is moved by
+    the joint: neither is counted."""
+    count = int(model.body_count)
+    welded, jointed = np.zeros(count, dtype=bool), np.zeros(count, dtype=bool)
     kinds = _joint_kinds()
     jt, jc = model.joint_type.numpy(), model.joint_child.numpy()
     for t, c in zip(jt, jc, strict=False):
-        if int(c) >= 0 and int(t) == kinds.get("fixed", -2):  # a weld holds it; a hinge or a slide would let it move
-            held[int(c)] = True
-    fixed = model.body_inv_mass.numpy() == 0.0
+        if int(c) >= 0:
+            welded[int(c)] |= int(t) == kinds.get("fixed", -2)
+            jointed[int(c)] |= int(t) != kinds.get("free", -1)
+    # an infinite mass where nothing but a script can move the body (free, or no joint): a massless link on a hinge
+    # (a URDF's intermediate frame) is moved by its joint
+    fixed = (model.body_inv_mass.numpy() == 0.0) & ~jointed
     flags = getattr(model, "body_flags", None)
     if flags is not None:
         try:
@@ -337,7 +346,7 @@ def _fixed_bodies(model: Any) -> np.ndarray:
             fixed |= (flags.numpy() & int(newton.BodyFlags.KINEMATIC)) != 0
         except Exception:  # pragma: no cover - a Newton without the flag
             pass
-    return fixed & ~held  # one held by a joint (welded to the world, the weld_to_world pattern) is a weld
+    return fixed & ~welded  # one welded in place (the weld_to_world pattern) is a weld, flagged or not
 
 
 @functools.lru_cache(maxsize=1)
@@ -432,7 +441,9 @@ class Replay:
         self.held_to: np.ndarray | None = None
         self.hooks0: set[int] = set()
         self.kept: list = []
-        self._hold_hook = self._after_hook = self._cap_hook = None
+        self._hold_hook = self._after_hook = self._cap_hook = self._keep_hook = None
+        self.cleanup_error = ""
+        """Why the routine's own cleanup failed when the replay stopped it early, if it did (the reading stands)."""
         self._pinned: list[tuple[str, Any]] = []
         self.hooks_added = 0
         """Substep hooks found beyond those the scene had at the start: a dragger or a pin attached."""
@@ -505,10 +516,23 @@ class Replay:
             self._held_values = wp.array(
                 np.asarray(self.held_to, dtype=np.float32), dtype=wp.float32, device=self.sim.model.device
             )
-            self._pin("pre_step", self._hold_hook)
-        self._cap_hook = self._cap
+        self._cap_hook, self._keep_hook = self._cap, self._keep
         self._pin("pre_step", self._cap_hook)
-        self._pin("post_step", self._after_hook)
+        self._pin("post_step", self._keep_hook)
+        self._keep()
+
+    def _keep(self, _env: Any = None) -> None:
+        """Put the hold last among the pre-step hooks and the logger last among the post-step ones: after every
+        other hook that writes targets, and after a follower that moves a held thing. Pinned first itself, so a reset
+        the routine takes cannot retire it; it puts back what a reset retired."""
+        for hooks, hook in (
+            (self.sim.pre_step_hooks, self._hold_hook if self.held is not None else None),
+            (self.sim.post_step_hooks, self._after_hook),
+        ):
+            if hook is not None and (not hooks or hooks[-1] is not hook):
+                if any(h is hook for h in hooks):
+                    hooks.remove(hook)
+                hooks.append(hook)
 
     def _pin(self, name: str, hook: Any) -> None:
         """Put a hook first on its list and under the episode's floor, so a reset the routine itself takes (which
@@ -522,7 +546,7 @@ class Replay:
     def _added(self) -> tuple[int, int]:
         """How many hooks are on the scene now that were not at the start: on substep phases, and on the step lists
         (this replay's own two left out)."""
-        mine = {id(self._hold_hook), id(self._after_hook), id(self._cap_hook)}
+        mine = {id(self._hold_hook), id(self._after_hook), id(self._cap_hook), id(self._keep_hook)}
         substep = steps = 0
         for name, hooks in self.sim.hook_lists().items():
             new = sum(1 for fn in hooks if id(fn) not in self.hooks0 and id(fn) not in mine)
@@ -542,6 +566,9 @@ class Replay:
                 if isinstance(floor, dict) and floor.get(name, 0) > 0:
                     floor[name] -= 1
         self._pinned = []
+        for hooks, hook in ((self.sim.pre_step_hooks, self._hold_hook), (self.sim.post_step_hooks, self._after_hook)):
+            if hook is not None and any(h is hook for h in hooks):
+                hooks.remove(hook)
 
     def _hold(self, _env: Any = None) -> None:
         try:
@@ -566,9 +593,11 @@ class Replay:
                 raise Broken(self.broken) from exc
 
     def _cap(self, _env: Any = None) -> None:
-        """Before a step the routine takes itself past the cap: stop it, raised into the routine before the physics, so
-        no step is left half done. Then the routine's own cleanup (a finally that opens the gripper and settles) gets a
-        grace of as many steps, and a routine that swallowed it and loops on is stopped before every step after."""
+        """Keep the hold last (:meth:`_keep`); then, before a step the routine takes itself past the cap, stop it,
+        raised into the routine before the physics, so no step is left half done. The routine's own cleanup (a finally
+        that opens the gripper and settles) gets a grace of as many steps, and a routine that swallowed it and loops on
+        is stopped before every step after."""
+        self._keep()
         if self.limit and self.inside and self.steps >= self.limit:
             first = self.overrun_at == 0
             self.overrun_at = self.overrun_at or self.steps
@@ -697,6 +726,7 @@ class Replay:
             "steps": self.steps,
             "log_error": self.error,
             "held_rows": 0 if self.held is None else len(self.held),
+            "cleanup_error": self.cleanup_error,
             "hooks_added": self.hooks_added,
             "step_hooks_added": self.step_hooks_added,
             "robot_equalities_on": sorted(self.eq_on),
@@ -871,10 +901,15 @@ def replay(
     long = f"still going when the written replay had long ended ({steps} steps)"
 
     def stop() -> None:
-        """The hold and the cap off first, then the routine's own cleanup, now and on this scene."""
+        """The hold and the cap off first, then the routine's own cleanup, now and on this scene. A cleanup that
+        fails (or yields in its finally) does not change why the replay stopped."""
         if tap is not None:
             tap.remove()
-        routine.close()
+        try:
+            routine.close()
+        except Exception as exc:
+            if tap is not None:
+                tap.cleanup_error = f"{type(exc).__name__}: {exc}"
 
     tap: Replay | None = None
     built = AsBuilt(sim, HEAVY if mode == "heavy" else 1.0) if mode in ("built", "heavy") else None
@@ -1059,11 +1094,12 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         moved = rigid.get(worst, 0.0)
         drift = {k: v for k, v in soft.items() if v > settle_mm}
         if moved > settle_mm:
-            cause = (
-                "the attachment the contact line names"
-                if found
-                else "it starts inside something, or something other than the robot pushes it"
-            )
+            if found:
+                cause = "the attachment the contact line names"
+            elif "#" in worst:  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
+                cause = "a part on a joint swung or settled, so the mechanism is not at rest at the start"
+            else:
+                cause = "it starts inside something, or something other than the robot pushes it"
             line(False, "frozen", f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}")
         elif drift:
             k = max(drift, key=drift.get)
