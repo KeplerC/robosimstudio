@@ -347,11 +347,11 @@ finding, PASS and FAIL as `check` says them and NOTE for what the report has
 to explain:
 
 ```
-PASS  contact  nothing ties a thing to the robot or the world, no motor on a thing's joints
-PASS  written  finished; moved flower_1, flower_2, flower_3
-FAIL  frozen   flower_1 moved 12.3 mm with the robot frozen: it starts inside something, or something other than the robot pushes it
+PASS  contact  nothing ties a thing to the robot, no motor on a thing's joints, nothing welded
+FAIL  written  stopped: RoutineError: the right hand stopped 29 mm short of where it was sent
+FAIL  frozen   flower_1 moved 18.6 mm with the robot frozen: it starts inside something, or something other than the robot pushes it
 PASS  open     with the fingers held open the task did not happen (RuntimeError: Flower 1 did not remain in the fingers)
-PASS  built    finished with every friction at most 1 and the arm's torque at 27/10 Nm
+FAIL  built    with every friction at most 1 and the arm's torque at 27/10 Nm the routine finished, but the things did not end where the written run left them
 NOTE  heavy    with the handled things 2 times as heavy the routine stopped: RuntimeError: Flower 3 did not remain in the fingers (the grasp's margin)
 NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the solver used friction 2 to 4 at the finger contacts (above any real pad: the built line is the one to trust)
 ```
@@ -361,23 +361,32 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   by something other than the robot.
 - **open** holds the fingers fully open and moves the arms as written. A
   pinch fails; a task that still happens is carried by a support, a hook or
-  two arms squeezing, and the report says which.
+  two arms squeezing, and the report says which. What happened is read off
+  where the things end, so a routine that says it finished while the thing
+  never moved counts as the task not done.
 - **built** puts every contact friction at 1.0 or under and caps the arm's
   joint torque at the real arm's (a YAM's 27 Nm and 10 Nm, a UR5e's 150 Nm and
-  28 Nm, a Panda's 87 Nm and 12 Nm; for another robot, friction only). A
-  grip that only holds at a friction no rubber pad has fails here.
+  28 Nm, a Panda's 87 Nm and 12 Nm; for another robot, friction only). It
+  passes when the routine finishes and the things end where the written run
+  left them (within 50 mm and 30°): a grip that only holds at a friction no
+  rubber pad has fails here, even when the routine's own checks miss it.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
 - **contact** reads the model: a joint or equality constraint from a thing to
-  the robot, the world or another thing, a drive on a thing's own joint, an
-  infinite mass. **grip** is the median force each hand's fingers put on what
+  the robot, a stiffness driving a thing's own joint, or an infinite mass
+  fails it; a thing welded to the world or to another thing is a NOTE for the
+  report to explain (a hinge or a slide to the world or to furniture is a
+  mechanism, and damping alone is not a motor). **grip** is the median force each hand's fingers put on what
   they moved, and the friction MuJoCo mixed at those contacts (the larger of
   the two surfaces'): a hand whose own pads carry 2 or 4 grips with that, not
   with the number written for the thing.
 
-A replay overrides the robot's joint targets just before each physics step,
-which is where every routine's commands land, so it works whichever way the
-routine was written. A routine's own checks stopping it is a reading, not an
+Every replay starts at the reset with the page held (it is put back as it
+was when `physics` ends): a routine that only works once the page has run a
+while, letting what starts inside something pop out and settle, fails
+`written`, and `frozen` says what moved. A replay holds the robot's joint
+targets in a pre-step hook, after the routine's commands land and before the
+physics, so it works whichever way the routine was written. A routine's own checks stopping it is a reading, not an
 error: the line quotes them. A deformable is read by its particles; `built`
 and `heavy` change neither its friction nor its mass. `physics` resets the
 scene when it ends; it is refused while a routine plays.
