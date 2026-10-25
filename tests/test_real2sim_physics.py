@@ -97,6 +97,23 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(result)["built"], False)
         self.assertIn("did not end where the written run left them", result["report"])
 
+    def test_built_is_not_read_when_the_written_run_failed(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["outcome"] = runs["built"]["outcome"] = "RoutineError: the loop did not seat"
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["built"])
+        self.assertIn("not read: the written replay did not finish", result["report"])
+
+    def test_a_loop_seated_beside_its_start_is_not_one_that_never_moved(self) -> None:
+        written, opened = _run(), _run()
+        for run, away in ((written, 65.0), (opened, 0.0)):
+            run["things"] = {}
+            run["deformables"] = {
+                "gasket": {"moved_max_mm": 137.0 if away else 0.0, "end": [0.0, -0.1, 0.003], "particle_end_mm": away}
+            }
+        runs = {**_clean_runs(), "written": written, "open": opened}
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["open"], True)
+
     def test_heavy_failing_is_a_note(self) -> None:
         runs = _clean_runs()
         runs["heavy"] = _run(outcome="RuntimeError: flower 3 slipped")

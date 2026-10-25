@@ -326,7 +326,8 @@ class Replay:
                 continue
             if len(pts):
                 base = self.soft0.setdefault(name, pts.copy())
-                soft[name] = [*pts.mean(0).tolist(), float(np.linalg.norm(pts - base, axis=1).max())]
+                away = np.linalg.norm(pts - base, axis=1)
+                soft[name] = [*pts.mean(0).tolist(), float(away.max()), float(np.median(away))]
         jaw = {}
         for a in self.arms:
             try:
@@ -408,6 +409,9 @@ class Replay:
                 "end_mm": round(float(np.linalg.norm(c[-1] - c[0])) * 1000, 1),
                 "end": [round(float(v), 4) for v in c[-1]],
                 "particle_moved_max_mm": round(float(S[:, 3].max()) * 1000, 1),
+                # how far its particles end from where they started: a loop seated beside its start has its centre
+                # near where it began, and its particles moved
+                "particle_end_mm": round(float(S[-1, 4]) * 1000, 1),
             }
         out["deformables"] = soft
         out["jaw_mm"] = {
@@ -540,6 +544,8 @@ def _same_end(run: dict, written: dict, names: list[str], mm: float = 50.0, deg:
             continue
         if np.linalg.norm(np.subtract(a["end"], b["end"])) * 1000 > mm:
             return False
+        if abs(a.get("particle_end_mm", 0.0) - b.get("particle_end_mm", 0.0)) > mm / 2:
+            return False
         if abs(a.get("turn_end_deg", 0.0) - b.get("turn_end_deg", 0.0)) > deg:
             return False
     return True
@@ -608,8 +614,10 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         else " (no torque limits known for this robot)"
     )
 
-    def held(run: dict, what: str) -> tuple[bool, str]:
+    def held(run: dict, what: str) -> tuple[bool | None, str]:
         """Finished, and the things ended where the written run left them: a grip that slipped fails here."""
+        if written.get("outcome") != "finished":
+            return None, "not read: the written replay did not finish, so there is no end to hold this one to"
         if run["outcome"] != "finished":
             return False, f"with {what} the routine stopped: {run['outcome']}"
         if not _same_end(run, written, names):
@@ -626,7 +634,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     heavy = runs.get("heavy")
     if heavy:
         ok, detail = held(heavy, f"the handled things {HEAVY:g} times as heavy")
-        line(True if ok else None, "heavy", detail if ok else detail + " (the grasp's margin)")
+        line(True if ok else None, "heavy", detail if ok is not False else detail + " (the grasp's margin)")
     if written:
         grip = []
         for k in names:
