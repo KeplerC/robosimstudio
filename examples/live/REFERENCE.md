@@ -365,8 +365,10 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   where the things end, so a routine that says it finished while the thing
   never moved counts as the task not done.
 - **built** puts every contact friction at 1.0 or under and caps the arm's
-  joint torque at the real arm's (a YAM's 27 Nm and 10 Nm, a UR5e's 150 Nm and
-  28 Nm, a Panda's 87 Nm and 12 Nm; for another robot, friction only). It
+  joint torque at the real arm's, named by the robot or its own joints (a
+  YAM's 27 Nm and 10 Nm; a UR3's, UR5's, UR10's or UR16's; a Panda's 87 Nm and
+  12 Nm; for another robot, or a Universal Robots arm of no stated size,
+  friction only). It
   passes when the routine finishes and the things end where the written run
   left them (within 50 mm and 30°): a grip that only holds at a friction no
   rubber pad has fails here, even when the routine's own checks miss it.
@@ -376,18 +378,26 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   the robot, a stiffness driving a thing's own joint, or an infinite mass
   fails it; a thing welded to the world or to another thing is a NOTE for the
   report to explain (a hinge or a slide to the world or to furniture is a
-  mechanism, and damping alone is not a motor). **grip** is the median force each hand's fingers put on what
-  they moved, and the friction MuJoCo mixed at those contacts (the larger of
-  the two surfaces'): a hand whose own pads carry 2 or 4 grips with that, not
-  with the number written for the thing.
+  mechanism, and damping alone is not a motor).
+- **flight**, a NOTE when it shows, is a single free body with nothing within
+  the contact margin that does not fall at g: something holds it that is not
+  a contact. It is not read in a scene with a deformable, whose contacts are
+  not in MuJoCo's list.
+- **grip** is the median force each hand's fingers put on what they moved,
+  and the friction MuJoCo mixed at those contacts (the larger of the two
+  surfaces'): a hand whose own pads carry 2 or 4 grips with that, not with the
+  number written for the thing.
 
 Every replay starts at the reset with the page held (it is put back as it
 was when `physics` ends): a routine that only works once the page has run a
 while, letting what starts inside something pop out and settle, fails
 `written`, and `frozen` says what moved. A replay holds the robot's joint
 targets in a pre-step hook, after the routine's commands land and before the
-physics, so it works whichever way the routine was written. A routine's own checks stopping it is a reading, not an
-error: the line quotes them. A deformable is read by its particles; `built`
+physics, so it works whichever way the routine was written. A replay other
+than `written` is cut a little past the written run's length (10%, at least
+25 steps) when its routine is still going: one waiting for a pose the frozen
+arm never reaches is read as not done. A routine's own checks stopping it is
+a reading, not an error: the line quotes them. A deformable is read by its particles; `built`
 and `heavy` change neither its friction nor its mass. `physics` resets the
 scene when it ends; it is refused while a routine plays.
 
