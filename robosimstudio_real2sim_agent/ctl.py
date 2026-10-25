@@ -55,7 +55,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .wire import DEFAULT_RUN_DIR, NoReply, NoServer, parse_ready, request, socket_path
+from .wire import DEFAULT_RUN_DIR, ROUTINE_PLAYING, NoReply, NoServer, parse_ready, request, socket_path
 
 __all__ = [
     "CATALOGS",
@@ -75,6 +75,7 @@ TIMEOUTS = {
     "snapshot": 600.0,
     "eval": 900.0,
     "play": 900.0,
+    "physics": 900.0,
     "catalog": 120.0,
     "compare": 600.0,
     "check": 600.0,
@@ -416,6 +417,30 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--every", type=int, default=4, help="with --record: a frame per this many control steps")
     play.add_argument("--camera", default="", help="with --record: the camera to record through")
     _wait_flags(play, "return when the routine ends, saying how, its output streamed")
+    phys = sub.add_parser(
+        "physics",
+        parents=[common],
+        help="replay a routine with the robot frozen, the fingers open, the robot as built and the things heavier",
+    )
+    phys.add_argument("name", nargs="?", default="", help="which, when `routines` binds several (default: the first)")
+    phys.add_argument(
+        "--only",
+        type=lambda text: [m.strip() for m in text.split(",") if m.strip()],
+        default=[],
+        metavar="A,B",
+        help="these replays after `written`, comma-separated (default: frozen,open,built,heavy)",
+    )
+    phys.add_argument(
+        "--settle-mm", type=float, default=None, help="how far a thing may move with the robot frozen (default 2)"
+    )
+    phys.add_argument("--note", default="", help="a line for the log: why this reading")
+    phys.add_argument(
+        "--wait-limit",
+        type=float,
+        default=WAIT_LIMIT,
+        metavar="S",
+        help=f"give up on a replay after S seconds (default {WAIT_LIMIT:.0f})",
+    )
     show = sub.add_parser(
         "show", parents=[common], help="put a picture on the page for the person watching, under a label"
     )
@@ -779,6 +804,89 @@ def _differs_from_running(args: argparse.Namespace, status: dict) -> str:
     return ""
 
 
+def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
+    """Every physics replay of a routine, each from a reset scene, then the verdict (``physics.json``, a log line).
+
+    The replays are separate scripts because only a reset puts the scene back,
+    and a reset stops whatever plays: so this side resets, starts one, waits
+    for it to end, and starts the next.
+    """
+    from .physics import MODES
+
+    if "written" in args.only:
+        _say("physics: `written` always plays first; --only names the replays after it")
+    later = list(dict.fromkeys(m for m in (args.only or MODES[1:]) if m != "written"))
+    unknown = [m for m in later if m not in MODES]
+    if unknown:
+        print(f"ctl: no physics replay {', '.join(unknown)}; the replays are {', '.join(MODES)}", file=sys.stderr)
+        return 2
+    quiet = Path(args.run_dir) / ".physics-no-stream"  # never written: the replays' own output is not streamed
+
+    def ask(req: dict, timeout: float) -> dict:
+        return request(sock, {**req, "timeout": timeout}, timeout)
+
+    def reset() -> dict:
+        """Reset, and wait until the page has taken it: `reset` only asks, and the page resets on its next pass."""
+        before = int(ask({"cmd": "status", "light": True}, DEFAULT_TIMEOUT).get("resets", 0))
+        asked = ask({"cmd": "reset"}, TIMEOUTS["reset"])
+        if not asked.get("ok"):  # refused (no scene in the page): say so now, not after an hour of waiting
+            return asked
+        taken = poll(sock, lambda st: int(st.get("resets", 0)) > before, lambda st: "resetting", args.wait_limit)
+        return taken if not taken.get("ok") else wait_until_free(sock, args.wait_limit)
+
+    try:
+        # Held while the replays play, so each starts at its reset and not after a moment of free running (a thing
+        # that starts inside a finger would be pushed out before `frozen` began). The page still steps a routine
+        # that drives through it, and one that steps the scene itself steps it anyway.
+        # the light status: a busy page answers a full one without `paused`, which would read as running
+        first = ask({"cmd": "status", "light": True}, DEFAULT_TIMEOUT)
+        if first.get("playing"):  # before the first reset, which would stop it and its take
+            return show({"ok": False, "error": ROUTINE_PLAYING}, args.json)
+        if first.get("run_under_way"):  # pausing would end it, and resuming after would leave the page running free
+            return show({"ok": False, "error": "a `run N` is under way: let it end, or `pause` it"}, args.json)
+        was_paused = bool(first.get("paused"))
+        ask({"cmd": "pause"}, TIMEOUTS["pause"])
+        try:
+            for mode in ["written", *later]:
+                free = reset()
+                if not free.get("ok"):
+                    return show(free, args.json)
+                started = ask({"cmd": "physics", "op": "replay", "mode": mode, "name": args.name}, TIMEOUTS["physics"])
+                if not started.get("ok"):
+                    return show(started, args.json)
+                _say(f"physics: {mode} ...")  # on stderr, as every wait's progress is: --json stays one document
+                ended = wait_for_script(sock, started, quiet, 0, args.wait_limit)
+                if not ended.get("ok"):
+                    # still playing past --wait-limit, or failed: a reset stops it, and its own cleanup puts the
+                    # robot back (the friction, the torque, the masses); then say what happened
+                    ask({"cmd": "reset"}, TIMEOUTS["reset"])
+                    return show(ended, args.json)
+            done = reset()
+            if not done.get("ok"):
+                return show(done, args.json)
+            reply = ask(
+                {"cmd": "physics", "op": "report", "settle_mm": args.settle_mm, "note": args.note}, TIMEOUTS["physics"]
+            )
+        except BaseException:
+            # interrupted mid-replay: a reset stops it, and its own cleanup takes the hold and the changed friction,
+            # torque and masses off before the page runs on
+            try:
+                ask({"cmd": "reset"}, TIMEOUTS["reset"])
+            except Exception:
+                pass
+            raise
+        finally:
+            if not was_paused:
+                ask({"cmd": "resume"}, TIMEOUTS["resume"])
+    except NoServer:
+        print(f"ctl: no server at {sock}\nstart one with:  {START_HINT}", file=sys.stderr)
+        return 2
+    except NoReply as exc:
+        print(f"ctl: {exc}{busy_note(sock)}", file=sys.stderr)
+        return 1
+    return show(reply, args.json)
+
+
 def cmd_up(args: argparse.Namespace, sock: Path) -> int:
     scene = Path(args.scene)
     if not scene.is_file():
@@ -1084,6 +1192,8 @@ def main(argv=None) -> int:
         return cmd_camera(args)
     if args.cmd == "ref" and args.op == "plate":
         return cmd_plate(args)
+    if args.cmd == "physics":
+        return cmd_physics(args, sock)
     if args.cmd == "up":
         # the scene beside the run directory: `examples/live/ctl` pins run/ beside its scene.py, a twin's ctl beside its own
         args.scene = args.scene or str(Path(os.path.abspath(args.run_dir)).parent / "scene.py")

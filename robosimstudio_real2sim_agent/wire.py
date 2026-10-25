@@ -27,6 +27,7 @@ from pathlib import Path
 __all__ = [
     "DEFAULT_RUN_DIR",
     "READY_PREFIX",
+    "ROUTINE_PLAYING",
     "SOCKET_NAME",
     "ControlSocket",
     "NoReply",
@@ -37,6 +38,9 @@ __all__ = [
     "request",
     "socket_path",
 ]
+
+ROUTINE_PLAYING = "a routine is playing (`status` lists it under `playing`); let it end, or `reset` to stop it"
+"""What ``run``, ``check`` and ``physics`` answer while a routine plays (``physics`` says it before a reset stops it)."""
 
 DEFAULT_RUN_DIR = "run"
 """Where a page keeps its socket, its log and its snapshots: under the directory it was started from."""
