@@ -348,10 +348,10 @@ to explain:
 
 ```
 PASS  contact  nothing ties a thing to the robot, no motor on a thing's joints, nothing welded
-FAIL  written  stopped: RoutineError: the right hand stopped 29 mm short of where it was sent
+PASS  written  finished; moved flower_1, flower_2, flower_3
 FAIL  frozen   flower_1 moved 18.6 mm with the robot frozen: it starts inside something, or something other than the robot pushes it
 PASS  open     with the fingers held open the task did not happen (RuntimeError: Flower 1 did not remain in the fingers)
-FAIL  built    with every friction at most 1 and the arm's torque at 27/10 Nm the routine finished, but the things did not end where the written run left them
+FAIL  built    with every friction at most 1 and the arm's torque at 27/10 Nm the routine stopped: RuntimeError: Flower 3 is outside the pitcher
 NOTE  heavy    with the handled things 2 times as heavy the routine stopped: RuntimeError: Flower 3 did not remain in the fingers (the grasp's margin)
 NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the solver used friction 2 to 4 at the finger contacts (above any real pad: the built line is the one to trust)
 ```
@@ -372,6 +372,8 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   passes when the routine finishes and the things end where the written run
   left them (within 50 mm and 30°): a grip that only holds at a friction no
   rubber pad has fails here, even when the routine's own checks miss it.
+  When the written replay did not finish, there is no end to hold it to, and
+  `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
 - **contact** reads the model: a joint or equality constraint from a thing to

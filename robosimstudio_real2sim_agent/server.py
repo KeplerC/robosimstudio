@@ -1565,8 +1565,8 @@ class LiveServer:
             "drift_mm": result["drift_mm"],
         }
 
-    def cmd_play(self, name: str = "", record: str = "", every: int = 4, camera: str = "") -> dict:
-        """Play a routine the scene file binds, the way its button does."""
+    def _routine_named(self, name: str) -> tuple[str, Any] | dict:
+        """The routine the scene file binds under ``name`` (the first, if empty) and its callable, or a refusal."""
         found = self.routines()
         names = list(found)
         if not names:
@@ -1577,7 +1577,10 @@ class LiveServer:
         name = name or names[0]
         if name not in names:
             return {"ok": False, "error": f"no routine called {name!r}; the scene file binds {', '.join(names)}"}
-        fn = found[name]
+        return name, found[name]
+
+    def _start_routine(self, name: str, fn) -> tuple[Any, bool] | dict:
+        """The generator a routine returns, as its button calls it, and whether it drives the page; or a refusal."""
         try:
             # a routine that asks for the page's session gets it, to drive the arm panels (reach, grip)
             # or anything else on the page; one that steps the scene itself has the panels held off for it
@@ -1590,6 +1593,18 @@ class LiveServer:
                 "ok": False,
                 "error": f"routine {name!r} returned {type(gen).__name__}, not a generator: it yields as it goes (REFERENCE, Acting)",
             }
+        return gen, wants_session
+
+    def cmd_play(self, name: str = "", record: str = "", every: int = 4, camera: str = "") -> dict:
+        """Play a routine the scene file binds, the way its button does."""
+        named = self._routine_named(name)
+        if isinstance(named, dict):
+            return named
+        name, fn = named
+        started = self._start_routine(name, fn)
+        if isinstance(started, dict):
+            return started
+        gen, wants_session = started
         serial = self.start_script(gen, name=name, drives_page=wants_session, record=record, every=every, camera=camera)
         reply = {"ok": True, "playing": name, "serial": serial}
         if record:
@@ -1638,13 +1653,10 @@ class LiveServer:
             return {"ok": False, "error": ROUTINE_PLAYING}
         if mode not in physics.MODES:
             return {"ok": False, "error": f"no physics replay {mode!r}; the replays are {', '.join(physics.MODES)}"}
-        found = self.routines()
-        if not found:
-            return {"ok": False, "error": "the scene file binds no `routine` and no `routines` dict to replay"}
-        name = name or next(iter(found))
-        if name not in found:
-            return {"ok": False, "error": f"no routine called {name!r}; the scene file binds {', '.join(found)}"}
-        fn = found[name]
+        named = self._routine_named(name)
+        if isinstance(named, dict):
+            return named
+        name, fn = named
         if mode == "written":
             self.physics, self.physics_scene = {}, self.scene_id
             try:
@@ -1660,17 +1672,10 @@ class LiveServer:
                 "ok": False,
                 "error": "replay `written` first: the others run as long as it did and are read against it",
             }
-        wants_session = "session" in inspect.signature(fn).parameters
-        try:
-            routine = fn(self.sim, session=self.session) if wants_session else fn(self.sim)
-        except Exception:
-            return {"ok": False, "error": traceback.format_exc()[-3000:]}
-        if not inspect.isgenerator(routine):
-            return {
-                "ok": False,
-                "error": f"routine {name!r} returned {type(routine).__name__}, not a generator: it yields as it goes "
-                "(REFERENCE, Acting)",
-            }
+        started = self._start_routine(name, fn)
+        if isinstance(started, dict):
+            return started
+        routine, wants_session = started
         steps = int(self.physics.get("written", {}).get("steps") or 0)
         gen = physics.replay(self.sim, routine, mode, self.physics, steps=steps, steps_itself=not wants_session)
         serial = self.start_script(gen, name=f"physics {mode}", drives_page=wants_session)

@@ -826,7 +826,9 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
     def reset() -> dict:
         """Reset, and wait until the page has taken it: `reset` only asks, and the page resets on its next pass."""
         before = int(ask({"cmd": "status", "light": True}, DEFAULT_TIMEOUT).get("resets", 0))
-        ask({"cmd": "reset"}, TIMEOUTS["reset"])
+        asked = ask({"cmd": "reset"}, TIMEOUTS["reset"])
+        if not asked.get("ok"):  # refused (no scene in the page): say so now, not after an hour of waiting
+            return asked
         taken = poll(sock, lambda st: int(st.get("resets", 0)) > before, lambda st: "resetting", args.wait_limit)
         return taken if not taken.get("ok") else wait_until_free(sock, args.wait_limit)
 
@@ -834,7 +836,8 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
         # Held while the replays play, so each starts at its reset and not after a moment of free running (a thing
         # that starts inside a finger would be pushed out before `frozen` began). The page still steps a routine
         # that drives through it, and one that steps the scene itself steps it anyway.
-        was_paused = bool(ask({"cmd": "status"}, DEFAULT_TIMEOUT).get("paused"))
+        # the light status: a busy page answers a full one without `paused`, which would read as running
+        was_paused = bool(ask({"cmd": "status", "light": True}, DEFAULT_TIMEOUT).get("paused"))
         ask({"cmd": "pause"}, TIMEOUTS["pause"])
         try:
             for mode in ["written", *later]:
@@ -844,11 +847,13 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                 started = ask({"cmd": "physics", "op": "replay", "mode": mode, "name": args.name}, TIMEOUTS["physics"])
                 if not started.get("ok"):
                     return show(started, args.json)
-                print(f"physics: {mode} ...", flush=True)
+                _say(f"physics: {mode} ...")  # on stderr, as every wait's progress is: --json stays one document
                 ended = wait_for_script(sock, started, quiet, 0, args.wait_limit)
                 if not ended.get("ok"):
                     return show(ended, args.json)
-            reset()
+            done = reset()
+            if not done.get("ok"):
+                return show(done, args.json)
             reply = ask(
                 {"cmd": "physics", "op": "report", "settle_mm": args.settle_mm, "note": args.note}, TIMEOUTS["physics"]
             )

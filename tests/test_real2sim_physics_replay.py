@@ -141,6 +141,47 @@ class Replays(unittest.TestCase):
         self.assertLessEqual(played, STEPS + 26)
         self.assertIn("still going when the written replay had long ended", store["frozen"]["outcome"])
 
+    def test_a_routine_that_steps_without_yielding_is_stopped_at_the_step(self) -> None:
+        from robosimstudio_real2sim_agent import physics
+
+        def loops(sim):
+            arm = sim.scene.handles.arms["right"]
+            start = float(sim.state.joint_q.numpy()[arm.arm_coords[0]])
+            q = sim.control.joint_target_q.numpy()
+            q[arm.arm_coords[0]] = start + 0.3
+            while abs(float(sim.state.joint_q.numpy()[arm.arm_coords[0]]) - start) < 0.2:
+                sim.control.joint_target_q.assign(q)
+                sim.run(1)  # never yields until the pose is reached, which the frozen arm never does
+            yield
+
+        self.sim.reset()
+        store: dict = {}
+        for _ in physics.replay(self.sim, loops(self.sim), "frozen", store, steps=STEPS, steps_itself=True):
+            pass
+        self.assertIn("still going when the written replay had long ended", store["frozen"]["outcome"])
+        self.assertLessEqual(store["frozen"]["steps"], STEPS + 26)
+
+    def test_the_robot_as_built_puts_back_only_what_it_changed(self) -> None:
+        """A slider moved while `built` plays keeps its value: only the entries the replay changed go back."""
+        from robosimstudio_real2sim_agent import physics
+
+        self.sim.reset()
+        m = self.sim.model
+        mu = m.shape_material_mu.numpy()
+        mild = int(np.flatnonzero(mu <= 1.0)[0])
+        grippy = mu > 1.0
+        built = physics.AsBuilt(self.sim, heavier=2.0)
+        built.apply()
+        moved = m.shape_material_mu.numpy()
+        moved[mild] = 0.3  # the slider, mid-replay
+        m.shape_material_mu.assign(moved)
+        built.restore()
+        after = m.shape_material_mu.numpy()
+        self.assertAlmostEqual(float(after[mild]), 0.3, places=5)
+        np.testing.assert_allclose(after[grippy], mu[grippy])
+        mu[mild] = after[mild]
+        m.shape_material_mu.assign(mu)
+
     def test_the_model_read_finds_a_free_cube_free(self) -> None:
         from robosimstudio_real2sim_agent import physics
 

@@ -23,10 +23,12 @@ still or a take. So the routine is played again, five ways (:data:`MODES`):
 
 **One door.** Every routine moves the robot by writing ``joint_target_q``:
 the arm panels' IK and the gripper write it just before the page steps, a
-routine that steps the scene itself writes it through ``sim.step``. So
-:class:`Replay` wraps ``pipeline.step`` -- overriding the targets just before
-the physics step and logging just after -- and never needs to know how a
-routine was written.
+routine that steps the scene itself writes it through ``sim.step``. Both
+step through ``EnvBase._step_once``, so :class:`Replay` holds the targets in
+a pre-step hook there and logs in a post-step hook, and never needs to know
+how a routine was written. Code that calls ``pipeline.step()`` itself goes
+round that door and is not held: a routine is not written that way, and a
+settle a material runs while the scene is built is not a routine's step.
 
 **Free flight** is judged on nothing being within the contact margin, not on
 the contact force: contacts are read after the last substep, and one that
@@ -39,7 +41,7 @@ from __future__ import annotations
 import math
 import traceback
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 
@@ -125,10 +127,9 @@ def layout(sim: Any) -> dict[str, np.ndarray]:
     m, h = sim.model, sim.scene.handles
     n = int(sim.control.joint_target_q.shape[0])
     by_coord = n == m.joint_coord_count and n != m.joint_dof_count
-    arm, grip, opened, arm_dofs = [], [], [], []
+    arm, grip, opened = [], [], []
     for a in h.arms.values():
         arm += list(a.arm_coords if by_coord else a.arm_dofs)
-        arm_dofs += list(a.arm_dofs)
         g = list(a.gripper_coords if by_coord else a.gripper_dofs)
         grip += g
         o = list(a.gripper_open_q) or [0.0]
@@ -137,7 +138,6 @@ def layout(sim: Any) -> dict[str, np.ndarray]:
         "arm": np.asarray(arm, dtype=np.int64),
         "grip": np.asarray(grip, dtype=np.int64),
         "open": np.asarray(opened, dtype=np.float64),
-        "arm_dofs": np.asarray(arm_dofs, dtype=np.int64),
     }
 
 
@@ -191,13 +191,9 @@ def model_facts(sim: Any) -> dict[str, Any]:
         },
         "finger_mu": {a: sorted({round(float(v), 3) for v in mu[s]}) for a, s in fing.items()},
     }
-    try:
-        import newton
-
-        free, fixed = int(newton.JointType.FREE), int(newton.JointType.FIXED)
-        kinds = {int(v): k.lower() for k, v in newton.JointType.__members__.items()}
-    except Exception:  # pragma: no cover - newton is always there on a page
-        free, fixed, kinds = -1, -2, {}
+    kinds = _joint_kinds()
+    free, fixed = kinds.get("free", -1), kinds.get("fixed", -2)
+    kinds = {v: k for k, v in kinds.items()}
     jt, jp, jc = m.joint_type.numpy(), m.joint_parent.numpy(), m.joint_child.numpy()
     qd0 = m.joint_qd_start.numpy()
     ke = m.joint_target_ke.numpy()
@@ -233,18 +229,23 @@ def model_facts(sim: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------- the replay
 
 
-def _free_joint_type() -> int:
+def _joint_kinds() -> dict[str, int]:
+    """Newton's joint types by lower-case name (``free``, ``fixed``, ``revolute``, ...)."""
     try:
         import newton
 
-        return int(newton.JointType.FREE)
+        return {k.lower(): int(v) for k, v in newton.JointType.__members__.items()}
     except Exception:  # pragma: no cover - newton is always there on a page
-        return -1
+        return {}
 
 
 def _turn_deg(q0: np.ndarray, q1: np.ndarray) -> float:
     d = abs(float(np.dot(q0 / np.linalg.norm(q0), q1 / np.linalg.norm(q1))))
     return math.degrees(2 * math.acos(min(1.0, d)))
+
+
+class Overrun(RuntimeError):
+    """A replay's routine was still going well past the written run's length: raised from the step that passed it."""
 
 
 class Replay:
@@ -265,7 +266,7 @@ class Replay:
         self.owner = np.full(n, -1, dtype=np.int64)
         for i, name in enumerate(self.names):
             self.owner[self.th[name]["shapes"]] = i
-        free_kind = _free_joint_type()
+        free_kind = _joint_kinds().get("free", -1)
         jt, jc = sim.model.joint_type.numpy(), sim.model.joint_child.numpy()
         free_bodies = {int(c) for t, c in zip(jt, jc, strict=False) if int(t) == free_kind}
         # a thing on a hinge, or one a cloth or a soft body can push (their contacts are not MuJoCo's), does not fall
@@ -290,6 +291,8 @@ class Replay:
         self.steps = 0
         self.error = ""
         self.start: np.ndarray | None = None
+        self.limit = 0
+        """Steps after which a routine that steps the scene itself is stopped, raised from the step; 0 never."""
 
     def install(self) -> None:
         """Read the start (the first row: what a push-out in the first step moves is measured from it), then hook in."""
@@ -317,6 +320,9 @@ class Replay:
 
     def _after(self, _env: Any = None) -> None:
         self.steps += 1
+        if self.limit and self.steps >= self.limit:
+            self.limit = 0
+            raise Overrun(self.steps)
         try:
             self.log()
         except Exception:
@@ -467,60 +473,73 @@ class AsBuilt:
     """The robot as built, for the length of a replay: friction at most :data:`REAL_MU`, the real arm's torque.
 
     ``heavier`` also scales every handled thing's mass and inertia; a thing with
-    an infinite mass (kinematic) is left so. Each array changed is saved first
-    and assigned back whole on :meth:`restore`, and the solvers are told once
-    each way, as :mod:`robosimstudio.core.tuning` tells them for a slider.
-    :meth:`restore` puts back whatever :meth:`apply` got as far as changing.
+    an infinite mass (kinematic, or welded) is left so. Only the entries changed
+    are saved, and :meth:`restore` writes those back into the arrays as they are
+    then, so a slider moved during the replay keeps what it set elsewhere; the
+    solvers are told once each way, as :mod:`robosimstudio.core.tuning` tells
+    them for a slider. :meth:`restore` puts back whatever :meth:`apply` got as
+    far as changing.
     """
 
-    MASS = ("body_mass", "body_inv_mass", "body_inertia", "body_inv_inertia")
+    MASS: ClassVar[tuple[str, ...]] = ("body_mass", "body_inv_mass", "body_inertia", "body_inv_inertia")
+    FLAGS: ClassVar[dict[str, int]] = {"shape_material_mu": _SHAPE_PROPERTIES, "joint_effort_limit": _JOINT_DOF}
 
     def __init__(self, sim: Any, heavier: float = 1.0) -> None:
         self.sim, self.heavier = sim, float(heavier)
-        self.saved: dict[str, np.ndarray] = {}
+        self.saved: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        """Per array: the rows changed, and what they held."""
+
+    def _change(self, name: str, rows: np.ndarray, new: np.ndarray) -> None:
+        array = getattr(self.sim.model, name)
+        values = array.numpy()
+        self.saved[name] = (rows, values[rows].copy())
+        values[rows] = new
+        array.assign(values)
 
     def apply(self) -> None:
         from robosimstudio.core import tuning
 
         m = self.sim.model
-        flags = 0
-        self.saved["shape_material_mu"] = m.shape_material_mu.numpy().copy()
-        m.shape_material_mu.assign(np.minimum(self.saved["shape_material_mu"], REAL_MU))
-        flags |= _SHAPE_PROPERTIES
+        mu = m.shape_material_mu.numpy()
+        grippy = np.flatnonzero(mu > REAL_MU)
+        flags = _SHAPE_PROPERTIES if len(grippy) else 0
+        if len(grippy):
+            self._change("shape_material_mu", grippy, np.full(len(grippy), REAL_MU, dtype=mu.dtype))
         limits = real_arm_torque(self.sim)
         if limits is not None:
-            self.saved["joint_effort_limit"] = m.joint_effort_limit.numpy().copy()
-            effort = self.saved["joint_effort_limit"].copy()
-            for arm in self.sim.scene.handles.arms.values():
-                for i, d in enumerate(arm.arm_dofs[: len(limits)]):
-                    effort[d] = min(effort[d], limits[i])
-            m.joint_effort_limit.assign(effort)
+            effort = m.joint_effort_limit.numpy()
+            dofs = [d for arm in self.sim.scene.handles.arms.values() for d in arm.arm_dofs[: len(limits)]]
+            caps = [
+                limits[i]
+                for arm in self.sim.scene.handles.arms.values()
+                for i in range(len(arm.arm_dofs[: len(limits)]))
+            ]
+            rows = np.asarray(dofs, dtype=np.int64)
+            self._change("joint_effort_limit", rows, np.minimum(effort[rows], np.asarray(caps, dtype=effort.dtype)))
             flags |= _JOINT_DOF
         if self.heavier != 1.0:
-            arrays = {name: getattr(m, name).numpy().copy() for name in self.MASS}
-            self.saved.update({name: v.copy() for name, v in arrays.items()})
-            for t in things(self.sim).values():
-                for b in t["bodies"]:
-                    if arrays["body_inv_mass"][b] == 0.0:
-                        continue  # kinematic, or welded to the world: giving it an inverse mass would set it free
-                    arrays["body_mass"][b] *= self.heavier
-                    arrays["body_inv_mass"][b] /= self.heavier
-                    arrays["body_inertia"][b] *= self.heavier
-                    arrays["body_inv_inertia"][b] /= self.heavier
-            for name, v in arrays.items():
-                getattr(m, name).assign(v)
-            flags |= _BODY_INERTIAL
-        tuning.notify(self.sim.pipeline, flags)
+            inv = m.body_inv_mass.numpy()
+            rows = np.asarray(
+                [b for t in things(self.sim).values() for b in t["bodies"] if inv[b] != 0.0], dtype=np.int64
+            )
+            if len(rows):  # a body of infinite mass stays so: giving it an inverse mass would set it free
+                for name in self.MASS:
+                    scale = self.heavier if name in ("body_mass", "body_inertia") else 1.0 / self.heavier
+                    self._change(name, rows, getattr(m, name).numpy()[rows] * scale)
+                flags |= _BODY_INERTIAL
+        if flags:
+            tuning.notify(self.sim.pipeline, flags)
 
     def restore(self) -> None:
         from robosimstudio.core import tuning
 
-        m, flags = self.sim.model, 0
-        for name, v in self.saved.items():
-            getattr(m, name).assign(v)
-            flags |= {"shape_material_mu": _SHAPE_PROPERTIES, "joint_effort_limit": _JOINT_DOF}.get(
-                name, _BODY_INERTIAL
-            )
+        flags = 0
+        for name, (rows, old) in self.saved.items():
+            array = getattr(self.sim.model, name)
+            values = array.numpy()
+            values[rows] = old
+            array.assign(values)
+            flags |= self.FLAGS.get(name, _BODY_INERTIAL)
         self.saved = {}
         if flags:
             tuning.notify(self.sim.pipeline, flags)
@@ -547,6 +566,10 @@ def replay(
     capped = mode != "written" and steps > 0
     limit = steps + max(25, int(OVERRUN * steps))
     tap = Replay(sim, mode)
+    if capped and steps_itself:
+        # a routine stepping the scene itself may loop on `sim.step` until a pose is reached, never yielding: the
+        # cap is enforced at the step, raised inside the routine; one the page steps is cut at its yield below
+        tap.limit = limit
     built = AsBuilt(sim, HEAVY if mode == "heavy" else 1.0) if mode in ("built", "heavy") else None
     outcome = "finished"
     try:
@@ -560,8 +583,11 @@ def replay(
                     outcome = f"still going when the written replay had long ended ({steps} steps)"
                     routine.close()
                     break
+        except Overrun:
+            outcome = f"still going when the written replay had long ended ({steps} steps)"
         except Exception as exc:  # the routine's own checks stopping it is the reading, not a failure of this
             outcome = f"{type(exc).__name__}: {str(exc)[:300]}"
+        tap.limit = 0
         while capped and tap.steps < steps:
             if steps_itself:
                 sim.run(1)
@@ -654,7 +680,14 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             else f"{worst} moved {moved:.1f} mm with the robot frozen: it starts inside something, or something other than the robot pushes it",
         )
     opened = runs.get("open")
-    if opened:
+    if opened and (written.get("outcome") != "finished" or not names):
+        line(
+            None,
+            "open",
+            "not read: the written replay "
+            + ("did not finish" if written.get("outcome") != "finished" else "moved nothing"),
+        )
+    elif opened:
         did = opened["outcome"] == "finished" and _same_end(opened, written, names)
         line(
             None if did else True,

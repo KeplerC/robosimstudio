@@ -132,6 +132,13 @@ class Verdict(unittest.TestCase):
         self.assertIsNone(_words(result)["flight"])
         self.assertIs(_words(result)["written"], True)
 
+    def test_open_is_not_read_when_the_written_run_moved_nothing(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"]["moved_max_mm"] = 3.0
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["open"])
+        self.assertIn("not read: the written replay moved nothing", result["report"])
+
     def test_heavy_failing_is_a_note(self) -> None:
         runs = _clean_runs()
         runs["heavy"] = _run(outcome="RuntimeError: flower 3 slipped")
