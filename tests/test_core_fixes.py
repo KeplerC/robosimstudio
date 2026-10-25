@@ -105,6 +105,7 @@ class TestEveryDoorRunsThePostStepHooks(unittest.TestCase):
         sim = Sim.__new__(Sim)
         sim.pipeline = types.SimpleNamespace(step=lambda: None)
         sim.step_count = 0
+        sim.pre_step_hooks = []
         sim.post_step_hooks = []
         sim._warned_nonfinite = True  # nothing to read the finite flags from
         return sim
@@ -115,6 +116,16 @@ class TestEveryDoorRunsThePostStepHooks(unittest.TestCase):
         sim.post_step_hooks.append(lambda s: seen.append(s.step_count))
         sim.run(3)
         self.assertEqual(seen, [1, 2, 3])
+
+    def test_a_pre_step_hook_runs_before_the_physics(self) -> None:
+        """``./ctl physics`` holds the robot's targets here: after whatever drove the robot, before the step."""
+        sim = self._sim()
+        order: list[str] = []
+        sim.pipeline = types.SimpleNamespace(step=lambda: order.append("physics"))
+        sim.pre_step_hooks.append(lambda s: order.append(f"pre {s.step_count}"))
+        sim.post_step_hooks.append(lambda s: order.append(f"post {s.step_count}"))
+        sim.run(2)
+        self.assertEqual(order, ["pre 0", "physics", "post 1", "pre 1", "physics", "post 2"])
 
     def test_draw(self) -> None:
         draw = importlib.import_module("robosimstudio.sim.draw")  # the package exports the function by that name

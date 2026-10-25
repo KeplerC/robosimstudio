@@ -1607,6 +1607,12 @@ class LiveServer:
                     "ok": False,
                     "error": "no physics replays of this scene: `./ctl physics` plays them (a save since starts them over)",
                 }
+            stopped = [mode for mode, run in self.physics.items() if run.get("outcome") == physics.STOPPED]
+            if stopped:
+                return {
+                    "ok": False,
+                    "error": f"the {', '.join(stopped)} replay was stopped before it ended: run `./ctl physics` again",
+                }
             result = physics.verdict(self.physics_model, self.physics, float(settle_mm))
             out = self.run_dir / "physics.json"
             out.write_text(
@@ -1637,7 +1643,11 @@ class LiveServer:
                 self.physics_model = physics.model_facts(self.sim)
             except Exception:
                 return {"ok": False, "error": traceback.format_exc()[-3000:]}
-        elif "written" not in self.physics or self.physics_scene != self.scene_id:
+        elif (
+            "written" not in self.physics
+            or self.physics_scene != self.scene_id
+            or self.physics["written"].get("outcome") == physics.STOPPED
+        ):
             return {
                 "ok": False,
                 "error": "replay `written` first: the others run as long as it did and are read against it",

@@ -37,7 +37,7 @@ def _run(
     return run
 
 
-CLEAN = {"ties": [], "drives": [], "kinematic": [], "real_arm_torque": physics.ARM_TORQUE["yam"]}
+CLEAN = {"ties": [], "welds": [], "drives": [], "kinematic": [], "real_arm_torque": physics.ARM_TORQUE["yam"]}
 
 
 def _clean_runs() -> dict:
@@ -90,6 +90,13 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(result)["built"], False)
         self.assertIn("the receiving hand lost the reel", result["report"])
 
+    def test_finished_as_built_but_slipped_fails(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = _run(end=(0.4, 0.0, 0.9), turn=0.0)  # the routine ran out, the crate stayed on the table
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["built"], False)
+        self.assertIn("did not end where the written run left them", result["report"])
+
     def test_heavy_failing_is_a_note(self) -> None:
         runs = _clean_runs()
         runs["heavy"] = _run(outcome="RuntimeError: flower 3 slipped")
@@ -109,6 +116,12 @@ class Verdict(unittest.TestCase):
         result = physics.verdict(model, _clean_runs())
         self.assertIs(_words(result)["contact"], False)
         self.assertFalse(result["passed"])
+
+    def test_a_weld_to_the_world_is_a_note(self) -> None:
+        model = {**CLEAN, "welds": ["lamp welded to the world"]}
+        result = physics.verdict(model, _clean_runs())
+        self.assertIsNone(_words(result)["contact"])
+        self.assertTrue(result["passed"])
 
     def test_an_unknown_robot_says_friction_only(self) -> None:
         model = {**CLEAN, "real_arm_torque": None}
@@ -164,6 +177,13 @@ class Refusals(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             reply = _server(Path(tmp)).cmd_physics(mode="sideways")
         self.assertIn("no physics replay 'sideways'", reply["error"])
+
+    def test_a_stopped_written_replay_is_played_again_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            live = _server(Path(tmp))
+            live.physics, live.physics_scene = {"written": _run(outcome=physics.STOPPED)}, "abc"
+            self.assertIn("replay `written` first", live.cmd_physics(mode="frozen")["error"])
+            self.assertIn("was stopped before it ended", live.cmd_physics(op="report")["error"])
 
     def test_refused_while_a_routine_plays(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

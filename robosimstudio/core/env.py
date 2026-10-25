@@ -158,6 +158,9 @@ class EnvBase:
         """
         self.teleop_hooks: list[PostStepHook] = []
         """Run once per :meth:`step_teleop`, not per :meth:`step`."""
+        self.pre_step_hooks: list[PostStepHook] = []
+        """Run just before every control period's physics, after whatever drives the robot wrote its targets: a
+        hook here sees the step's commands and can change them (``./ctl physics`` holds the robot's)."""
 
         self.step_count = 0
         self.termination_request: str | None = None
@@ -320,11 +323,14 @@ class EnvBase:
     def _step_once(self) -> None:
         """One control period of physics and the bookkeeping every loop owes it.
 
-        The step count and :attr:`post_step_hooks`, in that order. Every door
-        that advances the scene -- :meth:`step`, :meth:`step_teleop`,
-        ``Sim.run``, ``rss.draw`` -- goes through here, so a hook a scene
-        installs runs whichever of them is driving.
+        :attr:`pre_step_hooks`, the physics, the step count and
+        :attr:`post_step_hooks`, in that order. Every door that advances the
+        scene -- :meth:`step`, :meth:`step_teleop`, ``Sim.run``, ``rss.draw`` --
+        goes through here, so a hook a scene installs runs whichever of them is
+        driving.
         """
+        for hook in self.pre_step_hooks:
+            hook(self)
         self.pipeline.step()
         self.step_count += 1
         for hook in self.post_step_hooks:

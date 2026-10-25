@@ -103,12 +103,29 @@ class Replays(unittest.TestCase):
         self.assertAlmostEqual(_routine.seen[0][1], 2.0 * mass0, places=5)
         self.assertAlmostEqual(float(self.sim.model.body_mass.numpy()[self.sim["cube"].handle.body]), mass0, places=5)
 
+    def test_a_replay_the_page_stops_is_stored_stopped_and_the_model_put_back(self) -> None:
+        from robosimstudio_real2sim_agent import physics
+
+        self.sim.reset()
+        m = self.sim.model
+        before = {k: getattr(m, k).numpy().copy() for k in ("shape_material_mu", "body_mass", "body_inv_mass")}
+        store: dict = {}
+        gen = physics.replay(self.sim, _routine, "heavy", store, steps=STEPS)
+        for _ in range(5):
+            next(gen)
+        self.assertLessEqual(float(m.shape_material_mu.numpy().max()), 1.0)
+        gen.close()  # what a reset, a save or Stop does to a playing script
+        self.assertEqual(store["heavy"]["outcome"], physics.STOPPED)
+        for k, v in before.items():
+            np.testing.assert_allclose(getattr(m, k).numpy(), v)
+        self.assertEqual((self.sim.pre_step_hooks, self.sim.post_step_hooks.count(None)), ([], 0))
+
     def test_the_model_read_finds_a_free_cube_free(self) -> None:
         from robosimstudio_real2sim_agent import physics
 
         facts = physics.model_facts(self.sim)
         self.assertIn("cube", facts["things"])
-        self.assertEqual((facts["ties"], facts["drives"], facts["kinematic"]), ([], [], []))
+        self.assertEqual((facts["ties"], facts["welds"], facts["drives"], facts["kinematic"]), ([], [], [], []))
         self.assertEqual(facts["real_arm_torque"], physics.ARM_TORQUE["yam"])
         self.assertTrue(np.isclose(max(max(v) for v in facts["finger_mu"].values()), 4.0))
 
