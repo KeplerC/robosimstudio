@@ -378,15 +378,16 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
-- **contact** reads the model: a joint or equality constraint between a thing
-  and the robot (either way round), a stiffness driving a thing's own joint, a
-  thing of infinite mass or flagged kinematic, a hook attached while the
-  written routine played (a dragger, a pin, a follower on any substep phase or
-  step list), or a stiff joint on a thing whose target moved while it played
-  (a motor) fails it; a stiff joint held at its target is the thing's own
-  elasticity (a rod's bending) and passes; a thing welded to the world or to another thing is a NOTE for the
-  report to explain (a hinge or a slide to the world or to furniture is a
-  mechanism, and damping alone is not a motor).
+- **contact** reads the model and the written replay. A joint or equality
+  constraint between a thing and the robot (either way round), a thing flagged
+  kinematic or of infinite mass while free to move, a hook put on a substep
+  phase while the routine played (a dragger, a pin), or a stiff joint on a
+  thing whose target moved while it played (a motor) fails it. A thing welded
+  to the world or to another thing, or a hook the routine put on the step
+  lists, is a NOTE for the report to explain. A stiff joint held at its target
+  is the thing's own elasticity (a rod's bending), a hinge or a slide to the
+  world or to furniture is a mechanism, and damping alone is not a motor: all
+  pass.
 - **flight**, a NOTE when it shows, is a single free body with nothing within
   the contact margin that does not fall at g: something holds it that is not
   a contact. It is not read in a scene with a deformable, whose contacts are

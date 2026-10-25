@@ -1675,7 +1675,15 @@ class LiveServer:
             return started
         routine, wants_session = started
         steps = int(self.physics.get("written", {}).get("steps") or 0)
-        gen = physics.replay(self.sim, routine, mode, self.physics, steps=steps, steps_itself=not wants_session)
+        gen = physics.replay(
+            self.sim,
+            routine,
+            mode,
+            self.physics,
+            steps=steps,
+            steps_itself=not wants_session,
+            drive_rows=self.physics_model.get("drive_rows"),
+        )
         serial = self.start_script(gen, name=f"physics {mode}", drives_page=wants_session)
         return {"ok": True, "playing": f"physics {mode}", "serial": serial}
 

@@ -853,6 +853,9 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                 _say(f"physics: {mode} ...")  # on stderr, as every wait's progress is: --json stays one document
                 ended = wait_for_script(sock, started, quiet, 0, args.wait_limit)
                 if not ended.get("ok"):
+                    # still playing past --wait-limit, or failed: a reset stops it, and its own cleanup puts the
+                    # robot back (the friction, the torque, the masses); then say what happened
+                    ask({"cmd": "reset"}, TIMEOUTS["reset"])
                     return show(ended, args.json)
             done = reset()
             if not done.get("ok"):

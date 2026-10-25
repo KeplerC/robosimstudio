@@ -230,7 +230,7 @@ class Replays(unittest.TestCase):
         def follows(sim):
             sim.post_step_hooks.append(lambda env: None)
             try:
-                for _ in range(5):
+                for _ in range(12):  # hooks are looked for every few steps
                     sim.run(1)
                     yield
             finally:
@@ -240,7 +240,7 @@ class Replays(unittest.TestCase):
         store: dict = {}
         for _ in physics.replay(self.sim, follows(self.sim), "written", store, steps_itself=True):
             pass
-        self.assertEqual(store["written"]["hooks_added"], 1)
+        self.assertEqual((store["written"]["hooks_added"], store["written"]["step_hooks_added"]), (0, 1))
 
     def test_the_robot_as_built_puts_back_only_what_it_changed(self) -> None:
         """A slider moved while `built` plays keeps its value: only the entries the replay changed go back."""

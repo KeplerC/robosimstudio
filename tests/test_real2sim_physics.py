@@ -209,12 +209,32 @@ class Verdict(unittest.TestCase):
         self.assertIsNone(_words(result)["contact"])
         self.assertTrue(result["passed"])
 
-    def test_a_hook_attached_while_the_routine_played_fails_contact(self) -> None:
+    def test_a_substep_hook_attached_while_the_routine_played_fails_contact(self) -> None:
         runs = _clean_runs()
         runs["written"]["hooks_added"] = 1
         result = physics.verdict(CLEAN, runs)
         self.assertIs(_words(result)["contact"], False)
-        self.assertIn("attached while the routine played", result["report"])
+        self.assertIn("substep hook(s) attached while the routine played", result["report"])
+
+    def test_a_step_hook_the_routine_added_is_a_note(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["step_hooks_added"] = 1
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["contact"])
+        self.assertIn("say in the report what each does", result["report"])
+
+    def test_a_massless_base_welded_in_place_is_not_kinematic(self) -> None:
+        import numpy as np
+
+        kinds = physics._joint_kinds()
+        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
+        model = types.SimpleNamespace(
+            body_count=3,
+            body_inv_mass=arr([0.0, 0.0, 1.0]),
+            joint_type=arr([kinds["free"], kinds["fixed"]]),
+            joint_child=arr([0, 1]),
+        )
+        self.assertEqual(physics._fixed_bodies(model).tolist(), [True, False, False])
 
     def test_an_unknown_robot_says_friction_only(self) -> None:
         model = {**CLEAN, "real_arm_torque": None}

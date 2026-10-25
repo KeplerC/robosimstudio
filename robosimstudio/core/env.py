@@ -261,6 +261,13 @@ class EnvBase:
             space.reset(self.state)
         return self.observe(), self.reset_info()
 
+    def hook_lists(self) -> dict[str, list]:
+        """Every list a hook can be put on, by name: each substep phase's, then ``pre_step`` and ``post_step``."""
+        hooks = self.pipeline.hooks
+        lists = {phase: getattr(hooks, phase) for phase in getattr(hooks, "PHASES", ("post_solve",))}
+        lists.update(post_step=self.post_step_hooks, pre_step=self.pre_step_hooks)
+        return lists
+
     def _retire_episode_hooks(self) -> None:
         """Drop every hook installed since the first reset, so none outlives its episode.
 
@@ -283,9 +290,7 @@ class EnvBase:
         removing one also drops the graph and asks for a re-capture on the next
         step; otherwise the graph would go on replaying the retired hook.
         """
-        hooks = self.pipeline.hooks
-        lists = {phase: getattr(hooks, phase) for phase in getattr(hooks, "PHASES", ("post_solve",))}
-        lists.update(post_step=self.post_step_hooks, pre_step=self.pre_step_hooks)
+        lists = self.hook_lists()
         floor = self._episode_hook_floor
         if floor is None:
             self._episode_hook_floor = {name: len(hooks) for name, hooks in lists.items()}

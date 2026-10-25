@@ -128,6 +128,15 @@ def real_arm_torque(sim: Any) -> tuple[float, ...] | None:
     return None
 
 
+def _by_coord(sim: Any) -> bool:
+    """Whether ``joint_target_q`` is laid out by coordinates (Newton's opt-in) rather than by DOFs.
+
+    The two differ for any scene with a free body (7 coordinates, 6 DOFs).
+    """
+    m, n = sim.model, int(sim.control.joint_target_q.shape[0])
+    return n == m.joint_coord_count and n != m.joint_dof_count
+
+
 def layout(sim: Any) -> dict[str, np.ndarray]:
     """Where each arm's and each finger's target sits in ``joint_target_q``, and the fingers' open targets.
 
@@ -136,13 +145,15 @@ def layout(sim: Any) -> dict[str, np.ndarray]:
     """
     m, h = sim.model, sim.scene.handles
     n = int(sim.control.joint_target_q.shape[0])
-    by_coord = n == m.joint_coord_count and n != m.joint_dof_count
+    by_coord = _by_coord(sim)
     arm, grip, opened = [], [], []
     for a in h.arms.values():
         arm += list(a.arm_coords if by_coord else a.arm_dofs)
         g = list(a.gripper_coords if by_coord else a.gripper_dofs)
         grip += g
-        opened += list(a._finger_limits(len(g))[0][: len(g)])  # a mirrored pair opens at (+w, -w), not at 0
+        # a mirrored pair opens at (+w, -w), not at 0; a spec that names fewer open values than it drives fingers
+        # repeats them, so every held row has its value
+        opened += list(np.resize(a._finger_limits(len(g))[0], len(g)))
     # every target the robot has, a torso, a rail or a head too: `frozen` holds them all
     robot = _robot_bodies(sim)
     child, q0, qd0 = m.joint_child.numpy(), m.joint_q_start.numpy(), m.joint_qd_start.numpy()
@@ -219,8 +230,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
     jt, jp, jc = m.joint_type.numpy(), m.joint_parent.numpy(), m.joint_child.numpy()
     qd0 = m.joint_qd_start.numpy()
     ke = m.joint_target_ke.numpy()
-    n_targets = int(sim.control.joint_target_q.shape[0])
-    by_coord = n_targets == m.joint_coord_count and n_targets != m.joint_dof_count
+    by_coord = _by_coord(sim)
     q0 = m.joint_q_start.numpy()
     ties, welds, drives, drive_rows = [], [], [], []
     for j in range(len(jt)):
@@ -264,8 +274,16 @@ def model_facts(sim: Any) -> dict[str, Any]:
 
 
 def _fixed_bodies(model: Any) -> np.ndarray:
-    """Per body, whether nothing but a script moves it: an infinite mass, or Newton's KINEMATIC flag."""
-    fixed = model.body_inv_mass.numpy() == 0.0
+    """Per body, whether nothing but a script moves it: Newton's KINEMATIC flag, or an infinite mass on a body
+    free to move (a free joint, or none). A massless base held by a joint (a cabinet's carcass welded to the world)
+    is fixed by its joint, not moved by a script, and is not counted."""
+    held = np.zeros(int(model.body_count), dtype=bool)
+    kinds = _joint_kinds()
+    jt, jc = model.joint_type.numpy(), model.joint_child.numpy()
+    for t, c in zip(jt, jc, strict=False):
+        if int(c) >= 0 and int(t) != kinds.get("free", -1):
+            held[int(c)] = True
+    fixed = (model.body_inv_mass.numpy() == 0.0) & ~held
     flags = getattr(model, "body_flags", None)
     if flags is not None:
         try:
@@ -320,7 +338,7 @@ class Replay:
     overlap, each deformable's particles, the jaw widths.
     """
 
-    def __init__(self, sim: Any, mode: str) -> None:
+    def __init__(self, sim: Any, mode: str, drive_rows: list[int] | None = None) -> None:
         self.sim, self.mode = sim, mode
         self.lay, self.th, self.fing = layout(sim), things(sim), fingers(sim)
         self.dt = 1.0 / float(sim.request.physics.control_hz)
@@ -365,12 +383,14 @@ class Replay:
         """The target rows ``frozen`` or ``open`` hold, and what they are held at (``held_to``)."""
         self.held_to: np.ndarray | None = None
         self.hooks0: set[int] = set()
-        self.lengths0: tuple[int, ...] = ()
+        self.kept: list = []
+        self._hold_hook = self._after_hook = None
         self.hooks_added = 0
+        self.step_hooks_added = 0
         """Post-solve hooks found on the pipeline beyond those it had at the start: a dragger or a pin attached."""
         self.limit = 0
         """Steps after which a routine that steps the scene itself is stopped, raised from the step; 0 never."""
-        self.drive_rows = np.asarray(model_facts(sim)["drive_rows"] if mode == "written" else [], dtype=np.int64)
+        self.drive_rows = np.asarray(drive_rows if mode == "written" and drive_rows else [], dtype=np.int64)
         """The ``joint_target_q`` rows of the stiff joints on things (:func:`model_facts`'s ``drive_rows``), watched
         on the written replay, the one the verdict reads them off."""
         self.drive0: np.ndarray | None = None
@@ -390,7 +410,8 @@ class Replay:
         elif self.mode == "open":
             self.held, self.held_to = self.lay["grip"], self.lay["open"]
         self._hold_hook, self._after_hook = self._hold, self._after  # one object each, to find and remove
-        self.hooks0 = self._hooks()
+        self.kept = [fn for hooks in self.sim.hook_lists().values() for fn in hooks]  # held, so no id is reused
+        self.hooks0 = {id(fn) for fn in self.kept}
         if len(self.drive_rows):
             self.drive0 = self.start[self.drive_rows].copy()
         self.log(contacts=False)  # the reset stepped nothing: the probe still holds the last replay's contacts
@@ -401,19 +422,19 @@ class Replay:
             )
             self.sim.pre_step_hooks.append(self._hold_hook)
         self.sim.post_step_hooks.append(self._after_hook)
-        self.lengths0 = self._hook_lengths()
 
-    def _hook_lists(self) -> list:
-        phases = getattr(self.sim.pipeline, "hooks", None)
-        lists = [getattr(phases, phase, ()) for phase in getattr(phases, "PHASES", ())]
-        return [*lists, self.sim.pre_step_hooks, self.sim.post_step_hooks]
-
-    def _hook_lengths(self) -> tuple[int, ...]:
-        return tuple(len(hooks) for hooks in self._hook_lists())
-
-    def _hooks(self) -> set[int]:
-        """Every hook on the scene now: each substep phase's, and the env's pre- and post-step lists."""
-        return {id(fn) for hooks in self._hook_lists() for fn in hooks}
+    def _added(self) -> tuple[int, int]:
+        """How many hooks are on the scene now that were not at the start: on substep phases, and on the step lists
+        (this replay's own two left out)."""
+        mine = {id(self._hold_hook), id(self._after_hook)}
+        substep = steps = 0
+        for name, hooks in self.sim.hook_lists().items():
+            new = sum(1 for fn in hooks if id(fn) not in self.hooks0 and id(fn) not in mine)
+            if name in ("pre_step", "post_step"):
+                steps += new
+            else:
+                substep += new
+        return substep, steps
 
     def remove(self) -> None:
         self.limit = 0
@@ -454,9 +475,10 @@ class Replay:
         hand = np.zeros((n, len(self.arms)))
         robot, near, depth_robot = np.zeros(n), np.zeros(n), np.zeros(n)
         probe = getattr(sim, "contacts", None)
-        if contacts and self._hook_lengths() != self.lengths0:
-            mine = {id(getattr(self, "_hold_hook", None)), id(getattr(self, "_after_hook", None))}
-            self.hooks_added = max(self.hooks_added, len(self._hooks() - self.hooks0 - mine))
+        if contacts and self.steps % SAMPLE_EVERY == 0:  # by identity, so a hook swapped for another is seen
+            substep, steps = self._added()
+            self.hooks_added = max(self.hooks_added, substep)
+            self.step_hooks_added = max(self.step_hooks_added, steps)
         if probe is not None and n and contacts:
             probe.update(sim.step_count)  # the step's read, shared with a panel reading the same frame
             if len(probe.geoms):
@@ -514,7 +536,10 @@ class Replay:
         )
 
     def _mixed_friction(self, probe: Any) -> None:
-        """The friction MuJoCo used at this step's finger contacts: a sample every ten steps is plenty."""
+        """The friction MuJoCo used at this step's finger contacts: a sample every ten steps is plenty. Not on a CPU
+        solver, whose Warp copy of the data is never stepped."""
+        if getattr(probe, "_host", False):
+            return
         try:
             data = probe.solver.mjw_data
             count = int(np.ravel(data.nacon.numpy())[0])
@@ -540,6 +565,7 @@ class Replay:
             "steps": self.steps,
             "log_error": self.error,
             "hooks_added": self.hooks_added,
+            "step_hooks_added": self.step_hooks_added,
             "thing_targets_moved": round(self.drive_moved, 6),
             "things": {},
         }
@@ -686,7 +712,14 @@ class AsBuilt:
 
 
 def replay(
-    sim: Any, routine: Iterator, mode: str, store: dict, *, steps: int = 0, steps_itself: bool = False
+    sim: Any,
+    routine: Iterator,
+    mode: str,
+    store: dict,
+    *,
+    steps: int = 0,
+    steps_itself: bool = False,
+    drive_rows: list[int] | None = None,
 ) -> Iterator[None]:
     """The routine (the generator it returned) played under ``mode``, its summary in ``store[mode]`` however it ends.
 
@@ -703,13 +736,13 @@ def replay(
     """
     if mode not in MODES:
         raise ValueError(f"mode {mode!r} is not one of {', '.join(MODES)}")
-    capped = mode != "written" and steps > 0
+    capped = mode != "written"
     limit = steps + max(25, int(OVERRUN * steps))
     tap: Replay | None = None
     built = AsBuilt(sim, HEAVY if mode == "heavy" else 1.0) if mode in ("built", "heavy") else None
     outcome = "finished"
     try:
-        tap = Replay(sim, mode)
+        tap = Replay(sim, mode, drive_rows=drive_rows)
         if capped:
             # a routine may loop on `sim.run` until a pose is reached, never yielding: the cap is enforced at a step
             # the routine takes itself, raised into it; a step the page takes between yields is cut at the yield
@@ -756,6 +789,9 @@ def replay(
         routine.close()
     except Exception as exc:
         outcome = f"{FAILED}: {type(exc).__name__}: {str(exc)[:300]}"
+        if tap is not None:
+            tap.remove()
+        routine.close()
         raise
     finally:
         if tap is not None:
@@ -821,10 +857,17 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         found.append("a target on a thing's own joint moved while the routine played: a motor")
     added = (runs.get("written") or {}).get("hooks_added", 0)
     if added:
-        found.append(f"{added} post-solve hook(s) attached while the routine played (a dragger or a pin)")
+        found.append(f"{added} substep hook(s) attached while the routine played (a dragger or a pin)")
     welds = model.get("welds", [])
     if found:
         line(False, "contact", "; ".join(found + welds))
+    elif (runs.get("written") or {}).get("step_hooks_added", 0):
+        line(
+            None,
+            "contact",
+            f"{runs['written']['step_hooks_added']} step hook(s) added while the routine played: say in the report "
+            "what each does (one that moves a thing is an attachment)",
+        )
     elif welds:
         line(None, "contact", "; ".join(welds) + ": a welded thing cannot move, so say in the report why it is welded")
     else:
