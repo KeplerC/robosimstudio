@@ -1661,14 +1661,16 @@ class LiveServer:
                 facts = physics.model_facts(self.sim)
             except Exception:
                 return {"ok": False, "error": traceback.format_exc()[-3000:]}
-        elif (
-            "written" not in self.physics
-            or self.physics_scene != self.scene_id
-            or not _read_replay(self.physics["written"])
-        ):
+        elif "written" not in self.physics or self.physics_scene != self.scene_id:
             return {
                 "ok": False,
                 "error": "replay `written` first: the others run as long as it did and are read against it",
+            }
+        elif not _read_replay(self.physics["written"]):
+            return {
+                "ok": False,
+                "error": f"the written replay did not run to a reading ({self.physics['written'].get('outcome')}): "
+                "nothing to read the others against",
             }
         started = self._start_routine(name, fn)
         if isinstance(started, dict):

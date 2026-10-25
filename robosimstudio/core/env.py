@@ -262,10 +262,11 @@ class EnvBase:
         return self.observe(), self.reset_info()
 
     def hook_lists(self) -> dict[str, list]:
-        """Every list a hook can be put on, by name: each substep phase's, then ``pre_step`` and ``post_step``."""
+        """Every list a hook can be put on, by name: each substep phase's, then ``pre_step``, ``post_step`` and
+        ``teleop``."""
         hooks = self.pipeline.hooks
         lists = {phase: getattr(hooks, phase) for phase in getattr(hooks, "PHASES", ("post_solve",))}
-        lists.update(post_step=self.post_step_hooks, pre_step=self.pre_step_hooks)
+        lists.update(post_step=self.post_step_hooks, pre_step=self.pre_step_hooks, teleop=self.teleop_hooks)
         return lists
 
     def _retire_episode_hooks(self) -> None:

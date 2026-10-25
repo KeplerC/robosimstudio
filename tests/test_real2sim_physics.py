@@ -169,6 +169,25 @@ class Verdict(unittest.TestCase):
         self.assertIsNone(_words(result)["frozen"])
         self.assertIn("water drifted 3.4 mm: still settling", result["report"])
 
+    def test_a_thing_left_alone_but_knocked_away_as_built_fails(self) -> None:
+        runs = _clean_runs()
+        for run in runs.values():
+            run["things"]["cup"] = _thing(0.0)
+        runs["built"]["things"]["cup"] = _thing(150.0)  # the sagging arm swept it off the bench
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["built"], False)
+        self.assertIn("cup, which the written run left alone, was moved 150 mm", result["report"])
+
+    def test_each_kind_of_arm_keeps_its_own_torque(self) -> None:
+        model = {**CLEAN, "arm_torque": {"left": physics.ARM_TORQUE["yam"], "right": physics.ARM_TORQUE["panda"]}}
+        result = physics.verdict(model, _clean_runs())
+        self.assertIn("left 27/10 Nm; right 87/12 Nm", result["report"])
+
+    def test_a_grasp_latch_engaged_fails_contact(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["latched"] = ["cable"]
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["contact"], False)
+
     def test_heavy_failing_is_a_note(self) -> None:
         runs = _clean_runs()
         runs["heavy"] = _run(outcome="RuntimeError: flower 3 slipped")
@@ -253,6 +272,19 @@ class Verdict(unittest.TestCase):
         self.assertIsNone(_words(result)["contact"])
         self.assertIn("say in the report what each does", result["report"])
 
+    def test_a_kinematic_thing_on_a_slide_is_still_kinematic(self) -> None:
+        import numpy as np
+
+        kinds = physics._joint_kinds()
+        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
+        model = types.SimpleNamespace(
+            body_count=2,
+            body_inv_mass=arr([0.0, 0.0]),
+            joint_type=arr([kinds["prismatic"], kinds["fixed"]]),
+            joint_child=arr([0, 1]),
+        )
+        self.assertEqual(physics._fixed_bodies(model).tolist(), [True, False])
+
     def test_a_massless_base_welded_in_place_is_not_kinematic(self) -> None:
         import numpy as np
 
@@ -335,8 +367,8 @@ class Layout(unittest.TestCase):
                 joint_coord_count=9,
                 joint_dof_count=9,
                 joint_child=arr(range(1, 10)),
-                joint_q_start=arr(range(9)),
-                joint_qd_start=arr(range(9)),
+                joint_q_start=arr(range(10)),
+                joint_qd_start=arr(range(10)),
                 shape_body=arr([1]),
             ),
             scene=types.SimpleNamespace(
@@ -401,7 +433,7 @@ class Refusals(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             live = _server(Path(tmp))
             live.physics, live.physics_scene = {"written": _run(outcome=physics.STOPPED)}, "abc"
-            self.assertIn("replay `written` first", live.cmd_physics(mode="frozen")["error"])
+            self.assertIn("the written replay did not run to a reading", live.cmd_physics(mode="frozen")["error"])
             self.assertIn("did not run to a reading", live.cmd_physics(op="report")["error"])
 
     def test_refused_while_a_routine_plays(self) -> None:

@@ -119,13 +119,27 @@ def _robot_joint_labels(sim: Any) -> list[str]:
     return [str(labels[j]) for j in range(min(len(labels), len(child))) if int(child[j]) in robot]
 
 
-def real_arm_torque(sim: Any) -> tuple[float, ...] | None:
-    """The real arm's torque limits, per joint from the base, or ``None`` for a robot not in :data:`ARM_TORQUE`."""
-    words = f"{robot_name(sim)} {' '.join(_robot_joint_labels(sim))}".lower()
+def _match_arm(words: str) -> tuple[float, ...] | None:
     for key in sorted(ARM_TORQUE, key=len, reverse=True):
-        if re.search(rf"{key}(?![0-9])", words):  # a UR3 is not a UR30
+        if re.search(rf"{key}(?![0-9])", words.lower()):  # a UR3 is not a UR30
             return ARM_TORQUE[key]
     return None
+
+
+def real_arm_torque(sim: Any, arm: Any = None) -> tuple[float, ...] | None:
+    """The real arm's torque limits, per joint from the base, or ``None`` for a robot not in :data:`ARM_TORQUE`.
+
+    Given an arm handle, read off that arm's own joints first, so two kinds of arm in one scene each keep their own;
+    the robot's name and all its joints answer when the arm's joints name no model.
+    """
+    if arm is not None:
+        labels = list(getattr(sim.model, "joint_label", []) or [])
+        qd0 = sim.model.joint_qd_start.numpy()
+        mine = [str(labels[j]) for j in range(min(len(labels), len(qd0))) if int(qd0[j]) in set(arm.arm_dofs)]
+        hit = _match_arm(" ".join(mine))
+        if hit is not None:
+            return hit
+    return _match_arm(f"{robot_name(sim)} {' '.join(_robot_joint_labels(sim))}")
 
 
 def _by_coord(sim: Any) -> bool:
@@ -144,7 +158,6 @@ def layout(sim: Any) -> dict[str, np.ndarray]:
     the two differ for any scene with a free body (7 coordinates, 6 DOFs).
     """
     m, h = sim.model, sim.scene.handles
-    n = int(sim.control.joint_target_q.shape[0])
     by_coord = _by_coord(sim)
     arm, grip, opened = [], [], []
     for a in h.arms.values():
@@ -154,17 +167,25 @@ def layout(sim: Any) -> dict[str, np.ndarray]:
         # a mirrored pair opens at (+w, -w), not at 0; a spec that names fewer open values than it drives fingers
         # repeats them, so every held row has its value
         opened += list(np.resize(a._finger_limits(len(g))[0], len(g)))
-    # every target the robot has, a torso, a rail or a head too: `frozen` holds them all
+    # every target the robot has, a torso, a rail or a head too: `frozen` holds them all. Newton 1.7 says where each
+    # joint's targets start (joint_target_q_start); its start arrays end in a sentinel, so [j + 1] always exists
     robot = _robot_bodies(sim)
-    child, q0, qd0 = m.joint_child.numpy(), m.joint_q_start.numpy(), m.joint_qd_start.numpy()
-    starts = q0 if by_coord else qd0
+    child, qd0 = m.joint_child.numpy(), m.joint_qd_start.numpy()
+    starts = getattr(m, "joint_target_q_start", None)
+    starts = starts.numpy() if starts is not None else (m.joint_q_start.numpy() if by_coord else qd0)
     rows: list[int] = []
+    dofs: list[int] = []
     for j in range(len(child)):
         if int(child[j]) in robot:
-            end = int(starts[j + 1]) if j + 1 < len(starts) else n
-            rows += list(range(int(starts[j]), min(end, n)))
+            rows += list(range(int(starts[j]), int(starts[j + 1])))
+            dofs += list(range(int(qd0[j]), int(qd0[j + 1])))
+    grip_dofs = [d for a in h.arms.values() for d in a.gripper_dofs]
     return {
         "robot": np.asarray(sorted(set(rows) | set(arm) | set(grip)), dtype=np.int64),
+        "robot_dofs": np.asarray(
+            sorted(set(dofs) | {d for a in h.arms.values() for d in a.arm_dofs} | set(grip_dofs)), dtype=np.int64
+        ),
+        "grip_dofs": np.asarray(grip_dofs, dtype=np.int64),
         "arm": np.asarray(arm, dtype=np.int64),
         "grip": np.asarray(grip, dtype=np.int64),
         "open": np.asarray(opened, dtype=np.float64),
@@ -213,6 +234,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
     out: dict[str, Any] = {
         "robot": robot_name(sim),
         "real_arm_torque": real_arm_torque(sim),
+        "arm_torque": {name: real_arm_torque(sim, arm) for name, arm in sim.scene.handles.arms.items()},
         "things": {
             name: {
                 "mass_kg": round(float(sum(mass[b] for b in t["bodies"])), 4),
@@ -305,7 +327,7 @@ def _fixed_bodies(model: Any) -> np.ndarray:
     kinds = _joint_kinds()
     jt, jc = model.joint_type.numpy(), model.joint_child.numpy()
     for t, c in zip(jt, jc, strict=False):
-        if int(c) >= 0 and int(t) != kinds.get("free", -1):
+        if int(c) >= 0 and int(t) == kinds.get("fixed", -2):  # a weld holds it; a hinge or a slide would let it move
             held[int(c)] = True
     fixed = model.body_inv_mass.numpy() == 0.0
     flags = getattr(model, "body_flags", None)
@@ -425,6 +447,22 @@ class Replay:
         self.eq_rows = np.asarray(sorted(int(k) for k in robot_rows), dtype=np.int64)
         self.eq_enabled = getattr(table, "equality_constraint_enabled", None) if len(self.eq_rows) else None
         self.eq_on: set[int] = set()
+        # holds a scene builds in rather than adds while it plays: a suction cup (its weld or its wrench tier) and a
+        # rod's grasp latch, read each step of the written run
+        self.cups: list[tuple[str, Any]] = []
+        self.latches: list[tuple[str, Any]] = []
+        if mode == "written":
+            for name in sim.scene.handles.arms:
+                try:
+                    self.cups.append((name, sim.suction(name)))
+                except Exception:
+                    pass
+            for name, entity in getattr(sim.scene, "by_name", {}).items():
+                flag = getattr(entity, "_hold_flag", None)
+                if flag is not None and getattr(getattr(entity, "spec", None), "allow_grasp_latch", False):
+                    self.latches.append((name, flag))
+        self.suction_held: set[str] = set()
+        self.latched: set[str] = set()
         """The thing-to-robot equality rows found enabled at any step of the written run: a weld or a seal held it."""
         self.drive_moved = 0.0
         """The most any of those targets moved from where it started: a motor on a thing, if above zero."""
@@ -450,6 +488,10 @@ class Replay:
             self.drive0 = self.start[self.drive_rows].copy()
         self.log(contacts=False)  # the reset stepped nothing: the probe still holds the last replay's contacts
         if self.held is not None:
+            dev = self.sim.model.device
+            dofs = self.lay["robot_dofs"] if self.mode == "frozen" else self.lay["grip_dofs"]
+            self._dof_rows = wp.array(np.asarray(dofs, dtype=np.int32), dtype=wp.int32, device=dev)
+            self._dof_zeros = wp.zeros(len(dofs), dtype=wp.float32, device=dev)
             self._held_rows = wp.array(self.held.astype(np.int32), dtype=wp.int32, device=self.sim.model.device)
             self._held_values = wp.array(
                 np.asarray(self.held_to, dtype=np.float32), dtype=wp.float32, device=self.sim.model.device
@@ -481,13 +523,24 @@ class Replay:
 
     def _hold(self, _env: Any = None) -> None:
         try:
+            control, dev = self.sim.control, self.sim.model.device
             wp.launch(
                 _write_rows,
                 dim=len(self.held),
                 inputs=[self._held_rows, self._held_values],
-                outputs=[self.sim.control.joint_target_q],
-                device=self.sim.model.device,
+                outputs=[control.joint_target_q],
+                device=dev,
             )
+            # a velocity target or a feed-forward force moves a held joint as surely as a position target does
+            for array in (getattr(control, "joint_target_qd", None), getattr(control, "joint_f", None)):
+                if array is not None and len(self._dof_rows):
+                    wp.launch(
+                        _write_rows,
+                        dim=len(self._dof_rows),
+                        inputs=[self._dof_rows, self._dof_zeros],
+                        outputs=[array],
+                        device=dev,
+                    )
         except Exception as exc:  # the replay's own fault: not a reading the routine's checks made
             self.broken = self.broken or f"holding the robot's targets: {type(exc).__name__}: {exc}"
             if self.inside:  # a step the routine took itself; one the page takes must not raise into the page
@@ -514,6 +567,19 @@ class Replay:
         hand = np.zeros((n, len(self.arms)))
         robot, near, depth_robot = np.zeros(n), np.zeros(n), np.zeros(n)
         probe = getattr(sim, "contacts", None)
+        if self.mode == "written":
+            for name, cup in self.cups:
+                try:
+                    if cup.holding:
+                        self.suction_held.add(name)
+                except Exception:
+                    pass
+            for name, flag in self.latches:
+                try:
+                    if np.asarray(flag.numpy()).any():
+                        self.latched.add(name)
+                except Exception:
+                    pass
         if self.eq_enabled is not None:  # every step: a seal switched on and off between samples still held
             on = np.asarray(self.eq_enabled.numpy())[self.eq_rows]
             self.eq_on |= {int(k) for k, v in zip(self.eq_rows, on, strict=True) if v}
@@ -546,7 +612,7 @@ class Replay:
         vel = {name: bqd[self.th[name]["bodies"][0], :3].tolist() for name in self.names}
         soft, jaw = {}, {}
         sampled = self.steps % SAMPLE_EVERY == 0
-        if sampled and self.drive0 is not None:
+        if self.drive0 is not None:  # every step: a target pulsed between samples is still a motor
             moved = np.abs(sim.control.joint_target_q.numpy()[self.drive_rows] - self.drive0)
             self.drive_moved = max(self.drive_moved, float(moved.max()))
         for name, p in (sim.particle_probes() or {}).items() if sampled else ():
@@ -609,6 +675,8 @@ class Replay:
             "hooks_added": self.hooks_added,
             "step_hooks_added": self.step_hooks_added,
             "robot_equalities_on": sorted(self.eq_on),
+            "suction_held": sorted(self.suction_held),
+            "latched": sorted(self.latched),
             "thing_targets_moved": round(self.drive_moved, 6),
             "things": {},
         }
@@ -713,15 +781,14 @@ class AsBuilt:
         flags = _SHAPE_PROPERTIES if len(grippy) else 0
         if len(grippy):
             self._change("shape_material_mu", grippy, np.full(len(grippy), REAL_MU, dtype=mu.dtype))
-        limits = real_arm_torque(self.sim)
-        if limits is not None:
+        dofs, caps = [], []
+        for arm in self.sim.scene.handles.arms.values():
+            limits = real_arm_torque(self.sim, arm)
+            if limits is not None:
+                dofs += list(arm.arm_dofs[: len(limits)])
+                caps += list(limits[: len(arm.arm_dofs)])
+        if dofs:
             effort = m.joint_effort_limit.numpy()
-            dofs = [d for arm in self.sim.scene.handles.arms.values() for d in arm.arm_dofs[: len(limits)]]
-            caps = [
-                limits[i]
-                for arm in self.sim.scene.handles.arms.values()
-                for i in range(len(arm.arm_dofs[: len(limits)]))
-            ]
             rows = np.asarray(dofs, dtype=np.int64)
             self._change("joint_effort_limit", rows, np.minimum(effort[rows], np.asarray(caps, dtype=effort.dtype)))
             flags |= _JOINT_DOF
@@ -823,6 +890,8 @@ def replay(
             outcome = long
         except Exception as exc:  # the routine's own checks stopping it is the reading, not a failure of this
             outcome = f"{type(exc).__name__}: {str(exc)[:300]}"
+        if capped and tap.overrun_at and outcome == "finished":  # it caught the cap and returned
+            outcome = long
         tap.limit = 0
         while capped and tap.steps < steps:
             if steps_itself:
@@ -864,6 +933,10 @@ def _ended_elsewhere(run: dict, written: dict, names: list[str], mm: float = 50.
     Each thing has to end within ``mm`` and ``deg`` of its written end, and to have moved on the way at least a
     third as far as the written run moved it: a mug lifted and set back near its start ends there too.
     """
+    for k in {**written.get("things", {}), **written.get("deformables", {})}:
+        a = run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
+        if k not in names and a and a.get("moved_max_mm", 0.0) > mm:  # left alone as written, knocked away here
+            return f"{k}, which the written run left alone, was moved {a['moved_max_mm']:.0f} mm"
     for k in names:
         a = run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
         b = written.get("things", {}).get(k) or written.get("deformables", {}).get(k)
@@ -904,13 +977,17 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         label = labels.get(str(k), "")
         if "suction" not in label:
             found.append(f"equality row {k} ({label or 'a weld'}) held a thing to the robot while the routine played")
+    for name in (runs.get("written") or {}).get("latched", []):
+        found.append(f"{name}'s grasp latch held it to a hand while the routine played")
     added = (runs.get("written") or {}).get("hooks_added", 0)
     if added:
         found.append(f"{added} substep hook(s) attached while the routine played (a dragger or a pin)")
     welds = model.get("welds", [])
     if found:
         line(False, "contact", "; ".join(found + welds))
-    elif any("suction" in labels.get(str(k), "") for k in (runs.get("written") or {}).get("robot_equalities_on", [])):
+    elif (runs.get("written") or {}).get("suction_held") or any(
+        "suction" in labels.get(str(k), "") for k in (runs.get("written") or {}).get("robot_equalities_on", [])
+    ):
         line(
             None,
             "contact",
@@ -998,12 +1075,21 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             if did
             else f"with the fingers held open the task did not happen ({opened['outcome'] if opened['outcome'] != 'finished' else 'the things ended elsewhere'})",
         )
+    per_arm = {k: tuple(v) for k, v in (model.get("arm_torque") or {}).items() if v}
     torque = model.get("real_arm_torque")
-    robot = f"every friction at most {REAL_MU:g}" + (
-        f" and the arm's torque at {'/'.join(f'{v:g}' for v in sorted(set(torque), reverse=True))} Nm"
-        if torque
-        else " (no torque limits known for this robot)"
-    )
+
+    def nm(limits) -> str:
+        return "/".join(f"{v:g}" for v in sorted(set(limits), reverse=True))
+
+    if len(set(per_arm.values())) > 1:
+        caps = "; ".join(f"{k} {nm(v)} Nm" for k, v in per_arm.items())
+        robot = f"every friction at most {REAL_MU:g} and each arm's torque at its own ({caps})"
+    elif per_arm or torque:
+        robot = (
+            f"every friction at most {REAL_MU:g} and the arm's torque at {nm(next(iter(per_arm.values()), torque))} Nm"
+        )
+    else:
+        robot = f"every friction at most {REAL_MU:g} (no torque limits known for this robot)"
 
     def held(run: dict, what: str) -> tuple[bool | None, str]:
         """Finished, and the things ended where the written run left them: a grip that slipped fails here."""
