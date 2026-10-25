@@ -270,10 +270,27 @@ class Verdict(unittest.TestCase):
             equality_constraint_body1=arr([4, 1]),
             equality_constraint_body2=arr([9, 2]),
             equality_constraint_objtype=arr([1, 3]),  # a body pair, and a joint coupling
+            equality_constraint_type=arr([1, 2]),
             equality_constraint_label=["hand/grab", "mimic"],
         )
         sim = types.SimpleNamespace(model=types.SimpleNamespace(mujoco=table))
         self.assertEqual(physics.equality_rows(sim), {0: (4, 9, "hand/grab")})
+
+    def test_a_weld_left_at_the_default_object_type_is_a_body_weld(self) -> None:
+        """Newton's MuJoCo solver reads an object type of -1 (the default) as a body."""
+        import numpy as np
+
+        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
+        table = types.SimpleNamespace(
+            equality_constraint_count=1,
+            equality_constraint_body1=arr([4]),
+            equality_constraint_body2=arr([9]),
+            equality_constraint_objtype=arr([-1]),
+            equality_constraint_type=arr([1]),
+            equality_constraint_label=["glue"],
+        )
+        sim = types.SimpleNamespace(model=types.SimpleNamespace(mujoco=table))
+        self.assertEqual(physics.equality_rows(sim), {0: (4, 9, "glue")})
 
     def test_a_step_hook_the_routine_added_is_a_note(self) -> None:
         runs = _clean_runs()
@@ -453,6 +470,14 @@ class Refusals(unittest.TestCase):
             runs["frozen"]["log_error"] = "Traceback ... ValueError"
             live.physics, live.physics_scene, live.physics_model = runs, "abc", dict(CLEAN)
             self.assertIn("did not run to a reading", live.cmd_physics(op="report")["error"])
+
+    def test_a_refusal_shows_the_log_s_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            live = _server(Path(tmp))
+            runs = _clean_runs()
+            runs["written"]["log_error"] = "Traceback (most recent call last):\n  ...\nKeyError: 'geoms'"
+            live.physics, live.physics_scene, live.physics_model = runs, "abc", dict(CLEAN)
+            self.assertIn("its log failed: KeyError: 'geoms'", live.cmd_physics(mode="frozen")["error"])
 
     def test_a_replay_that_failed_in_its_own_code_is_not_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

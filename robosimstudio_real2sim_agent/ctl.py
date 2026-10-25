@@ -813,7 +813,9 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
     """
     from .physics import MODES
 
-    later = [m for m in (args.only or MODES[1:]) if m != "written"]
+    if "written" in args.only:
+        _say("physics: `written` always plays first; --only names the replays after it")
+    later = list(dict.fromkeys(m for m in (args.only or MODES[1:]) if m != "written"))
     unknown = [m for m in later if m not in MODES]
     if unknown:
         print(f"ctl: no physics replay {', '.join(unknown)}; the replays are {', '.join(MODES)}", file=sys.stderr)

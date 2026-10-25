@@ -160,7 +160,13 @@ class EnvBase:
         """Run once per :meth:`step_teleop`, not per :meth:`step`."""
         self.pre_step_hooks: list[PostStepHook] = []
         """Run just before every control period's physics, after whatever drives the robot wrote its targets: a
-        hook here sees the step's commands and can change them (``./ctl physics`` holds the robot's)."""
+        hook here sees the step's commands and can change them."""
+        self.last_pre_step_hooks: list[PostStepHook] = []
+        """Run after every :attr:`pre_step_hooks` hook, and never retired by a reset: for a tool that owns its hook's
+        lifetime and must have the last word on the step's commands (``./ctl physics`` holds the robot's here)."""
+        self.last_post_step_hooks: list[PostStepHook] = []
+        """Run after every :attr:`post_step_hooks` hook, and never retired by a reset: for a tool that must read the
+        step after every follower has moved what it moves (``./ctl physics`` logs here)."""
 
         self.step_count = 0
         self.termination_request: str | None = None
@@ -262,11 +268,17 @@ class EnvBase:
         return self.observe(), self.reset_info()
 
     def hook_lists(self) -> dict[str, list]:
-        """Every list a hook can be put on, by name: each substep phase's, then ``pre_step``, ``post_step`` and
-        ``teleop``."""
+        """Every list a hook can be put on, by name: each substep phase's, then ``pre_step``, ``post_step``,
+        ``teleop``, ``last_pre_step`` and ``last_post_step``."""
         hooks = self.pipeline.hooks
         lists = {phase: getattr(hooks, phase) for phase in getattr(hooks, "PHASES", ("post_solve",))}
-        lists.update(post_step=self.post_step_hooks, pre_step=self.pre_step_hooks, teleop=self.teleop_hooks)
+        lists.update(
+            post_step=self.post_step_hooks,
+            pre_step=self.pre_step_hooks,
+            teleop=self.teleop_hooks,
+            last_pre_step=self.last_pre_step_hooks,
+            last_post_step=self.last_post_step_hooks,
+        )
         return lists
 
     def _retire_episode_hooks(self) -> None:
@@ -336,17 +348,18 @@ class EnvBase:
     def _step_once(self) -> None:
         """One control period of physics and the bookkeeping every loop owes it.
 
-        :attr:`pre_step_hooks`, the physics, the step count and
-        :attr:`post_step_hooks`, in that order. Every door that advances the
+        :attr:`pre_step_hooks` then :attr:`last_pre_step_hooks`, the physics,
+        the step count, :attr:`post_step_hooks` then
+        :attr:`last_post_step_hooks`, in that order. Every door that advances the
         scene -- :meth:`step`, :meth:`step_teleop`, ``Sim.run``, ``rss.draw`` --
         goes through here, so a hook a scene installs runs whichever of them is
         driving.
         """
-        for hook in self.pre_step_hooks:
+        for hook in (*self.pre_step_hooks, *self.last_pre_step_hooks):
             hook(self)
         self.pipeline.step()
         self.step_count += 1
-        for hook in self.post_step_hooks:
+        for hook in (*self.post_step_hooks, *self.last_post_step_hooks):
             hook(self)
 
     def step(self, action: Sequence[float] | None = None, mode: str = "") -> StepResult:

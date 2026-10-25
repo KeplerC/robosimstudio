@@ -151,6 +151,13 @@ def _read_replay(run: dict) -> bool:
     return outcome != physics.STOPPED and not outcome.startswith(physics.FAILED) and not run.get("log_error")
 
 
+def _why(run: dict) -> str:
+    """Why a replay is not a reading: its log's error when that is it, else how it ended."""
+    if run.get("log_error"):
+        return f"its log failed: {str(run['log_error']).strip().splitlines()[-1]}"
+    return str(run.get("outcome", ""))
+
+
 class LiveServer:
     """One page, one scene file, one socket. Everything but the accept loop runs on the main thread."""
 
@@ -1632,8 +1639,7 @@ class LiveServer:
             if unread:
                 return {
                     "ok": False,
-                    "error": f"the {', '.join(unread)} replay did not run to a reading (stopped, or failed in its own "
-                    f"code: {self.physics[unread[0]].get('outcome')}): run `./ctl physics` again",
+                    "error": f"the {', '.join(unread)} replay did not run to a reading: {_why(self.physics[unread[0]])}",
                 }
             bar = physics.SETTLE_MM if settle_mm is None else float(settle_mm)
             result = physics.verdict(self.physics_model, self.physics, bar)
@@ -1670,8 +1676,8 @@ class LiveServer:
         elif not _read_replay(self.physics["written"]):
             return {
                 "ok": False,
-                "error": f"the written replay did not run to a reading ({self.physics['written'].get('outcome')}): "
-                "nothing to read the others against",
+                "error": f"the written replay did not run to a reading ({_why(self.physics['written'])}): nothing to "
+                "read the others against",
             }
         started = self._start_routine(name, fn)
         if isinstance(started, dict):

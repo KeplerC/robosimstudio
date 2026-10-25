@@ -255,8 +255,12 @@ def model_facts(sim: Any) -> dict[str, Any]:
     tstart = getattr(m, "joint_target_q_start", None)
     tstart = tstart.numpy() if tstart is not None else (m.joint_q_start.numpy() if _by_coord(sim) else qd0)
     ties, welds, drives, drive_rows = [], [], [], []
+    enabled = getattr(m, "joint_enabled", None)
+    live = enabled.numpy() if enabled is not None else np.ones(len(jt), dtype=bool)
     for j in range(len(jt)):
         child, parent = int(jc[j]), int(jp[j])
+        if not live[j]:  # a weld built off (an MJCF weld with active="false") holds nothing until switched on
+            continue
         if parent in owner and child in robot_bodies:  # a robot link hung off a thing: the same tie the other way
             ties.append(f"{owner[parent]} by a {kinds.get(int(jt[j]), 'joint')} joint to the robot")
             continue
@@ -313,13 +317,14 @@ def equality_rows(sim: Any) -> dict[int, tuple[int, int, str]]:
         return {}
     b1, b2 = table.equality_constraint_body1.numpy(), table.equality_constraint_body2.numpy()
     objtype = getattr(table, "equality_constraint_objtype", None)
-    kinds = objtype.numpy() if objtype is not None else np.ones(count)
+    objs = objtype.numpy() if objtype is not None else np.ones(count)
+    kind = getattr(table, "equality_constraint_type", None)
+    kinds = kind.numpy() if kind is not None else np.ones(count)
     labels = list(getattr(table, "equality_constraint_label", None) or [""] * count)
-    return {
-        k: (int(b1[k]), int(b2[k]), str(labels[k]) if k < len(labels) else "")
-        for k in range(count)
-        if int(kinds[k]) == 1
-    }
+    # mjOBJ_BODY is 1; the default, -1, is read as a body by Newton's MuJoCo solver; a connect (0) or a weld (1)
+    # is a body pair, a joint or tendon coupling is not
+    keep = [k for k in range(count) if (int(objs[k]) == 1 or int(objs[k]) < 0) and int(kinds[k]) in (0, 1)]
+    return {k: (int(b1[k]), int(b2[k]), str(labels[k]) if k < len(labels) else "") for k in keep}
 
 
 def _fixed_bodies(model: Any) -> np.ndarray:
@@ -441,10 +446,9 @@ class Replay:
         self.held_to: np.ndarray | None = None
         self.hooks0: set[int] = set()
         self.kept: list = []
-        self._hold_hook = self._after_hook = self._cap_hook = self._keep_hook = None
+        self._hold_hook = self._after_hook = self._cap_hook = None
         self.cleanup_error = ""
         """Why the routine's own cleanup failed when the replay stopped it early, if it did (the reading stands)."""
-        self._pinned: list[tuple[str, Any]] = []
         self.hooks_added = 0
         """Substep hooks found beyond those the scene had at the start: a dragger or a pin attached."""
         self.step_hooks_added = 0
@@ -516,41 +520,22 @@ class Replay:
             self._held_values = wp.array(
                 np.asarray(self.held_to, dtype=np.float32), dtype=wp.float32, device=self.sim.model.device
             )
-        self._cap_hook, self._keep_hook = self._cap, self._keep
-        self._pin("pre_step", self._cap_hook)
-        self._pin("post_step", self._keep_hook)
-        self._keep()
-
-    def _keep(self, _env: Any = None) -> None:
-        """Put the hold last among the pre-step hooks and the logger last among the post-step ones: after every
-        other hook that writes targets, and after a follower that moves a held thing. Pinned first itself, so a reset
-        the routine takes cannot retire it; it puts back what a reset retired."""
-        for hooks, hook in (
-            (self.sim.pre_step_hooks, self._hold_hook if self.held is not None else None),
-            (self.sim.post_step_hooks, self._after_hook),
-        ):
-            if hook is not None and (not hooks or hooks[-1] is not hook):
-                if any(h is hook for h in hooks):
-                    hooks.remove(hook)
-                hooks.append(hook)
-
-    def _pin(self, name: str, hook: Any) -> None:
-        """Put a hook first on its list and under the episode's floor, so a reset the routine itself takes (which
-        retires every hook above the floor) keeps it: the hold, the cap and the count stay on through it."""
-        self.sim.hook_lists()[name].insert(0, hook)
-        floor = getattr(self.sim, "_episode_hook_floor", None)
-        if isinstance(floor, dict) and name in floor:
-            floor[name] += 1
-        self._pinned.append((name, hook))
+        # on the env's last lists: after every other hook (the hold has the last word on the targets, the log reads
+        # the step after any follower), and never retired, so a reset the routine itself takes keeps them on
+        self._cap_hook = self._cap
+        self.sim.last_pre_step_hooks.append(self._cap_hook)
+        if self.held is not None:
+            self.sim.last_pre_step_hooks.append(self._hold_hook)
+        self.sim.last_post_step_hooks.append(self._after_hook)
 
     def _added(self) -> tuple[int, int]:
         """How many hooks are on the scene now that were not at the start: on substep phases, and on the step lists
         (this replay's own two left out)."""
-        mine = {id(self._hold_hook), id(self._after_hook), id(self._cap_hook), id(self._keep_hook)}
+        mine = {id(self._hold_hook), id(self._after_hook), id(self._cap_hook)}
         substep = steps = 0
         for name, hooks in self.sim.hook_lists().items():
             new = sum(1 for fn in hooks if id(fn) not in self.hooks0 and id(fn) not in mine)
-            if name in ("pre_step", "post_step", "teleop"):
+            if name in ("pre_step", "post_step", "teleop", "last_pre_step", "last_post_step"):
                 steps += new
             else:
                 substep += new
@@ -558,15 +543,11 @@ class Replay:
 
     def remove(self) -> None:
         self.limit = 0
-        floor = getattr(self.sim, "_episode_hook_floor", None)
-        for name, hook in self._pinned:
-            hooks = self.sim.hook_lists()[name]
-            if any(h is hook for h in hooks):
-                hooks.remove(hook)
-                if isinstance(floor, dict) and floor.get(name, 0) > 0:
-                    floor[name] -= 1
-        self._pinned = []
-        for hooks, hook in ((self.sim.pre_step_hooks, self._hold_hook), (self.sim.post_step_hooks, self._after_hook)):
+        for hooks, hook in (
+            (self.sim.last_pre_step_hooks, self._cap_hook),
+            (self.sim.last_pre_step_hooks, self._hold_hook),
+            (self.sim.last_post_step_hooks, self._after_hook),
+        ):
             if hook is not None and any(h is hook for h in hooks):
                 hooks.remove(hook)
 
@@ -593,11 +574,9 @@ class Replay:
                 raise Broken(self.broken) from exc
 
     def _cap(self, _env: Any = None) -> None:
-        """Keep the hold last (:meth:`_keep`); then, before a step the routine takes itself past the cap, stop it,
-        raised into the routine before the physics, so no step is left half done. The routine's own cleanup (a finally
-        that opens the gripper and settles) gets a grace of as many steps, and a routine that swallowed it and loops on
-        is stopped before every step after."""
-        self._keep()
+        """Before a step the routine takes itself past the cap, stop it, raised into the routine before the physics, so
+        no step is left half done. The routine's own cleanup (a finally that opens the gripper and settles) gets a
+        grace of as many steps, and a routine that swallowed it and loops on is stopped before every step after."""
         if self.limit and self.inside and self.steps >= self.limit:
             first = self.overrun_at == 0
             self.overrun_at = self.overrun_at or self.steps
@@ -938,7 +917,6 @@ def replay(
                     raise Broken(tap.broken)
                 if capped and tap.steps >= limit:
                     outcome = long
-                    stop()
                     break
         except Overrun:
             outcome = long
@@ -946,6 +924,8 @@ def replay(
             outcome = f"{type(exc).__name__}: {str(exc)[:300]}"
         if capped and tap.overrun_at and outcome == "finished":  # it caught the cap and returned
             outcome = long
+        if outcome == long:
+            stop()  # outside the try above: a failure here is the replay's, not the routine's
         tap.limit = 0
         while capped and tap.steps < steps:
             if steps_itself:
@@ -1094,7 +1074,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         moved = rigid.get(worst, 0.0)
         drift = {k: v for k, v in soft.items() if v > settle_mm}
         if moved > settle_mm:
-            if found:
+            if any(worst.split("#")[0] in f for f in found):
                 cause = "the attachment the contact line names"
             elif "#" in worst:  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
                 cause = "a part on a joint swung or settled, so the mechanism is not at rest at the start"

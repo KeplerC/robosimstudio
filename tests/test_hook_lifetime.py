@@ -37,6 +37,7 @@ class TestEpisodeHooksDoNotOutliveTheirEpisode(unittest.TestCase):
         env.post_step_hooks = []
         env.pre_step_hooks = []
         env.teleop_hooks = []
+        env.last_pre_step_hooks, env.last_post_step_hooks = [], []
         env._episode_hook_floor = None
         env.pipeline = types.SimpleNamespace(hooks=types.SimpleNamespace(post_solve=[]), invalidated=[])
         env.pipeline.invalidate_graph = lambda *, recapture=True: env.pipeline.invalidated.append(recapture)
