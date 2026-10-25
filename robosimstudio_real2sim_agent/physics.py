@@ -39,11 +39,13 @@ still carries it.
 from __future__ import annotations
 
 import math
+import re
 import traceback
 from collections.abc import Iterator
 from typing import Any, ClassVar
 
 import numpy as np
+import warp as wp
 
 from robosimstudio.engines.pose import quat_rotate
 
@@ -96,15 +98,23 @@ def robot_name(sim: Any) -> str:
     return str(getattr(spec, "name", "") or "")
 
 
+def _robot_bodies(sim: Any) -> set[int]:
+    """Every body of the robot, shapeless links (a flange, a tool frame) included."""
+    m = sim.model
+    owners = {
+        int(b) for b in np.unique(m.shape_body.numpy()[np.asarray(sim.scene.handles.robot_shapes, dtype=np.int64)])
+    }
+    own = getattr(getattr(sim.scene, "embodiment", None), "bodies", None)
+    return owners | ({int(b) for b in own} if own is not None else set())
+
+
 def _robot_joint_labels(sim: Any) -> list[str]:
     """The labels of the robot's own joints: a thing's joint named after a robot must not name the arm."""
     m = sim.model
     labels = list(getattr(m, "joint_label", []) or [])
     if not labels:
         return []
-    robot = {
-        int(b) for b in np.unique(m.shape_body.numpy()[np.asarray(sim.scene.handles.robot_shapes, dtype=np.int64)])
-    }
+    robot = _robot_bodies(sim)
     child = m.joint_child.numpy()
     return [str(labels[j]) for j in range(min(len(labels), len(child))) if int(child[j]) in robot]
 
@@ -112,8 +122,8 @@ def _robot_joint_labels(sim: Any) -> list[str]:
 def real_arm_torque(sim: Any) -> tuple[float, ...] | None:
     """The real arm's torque limits, per joint from the base, or ``None`` for a robot not in :data:`ARM_TORQUE`."""
     words = f"{robot_name(sim)} {' '.join(_robot_joint_labels(sim))}".lower()
-    for key in sorted(ARM_TORQUE, key=len, reverse=True):  # "ur10" before "ur1", should one come
-        if key in words:
+    for key in sorted(ARM_TORQUE, key=len, reverse=True):
+        if re.search(rf"{key}(?![0-9])", words):  # a UR3 is not a UR30
             return ARM_TORQUE[key]
     return None
 
@@ -171,13 +181,13 @@ def model_facts(sim: Any) -> dict[str, Any]:
     not the number a twin wrote for its thing when the hand's own pads are
     grippier.
     """
-    m, h = sim.model, sim.scene.handles
+    m = sim.model
     mu = m.shape_material_mu.numpy()
     mass = m.body_mass.numpy()
     th, fing = things(sim), fingers(sim)
-    fixed = _fixed_bodies(m)
+    fixed_body = _fixed_bodies(m)
     owner = {b: name for name, t in th.items() for b in t["bodies"]}
-    robot_bodies = {int(b) for b in np.unique(m.shape_body.numpy()[h.robot_shapes]) if b >= 0}
+    robot_bodies = {b for b in _robot_bodies(sim) if b >= 0}
     out: dict[str, Any] = {
         "robot": robot_name(sim),
         "real_arm_torque": real_arm_torque(sim),
@@ -186,14 +196,14 @@ def model_facts(sim: Any) -> dict[str, Any]:
                 "mass_kg": round(float(sum(mass[b] for b in t["bodies"])), 4),
                 "bodies": len(t["bodies"]),
                 "mu": sorted({round(float(v), 3) for v in mu[t["shapes"]]}) if len(t["shapes"]) else [],
-                "kinematic": bool(any(fixed[b] for b in t["bodies"])),
+                "kinematic": bool(any(fixed_body[b] for b in t["bodies"])),
             }
             for name, t in th.items()
         },
         "finger_mu": {a: sorted({round(float(v), 3) for v in mu[s]}) for a, s in fing.items()},
     }
     kinds = _joint_kinds()
-    free, fixed = kinds.get("free", -1), kinds.get("fixed", -2)
+    free, fixed_kind = kinds.get("free", -1), kinds.get("fixed", -2)
     kinds = {v: k for k, v in kinds.items()}
     jt, jp, jc = m.joint_type.numpy(), m.joint_parent.numpy(), m.joint_child.numpy()
     qd0 = m.joint_qd_start.numpy()
@@ -210,7 +220,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
         if parent in robot_bodies:
             ties.append(f"{thing} by a {kind} joint to the robot")
             continue
-        if int(jt[j]) == fixed and owner.get(parent) != thing:
+        if int(jt[j]) == fixed_kind and owner.get(parent) != thing:
             welds.append(f"{thing} welded to {'the world' if parent == -1 else owner.get(parent, f'body {parent}')}")
         end = int(qd0[j + 1]) if j + 1 < len(qd0) else int(m.joint_dof_count)
         drives += [f"{thing}'s {kind} joint {j} (ke {float(ke[d]):g})" for d in range(int(qd0[j]), end) if ke[d] > 0]
@@ -260,6 +270,16 @@ def _joint_kinds() -> dict[str, int]:
 def _turn_deg(q0: np.ndarray, q1: np.ndarray) -> float:
     d = abs(float(np.dot(q0 / np.linalg.norm(q0), q1 / np.linalg.norm(q1))))
     return math.degrees(2 * math.acos(min(1.0, d)))
+
+
+class Broken(BaseException):
+    """The replay's own hold failed inside a step: a broken replay, not a reading of the routine."""
+
+
+@wp.kernel
+def _write_rows(rows: wp.array(dtype=wp.int32), values: wp.array(dtype=wp.float32), target: wp.array(dtype=wp.float32)):
+    i = wp.tid()
+    target[rows[i]] = values[i]
 
 
 class Overrun(BaseException):
@@ -322,6 +342,10 @@ class Replay:
         """Post-solve hooks found on the pipeline beyond those it had at the start: a dragger or a pin attached."""
         self.limit = 0
         """Steps after which a routine that steps the scene itself is stopped, raised from the step; 0 never."""
+        self.broken = ""
+        """Why the replay's own hold failed, if it did: the replay is then not a reading."""
+        self.raise_broken = False
+        """Whether a failed hold raises (the routine steps the scene itself) or is only recorded (the page steps)."""
 
     def install(self) -> None:
         """Read the start (the first row: what a push-out in the first step moves is measured from it), then hook in."""
@@ -331,22 +355,46 @@ class Replay:
             self.held_to = self.start[self.held]
         elif self.mode == "open":
             self.held, self.held_to = self.lay["grip"], self.lay["open"]
-        self.hooks0 = len(getattr(getattr(self.sim.pipeline, "hooks", None), "post_solve", []))
-        self.log()
+        self._hold_hook, self._after_hook = self._hold, self._after  # one object each, to find and remove
+        self.hooks0 = self._hooks()
+        self.log(contacts=False)  # the reset stepped nothing: the probe still holds the last replay's contacts
         if self.held is not None:
-            self.sim.pre_step_hooks.append(self._hold)
-        self.sim.post_step_hooks.append(self._after)
+            self._held_rows = wp.array(self.held.astype(np.int32), dtype=wp.int32, device=self.sim.model.device)
+            self._held_values = wp.array(
+                np.asarray(self.held_to, dtype=np.float32), dtype=wp.float32, device=self.sim.model.device
+            )
+            self.sim.pre_step_hooks.append(self._hold_hook)
+        self.sim.post_step_hooks.append(self._after_hook)
+
+    def _hooks(self) -> set[int]:
+        """Every hook on the scene now: each substep phase's, and the env's pre- and post-step lists."""
+        phases = getattr(self.sim.pipeline, "hooks", None)
+        lists = [getattr(phases, phase, ()) for phase in getattr(phases, "PHASES", ())]
+        lists += [self.sim.pre_step_hooks, self.sim.post_step_hooks]
+        return {id(fn) for hooks in lists for fn in hooks}
 
     def remove(self) -> None:
-        for hooks, hook in ((self.sim.pre_step_hooks, self._hold), (self.sim.post_step_hooks, self._after)):
-            if hook in hooks:  # a reset may have retired it already
+        self.limit = 0
+        for hooks, hook in (
+            (self.sim.pre_step_hooks, getattr(self, "_hold_hook", None)),
+            (self.sim.post_step_hooks, getattr(self, "_after_hook", None)),
+        ):
+            if hook is not None and any(h is hook for h in hooks):  # a reset may have retired it already
                 hooks.remove(hook)
 
     def _hold(self, _env: Any = None) -> None:
-        target = self.sim.control.joint_target_q
-        q = target.numpy()
-        q[self.held] = self.held_to
-        target.assign(q)
+        try:
+            wp.launch(
+                _write_rows,
+                dim=len(self.held),
+                inputs=[self._held_rows, self._held_values],
+                outputs=[self.sim.control.joint_target_q],
+                device=self.sim.model.device,
+            )
+        except Exception as exc:  # the replay's own fault: not a reading the routine's checks made
+            self.broken = self.broken or f"holding the robot's targets: {type(exc).__name__}: {exc}"
+            if self.raise_broken:  # inside the routine's own step; a step the page takes must not raise into it
+                raise Broken(self.broken) from exc
 
     def _after(self, _env: Any = None) -> None:
         self.steps += 1
@@ -357,17 +405,17 @@ class Replay:
         except Exception:
             self.error = self.error or traceback.format_exc()[-800:]
 
-    def log(self) -> None:
+    def log(self, contacts: bool = True) -> None:
         sim = self.sim
         bq, bqd = sim.state.body_q.numpy(), sim.state.body_qd.numpy()
         n = len(self.names)
         hand = np.zeros((n, len(self.arms)))
         robot, near, depth_robot = np.zeros(n), np.zeros(n), np.zeros(n)
         probe = getattr(sim, "contacts", None)
-        hooks = getattr(getattr(sim.pipeline, "hooks", None), "post_solve", None)
-        if hooks is not None:
-            self.hooks_added = max(self.hooks_added, len(hooks) - self.hooks0)
-        if probe is not None and n:
+        if contacts:
+            mine = {id(getattr(self, "_hold_hook", None)), id(getattr(self, "_after_hook", None))}
+            self.hooks_added = max(self.hooks_added, len(self._hooks() - self.hooks0 - mine))
+        if probe is not None and n and contacts:
             probe.update(sim.step_count)  # the step's read, shared with a panel reading the same frame
             if len(probe.geoms):
                 a, b = probe._shape_pairs()
@@ -517,6 +565,12 @@ class AsBuilt:
     solvers are told once each way, as :mod:`robosimstudio.core.tuning` tells
     them for a slider. :meth:`restore` puts back whatever :meth:`apply` got as
     far as changing.
+
+    Not :class:`~robosimstudio.core.tuning.BodyWriter`: that sets one entity's
+    mass to a value and holds only a massless body fixed, where this scales
+    every handled thing at once, must also leave a body flagged ``KINEMATIC``
+    (which keeps its mass) alone, and must put back exactly the rows it wrote
+    rather than divide its way back.
     """
 
     MASS: ClassVar[tuple[str, ...]] = ("body_mass", "body_inv_mass", "body_inertia", "body_inv_inertia")
@@ -612,6 +666,7 @@ def replay(
     outcome = "finished"
     try:
         tap = Replay(sim, mode)
+        tap.raise_broken = steps_itself
         if capped and steps_itself:
             # a routine stepping the scene itself may loop on `sim.step` until a pose is reached, never yielding:
             # the cap is enforced at the step, raised inside the routine; one the page steps is cut at its yield
@@ -622,6 +677,8 @@ def replay(
         try:
             for _ in routine:
                 yield
+                if tap.broken:
+                    raise Broken(tap.broken)
                 if capped and tap.steps >= limit:
                     outcome = f"still going when the written replay had long ended ({steps} steps)"
                     routine.close()
@@ -635,10 +692,18 @@ def replay(
             if steps_itself:
                 sim.run(1)
             yield
+            if tap.broken:
+                raise Broken(tap.broken)
     except GeneratorExit:
         outcome = STOPPED
+        if tap is not None:
+            tap.remove()  # first: a cleanup that steps must not meet the hold or the cap
         routine.close()  # its own cleanup runs now, on this scene, not at collection on the next one
         raise
+    except Broken as exc:
+        outcome = f"{FAILED}: {exc}"
+        tap.remove()
+        routine.close()
     except Exception as exc:
         outcome = f"{FAILED}: {type(exc).__name__}: {str(exc)[:300]}"
         raise
@@ -659,11 +724,15 @@ def _moved(run: dict, floor: float = 20.0) -> list[str]:
 
 
 def _same_end(run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0) -> bool:
+    """Each thing ended where the written run left it, and moved on the way as that run moved it: a mug lifted and
+    set back near its start ends there too, so having moved at least a third as far is part of doing the same."""
     for k in names:
         a = run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
         b = written.get("things", {}).get(k) or written.get("deformables", {}).get(k)
         if not a or not b:
             continue
+        if a.get("moved_max_mm", 0.0) < b.get("moved_max_mm", 0.0) / 3:
+            return False
         if np.linalg.norm(np.subtract(a["end"], b["end"])) * 1000 > mm:
             return False
         if abs(a.get("particle_end_mm", 0.0) - b.get("particle_end_mm", 0.0)) > mm / 2:

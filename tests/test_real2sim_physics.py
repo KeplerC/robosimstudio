@@ -139,6 +139,12 @@ class Verdict(unittest.TestCase):
         self.assertIsNone(_words(result)["open"])
         self.assertIn("not read: the written replay moved nothing", result["report"])
 
+    def test_a_thing_set_back_where_it_started_is_not_one_that_never_moved(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"].update(moved_max_mm=150.0, end=[0.4, 0.0, 0.9])  # lifted and set back
+        runs["open"] = _run(moved=0.0, end=(0.4, 0.0, 0.9), turn=0.0)  # finished, never moved, ends in the same place
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["open"], True)
+
     def test_heavy_failing_is_a_note(self) -> None:
         runs = _clean_runs()
         runs["heavy"] = _run(outcome="RuntimeError: flower 3 slipped")
@@ -211,6 +217,9 @@ class RobotTable(unittest.TestCase):
         self.assertEqual(
             physics.real_arm_torque(_sim("pair", ["ur5e/left_shoulder_pan_joint"])), physics.ARM_TORQUE["ur5"]
         )
+
+    def test_a_ur30_is_not_a_ur3(self) -> None:
+        self.assertIsNone(physics.real_arm_torque(_sim("ur30_cell", [])))
 
     def test_a_thing_named_after_a_robot_does_not_name_the_arm(self) -> None:
         self.assertIsNone(physics.real_arm_torque(_sim("arm", ["j1"], thing_labels=("panda_plush/hinge",))))

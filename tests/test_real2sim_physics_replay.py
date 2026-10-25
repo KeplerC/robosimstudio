@@ -203,6 +203,25 @@ class Replays(unittest.TestCase):
         gen.close()
         self.assertEqual(len(cleaned), 1, "the routine's own cleanup did not run when the replay was stopped")
 
+    def test_a_hook_the_routine_attaches_is_caught(self) -> None:
+        """A follower on the post-step list (the way a grab tool carries a thing) is an attachment."""
+        from robosimstudio_real2sim_agent import physics
+
+        def follows(sim):
+            sim.post_step_hooks.append(lambda env: None)
+            try:
+                for _ in range(5):
+                    sim.run(1)
+                    yield
+            finally:
+                sim.post_step_hooks.pop()
+
+        self.sim.reset()
+        store: dict = {}
+        for _ in physics.replay(self.sim, follows(self.sim), "written", store, steps_itself=True):
+            pass
+        self.assertEqual(store["written"]["hooks_added"], 1)
+
     def test_the_robot_as_built_puts_back_only_what_it_changed(self) -> None:
         """A slider moved while `built` plays keeps its value: only the entries the replay changed go back."""
         from robosimstudio_real2sim_agent import physics
