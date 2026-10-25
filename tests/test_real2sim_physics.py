@@ -37,7 +37,14 @@ def _run(
     return run
 
 
-CLEAN = {"ties": [], "welds": [], "drives": [], "kinematic": [], "real_arm_torque": physics.ARM_TORQUE["yam"]}
+CLEAN = {
+    "ties": [],
+    "welds": [],
+    "drives": [],
+    "drive_rows": [],
+    "kinematic": [],
+    "real_arm_torque": physics.ARM_TORQUE["yam"],
+}
 
 
 def _clean_runs() -> dict:
@@ -164,6 +171,20 @@ class Verdict(unittest.TestCase):
         result = physics.verdict(model, _clean_runs())
         self.assertIs(_words(result)["contact"], False)
         self.assertFalse(result["passed"])
+
+    def test_a_stiff_joint_held_at_its_target_is_elasticity_not_a_motor(self) -> None:
+        model = {**CLEAN, "drives": ["flower_1's revolute joint 20 (ke 3)"]}
+        result = physics.verdict(model, _clean_runs())
+        self.assertIs(_words(result)["contact"], True)
+        self.assertIn("1 stiff joint(s) on things held at their targets", result["report"])
+
+    def test_a_stiff_joint_whose_target_moves_is_a_motor(self) -> None:
+        model = {**CLEAN, "drives": ["lid's revolute joint 3 (ke 50)"]}
+        runs = _clean_runs()
+        runs["written"]["thing_targets_moved"] = 1.2
+        result = physics.verdict(model, runs)
+        self.assertIs(_words(result)["contact"], False)
+        self.assertIn("a motor", result["report"])
 
     def test_a_weld_to_the_world_is_a_note(self) -> None:
         model = {**CLEAN, "welds": ["lamp welded to the world"]}

@@ -175,8 +175,10 @@ def model_facts(sim: Any) -> dict[str, Any]:
     whatever it is called (``ties``); a thing welded to the world or to another
     thing is noted for the report to explain (``welds``), while a hinge or a
     slide to the world or to furniture is a mechanism (a lid, a drawer) and is
-    not. A stiffness on a thing's own joint is a motor (``drives``); damping
-    alone is not. An infinite mass is a kinematic thing. The friction is the one
+    not. A stiffness on a thing's own joint (``drives``) is its elasticity (a
+    rod's bending) while its target stays put, and a motor once something moves
+    the target: :class:`Replay` watches those targets (``drive_rows``) and the
+    verdict reads the written run's. An infinite mass is a kinematic thing. The friction is the one
     MuJoCo mixes at a finger contact (the larger of the two surfaces'), which is
     not the number a twin wrote for its thing when the hand's own pads are
     grippier.
@@ -208,7 +210,10 @@ def model_facts(sim: Any) -> dict[str, Any]:
     jt, jp, jc = m.joint_type.numpy(), m.joint_parent.numpy(), m.joint_child.numpy()
     qd0 = m.joint_qd_start.numpy()
     ke = m.joint_target_ke.numpy()
-    ties, welds, drives = [], [], []
+    n_targets = int(sim.control.joint_target_q.shape[0])
+    by_coord = n_targets == m.joint_coord_count and n_targets != m.joint_dof_count
+    q0 = m.joint_q_start.numpy()
+    ties, welds, drives, drive_rows = [], [], [], []
     for j in range(len(jt)):
         child, parent = int(jc[j]), int(jp[j])
         if parent in owner and child in robot_bodies:  # a robot link hung off a thing: the same tie the other way
@@ -223,7 +228,12 @@ def model_facts(sim: Any) -> dict[str, Any]:
         if int(jt[j]) == fixed_kind and owner.get(parent) != thing:
             welds.append(f"{thing} welded to {'the world' if parent == -1 else owner.get(parent, f'body {parent}')}")
         end = int(qd0[j + 1]) if j + 1 < len(qd0) else int(m.joint_dof_count)
-        drives += [f"{thing}'s {kind} joint {j} (ke {float(ke[d]):g})" for d in range(int(qd0[j]), end) if ke[d] > 0]
+        stiff = [d for d in range(int(qd0[j]), end) if ke[d] > 0]
+        if stiff:
+            drives.append(f"{thing}'s {kind} joint {j} (ke {float(max(ke[d] for d in stiff)):g})")
+            # where the target of each stiff dof sits in joint_target_q (a hinge's or a slide's one coordinate is its
+            # dof's; a ball joint's four coordinates do not line up with its three dofs, and are read as they fall)
+            drive_rows += [int(q0[j]) + (d - int(qd0[j])) if by_coord else d for d in stiff]
     if getattr(m, "equality_constraint_count", 0):
         b1, b2 = m.equality_constraint_body1.numpy(), m.equality_constraint_body2.numpy()
         for k in range(int(m.equality_constraint_count)):
@@ -236,6 +246,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
     out["ties"] = ties
     out["welds"] = welds
     out["drives"] = drives
+    out["drive_rows"] = drive_rows
     out["kinematic"] = [name for name, t in out["things"].items() if t["kinematic"]]
     return out
 
@@ -342,6 +353,12 @@ class Replay:
         """Post-solve hooks found on the pipeline beyond those it had at the start: a dragger or a pin attached."""
         self.limit = 0
         """Steps after which a routine that steps the scene itself is stopped, raised from the step; 0 never."""
+        self.drive_rows = np.asarray(model_facts(sim)["drive_rows"] if mode == "written" else [], dtype=np.int64)
+        """The ``joint_target_q`` rows of the stiff joints on things (:func:`model_facts`'s ``drive_rows``), watched
+        on the written replay, the one the verdict reads them off."""
+        self.drive0: np.ndarray | None = None
+        self.drive_moved = 0.0
+        """The most any of those targets moved from where it started: a motor on a thing, if above zero."""
         self.broken = ""
         """Why the replay's own hold failed, if it did: the replay is then not a reading."""
         self.raise_broken = False
@@ -357,6 +374,8 @@ class Replay:
             self.held, self.held_to = self.lay["grip"], self.lay["open"]
         self._hold_hook, self._after_hook = self._hold, self._after  # one object each, to find and remove
         self.hooks0 = self._hooks()
+        if len(self.drive_rows):
+            self.drive0 = self.start[self.drive_rows].copy()
         self.log(contacts=False)  # the reset stepped nothing: the probe still holds the last replay's contacts
         if self.held is not None:
             self._held_rows = wp.array(self.held.astype(np.int32), dtype=wp.int32, device=self.sim.model.device)
@@ -443,6 +462,9 @@ class Replay:
             pose[name] = [*(bq[b, :3] + quat_rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
         soft, jaw = {}, {}
         sampled = self.steps % SAMPLE_EVERY == 0
+        if sampled and self.drive0 is not None:
+            moved = np.abs(sim.control.joint_target_q.numpy()[self.drive_rows] - self.drive0)
+            self.drive_moved = max(self.drive_moved, float(moved.max()))
         for name, p in (sim.particle_probes() or {}).items() if sampled else ():
             try:
                 p.update(sim.state, None)
@@ -498,6 +520,7 @@ class Replay:
             "steps": self.steps,
             "log_error": self.error,
             "hooks_added": self.hooks_added,
+            "thing_targets_moved": round(self.drive_moved, 6),
             "things": {},
         }
         if not rows:
@@ -752,7 +775,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     def line(ok: bool | None, name: str, detail: str) -> None:
         lines.append({"ok": ok, "name": name, "detail": detail})
 
-    found = model.get("ties", []) + model.get("drives", []) + [f"{k} is kinematic" for k in model.get("kinematic", [])]
+    driven = (runs.get("written") or {}).get("thing_targets_moved", 0.0) > 1e-6
+    found = model.get("ties", []) + (model.get("drives", []) if driven else [])
+    found += [f"{k} is kinematic" for k in model.get("kinematic", [])]
+    if driven:
+        found.append("a target on a thing's own joint moved while the routine played: a motor")
     added = (runs.get("written") or {}).get("hooks_added", 0)
     if added:
         found.append(f"{added} post-solve hook(s) attached while the routine played (a dragger or a pin)")
@@ -762,7 +789,14 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     elif welds:
         line(None, "contact", "; ".join(welds) + ": a welded thing cannot move, so say in the report why it is welded")
     else:
-        line(True, "contact", "nothing ties a thing to the robot, no motor on a thing's joints, nothing welded")
+        springs = (
+            f"; {len(model['drives'])} stiff joint(s) on things held at their targets (their elasticity)"
+            if model.get("drives")
+            else ""
+        )
+        line(
+            True, "contact", "nothing ties a thing to the robot, no motor on a thing's joints, nothing welded" + springs
+        )
     written = runs.get("written") or {}
     names = _moved(written)
     if written:
