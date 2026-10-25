@@ -162,6 +162,7 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
 | `check [--camera N] [--key ...] [--object NAME ...]` | The gate: builds, finite state, camera at the clip's aspect, every named thing present, penetration and drift at rest under their bars. |
 | `log [--last N]` | Every compare, check, take and `snapshot --note` so far: what it left (PASS/FAIL, the picture: a snapshot's pair when it made one) and the `scene.py` it measured. |
 | `play [NAME] [--record TAKE --camera N --every K] [--wait [--wait-limit S]]` | Play a routine the scene file binds, as its button on the page does; `--record` films a frame every `K` control steps (4). `--wait` returns when it ends and its take is written, printing the page's log as it goes, exits 1 with the traceback if it failed, and gives up after `--wait-limit` seconds (3600). |
+| `physics [NAME] [--only REPLAY ...] [--settle-mm MM] [--note TEXT]` | Replay a routine five ways, each from a reset scene, and say whether its physics is real (*The physics replays*): as written, with the robot frozen, with the fingers held open, with the robot as built, and with the handled things twice as heavy. Writes `run/physics.json` and a log line; takes as many times the routine's length as it plays replays. |
 | `show PATH [--label TEXT]`, `show --clear` | A picture on the page's board for the person watching. |
 | `run N [--no-wait] [--wait-limit S]` | Step N (at least 1) control steps, then hold, waiting until they are taken however slowly the scene steps (`--wait-limit`, 3600 s). Refused while a routine plays. A run cut short is an error saying how, at what step: paused, a routine started, a reset (also `check`'s), or a loop pass that failed end it held; a save that rebuilt the scene, `resume` or another run end it and leave the page to that. `status`'s `last_run` says how the last one ended. |
 | `pause`, `resume` | Pause or resume stepping. |
@@ -181,6 +182,7 @@ continues from the files already in `run/`, across restarts):
   take, `run/cmp_NNN_strip.png`
 - takes: `run/NAME.mp4`, `run/NAME.json` (every frame's step, time and
   positions), `run/NAME_seg.npz`
+- `run/physics.json` (the replays' readings and the lines)
 - `run/log.jsonl` (every reading), `run/serve.log` (the server's output)
 - from `ref frames`: `ref/tSSS.SS.jpg`, `ref/contact.jpg`, `ref/timeline.json`
 - from `ref plate`: `ref/plate_<clip>.png`, `ref/plate_<clip>_spread.png`; from
@@ -336,6 +338,49 @@ holds the camera's aspect to the clip's in `ref/timeline.json`, within 2%;
 against a photo, `compare` says when it had to stretch the photo to the
 camera's aspect. A line given nothing to look at (`objects` with no `--key`
 or `--object`) is a SKIP. The bars are defaults, and `check` blocks nothing.
+
+### The physics replays
+
+`physics` plays the routine again as written and four ways changed, each from
+a reset scene and each as long as the written one, and prints a line per
+finding, PASS and FAIL as `check` says them and NOTE for what the report has
+to explain:
+
+```
+PASS  contact  nothing ties a thing to the robot or the world, no motor on a thing's joints
+PASS  written  finished; moved flower_1, flower_2, flower_3
+FAIL  frozen   flower_1 moved 12.3 mm with the robot frozen: it starts inside something, or something other than the robot pushes it
+PASS  open     with the fingers held open the task did not happen (RuntimeError: Flower 1 did not remain in the fingers)
+PASS  built    finished with every friction at most 1 and the arm's torque at 27/10 Nm
+NOTE  heavy    with the handled things 2 times as heavy the routine stopped: RuntimeError: Flower 3 did not remain in the fingers (the grasp's margin)
+NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the solver used friction 2 to 4 at the finger contacts (above any real pad: the built line is the one to trust)
+```
+
+- **frozen** holds every arm and finger target where it started. A thing that
+  moves is pushed out of something it starts inside (a finger, the table) or
+  by something other than the robot.
+- **open** holds the fingers fully open and moves the arms as written. A
+  pinch fails; a task that still happens is carried by a support, a hook or
+  two arms squeezing, and the report says which.
+- **built** puts every contact friction at 1.0 or under and caps the arm's
+  joint torque at the real arm's (a YAM's 27 Nm and 10 Nm, a UR5e's 150 Nm and
+  28 Nm, a Panda's 87 Nm and 12 Nm; for another robot, friction only). A
+  grip that only holds at a friction no rubber pad has fails here.
+- **heavy** is `built` with every handled thing twice its mass: how much margin
+  the grasp has.
+- **contact** reads the model: a joint or equality constraint from a thing to
+  the robot, the world or another thing, a drive on a thing's own joint, an
+  infinite mass. **grip** is the median force each hand's fingers put on what
+  they moved, and the friction MuJoCo mixed at those contacts (the larger of
+  the two surfaces'): a hand whose own pads carry 2 or 4 grips with that, not
+  with the number written for the thing.
+
+A replay overrides the robot's joint targets just before each physics step,
+which is where every routine's commands land, so it works whichever way the
+routine was written. A routine's own checks stopping it is a reading, not an
+error: the line quotes them. A deformable is read by its particles; `built`
+and `heavy` change neither its friction nor its mass. `physics` resets the
+scene when it ends; it is refused while a routine plays.
 
 ### The take
 

@@ -75,6 +75,7 @@ TIMEOUTS = {
     "snapshot": 600.0,
     "eval": 900.0,
     "play": 900.0,
+    "physics": 900.0,
     "catalog": 120.0,
     "compare": 600.0,
     "check": 600.0,
@@ -416,6 +417,28 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--every", type=int, default=4, help="with --record: a frame per this many control steps")
     play.add_argument("--camera", default="", help="with --record: the camera to record through")
     _wait_flags(play, "return when the routine ends, saying how, its output streamed")
+    phys = sub.add_parser(
+        "physics",
+        parents=[common],
+        help="replay a routine with the robot frozen, the fingers open, the robot as built and the things heavier",
+    )
+    phys.add_argument("name", nargs="?", default="", help="which, when `routines` binds several (default: the first)")
+    phys.add_argument(
+        "--only",
+        nargs="+",
+        default=[],
+        metavar="REPLAY",
+        help="these replays after `written` (default: frozen open built heavy)",
+    )
+    phys.add_argument("--settle-mm", type=float, default=2.0, help="how far a thing may move with the robot frozen")
+    phys.add_argument("--note", default="", help="a line for the log: why this reading")
+    phys.add_argument(
+        "--wait-limit",
+        type=float,
+        default=WAIT_LIMIT,
+        metavar="S",
+        help=f"give up on a replay after S seconds (default {WAIT_LIMIT:.0f})",
+    )
     show = sub.add_parser(
         "show", parents=[common], help="put a picture on the page for the person watching, under a label"
     )
@@ -779,6 +802,59 @@ def _differs_from_running(args: argparse.Namespace, status: dict) -> str:
     return ""
 
 
+def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
+    """Every physics replay of a routine, each from a reset scene, then the verdict (``physics.json``, a log line).
+
+    The replays are separate scripts because only a reset puts the scene back,
+    and a reset stops whatever plays: so this side resets, starts one, waits
+    for it to end, and starts the next.
+    """
+    from .physics import MODES
+
+    later = [m for m in (args.only or MODES[1:]) if m != "written"]
+    unknown = [m for m in later if m not in MODES]
+    if unknown:
+        print(f"ctl: no physics replay {', '.join(unknown)}; the replays are {', '.join(MODES)}", file=sys.stderr)
+        return 2
+    quiet = Path(args.run_dir) / ".physics-no-stream"  # never written: the replays' own output is not streamed
+    try:
+        for mode in ["written", *later]:
+            request(sock, {"cmd": "reset", "timeout": TIMEOUTS["reset"]}, TIMEOUTS["reset"])
+            free = wait_until_free(sock, args.wait_limit)
+            if not free.get("ok"):
+                return show(free, args.json)
+            started = request(
+                sock,
+                {"cmd": "physics", "op": "replay", "mode": mode, "name": args.name, "timeout": TIMEOUTS["physics"]},
+                TIMEOUTS["physics"],
+            )
+            if not started.get("ok"):
+                return show(started, args.json)
+            print(f"physics: {mode} ...", flush=True)
+            ended = wait_for_script(sock, started, quiet, 0, args.wait_limit)
+            if not ended.get("ok"):
+                return show(ended, args.json)
+        request(sock, {"cmd": "reset", "timeout": TIMEOUTS["reset"]}, TIMEOUTS["reset"])
+        reply = request(
+            sock,
+            {
+                "cmd": "physics",
+                "op": "report",
+                "settle_mm": args.settle_mm,
+                "note": args.note,
+                "timeout": TIMEOUTS["physics"],
+            },
+            TIMEOUTS["physics"],
+        )
+    except NoServer:
+        print(f"ctl: no server at {sock}\nstart one with:  {START_HINT}", file=sys.stderr)
+        return 2
+    except NoReply as exc:
+        print(f"ctl: {exc}{busy_note(sock)}", file=sys.stderr)
+        return 1
+    return show(reply, args.json)
+
+
 def cmd_up(args: argparse.Namespace, sock: Path) -> int:
     scene = Path(args.scene)
     if not scene.is_file():
@@ -1084,6 +1160,8 @@ def main(argv=None) -> int:
         return cmd_camera(args)
     if args.cmd == "ref" and args.op == "plate":
         return cmd_plate(args)
+    if args.cmd == "physics":
+        return cmd_physics(args, sock)
     if args.cmd == "up":
         # the scene beside the run directory: `examples/live/ctl` pins run/ beside its scene.py, a twin's ctl beside its own
         args.scene = args.scene or str(Path(os.path.abspath(args.run_dir)).parent / "scene.py")

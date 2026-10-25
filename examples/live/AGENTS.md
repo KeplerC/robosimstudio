@@ -20,7 +20,9 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
   beside the photo), `./ctl compare` (per keyed thing its size, offset and
   overlap, a look sheet, and how far the frame's colours are from the
   photo's), `./ctl check` (finite, drift, overlap), `./ctl play NAME --record
-  TAKE --wait` (film a routine; it is put beside the clip), `./ctl log`.
+  TAKE --wait` (film a routine; it is put beside the clip), `./ctl physics`
+  (the routine replayed with the robot frozen, the fingers open, the robot
+  as built and the things heavier), `./ctl log`.
   `./ctl camera fit` solves a camera from six or more points whose world
   place you know and whose pixel you read off a still; `./ctl ref plate`
   makes a clean plate of a fixed camera's clip, which a camera takes as its
@@ -49,7 +51,11 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
    motion of a thing, no collider added to the fingers (if the grip needs
    purchase, enlarge a real feature of the thing and report it). Deformable
    things are simulated as the material they are and behave like the clip
-   (how they bend, sag and slide).
+   (how they bend, sag and slide). `./ctl physics` says whether it holds:
+   with the robot frozen nothing moves; with the fingers held open the task
+   does not happen (or the report says what carries the thing: a support, a
+   hook, two arms squeezing); with the robot as built -- every friction at
+   most 1, the real arm's torque -- the routine still finishes.
 3. **The motion matches.** A `routine` bound in `scene.py` (a Run button on
    the page) does what the clip shows: the same first state, the same last
    state, the same contacts in between.
@@ -81,7 +87,11 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
   the scene sits three seconds without creeping, the grasp holds at the force
   the routine uses, and a deformable's stiffness is fitted against a moment
   in the clip where it bends or sags. A mass, a friction or a stiffness is a
-  guess until a probe says otherwise; say what the probe read.
+  guess until a probe says otherwise; say what the probe read. The hand's
+  own pads count too: MuJoCo grips with the larger of the two surfaces'
+  friction, so `physics`'s grip line, not the number written for the thing,
+  says what held it. Run `./ctl physics` before the report and quote its
+  lines.
 - **What moves is drawn by the render, so it has to look like the clip.**
   Over a plate the robot's links, its hands and the things it handles are
   the only rendered pixels: give them the clip's colours and finish (an arm

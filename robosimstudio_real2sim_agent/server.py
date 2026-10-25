@@ -89,7 +89,7 @@ import numpy as np
 from robosimstudio.core.bus import BusClosed, BusTimeout, SimBus
 from robosimstudio_studio.session import StudioConfig
 
-from . import checks, frames, stills
+from . import checks, frames, physics, stills
 from .page import LiveSession
 from .scenefile import (
     Loaded,
@@ -130,11 +130,12 @@ BUSY = {
     "check": "running the gate (it steps the scene, then resets it)",
     "eval": "running eval code",
     "play": "starting a routine",
+    "physics": "starting a physics replay",
     "ref": "cutting stills out of the clip",
     "catalog": "listing the registries",
 }
 """What the main thread is doing, by command, for a ``status`` asked meanwhile."""
-READS_THE_SCENE = ("snapshot", "compare", "check", "eval", "play", "run", "reset")
+READS_THE_SCENE = ("snapshot", "compare", "check", "eval", "play", "physics", "run", "reset")
 """The commands that act on the scene in the page: their reply says when it is not the file's (a save that did
 not build, a bare scene standing in, a save not built yet), and they are refused while no scene is in."""
 MISSING_STAMPS = object()
@@ -202,6 +203,12 @@ class LiveServer:
         build read them; the log ties each reading to it."""
         self.resets = 0
         """Resets taken since the page came up: ``ctl run N`` reads a change in it as its run ended."""
+        self.physics: dict[str, dict] = {}
+        """The physics replays' summaries by mode (:mod:`.physics`), for the scene :attr:`physics_scene` names."""
+        self.physics_model: dict = {}
+        """What the model held when the written replay started (:func:`.physics.model_facts`)."""
+        self.physics_scene = ""
+        """The :attr:`scene_id` the replays in :attr:`physics` were played on: a save since makes them stale."""
         self.script: list = []
         """Generators an ``eval`` returned, advanced one ``next()`` per loop pass."""
         self.head_stepped = False
@@ -1583,6 +1590,65 @@ class LiveServer:
             reply["recording"] = str(self.run_dir / f"{record}.mp4")
             reply["take"] = record
         return reply
+
+    def cmd_physics(
+        self, op: str = "replay", mode: str = "written", name: str = "", settle_mm: float = 2.0, note: str = ""
+    ) -> dict:
+        """One physics replay of a routine (``op="replay"``), or the verdict on the ones played (``op="report"``).
+
+        ``./ctl physics`` resets the scene before each replay and plays them in
+        :data:`.physics.MODES` order: ``written`` first, because it starts the
+        set over (what the model holds is read then) and every later replay runs
+        as long as it did. The report writes ``physics.json`` and logs a line.
+        """
+        if op == "report":
+            if not self.physics or self.physics_scene != self.scene_id:
+                return {
+                    "ok": False,
+                    "error": "no physics replays of this scene: `./ctl physics` plays them (a save since starts them over)",
+                }
+            result = physics.verdict(self.physics_model, self.physics, float(settle_mm))
+            out = self.run_dir / "physics.json"
+            out.write_text(
+                json.dumps(
+                    {**result, "model": self.physics_model, "runs": self.physics}, default=checks._plain, indent=1
+                )
+            )
+            n = checks.log_append(
+                self.run_dir, {"cmd": "physics", "scene": self.scene_id, "passed": result["passed"], "note": note}
+            )
+            return {"ok": True, "passed": result["passed"], "report": result["report"], "json": str(out), "logged": n}
+        if op != "replay":
+            return {"ok": False, "error": f"physics does `replay` or `report`, not {op!r}"}
+        if self.script:
+            return {"ok": False, "error": ROUTINE_PLAYING}
+        if mode not in physics.MODES:
+            return {"ok": False, "error": f"no physics replay {mode!r}; the replays are {', '.join(physics.MODES)}"}
+        found = self.routines()
+        if not found:
+            return {"ok": False, "error": "the scene file binds no `routine` and no `routines` dict to replay"}
+        name = name or next(iter(found))
+        if name not in found:
+            return {"ok": False, "error": f"no routine called {name!r}; the scene file binds {', '.join(found)}"}
+        fn = found[name]
+        if mode == "written":
+            self.physics, self.physics_scene = {}, self.scene_id
+            try:
+                self.physics_model = physics.model_facts(self.sim)
+            except Exception:
+                return {"ok": False, "error": traceback.format_exc()[-3000:]}
+        elif "written" not in self.physics or self.physics_scene != self.scene_id:
+            return {
+                "ok": False,
+                "error": "replay `written` first: the others run as long as it did and are read against it",
+            }
+        wants_session = "session" in inspect.signature(fn).parameters
+        steps = int(self.physics.get("written", {}).get("steps") or 0)
+        gen = physics.replay(
+            self.sim, fn, mode, self.physics, session=self.session if wants_session else None, steps=steps
+        )
+        serial = self.start_script(gen, name=f"physics {mode}", drives_page=wants_session)
+        return {"ok": True, "playing": f"physics {mode}", "serial": serial}
 
     def cmd_show(self, path: str = "", label: str = "", clear: bool = False) -> dict:
         """Put a picture on the page for the person watching: what the agent is looking at, as it looks at it."""

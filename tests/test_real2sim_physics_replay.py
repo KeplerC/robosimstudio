@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: Apache-2.0
+"""`./ctl physics`'s replays on a built scene: what each one holds, and that the robot is put back after.
+
+A routine that turns the right arm's base joint and shuts its gripper, played
+under each replay: written, the arm turns; frozen, it does not and the cube it
+never touched stays put; open, the fingers stay open while the arm turns; built,
+every friction reads at most 1 while it plays and the hand's own 2 and 4 are
+back after; heavy, the cube weighs twice as much while it plays and its own
+mass after. Measured on the bimanual YAM: the base joint turns 0.267 rad of
+the 0.3 commanded written and 0.000 frozen; the jaw reads -1.8 mm shut and
+94 mm under ``open``.
+"""
+
+from __future__ import annotations
+
+import io
+import unittest
+from contextlib import redirect_stdout
+
+import numpy as np
+
+TIER = "medium"
+"""A GPU: one YAM scene built, a 40-step routine played five times."""
+
+STEPS = 40
+
+
+def _routine(sim):
+    """Turn the right arm's base 0.3 rad and shut its gripper, stepping the scene itself."""
+    arm = sim.scene.handles.arms["right"]
+    n = int(sim.control.joint_target_q.shape[0])
+    by_coord = n == sim.model.joint_coord_count and n != sim.model.joint_dof_count
+    base = (arm.arm_coords if by_coord else arm.arm_dofs)[0]
+    grip = list(arm.gripper_coords if by_coord else arm.gripper_dofs)
+    start = float(sim.state.joint_q.numpy()[arm.arm_coords[0]])
+    seen = []
+    for k in range(STEPS):
+        q = sim.control.joint_target_q.numpy()
+        q[base] = start + 0.3 * (k + 1) / STEPS
+        q[grip] = list(arm.gripper_closed_q) * (len(grip) // max(1, len(arm.gripper_closed_q)))
+        sim.control.joint_target_q.assign(q)
+        seen.append(
+            (
+                float(sim.model.shape_material_mu.numpy().max()),
+                float(sim.model.body_mass.numpy()[sim["cube"].handle.body]),
+            )
+        )
+        sim.run(1)
+        yield
+    _routine.seen = seen
+
+
+class Replays(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        import robosimstudio as rss
+
+        scene = rss.Scene(cell="bench_075", name="physics_replays")
+        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.03)))
+        with redirect_stdout(io.StringIO()):
+            cls.sim = scene.build()
+        cls.sim.run(30)  # the cube settles on the bench
+
+    def _play(self, mode: str, store: dict) -> dict:
+        from robosimstudio_real2sim_agent import physics
+
+        self.sim.reset()
+        self.sim.run(30)
+        arm = self.sim.scene.handles.arms["right"]
+        before = self.sim.state.joint_q.numpy().copy()
+        for _ in physics.replay(self.sim, _routine, mode, store, steps=STEPS):
+            pass
+        after = self.sim.state.joint_q.numpy()
+        return {
+            "base_turn": abs(float(after[arm.arm_coords[0]] - before[arm.arm_coords[0]])),
+            "jaw": float(self.sim.gripper("right").width(self.sim.state)),
+        }
+
+    def test_each_replay_holds_what_it_says(self) -> None:
+        store: dict = {}
+        mu0 = float(self.sim.model.shape_material_mu.numpy().max())
+        mass0 = float(self.sim.model.body_mass.numpy()[self.sim["cube"].handle.body])
+
+        written = self._play("written", store)
+        self.assertGreater(written["base_turn"], 0.2)
+        self.assertEqual(store["written"]["steps"], STEPS)
+        self.assertEqual(store["written"]["outcome"], "finished")
+
+        frozen = self._play("frozen", store)
+        self.assertLess(frozen["base_turn"], 0.01)
+        self.assertLess(store["frozen"]["things"]["cube"]["moved_max_mm"], 2.0)
+
+        opened = self._play("open", store)
+        self.assertGreater(opened["base_turn"], 0.2)  # the arm moves as written
+        self.assertGreater(opened["jaw"], written["jaw"] + 0.01)  # the fingers did not shut
+
+        self._play("built", store)
+        self.assertLessEqual(max(mu for mu, _ in _routine.seen), 1.0)
+        self.assertAlmostEqual(float(self.sim.model.shape_material_mu.numpy().max()), mu0, places=5)
+
+        self._play("heavy", store)
+        self.assertAlmostEqual(_routine.seen[0][1], 2.0 * mass0, places=5)
+        self.assertAlmostEqual(float(self.sim.model.body_mass.numpy()[self.sim["cube"].handle.body]), mass0, places=5)
+
+    def test_the_model_read_finds_a_free_cube_free(self) -> None:
+        from robosimstudio_real2sim_agent import physics
+
+        facts = physics.model_facts(self.sim)
+        self.assertIn("cube", facts["things"])
+        self.assertEqual((facts["ties"], facts["drives"], facts["kinematic"]), ([], [], []))
+        self.assertEqual(facts["real_arm_torque"], physics.ARM_TORQUE["yam"])
+        self.assertTrue(np.isclose(max(max(v) for v in facts["finger_mu"].values()), 4.0))
+
+
+if __name__ == "__main__":
+    unittest.main()

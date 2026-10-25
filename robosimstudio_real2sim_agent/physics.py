@@ -1,0 +1,632 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Whether a twin's physics is real: its own routine replayed with the robot changed, and what moved read off it.
+
+A twin's picture can match its clip while the physics does not hold: a thing
+that starts inside a finger and is pushed out, a "grasp" that is the hand
+wedging the thing at 700 N, a lift that works with the fingers held open, a
+grip that only holds at a friction no rubber has. None of that shows in a
+still or a take. So the routine is played again, five ways (:data:`MODES`):
+
+- ``written``: as it is, every step logged (what moved, the force each hand
+  puts on it, overlaps);
+- ``frozen``: every arm and finger target held where it started. Nothing may
+  move: what does is pushed by something other than the robot, or started
+  inside something;
+- ``open``: the fingers held fully open, the arms as written. A pinch task
+  fails; one that still succeeds is carried by something else (a support, a
+  hook, two arms squeezing), and the report has to say what;
+- ``built``: the robot as built -- every contact friction at most
+  :data:`REAL_MU`, the arm's torque capped at the real arm's
+  (:func:`real_arm_torque`). The routine still finishes;
+- ``heavy``: as built, and every handled thing twice as heavy: the grasp's
+  margin, a warning when it fails rather than a fault.
+
+**One door.** Every routine moves the robot by writing ``joint_target_q``:
+the arm panels' IK and the gripper write it just before the page steps, a
+routine that steps the scene itself writes it through ``sim.step``. So
+:class:`Replay` wraps ``pipeline.step`` -- overriding the targets just before
+the physics step and logging just after -- and never needs to know how a
+routine was written.
+
+**Free flight** is judged on nothing being within the contact margin, not on
+the contact force: contacts are read after the last substep, and one that
+comes and goes inside a step reads as none, while the step's velocity change
+still carries it.
+"""
+
+from __future__ import annotations
+
+import inspect
+import math
+import traceback
+from collections.abc import Callable, Iterator
+from typing import Any
+
+import numpy as np
+
+MODES = ("written", "frozen", "open", "built", "heavy")
+
+REAL_MU = 1.0
+"""The most friction a real contact here has: rubber pads on plastic, ceramic or metal run 0.5 to 1.0."""
+
+HEAVY = 2.0
+"""How much heavier ``heavy`` makes every handled thing."""
+
+SETTLE_MM = 2.0
+"""How far a thing may move with the robot frozen: a resting contact settles by a fraction of a millimetre."""
+
+# The real arms' joint torque limits [Nm], from their makers' data sheets, by a word in the robot's name: a robot
+# file's own numbers are a claim (the bimanual YAM's are right; a UR5e built for a twin gave its wrists 150).
+ARM_TORQUE = {
+    "ur5": (150.0, 150.0, 150.0, 28.0, 28.0, 28.0),
+    "yam": (27.0, 27.0, 27.0, 10.0, 10.0, 10.0),
+    "panda": (87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0),
+    "fr3": (87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0),
+}
+
+_SHAPE_PROPERTIES = 1 << 4  # newton.ModelFlags, spelled as bits as robosimstudio.core.tuning does
+_BODY_INERTIAL = 1 << 3
+_JOINT_DOF = 1 << 1
+
+
+# --------------------------------------------------------------------------- what the scene holds
+
+
+def robot_name(sim: Any) -> str:
+    spec = getattr(getattr(sim.scene, "embodiment", None), "spec", None)
+    return str(getattr(spec, "name", "") or "")
+
+
+def real_arm_torque(sim: Any) -> tuple[float, ...] | None:
+    """The real arm's torque limits, per joint from the base, or ``None`` for a robot not in :data:`ARM_TORQUE`."""
+    labels = " ".join(str(x) for x in list(getattr(sim.model, "joint_label", []))[:24])
+    words = f"{robot_name(sim)} {labels}".lower()
+    if "shoulder_pan" in words and "wrist_1" in words:  # a Universal Robots arm by its joints, whatever it is called
+        return ARM_TORQUE["ur5"]
+    for key, limits in ARM_TORQUE.items():
+        if key in words:
+            return limits
+    return None
+
+
+def layout(sim: Any) -> dict[str, np.ndarray]:
+    """Where each arm's and each finger's target sits in ``joint_target_q``, and the fingers' open targets.
+
+    Newton sizes the vector by DOFs unless coordinate-layout targets are on, and
+    the two differ for any scene with a free body (7 coordinates, 6 DOFs).
+    """
+    m, h = sim.model, sim.scene.handles
+    n = int(sim.control.joint_target_q.shape[0])
+    by_coord = n == m.joint_coord_count and n != m.joint_dof_count
+    arm, grip, opened, arm_dofs = [], [], [], []
+    for a in h.arms.values():
+        arm += list(a.arm_coords if by_coord else a.arm_dofs)
+        arm_dofs += list(a.arm_dofs)
+        g = list(a.gripper_coords if by_coord else a.gripper_dofs)
+        grip += g
+        o = list(a.gripper_open_q) or [0.0]
+        opened += (o * len(g))[: len(g)]
+    return {
+        "arm": np.asarray(arm, dtype=np.int64),
+        "grip": np.asarray(grip, dtype=np.int64),
+        "open": np.asarray(opened, dtype=np.float64),
+        "arm_dofs": np.asarray(arm_dofs, dtype=np.int64),
+    }
+
+
+def things(sim: Any) -> dict[str, dict[str, Any]]:
+    """Every dynamic thing that is not the robot: its bodies and its shapes."""
+    out = {}
+    for name, e in sim.scene.handles.objects.items():
+        bodies = [int(b) for b in (e.bodies or (e.body,)) if int(b) >= 0]
+        if bodies and not e.static:
+            out[name] = {"bodies": bodies, "shapes": np.asarray(e.shapes, dtype=np.int64)}
+    return out
+
+
+def fingers(sim: Any) -> dict[str, np.ndarray]:
+    return {
+        a: np.asarray(sorted({int(s) for g in arm.finger_groups for _, sh in g for s in sh}), dtype=np.int64)
+        for a, arm in sim.scene.handles.arms.items()
+    }
+
+
+def model_facts(sim: Any) -> dict[str, Any]:
+    """What the model holds that the contact rule is about, and the numbers the robot runs on.
+
+    A joint or equality that ties a thing's body to the robot or the world is an
+    attachment whatever it is called; a drive on a thing's own joint is a motor;
+    an infinite mass is a kinematic thing. The friction is the one MuJoCo mixes
+    at a finger contact (the larger of the two surfaces'), which is not the
+    number a twin wrote for its thing when the hand's own pads are grippier.
+    """
+    m, h = sim.model, sim.scene.handles
+    mu = m.shape_material_mu.numpy()
+    mass, inv = m.body_mass.numpy(), m.body_inv_mass.numpy()
+    th, fing = things(sim), fingers(sim)
+    owner = {b: name for name, t in th.items() for b in t["bodies"]}
+    robot_bodies = {int(b) for b in np.unique(m.shape_body.numpy()[h.robot_shapes]) if b >= 0}
+    out: dict[str, Any] = {
+        "robot": robot_name(sim),
+        "real_arm_torque": real_arm_torque(sim),
+        "things": {
+            name: {
+                "mass_kg": round(float(sum(mass[b] for b in t["bodies"])), 4),
+                "bodies": len(t["bodies"]),
+                "mu": sorted({round(float(v), 3) for v in mu[t["shapes"]]}) if len(t["shapes"]) else [],
+                "kinematic": bool(any(inv[b] == 0.0 for b in t["bodies"])),
+            }
+            for name, t in th.items()
+        },
+        "finger_mu": {a: sorted({round(float(v), 3) for v in mu[s]}) for a, s in fing.items()},
+    }
+    try:
+        import newton
+
+        free = int(newton.JointType.FREE)
+        kinds = {int(v): k.lower() for k, v in newton.JointType.__members__.items()}
+    except Exception:  # pragma: no cover - newton is always there on a page
+        free, kinds = -1, {}
+    jt, jp, jc = m.joint_type.numpy(), m.joint_parent.numpy(), m.joint_child.numpy()
+    qd0 = m.joint_qd_start.numpy()
+    ke, kd = m.joint_target_ke.numpy(), m.joint_target_kd.numpy()
+    ties, drives = [], []
+    for j in range(len(jt)):
+        child, parent = int(jc[j]), int(jp[j])
+        if child not in owner or int(jt[j]) == free:
+            continue
+        thing = owner[child]
+        if parent == -1 or parent in robot_bodies or owner.get(parent) != thing:
+            where = (
+                "the world"
+                if parent == -1
+                else ("the robot" if parent in robot_bodies else owner.get(parent, f"body {parent}"))
+            )
+            ties.append(f"{thing} by a {kinds.get(int(jt[j]), 'joint')} joint to {where}")
+            continue
+        end = int(qd0[j + 1]) if j + 1 < len(qd0) else int(m.joint_dof_count)
+        for d in range(int(qd0[j]), end):
+            if ke[d] > 0 or kd[d] > 0:
+                drives.append(f"{thing}'s joint {j} (ke {float(ke[d]):g}, kd {float(kd[d]):g})")
+    if getattr(m, "equality_constraint_count", 0):
+        b1, b2 = m.equality_constraint_body1.numpy(), m.equality_constraint_body2.numpy()
+        for k in range(int(m.equality_constraint_count)):
+            hit = owner.get(int(b1[k])) or owner.get(int(b2[k]))
+            if hit:
+                ties.append(f"{hit} by equality constraint {k}")
+    out["ties"] = ties
+    out["drives"] = drives
+    out["kinematic"] = [name for name, t in out["things"].items() if t["kinematic"]]
+    return out
+
+
+# --------------------------------------------------------------------------- the replay
+
+
+def _rotate(q: np.ndarray, v: np.ndarray) -> np.ndarray:
+    x, y, z, w = q
+    u = np.array([x, y, z])
+    return 2 * np.dot(u, v) * u + (w * w - np.dot(u, u)) * np.asarray(v) + 2 * w * np.cross(u, v)
+
+
+def _turn_deg(q0: np.ndarray, q1: np.ndarray) -> float:
+    d = abs(float(np.dot(q0 / np.linalg.norm(q0), q1 / np.linalg.norm(q1))))
+    return math.degrees(2 * math.acos(min(1.0, d)))
+
+
+class Replay:
+    """Wraps ``pipeline.step``: holds the robot's targets for ``frozen`` and ``open`` before each step, logs after.
+
+    Logged per step: each thing's centre of mass and turn (every body of a
+    jointed thing), the force each hand's fingers and the robot as a whole put
+    on it, whether anything is within the contact margin of it, the deepest
+    overlap, each deformable's particles, the jaw widths.
+    """
+
+    def __init__(self, sim: Any, mode: str) -> None:
+        self.sim, self.mode = sim, mode
+        self.pipe = sim.pipeline
+        self.lay, self.th, self.fing = layout(sim), things(sim), fingers(sim)
+        self.dt = 1.0 / float(sim.request.physics.control_hz)
+        n = int(sim.model.shape_count)
+        self.names = list(self.th)
+        self.owner = np.full(n, -1, dtype=np.int64)
+        for i, name in enumerate(self.names):
+            self.owner[self.th[name]["shapes"]] = i
+        self.parts = [(f"{name}#{k}", b) for name in self.names for k, b in enumerate(self.th[name]["bodies"][1:], 1)]
+        self.arms = list(self.fing)
+        self.finger_of = np.full(n, -1, dtype=np.int64)
+        for i, a in enumerate(self.arms):
+            self.finger_of[self.fing[a]] = i
+        self.robot = np.zeros(n, dtype=bool)
+        self.robot[np.asarray(sim.scene.handles.robot_shapes, dtype=np.int64)] = True
+        self.com = sim.model.body_com.numpy()
+        self.rows: list[dict] = []
+        self.soft0: dict[str, np.ndarray] = {}
+        self.mu_seen: list[float] = []
+        self.steps = 0
+        self.error = ""
+        self.start: np.ndarray | None = None
+        self._step: Callable | None = None
+
+    def install(self) -> None:
+        self.start = self.sim.control.joint_target_q.numpy().copy()
+        self._step = self.pipe.step
+        self.pipe.step = self.step  # an instance attribute shadows the method for every door that steps
+
+    def remove(self) -> None:
+        if self._step is not None:
+            try:
+                del self.pipe.step
+            except AttributeError:
+                self.pipe.step = self._step
+            self._step = None
+
+    def _hold(self) -> None:
+        if self.mode not in ("frozen", "open"):
+            return
+        target = self.sim.control.joint_target_q
+        q = target.numpy()
+        if self.mode == "frozen":
+            held = np.concatenate([self.lay["arm"], self.lay["grip"]])
+            q[held] = self.start[held]
+        else:
+            q[self.lay["grip"]] = self.lay["open"]
+        target.assign(q)
+
+    def step(self) -> None:
+        self._hold()
+        self._step()
+        self.steps += 1
+        try:
+            self.log()
+        except Exception:
+            self.error = self.error or traceback.format_exc()[-800:]
+
+    def log(self) -> None:
+        sim = self.sim
+        bq, bqd = sim.state.body_q.numpy(), sim.state.body_qd.numpy()
+        n = len(self.names)
+        hand = np.zeros((n, len(self.arms)))
+        robot, near, depth_robot = np.zeros(n), np.zeros(n), np.zeros(n)
+        probe = getattr(sim, "contacts", None)
+        if probe is not None and n:
+            probe.update(None)
+            if len(probe.geoms):
+                a, b = probe._shape_pairs()
+                force = np.linalg.norm(probe.impulses, axis=1) / probe.dt
+                depth = np.maximum(-np.asarray(probe.depths, dtype=np.float64), 0.0)
+                for x, y in ((a, b), (b, a)):
+                    ox = self.owner[x]
+                    real = (ox >= 0) & (self.owner[y] != ox)  # a thing's own shapes touching are not a contact
+                    np.add.at(near, ox[real], 1)
+                    on_robot = real & self.robot[y]
+                    np.add.at(robot, ox[on_robot], force[on_robot])
+                    np.maximum.at(depth_robot, ox[on_robot], depth[on_robot])
+                    on_finger = real & (self.finger_of[y] >= 0)
+                    np.add.at(hand, (ox[on_finger], self.finger_of[y][on_finger]), force[on_finger])
+                if self.steps % 10 == 0:
+                    self._mixed_friction(probe)
+        pose, vel = {}, {}
+        for name in self.names:
+            b = self.th[name]["bodies"][0]
+            pose[name] = [*(bq[b, :3] + _rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
+            vel[name] = bqd[b, :3].tolist()
+        for name, b in self.parts:
+            pose[name] = [*(bq[b, :3] + _rotate(bq[b, 3:], self.com[b])), *bq[b, 3:]]
+        soft = {}
+        for name, p in (sim.particle_probes() or {}).items():
+            try:
+                p.update(sim.state, None)
+                pts = np.asarray(p.points())
+            except Exception:
+                continue
+            if len(pts):
+                base = self.soft0.setdefault(name, pts.copy())
+                soft[name] = [*pts.mean(0).tolist(), float(np.linalg.norm(pts - base, axis=1).max())]
+        jaw = {}
+        for a in self.arms:
+            try:
+                jaw[a] = float(sim.gripper(a).width(sim.state))
+            except Exception:
+                pass
+        self.rows.append(
+            {
+                "pose": pose,
+                "vel": vel,
+                "hand": hand.tolist(),
+                "robot": robot.tolist(),
+                "near": near.tolist(),
+                "depth": depth_robot.tolist(),
+                "soft": soft,
+                "jaw": jaw,
+            }
+        )
+
+    def _mixed_friction(self, probe: Any) -> None:
+        """The friction MuJoCo used at this step's finger contacts: a sample every ten steps is plenty."""
+        try:
+            data = probe.solver.mjw_data
+            count = int(np.ravel(data.nacon.numpy())[0])
+            if not count:
+                return
+            g = data.contact.geom.numpy()[:count]
+            mu = data.contact.friction.numpy()[:count, 0]
+            sa, sb = probe.geom_to_shape[g[:, 0]], probe.geom_to_shape[g[:, 1]]
+            hit = ((self.finger_of[sa] >= 0) & (self.owner[sb] >= 0)) | (
+                (self.finger_of[sb] >= 0) & (self.owner[sa] >= 0)
+            )
+            if hit.any():
+                self.mu_seen += [float(mu[hit].min()), float(mu[hit].max())]
+        except Exception:
+            pass
+
+    def summary(self, outcome: str) -> dict[str, Any]:
+        rows = self.rows
+        out: dict[str, Any] = {"outcome": outcome, "steps": self.steps, "log_error": self.error, "things": {}}
+        if not rows:
+            return out
+        for name in self.names + [p for p, _ in self.parts]:
+            P = np.array([r["pose"][name] for r in rows])
+            d = np.linalg.norm(P[:, :3] - P[0, :3], axis=1)
+            t = {
+                "moved_max_mm": round(float(d.max()) * 1000, 1),
+                "end_mm": round(float(d[-1]) * 1000, 1),
+                "end": [round(float(v), 4) for v in P[-1, :3]],
+                "rise_max_mm": round(float((P[:, 2] - P[0, 2]).max()) * 1000, 1),
+                "turn_end_deg": round(_turn_deg(P[0, 3:], P[-1, 3:]), 1),
+            }
+            if name in self.names:
+                i = self.names.index(name)
+                hand = np.array([r["hand"][i] for r in rows])
+                t["hand_force_p50_p95_N"] = [
+                    [round(float(np.percentile(c[c > 0.5], q)), 1) for q in (50, 95)] if (c > 0.5).any() else [0.0, 0.0]
+                    for c in hand.T
+                ]
+                t["overlap_with_robot_max_mm"] = round(float(max(r["depth"][i] for r in rows)) * 1000, 2)
+                if t["moved_max_mm"] > 5.0:
+                    near = np.array([r["near"][i] for r in rows]) == 0
+                    v = np.array([r["vel"][name] for r in rows])
+                    free = near[1:-1] & near[:-2] & near[2:] & (np.linalg.norm(v[1:-1], axis=1) > 0.01)
+                    acc = (v[2:] - v[1:-1]) / self.dt
+                    g = np.ravel(self.sim.model.gravity.numpy())[:3]
+                    off = np.linalg.norm(acc - g, axis=1)
+                    t["free_flight_steps"] = int(free.sum())
+                    t["free_flight_not_falling"] = int((free & (off > 3.0)).sum())
+            out["things"][name] = t
+        soft = {}
+        for name in {k for r in rows for k in r["soft"]}:
+            S = np.array([r["soft"][name] for r in rows if name in r["soft"]])
+            c = S[:, :3]
+            soft[name] = {
+                "moved_max_mm": round(float(np.linalg.norm(c - c[0], axis=1).max()) * 1000, 1),
+                "end_mm": round(float(np.linalg.norm(c[-1] - c[0])) * 1000, 1),
+                "end": [round(float(v), 4) for v in c[-1]],
+                "particle_moved_max_mm": round(float(S[:, 3].max()) * 1000, 1),
+            }
+        out["deformables"] = soft
+        out["jaw_mm"] = {
+            a: [round(min(w) * 1000, 1), round(max(w) * 1000, 1)]
+            for a in self.arms
+            if (w := [r["jaw"][a] for r in rows[50:] if a in r["jaw"]])
+        }
+        if self.mu_seen:
+            out["finger_mu"] = [round(min(self.mu_seen), 3), round(max(self.mu_seen), 3)]
+        return out
+
+
+class AsBuilt:
+    """The robot as built, for the length of a replay: friction at most :data:`REAL_MU`, the real arm's torque.
+
+    ``heavier`` also scales every handled thing's mass (and inertia with it).
+    Everything is put back on exit, and each solver told, as
+    :mod:`robosimstudio.core.tuning` does for a slider.
+    """
+
+    def __init__(self, sim: Any, heavier: float = 1.0) -> None:
+        self.sim, self.heavier = sim, float(heavier)
+        self.saved: dict[str, np.ndarray] = {}
+
+    def __enter__(self) -> AsBuilt:
+        from robosimstudio.core import tuning
+
+        m = self.sim.model
+        self.saved["mu"] = m.shape_material_mu.numpy().copy()
+        m.shape_material_mu.assign(np.minimum(self.saved["mu"], REAL_MU))
+        flags = _SHAPE_PROPERTIES
+        limits = real_arm_torque(self.sim)
+        if limits is not None:
+            self.saved["effort"] = m.joint_effort_limit.numpy().copy()
+            effort = self.saved["effort"].copy()
+            for arm in self.sim.scene.handles.arms.values():
+                for i, d in enumerate(arm.arm_dofs[: len(limits)]):
+                    effort[d] = min(effort[d], limits[i])
+            m.joint_effort_limit.assign(effort)
+            flags |= _JOINT_DOF
+        if self.heavier != 1.0:
+            for t in things(self.sim).values():
+                for b in t["bodies"]:
+                    tuning.BodyWriter(m, [b], self.sim.pipeline)("mass", float(m.body_mass.numpy()[b]) * self.heavier)
+            flags |= _BODY_INERTIAL
+        tuning.notify(self.sim.pipeline, flags)
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        from robosimstudio.core import tuning
+
+        m = self.sim.model
+        flags = _SHAPE_PROPERTIES
+        m.shape_material_mu.assign(self.saved["mu"])
+        if "effort" in self.saved:
+            m.joint_effort_limit.assign(self.saved["effort"])
+            flags |= _JOINT_DOF
+        if self.heavier != 1.0:
+            for t in things(self.sim).values():
+                for b in t["bodies"]:
+                    tuning.BodyWriter(m, [b], self.sim.pipeline)("mass", float(m.body_mass.numpy()[b]) / self.heavier)
+            flags |= _BODY_INERTIAL
+        tuning.notify(self.sim.pipeline, flags)
+
+
+def replay(
+    sim: Any, routine: Callable, mode: str, store: dict, *, session: Any = None, steps: int = 0
+) -> Iterator[None]:
+    """The routine played under ``mode``, its summary put in ``store[mode]`` when it ends however it ends.
+
+    A replay other than ``written`` runs on to ``steps`` (the written run's
+    length) after the routine stops, so a counterfactual is judged over the same
+    time: a thing that drifts late still shows. A routine that steps the scene
+    itself is stepped here once it has stopped; one driving the arm panels has
+    the page step it, as it always does.
+    """
+    if mode not in MODES:
+        raise ValueError(f"mode {mode!r} is not one of {', '.join(MODES)}")
+    takes_session = "session" in inspect.signature(routine).parameters
+    tap = Replay(sim, mode)
+    built = AsBuilt(sim, HEAVY if mode == "heavy" else 1.0) if mode in ("built", "heavy") else None
+    if built is not None:
+        built.__enter__()
+    tap.install()
+    outcome = "finished"
+    try:
+        try:
+            yield from (routine(sim, session=session) if takes_session else routine(sim))
+        except Exception as exc:  # the routine's own checks stopping it is the reading, not a failure of this
+            outcome = f"{type(exc).__name__}: {str(exc)[:300]}"
+        while mode != "written" and steps and tap.steps < steps:
+            if not takes_session:
+                sim.run(1)
+            yield
+    finally:
+        tap.remove()
+        if built is not None:
+            built.__exit__(None, None, None)
+        store[mode] = tap.summary(outcome)
+
+
+# --------------------------------------------------------------------------- the verdict
+
+
+def _moved(run: dict, floor: float = 20.0) -> list[str]:
+    hit = [k for k, t in run.get("things", {}).items() if "#" not in k and t["moved_max_mm"] > floor]
+    return hit + [k for k, t in run.get("deformables", {}).items() if t["moved_max_mm"] > floor]
+
+
+def _same_end(run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0) -> bool:
+    for k in names:
+        a = run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
+        b = written.get("things", {}).get(k) or written.get("deformables", {}).get(k)
+        if not a or not b:
+            continue
+        if np.linalg.norm(np.subtract(a["end"], b["end"])) * 1000 > mm:
+            return False
+        if abs(a.get("turn_end_deg", 0.0) - b.get("turn_end_deg", 0.0)) > deg:
+            return False
+    return True
+
+
+def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) -> dict[str, Any]:
+    """The lines ``./ctl physics`` prints: PASS and FAIL as ``check`` says them, NOTE for what the report must explain."""
+    lines: list[dict[str, Any]] = []
+
+    def line(ok: bool | None, name: str, detail: str) -> None:
+        lines.append({"ok": ok, "name": name, "detail": detail})
+
+    found = model.get("ties", []) + model.get("drives", []) + [f"{k} is kinematic" for k in model.get("kinematic", [])]
+    line(
+        not found,
+        "contact",
+        "nothing ties a thing to the robot or the world, no motor on a thing's joints"
+        if not found
+        else "; ".join(found),
+    )
+    written = runs.get("written") or {}
+    names = _moved(written)
+    if written:
+        flew = {
+            k: t.get("free_flight_not_falling", 0)
+            for k, t in written["things"].items()
+            if t.get("free_flight_not_falling")
+        }
+        line(
+            written["outcome"] == "finished" and not flew,
+            "written",
+            (
+                f"finished; moved {', '.join(names) or 'nothing'}"
+                if written["outcome"] == "finished"
+                else f"stopped: {written['outcome']}"
+            )
+            + (f"; free of every contact but not falling at g: {flew} steps" if flew else ""),
+        )
+    frozen = runs.get("frozen")
+    if frozen:
+        rest = {k: t["moved_max_mm"] for k, t in {**frozen.get("things", {}), **frozen.get("deformables", {})}.items()}
+        worst = max(rest, key=rest.get) if rest else ""
+        moved = rest.get(worst, 0.0)
+        line(
+            moved <= settle_mm,
+            "frozen",
+            f"with the robot frozen nothing moved more than {moved:.1f} mm"
+            if moved <= settle_mm
+            else f"{worst} moved {moved:.1f} mm with the robot frozen: it starts inside something, or something other than the robot pushes it",
+        )
+    opened = runs.get("open")
+    if opened:
+        did = opened["outcome"] == "finished" and _same_end(opened, written, names)
+        line(
+            None if did else True,
+            "open",
+            "the routine finished with the fingers held open: say in the report what carries "
+            f"{', '.join(names) or 'the thing'} (a support, a hook, two arms squeezing)"
+            if did
+            else f"with the fingers held open the task did not happen ({opened['outcome'] if opened['outcome'] != 'finished' else 'the things ended elsewhere'})",
+        )
+    torque = model.get("real_arm_torque")
+    robot = f"every friction at most {REAL_MU:g}" + (
+        f" and the arm's torque at {'/'.join(f'{v:g}' for v in sorted(set(torque), reverse=True))} Nm"
+        if torque
+        else " (no torque limits known for this robot)"
+    )
+    built = runs.get("built")
+    if built:
+        line(
+            built["outcome"] == "finished",
+            "built",
+            f"finished with {robot}"
+            if built["outcome"] == "finished"
+            else f"with {robot} the routine stopped: {built['outcome']}",
+        )
+    heavy = runs.get("heavy")
+    if heavy:
+        line(
+            True if heavy["outcome"] == "finished" else None,
+            "heavy",
+            f"finished with the handled things {HEAVY:g} times as heavy"
+            if heavy["outcome"] == "finished"
+            else f"with the handled things {HEAVY:g} times as heavy the routine stopped: {heavy['outcome']} (the grasp's margin)",
+        )
+    if written:
+        grip = []
+        for k in names:
+            for i, (p50, p95) in enumerate(written["things"].get(k, {}).get("hand_force_p50_p95_N", [])):
+                if p50:
+                    grip.append(f"{k} {p50:g} N (p95 {p95:g}) by hand {i + 1}")
+        mu = written.get("finger_mu")
+        detail = (
+            ("the fingers pressed " + "; ".join(grip))
+            if grip
+            else "no finger force on a rigid thing (a deformable's is not read)"
+        )
+        if mu:
+            detail += f"; the solver used friction {mu[0]:g} to {mu[1]:g} at the finger contacts"
+        line(
+            None if (mu and mu[1] > REAL_MU) else True,
+            "grip",
+            detail + (" (above any real pad: the built line is the one to trust)" if mu and mu[1] > REAL_MU else ""),
+        )
+    word = {True: "PASS", False: "FAIL", None: "NOTE"}
+    return {
+        "passed": all(c["ok"] is not False for c in lines),
+        "checks": lines,
+        "report": "\n".join(f"{word[c['ok']]}  {c['name']:<8} {c['detail']}" for c in lines),
+    }
