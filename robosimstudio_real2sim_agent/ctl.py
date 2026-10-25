@@ -865,6 +865,14 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
             reply = ask(
                 {"cmd": "physics", "op": "report", "settle_mm": args.settle_mm, "note": args.note}, TIMEOUTS["physics"]
             )
+        except BaseException:
+            # interrupted mid-replay: a reset stops it, and its own cleanup takes the hold and the changed friction,
+            # torque and masses off before the page runs on
+            try:
+                ask({"cmd": "reset"}, TIMEOUTS["reset"])
+            except Exception:
+                pass
+            raise
         finally:
             if not was_paused:
                 ask({"cmd": "resume"}, TIMEOUTS["resume"])

@@ -291,14 +291,16 @@ class EnvBase:
         removing one also drops the graph and asks for a re-capture on the next
         step; otherwise the graph would go on replaying the retired hook.
         """
-        # not the teleop hooks: a front end attaches those once, after the first reset, not per episode
-        lists = {name: hooks for name, hooks in self.hook_lists().items() if name != "teleop"}
+        # post_solve, where a tool's pin goes, and the step lists; not rigid_force, where the studio's draggers sit
+        # from when the page attaches, nor the teleop hooks a front end attaches once: those are not an episode's
+        lists = {
+            name: hooks for name, hooks in self.hook_lists().items() if name in ("post_solve", "pre_step", "post_step")
+        }
         floor = self._episode_hook_floor
         if floor is None:
             self._episode_hook_floor = {name: len(hooks) for name, hooks in lists.items()}
             return
-        # every substep phase, not only post_solve: a pin a tool left on pre_solve holds just as well
-        substep = [name for name in lists if name not in ("post_step", "pre_step")]
+        substep = ["post_solve"]
         retired = any(len(lists[name]) > floor.get(name, 0) for name in substep)
         for name, hooks in lists.items():
             del hooks[floor.get(name, 0) :]

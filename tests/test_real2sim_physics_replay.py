@@ -181,6 +181,27 @@ class Replays(unittest.TestCase):
             pass
         self.assertIn("still going when the written replay had long ended", store["frozen"]["outcome"])
 
+    def test_a_routine_that_resets_the_scene_keeps_the_replay_hooked(self) -> None:
+        """A reset retires every hook above the episode's floor; the replay's own sit under it."""
+        from robosimstudio_real2sim_agent import physics
+
+        def resets(sim):
+            for _ in range(5):
+                sim.run(1)
+                yield
+            sim.reset()
+            for _ in range(5):
+                sim.run(1)
+                yield
+
+        self.sim.reset()
+        hooks_before = (len(self.sim.pre_step_hooks), len(self.sim.post_step_hooks))
+        store: dict = {}
+        for _ in physics.replay(self.sim, resets(self.sim), "frozen", store, steps=10, steps_itself=True):
+            pass
+        self.assertEqual(store["frozen"]["steps"], 10, "the count stopped at the routine's reset")
+        self.assertEqual((len(self.sim.pre_step_hooks), len(self.sim.post_step_hooks)), hooks_before)
+
     def test_a_routine_that_swallows_exceptions_is_still_stopped(self) -> None:
         from robosimstudio_real2sim_agent import physics
 
