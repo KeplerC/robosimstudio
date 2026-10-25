@@ -1088,6 +1088,7 @@ class LiveServer:
             "generation": self.generation,
             "resets": self.resets,
             "playing": len(self.script),
+            "run_under_way": self.run_budget > 0,
             "last_script": self.last_script,
             "last_run": self.last_run,
             "runs_ended": {str(k): v for k, v in self.runs_ended.copy().items()},
@@ -1656,9 +1657,8 @@ class LiveServer:
             return named
         name, fn = named
         if mode == "written":
-            self.physics, self.physics_scene = {}, self.scene_id
             try:
-                self.physics_model = physics.model_facts(self.sim)
+                facts = physics.model_facts(self.sim)
             except Exception:
                 return {"ok": False, "error": traceback.format_exc()[-3000:]}
         elif (
@@ -1672,8 +1672,10 @@ class LiveServer:
             }
         started = self._start_routine(name, fn)
         if isinstance(started, dict):
-            return started
+            return started  # the replays before stay as they were
         routine, wants_session = started
+        if mode == "written":  # the set starts over only once its first replay is under way
+            self.physics, self.physics_scene, self.physics_model = {}, self.scene_id, facts
         steps = int(self.physics.get("written", {}).get("steps") or 0)
         gen = physics.replay(
             self.sim,
@@ -1683,6 +1685,7 @@ class LiveServer:
             steps=steps,
             steps_itself=not wants_session,
             drive_rows=self.physics_model.get("drive_rows"),
+            robot_equalities=self.physics_model.get("robot_equalities"),
         )
         serial = self.start_script(gen, name=f"physics {mode}", drives_page=wants_session)
         return {"ok": True, "playing": f"physics {mode}", "serial": serial}

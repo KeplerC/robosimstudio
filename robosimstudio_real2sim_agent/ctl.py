@@ -840,6 +840,8 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
         first = ask({"cmd": "status", "light": True}, DEFAULT_TIMEOUT)
         if first.get("playing"):  # before the first reset, which would stop it and its take
             return show({"ok": False, "error": ROUTINE_PLAYING}, args.json)
+        if first.get("run_under_way"):  # pausing would end it, and resuming after would leave the page running free
+            return show({"ok": False, "error": "a `run N` is under way: let it end, or `pause` it"}, args.json)
         was_paused = bool(first.get("paused"))
         ask({"cmd": "pause"}, TIMEOUTS["pause"])
         try:

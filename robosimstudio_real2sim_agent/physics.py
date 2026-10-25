@@ -253,15 +253,19 @@ def model_facts(sim: Any) -> dict[str, Any]:
             # where the target of each stiff dof sits in joint_target_q (a hinge's or a slide's one coordinate is its
             # dof's; a ball joint's four coordinates do not line up with its three dofs, and are read as they fall)
             drive_rows += [int(q0[j]) + (d - int(qd0[j])) if by_coord else d for d in stiff]
-    if getattr(m, "equality_constraint_count", 0):
-        b1, b2 = m.equality_constraint_body1.numpy(), m.equality_constraint_body2.numpy()
-        for k in range(int(m.equality_constraint_count)):
-            pair = {int(b1[k]), int(b2[k])}
-            hit = next((owner[b] for b in pair if b in owner), None)
-            if hit and pair & robot_bodies:
-                ties.append(f"{hit} by equality constraint {k} to the robot")
-            elif hit:
-                welds.append(f"{hit} by equality constraint {k}")
+    rows = equality_rows(sim)
+    for k, (body1, body2, _label) in rows.items():
+        pair = {body1, body2}
+        hit = next((owner[b] for b in pair if b in owner), None)
+        if hit and not pair & robot_bodies:
+            welds.append(f"{hit} by equality constraint {k}")
+    # a row between a thing and the robot ties it only while enabled (a suction cup's rows are built off and switch
+    # on at a hold): the written replay watches them, and the verdict reads whether one was on
+    out["robot_equalities"] = {
+        str(k): label
+        for k, (body1, body2, label) in rows.items()
+        if {body1, body2} & robot_bodies and ({body1, body2} - robot_bodies) & set(owner)
+    }
     out["ties"] = ties
     out["welds"] = welds
     out["drives"] = drives
@@ -273,17 +277,37 @@ def model_facts(sim: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------- the replay
 
 
+def equality_rows(sim: Any) -> dict[int, tuple[int, int, str]]:
+    """The body-to-body equality rows (a weld, a connect) the scene has, by row: its two bodies and its label.
+
+    Newton 1.7 keeps them on ``model.mujoco`` (``equality_constraint_*``), not on the model itself.
+    """
+    table = getattr(sim.model, "mujoco", None)
+    count = int(getattr(table, "equality_constraint_count", 0) or 0)
+    if not count:
+        return {}
+    b1, b2 = table.equality_constraint_body1.numpy(), table.equality_constraint_body2.numpy()
+    objtype = getattr(table, "equality_constraint_objtype", None)
+    kinds = objtype.numpy() if objtype is not None else np.ones(count)
+    labels = list(getattr(table, "equality_constraint_label", None) or [""] * count)
+    return {
+        k: (int(b1[k]), int(b2[k]), str(labels[k]) if k < len(labels) else "")
+        for k in range(count)
+        if int(kinds[k]) == 1
+    }
+
+
 def _fixed_bodies(model: Any) -> np.ndarray:
     """Per body, whether nothing but a script moves it: Newton's KINEMATIC flag, or an infinite mass on a body
-    free to move (a free joint, or none). A massless base held by a joint (a cabinet's carcass welded to the world)
-    is fixed by its joint, not moved by a script, and is not counted."""
+    free to move (a free joint, or none). A body held by a joint (a cabinet's carcass welded to the world, flagged or
+    massless) is fixed by its joint, not moved by a script, and is not counted."""
     held = np.zeros(int(model.body_count), dtype=bool)
     kinds = _joint_kinds()
     jt, jc = model.joint_type.numpy(), model.joint_child.numpy()
     for t, c in zip(jt, jc, strict=False):
         if int(c) >= 0 and int(t) != kinds.get("free", -1):
             held[int(c)] = True
-    fixed = (model.body_inv_mass.numpy() == 0.0) & ~held
+    fixed = model.body_inv_mass.numpy() == 0.0
     flags = getattr(model, "body_flags", None)
     if flags is not None:
         try:
@@ -292,7 +316,7 @@ def _fixed_bodies(model: Any) -> np.ndarray:
             fixed |= (flags.numpy() & int(newton.BodyFlags.KINEMATIC)) != 0
         except Exception:  # pragma: no cover - a Newton without the flag
             pass
-    return fixed
+    return fixed & ~held  # one held by a joint (welded to the world, the weld_to_world pattern) is a weld
 
 
 def _joint_kinds() -> dict[str, int]:
@@ -338,7 +362,9 @@ class Replay:
     overlap, each deformable's particles, the jaw widths.
     """
 
-    def __init__(self, sim: Any, mode: str, drive_rows: list[int] | None = None) -> None:
+    def __init__(
+        self, sim: Any, mode: str, drive_rows: list[int] | None = None, model_rows: dict | None = None
+    ) -> None:
         self.sim, self.mode = sim, mode
         self.lay, self.th, self.fing = layout(sim), things(sim), fingers(sim)
         self.dt = 1.0 / float(sim.request.physics.control_hz)
@@ -394,10 +420,18 @@ class Replay:
         """The ``joint_target_q`` rows of the stiff joints on things (:func:`model_facts`'s ``drive_rows``), watched
         on the written replay, the one the verdict reads them off."""
         self.drive0: np.ndarray | None = None
+        table = getattr(sim.model, "mujoco", None)
+        robot_rows = (model_rows or {}) if mode == "written" else {}
+        self.eq_rows = np.asarray(sorted(int(k) for k in robot_rows), dtype=np.int64)
+        self.eq_enabled = getattr(table, "equality_constraint_enabled", None) if len(self.eq_rows) else None
+        self.eq_on: set[int] = set()
+        """The thing-to-robot equality rows found enabled at any step of the written run: a weld or a seal held it."""
         self.drive_moved = 0.0
         """The most any of those targets moved from where it started: a motor on a thing, if above zero."""
         self.broken = ""
         """Why the replay's own hold failed, if it did: the replay is then not a reading."""
+        self.overrun_at = 0
+        self.grace = 25
         self.inside = False
         """Whether the step now running was taken inside the routine's own ``next()`` (so may raise into it)."""
 
@@ -462,7 +496,12 @@ class Replay:
     def _after(self, _env: Any = None) -> None:
         self.steps += 1
         if self.limit and self.inside and self.steps >= self.limit:
-            raise Overrun(self.steps)
+            # raised at the cap; then the routine's own cleanup (a finally that opens the gripper and settles) gets a
+            # grace of as many steps, and a routine that swallowed it and loops on is stopped on every step after
+            first = self.overrun_at == 0
+            self.overrun_at = self.overrun_at or self.steps
+            if first or self.steps >= self.overrun_at + self.grace:
+                raise Overrun(self.steps)
         try:
             self.log()
         except Exception:
@@ -475,7 +514,10 @@ class Replay:
         hand = np.zeros((n, len(self.arms)))
         robot, near, depth_robot = np.zeros(n), np.zeros(n), np.zeros(n)
         probe = getattr(sim, "contacts", None)
-        if contacts and self.steps % SAMPLE_EVERY == 0:  # by identity, so a hook swapped for another is seen
+        if self.eq_enabled is not None:  # every step: a seal switched on and off between samples still held
+            on = np.asarray(self.eq_enabled.numpy())[self.eq_rows]
+            self.eq_on |= {int(k) for k, v in zip(self.eq_rows, on, strict=True) if v}
+        if contacts:  # every step and by identity: a hook swapped for another, or on for two steps, is seen
             substep, steps = self._added()
             self.hooks_added = max(self.hooks_added, substep)
             self.step_hooks_added = max(self.step_hooks_added, steps)
@@ -566,6 +608,7 @@ class Replay:
             "log_error": self.error,
             "hooks_added": self.hooks_added,
             "step_hooks_added": self.step_hooks_added,
+            "robot_equalities_on": sorted(self.eq_on),
             "thing_targets_moved": round(self.drive_moved, 6),
             "things": {},
         }
@@ -720,6 +763,7 @@ def replay(
     steps: int = 0,
     steps_itself: bool = False,
     drive_rows: list[int] | None = None,
+    robot_equalities: dict | None = None,
 ) -> Iterator[None]:
     """The routine (the generator it returned) played under ``mode``, its summary in ``store[mode]`` however it ends.
 
@@ -738,15 +782,24 @@ def replay(
         raise ValueError(f"mode {mode!r} is not one of {', '.join(MODES)}")
     capped = mode != "written"
     limit = steps + max(25, int(OVERRUN * steps))
+    long = f"still going when the written replay had long ended ({steps} steps)"
+
+    def stop() -> None:
+        """The hold and the cap off first, then the routine's own cleanup, now and on this scene."""
+        if tap is not None:
+            tap.remove()
+        routine.close()
+
     tap: Replay | None = None
     built = AsBuilt(sim, HEAVY if mode == "heavy" else 1.0) if mode in ("built", "heavy") else None
     outcome = "finished"
     try:
-        tap = Replay(sim, mode, drive_rows=drive_rows)
+        tap = Replay(sim, mode, drive_rows=drive_rows, model_rows=robot_equalities)
         if capped:
             # a routine may loop on `sim.run` until a pose is reached, never yielding: the cap is enforced at a step
             # the routine takes itself, raised into it; a step the page takes between yields is cut at the yield
             tap.limit = limit
+            tap.grace = max(25, int(OVERRUN * steps))
         if built is not None:
             built.apply()
         tap.install()
@@ -763,11 +816,11 @@ def replay(
                 if tap.broken:
                     raise Broken(tap.broken)
                 if capped and tap.steps >= limit:
-                    outcome = f"still going when the written replay had long ended ({steps} steps)"
-                    routine.close()
+                    outcome = long
+                    stop()
                     break
         except Overrun:
-            outcome = f"still going when the written replay had long ended ({steps} steps)"
+            outcome = long
         except Exception as exc:  # the routine's own checks stopping it is the reading, not a failure of this
             outcome = f"{type(exc).__name__}: {str(exc)[:300]}"
         tap.limit = 0
@@ -779,19 +832,14 @@ def replay(
                 raise Broken(tap.broken)
     except GeneratorExit:
         outcome = STOPPED
-        if tap is not None:
-            tap.remove()  # first: a cleanup that steps must not meet the hold or the cap
-        routine.close()  # its own cleanup runs now, on this scene, not at collection on the next one
+        stop()
         raise
     except Broken as exc:
         outcome = f"{FAILED}: {exc}"
-        tap.remove()
-        routine.close()
+        stop()
     except Exception as exc:
         outcome = f"{FAILED}: {type(exc).__name__}: {str(exc)[:300]}"
-        if tap is not None:
-            tap.remove()
-        routine.close()
+        stop()
         raise
     finally:
         if tap is not None:
@@ -839,10 +887,6 @@ def _ended_elsewhere(run: dict, written: dict, names: list[str], mm: float = 50.
     return ""
 
 
-def _same_end(run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0) -> bool:
-    return not _ended_elsewhere(run, written, names, mm, deg)
-
-
 def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) -> dict[str, Any]:
     """The lines ``./ctl physics`` prints: PASS and FAIL as ``check`` says them, NOTE for what the report must explain."""
     lines: list[dict[str, Any]] = []
@@ -855,12 +899,23 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     found += [f"{k} is kinematic" for k in model.get("kinematic", [])]
     if driven:
         found.append("a target on a thing's own joint moved while the routine played: a motor")
+    labels = model.get("robot_equalities", {})
+    for k in (runs.get("written") or {}).get("robot_equalities_on", []):
+        label = labels.get(str(k), "")
+        if "suction" not in label:
+            found.append(f"equality row {k} ({label or 'a weld'}) held a thing to the robot while the routine played")
     added = (runs.get("written") or {}).get("hooks_added", 0)
     if added:
         found.append(f"{added} substep hook(s) attached while the routine played (a dragger or a pin)")
     welds = model.get("welds", [])
     if found:
         line(False, "contact", "; ".join(found + welds))
+    elif any("suction" in labels.get(str(k), "") for k in (runs.get("written") or {}).get("robot_equalities_on", [])):
+        line(
+            None,
+            "contact",
+            "a suction cup's seal held a thing while the routine played: right only if the clip's gripper is one",
+        )
     elif (runs.get("written") or {}).get("step_hooks_added", 0):
         line(
             None,
@@ -934,7 +989,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             + ("did not finish" if written.get("outcome") != "finished" else "moved nothing"),
         )
     elif opened:
-        did = opened["outcome"] == "finished" and _same_end(opened, written, names)
+        did = opened["outcome"] == "finished" and not _ended_elsewhere(opened, written, names)
         line(
             None if did else True,
             "open",

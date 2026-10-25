@@ -378,8 +378,9 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
-- **contact** reads the model and the written replay. A joint or equality
-  constraint between a thing and the robot (either way round), a thing flagged
+- **contact** reads the model and the written replay. A joint between a thing
+  and the robot (either way round), an equality row between them that is on at
+  any step of the routine (a suction cup's seal is a NOTE instead), a thing flagged
   kinematic or of infinite mass while free to move, a hook put on a substep
   phase while the routine played (a dragger, a pin), or a stiff joint on a
   thing whose target moved while it played (a motor) fails it. A thing welded

@@ -216,6 +216,36 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(result)["contact"], False)
         self.assertIn("substep hook(s) attached while the routine played", result["report"])
 
+    def test_a_weld_to_the_robot_switched_on_while_it_played_fails_contact(self) -> None:
+        model = {**CLEAN, "robot_equalities": {"3": "pair/left/grab"}}
+        runs = _clean_runs()
+        runs["written"]["robot_equalities_on"] = [3]
+        result = physics.verdict(model, runs)
+        self.assertIs(_words(result)["contact"], False)
+        self.assertIn("equality row 3 (pair/left/grab) held a thing to the robot", result["report"])
+
+    def test_a_suction_seal_is_a_note(self) -> None:
+        model = {**CLEAN, "robot_equalities": {"5": "yam/right/suction/box"}}
+        runs = _clean_runs()
+        runs["written"]["robot_equalities_on"] = [5]
+        result = physics.verdict(model, runs)
+        self.assertIsNone(_words(result)["contact"])
+        self.assertIn("a suction cup's seal held a thing", result["report"])
+
+    def test_equality_rows_come_off_newton_1_7_s_mujoco_table(self) -> None:
+        import numpy as np
+
+        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
+        table = types.SimpleNamespace(
+            equality_constraint_count=2,
+            equality_constraint_body1=arr([4, 1]),
+            equality_constraint_body2=arr([9, 2]),
+            equality_constraint_objtype=arr([1, 3]),  # a body pair, and a joint coupling
+            equality_constraint_label=["hand/grab", "mimic"],
+        )
+        sim = types.SimpleNamespace(model=types.SimpleNamespace(mujoco=table))
+        self.assertEqual(physics.equality_rows(sim), {0: (4, 9, "hand/grab")})
+
     def test_a_step_hook_the_routine_added_is_a_note(self) -> None:
         runs = _clean_runs()
         runs["written"]["step_hooks_added"] = 1
