@@ -356,9 +356,11 @@ NOTE  heavy    with the handled things 2 times as heavy the routine stopped: Run
 NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the solver used friction 2 to 4 at the finger contacts (above any real pad: the built line is the one to trust)
 ```
 
-- **frozen** holds every arm and finger target where it started. A thing that
-  moves is pushed out of something it starts inside (a finger, the table) or
-  by something other than the robot.
+- **frozen** holds every target the robot has (arms, fingers, a torso or a
+  rail) where it started. A rigid thing that moves is pushed out of something
+  it starts inside (a finger, the table) or by something other than the
+  robot; a deformable still settling (a heap, a liquid, a draped cloth) is a
+  NOTE.
 - **open** holds the fingers fully open and moves the arms as written. A
   pinch fails; a task that still happens is carried by a support, a hook or
   two arms squeezing, and the report says which. What happened is read off
@@ -378,8 +380,11 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   the grasp has.
 - **contact** reads the model: a joint or equality constraint between a thing
   and the robot (either way round), a stiffness driving a thing's own joint, a
-  thing of infinite mass or flagged kinematic, or a post-solve hook attached
-  while the written routine played (a dragger, a pin) fails it; a thing welded to the world or to another thing is a NOTE for the
+  thing of infinite mass or flagged kinematic, a hook attached while the
+  written routine played (a dragger, a pin, a follower on any substep phase or
+  step list), or a stiff joint on a thing whose target moved while it played
+  (a motor) fails it; a stiff joint held at its target is the thing's own
+  elasticity (a rod's bending) and passes; a thing welded to the world or to another thing is a NOTE for the
   report to explain (a hinge or a slide to the world or to furniture is a
   mechanism, and damping alone is not a motor).
 - **flight**, a NOTE when it shows, is a single free body with nothing within
