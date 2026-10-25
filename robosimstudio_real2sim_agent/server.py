@@ -145,9 +145,10 @@ FIRST_RENDER = (
 
 
 def _read_replay(run: dict) -> bool:
-    """Whether a physics replay ran to a reading: not stopped by the page, not failed in its own code."""
+    """Whether a physics replay ran to a reading: not stopped by the page, not failed in its own code, and logged
+    (a replay whose log failed has rows missing, and would read as nothing having moved)."""
     outcome = str(run.get("outcome", ""))
-    return outcome != physics.STOPPED and not outcome.startswith(physics.FAILED)
+    return outcome != physics.STOPPED and not outcome.startswith(physics.FAILED) and not run.get("log_error")
 
 
 class LiveServer:

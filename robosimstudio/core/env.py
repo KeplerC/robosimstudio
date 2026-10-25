@@ -291,7 +291,8 @@ class EnvBase:
         removing one also drops the graph and asks for a re-capture on the next
         step; otherwise the graph would go on replaying the retired hook.
         """
-        lists = self.hook_lists()
+        # not the teleop hooks: a front end attaches those once, after the first reset, not per episode
+        lists = {name: hooks for name, hooks in self.hook_lists().items() if name != "teleop"}
         floor = self._episode_hook_floor
         if floor is None:
             self._episode_hook_floor = {name: len(hooks) for name, hooks in lists.items()}

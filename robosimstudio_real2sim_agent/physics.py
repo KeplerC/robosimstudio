@@ -38,6 +38,7 @@ still carries it.
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 import traceback
@@ -47,6 +48,7 @@ from typing import Any, ClassVar
 import numpy as np
 import warp as wp
 
+from robosimstudio.core import tuning
 from robosimstudio.engines.pose import compose_many
 
 MODES = ("written", "frozen", "open", "built", "heavy")
@@ -85,9 +87,9 @@ ARM_TORQUE = {
     "fr3": (87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0),
 }
 
-_SHAPE_PROPERTIES = 1 << 4  # newton.ModelFlags, spelled as bits as robosimstudio.core.tuning does
-_BODY_INERTIAL = 1 << 3
-_JOINT_DOF = 1 << 1
+_SHAPE_PROPERTIES = tuning.ShapeWriter.flags  # newton.ModelFlags, as the tuning writers name them
+_BODY_INERTIAL = tuning.BodyWriter.flags
+_JOINT_DOF = tuning.JointWriter.flags
 
 
 # --------------------------------------------------------------------------- what the scene holds
@@ -341,6 +343,7 @@ def _fixed_bodies(model: Any) -> np.ndarray:
     return fixed & ~held  # one held by a joint (welded to the world, the weld_to_world pattern) is a weld
 
 
+@functools.lru_cache(maxsize=1)
 def _joint_kinds() -> dict[str, int]:
     """Newton's joint types by lower-case name (``free``, ``fixed``, ``revolute``, ...)."""
     try:
@@ -432,10 +435,11 @@ class Replay:
         self.held_to: np.ndarray | None = None
         self.hooks0: set[int] = set()
         self.kept: list = []
-        self._hold_hook = self._after_hook = None
+        self._hold_hook = self._after_hook = self._cap_hook = None
         self.hooks_added = 0
+        """Substep hooks found beyond those the scene had at the start: a dragger or a pin attached."""
         self.step_hooks_added = 0
-        """Post-solve hooks found on the pipeline beyond those it had at the start: a dragger or a pin attached."""
+        """Step-list hooks (pre-step, post-step, teleop) found beyond the start's: a follower, or only a logger."""
         self.limit = 0
         """Steps after which a routine that steps the scene itself is stopped, raised from the step; 0 never."""
         self.drive_rows = np.asarray(drive_rows if mode == "written" and drive_rows else [], dtype=np.int64)
@@ -447,6 +451,7 @@ class Replay:
         self.eq_rows = np.asarray(sorted(int(k) for k in robot_rows), dtype=np.int64)
         self.eq_enabled = getattr(table, "equality_constraint_enabled", None) if len(self.eq_rows) else None
         self.eq_on: set[int] = set()
+        """The thing-to-robot equality rows found enabled at any step of the written run: a weld or a seal held it."""
         # holds a scene builds in rather than adds while it plays: a suction cup (its weld or its wrench tier) and a
         # rod's grasp latch, read each step of the written run
         self.cups: list[tuple[str, Any]] = []
@@ -462,8 +467,9 @@ class Replay:
                 if flag is not None and getattr(getattr(entity, "spec", None), "allow_grasp_latch", False):
                     self.latches.append((name, flag))
         self.suction_held: set[str] = set()
+        """The arms whose suction cup held a part at any step of the written run."""
         self.latched: set[str] = set()
-        """The thing-to-robot equality rows found enabled at any step of the written run: a weld or a seal held it."""
+        """The rods whose grasp latch was engaged at any step of the written run."""
         self.drive_moved = 0.0
         """The most any of those targets moved from where it started: a motor on a thing, if above zero."""
         self.broken = ""
@@ -491,22 +497,29 @@ class Replay:
             dev = self.sim.model.device
             dofs = self.lay["robot_dofs"] if self.mode == "frozen" else self.lay["grip_dofs"]
             self._dof_rows = wp.array(np.asarray(dofs, dtype=np.int32), dtype=wp.int32, device=dev)
-            self._dof_zeros = wp.zeros(len(dofs), dtype=wp.float32, device=dev)
+            control = self.sim.control
+            self._dof_start = []  # (the array, what its held rows held at the start)
+            for array in (getattr(control, "joint_target_qd", None), getattr(control, "joint_f", None)):
+                if array is not None and len(dofs):
+                    start = np.asarray(array.numpy(), dtype=np.float32)[np.asarray(dofs, dtype=np.int64)]
+                    self._dof_start.append((array, wp.array(start, dtype=wp.float32, device=dev)))
             self._held_rows = wp.array(self.held.astype(np.int32), dtype=wp.int32, device=self.sim.model.device)
             self._held_values = wp.array(
                 np.asarray(self.held_to, dtype=np.float32), dtype=wp.float32, device=self.sim.model.device
             )
             self.sim.pre_step_hooks.append(self._hold_hook)
+        self._cap_hook = self._cap
+        self.sim.pre_step_hooks.append(self._cap_hook)
         self.sim.post_step_hooks.append(self._after_hook)
 
     def _added(self) -> tuple[int, int]:
         """How many hooks are on the scene now that were not at the start: on substep phases, and on the step lists
         (this replay's own two left out)."""
-        mine = {id(self._hold_hook), id(self._after_hook)}
+        mine = {id(self._hold_hook), id(self._after_hook), id(getattr(self, "_cap_hook", None))}
         substep = steps = 0
         for name, hooks in self.sim.hook_lists().items():
             new = sum(1 for fn in hooks if id(fn) not in self.hooks0 and id(fn) not in mine)
-            if name in ("pre_step", "post_step"):
+            if name in ("pre_step", "post_step", "teleop"):
                 steps += new
             else:
                 substep += new
@@ -515,6 +528,7 @@ class Replay:
     def remove(self) -> None:
         self.limit = 0
         for hooks, hook in (
+            (self.sim.pre_step_hooks, getattr(self, "_cap_hook", None)),
             (self.sim.pre_step_hooks, getattr(self, "_hold_hook", None)),
             (self.sim.post_step_hooks, getattr(self, "_after_hook", None)),
         ):
@@ -531,30 +545,30 @@ class Replay:
                 outputs=[control.joint_target_q],
                 device=dev,
             )
-            # a velocity target or a feed-forward force moves a held joint as surely as a position target does
-            for array in (getattr(control, "joint_target_qd", None), getattr(control, "joint_f", None)):
-                if array is not None and len(self._dof_rows):
-                    wp.launch(
-                        _write_rows,
-                        dim=len(self._dof_rows),
-                        inputs=[self._dof_rows, self._dof_zeros],
-                        outputs=[array],
-                        device=dev,
-                    )
+            # a velocity target or a feed-forward force moves a held joint as surely as a position target does: both
+            # are held where they started (zero for a position-driven arm; an OSC's start torque for a torque-driven
+            # one, which keeps it up, where zero would drop it)
+            for array, start in self._dof_start:
+                wp.launch(
+                    _write_rows, dim=len(self._dof_rows), inputs=[self._dof_rows, start], outputs=[array], device=dev
+                )
         except Exception as exc:  # the replay's own fault: not a reading the routine's checks made
             self.broken = self.broken or f"holding the robot's targets: {type(exc).__name__}: {exc}"
             if self.inside:  # a step the routine took itself; one the page takes must not raise into the page
                 raise Broken(self.broken) from exc
 
-    def _after(self, _env: Any = None) -> None:
-        self.steps += 1
+    def _cap(self, _env: Any = None) -> None:
+        """Before a step the routine takes itself past the cap: stop it, raised into the routine before the physics, so
+        no step is left half done. Then the routine's own cleanup (a finally that opens the gripper and settles) gets a
+        grace of as many steps, and a routine that swallowed it and loops on is stopped before every step after."""
         if self.limit and self.inside and self.steps >= self.limit:
-            # raised at the cap; then the routine's own cleanup (a finally that opens the gripper and settles) gets a
-            # grace of as many steps, and a routine that swallowed it and loops on is stopped on every step after
             first = self.overrun_at == 0
             self.overrun_at = self.overrun_at or self.steps
             if first or self.steps >= self.overrun_at + self.grace:
                 raise Overrun(self.steps)
+
+    def _after(self, _env: Any = None) -> None:
+        self.steps += 1
         try:
             self.log()
         except Exception:
@@ -623,6 +637,8 @@ class Replay:
                 continue
             if len(pts):
                 base = self.soft0.setdefault(name, pts.copy())
+                if base.shape != pts.shape:  # particles added or cut away: measure from here on
+                    base = self.soft0[name] = pts.copy()
                 away = np.linalg.norm(pts - base, axis=1)
                 soft[name] = [*pts.mean(0).tolist(), float(away.max()), float(np.median(away))]
         for a in self.arms if sampled else ():
@@ -763,8 +779,6 @@ class AsBuilt:
         """Per array: the rows changed, and what they held."""
 
     def _change(self, name: str, rows: np.ndarray, new: np.ndarray) -> None:
-        from robosimstudio.core import tuning
-
         array = getattr(self.sim.model, name)
         values = array.numpy()
         self.saved[name] = (rows, values[rows].copy())
@@ -773,8 +787,6 @@ class AsBuilt:
         tuning.reach_island_copies(self.sim.pipeline, name)  # an island that keeps its own copy sees it too
 
     def apply(self) -> None:
-        from robosimstudio.core import tuning
-
         m = self.sim.model
         mu = m.shape_material_mu.numpy()
         grippy = np.flatnonzero(mu > REAL_MU)
@@ -806,8 +818,6 @@ class AsBuilt:
             tuning.notify(self.sim.pipeline, flags)
 
     def restore(self) -> None:
-        from robosimstudio.core import tuning
-
         flags = 0
         for name, (rows, old) in self.saved.items():
             array = getattr(self.sim.model, name)

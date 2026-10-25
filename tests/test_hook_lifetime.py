@@ -83,7 +83,7 @@ class TestEpisodeHooksDoNotOutliveTheirEpisode(unittest.TestCase):
         self.assertIsNone(env._episode_hook_floor)
         env.pipeline.hooks.post_solve.extend([object(), object()])
         env._retire_episode_hooks()
-        self.assertEqual(env._episode_hook_floor, {"post_solve": 2, "post_step": 0, "pre_step": 0, "teleop": 0})
+        self.assertEqual(env._episode_hook_floor, {"post_solve": 2, "post_step": 0, "pre_step": 0})
         self.assertEqual(len(env.pipeline.hooks.post_solve), 2, "the build's own hooks must survive")
 
     def test_it_is_idempotent_across_many_episodes(self) -> None:

@@ -27,6 +27,7 @@ from pathlib import Path
 __all__ = [
     "DEFAULT_RUN_DIR",
     "READY_PREFIX",
+    "ROUTINE_PLAYING",
     "SOCKET_NAME",
     "ControlSocket",
     "NoReply",

@@ -14,7 +14,8 @@ from pathlib import Path
 from unittest import mock
 
 from robosimstudio_real2sim_agent import ctl, physics
-from robosimstudio_real2sim_agent.server import ROUTINE_PLAYING, LiveServer
+from robosimstudio_real2sim_agent.server import LiveServer
+from robosimstudio_real2sim_agent.wire import ROUTINE_PLAYING
 
 TIER = "fast"
 
@@ -420,6 +421,14 @@ class Refusals(unittest.TestCase):
             with mock.patch.object(physics, "model_facts", return_value=dict(CLEAN)):
                 reply = live.cmd_physics()
         self.assertIn("returned NoneType, not a generator", reply["error"])
+
+    def test_a_replay_whose_log_failed_is_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            live = _server(Path(tmp))
+            runs = _clean_runs()
+            runs["frozen"]["log_error"] = "Traceback ... ValueError"
+            live.physics, live.physics_scene, live.physics_model = runs, "abc", dict(CLEAN)
+            self.assertIn("did not run to a reading", live.cmd_physics(op="report")["error"])
 
     def test_a_replay_that_failed_in_its_own_code_is_not_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
