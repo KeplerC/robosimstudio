@@ -71,11 +71,18 @@ class Robot:
     at: Xform | None = None
     """The base's pose in the cell's work-surface frame, or ``None`` for the
     robot's own mount (its spec's ``base_offset``)."""
-    arms_at: tuple[tuple[str, Xform], ...] = ()
+    arms_at: tuple[tuple[str, tuple[float, ...]], ...] = ()
     """``(arm name, pose)`` pairs: single arms' bases, each in the cell's
-    work-surface frame and absolute -- not relative to :attr:`at`."""
+    work-surface frame and absolute -- not relative to :attr:`at`. A pose is
+    seven numbers, or three for a position that keeps the base's heading. A
+    mapping is taken too, and held as pairs."""
     arm_actuation: ActuationSpec | None = None
     gripper_actuation: ActuationSpec | None = None
+
+    def __post_init__(self) -> None:
+        # One spelling, checked once, however the placement was written: the
+        # mapping rss.robot takes, or pairs -- and pairs keep it hashable.
+        object.__setattr__(self, "arms_at", _arms_at(self.arms_at))
 
     @property
     def label(self) -> str:
@@ -126,14 +133,18 @@ def robot(
             ``at`` is and in the same work-surface frame. A pose is where that
             arm's **base body** goes -- the body its
             :attr:`~robosimstudio.specs.ArmSpec.base_body_name` names, else
-            the one its first joint hangs on in the robot's file (on
+            the one its first moving joint hangs on in the robot's file (on
             ``yam_bimanual``, ``left_arm`` and ``right_arm``: the bottom of each
             mount puck). Absolute, not relative to ``at``: a named arm stands
             there wherever ``at`` puts the robot, and an arm left out follows
-            ``at`` as before. The robot's file is not edited or copied -- each
-            named arm is carried rigidly, its joints, actuators, hand and
-            colliders with it -- and the arms' collision settings are the
-            spec's, as without it::
+            ``at`` as before. A full pose ``(x, y, z, qx, qy, qz, qw)`` sets the
+            base's heading too; a position ``(x, y, z)`` moves the base there
+            and keeps the heading it already has from the file and ``at`` --
+            unlike ``at``, whose position means no rotation, so that moving one
+            arm of a turned robot does not turn the arm. The robot's file is not
+            edited or copied -- each named arm is carried rigidly, its joints,
+            actuators, hand and colliders with it -- and the arms' collision
+            settings are the spec's, as without it::
 
                 scene.add(rss.robot("yam_bimanual", arms_at={
                     "left": (-0.36, 0.20, 0.06),
@@ -142,8 +153,9 @@ def robot(
 
             An arm name the robot does not have is refused at build, naming
             the ones it has; so is a robot that arrives inside the scene's own
-            import, and an arm whose base hangs on a moving joint or shares the
-            body welded to the world with another arm.
+            import, an arm whose base hangs on a moving joint or shares the
+            body welded to the world with another arm, and an arm an equality
+            constraint ties to something that does not move with it.
         arm, gripper: Servo gains overriding the spec's own.
     """
     if isinstance(which, EmbodimentSpec):
@@ -162,17 +174,21 @@ def robot(
         )
     else:
         raise TypeError("rss.robot: give a registry name, an EmbodimentSpec, or asset= and arms=")
-    return Robot(name=spec, at=_base_at(at), arms_at=_arms_at(arms_at), arm_actuation=arm, gripper_actuation=gripper)
+    return Robot(name=spec, at=_base_at(at), arms_at=arms_at or (), arm_actuation=arm, gripper_actuation=gripper)
 
 
-def _base_at(at: Sequence[float] | None, what: str = "at=") -> Xform | None:
+def _base_at(at: Sequence[float] | None) -> Xform | None:
     """``at`` as a pose: a position gets the identity rotation, anything else is refused."""
     if at is None:
         return None
-    values = tuple(float(v) for v in at)
-    if len(values) == 3:
-        return (*values, 0.0, 0.0, 0.0, 1.0)
-    if len(values) == 7:
+    values = _spelled(at, "at=")
+    return (*values, 0.0, 0.0, 0.0, 1.0) if len(values) == 3 else values
+
+
+def _spelled(pose: Sequence[float], what: str) -> tuple[float, ...]:
+    """Three numbers or seven, as floats, or the reason it is neither."""
+    values = tuple(float(v) for v in pose)
+    if len(values) in (3, 7):
         return values
     raise ValueError(
         f"rss.robot: {what} is a position (x, y, z) or a pose (x, y, z, qx, qy, qz, qw) in the "
@@ -182,13 +198,14 @@ def _base_at(at: Sequence[float] | None, what: str = "at=") -> Xform | None:
 
 def _arms_at(
     arms_at: Mapping[str, Sequence[float]] | Sequence[tuple[str, Any]] | None,
-) -> tuple[tuple[str, Xform], ...]:
-    """``arms_at`` as ``(arm name, pose)`` pairs, each pose spelled out in full.
+) -> tuple[tuple[str, tuple[float, ...]], ...]:
+    """``arms_at`` as ``(arm name, pose)`` pairs, each pose three numbers or seven.
 
     Takes the mapping :func:`robot` is given or the pairs :class:`Robot` holds, so
-    a placement built either way reads the same. Only the spelling is checked
-    here; whether the names are the robot's, and once each, is the compiler's
-    question (``_arm_mounts``): only it knows which robot gets built.
+    a placement built either way reads the same. A position stays a position: it
+    keeps the base's heading, so it is not filled out to a pose here. Only the
+    spelling is checked; whether the names are the robot's, and once each, is the
+    compiler's question (``_arm_mounts``): only it knows which robot gets built.
     """
     if not arms_at:
         return ()
@@ -198,10 +215,9 @@ def _arms_at(
         if isinstance(item, str) or len(item) != 2 or not isinstance(item[0], str) or not item[0]:
             raise TypeError(f"rss.robot: arms_at= maps an arm's name to its base's pose, and got {item!r}")
         name, pose = item
-        placed = _base_at(pose, f"arms_at[{name!r}]")
-        if placed is None:
+        if pose is None:
             raise TypeError(f"rss.robot: arms_at[{name!r}] is None; leave the arm out to keep it where at= puts it")
-        pairs.append((name, placed))
+        pairs.append((name, _spelled(pose, f"arms_at[{name!r}]")))
     return tuple(pairs)
 
 
@@ -381,7 +397,7 @@ class Scene:
         ``at`` hold for a registered robot whose spec has an offset of its own.
         """
         at = _base_at(self._robot.at) if self._robot else None
-        arms = _arms_at(self._robot.arms_at) if self._robot else ()
+        arms = self._robot.arms_at if self._robot else ()
         if at is None and not arms:
             return self.binding
         if at is not None and self.binding is not None and (self.binding.mount is not None or self.binding.mount_point):
@@ -400,7 +416,12 @@ class Scene:
         if at is not None:
             changes["mount"] = in_surface(cell, at)
         if arms:
-            changes["arm_mounts"] = tuple((name, in_surface(cell, pose)) for name, pose in arms)
+            # A position is carried over as a position -- the point in world --
+            # so the base keeps its heading; a pose is a pose in world.
+            changes["arm_mounts"] = tuple(
+                (name, in_surface(cell, pose) if len(pose) == 7 else in_surface(cell, (*pose, 0.0, 0.0, 0.0, 1.0))[:3])
+                for name, pose in arms
+            )
         return replace(binding, **changes)
 
     def build(

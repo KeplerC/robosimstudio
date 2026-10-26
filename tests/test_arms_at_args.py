@@ -31,11 +31,19 @@ RIGHT = (0.12, -0.36, 0.22, 0.0, 0.0, H, H)
 
 
 class TestTheArgument(unittest.TestCase):
-    def test_a_position_is_a_pose_with_no_rotation(self) -> None:
+    def test_a_position_stays_a_position(self) -> None:
+        """Not filled out to a pose: a position keeps the base's heading, which only the build knows."""
         import robosimstudio as rss
 
         placed = rss.robot("yam_bimanual", arms_at={"left": LEFT, "right": RIGHT})
-        self.assertEqual((("left", (*LEFT, 0.0, 0.0, 0.0, 1.0)), ("right", RIGHT)), placed.arms_at)
+        self.assertEqual((("left", LEFT), ("right", RIGHT)), placed.arms_at)
+
+    def test_a_placement_built_directly_reads_the_same_and_hashes(self) -> None:
+        import robosimstudio as rss
+
+        direct = rss.Robot(name="yam_bimanual", arms_at={"left": list(LEFT)})
+        self.assertEqual((("left", LEFT),), direct.arms_at)
+        hash(direct)
 
     def test_unstated_is_empty(self) -> None:
         import robosimstudio as rss
@@ -68,17 +76,26 @@ class TestTheBinding(unittest.TestCase):
     def test_arms_at_reaches_the_binding_in_world(self) -> None:
         """The bench's work-surface frame is 750 mm up and centred at world x = 0.6."""
         mounts = dict(self._binding(arms_at={"left": LEFT, "right": RIGHT}).arm_mounts)
-        np.testing.assert_allclose(mounts["left"], (0.24, 0.20, 0.81, 0.0, 0.0, 0.0, 1.0), atol=1e-12)
+        np.testing.assert_allclose(mounts["left"], (0.24, 0.20, 0.81), atol=1e-12)
         np.testing.assert_allclose(mounts["right"], (0.72, -0.36, 0.97, 0.0, 0.0, H, H), atol=1e-12)
 
     def test_arms_at_is_absolute_not_relative_to_at(self) -> None:
         binding = self._binding(at=(-0.2, 0.1, 0.05), arms_at={"left": LEFT})
         np.testing.assert_allclose(binding.mount, (0.40, 0.10, 0.80, 0.0, 0.0, 0.0, 1.0), atol=1e-12)
-        np.testing.assert_allclose(dict(binding.arm_mounts)["left"], (0.24, 0.20, 0.81, 0.0, 0.0, 0.0, 1.0), atol=1e-12)
+        np.testing.assert_allclose(dict(binding.arm_mounts)["left"], (0.24, 0.20, 0.81), atol=1e-12)
 
     def test_without_arms_at_the_binding_is_untouched(self) -> None:
         self.assertIsNone(self._binding())
         self.assertEqual((), self._binding(at=(0.0, 0.0, 0.0)).arm_mounts)
+
+    def test_arm_mounts_without_a_robot_are_refused(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio.specs import Binding
+
+        scene = rss.Scene(cell="bench_075", binding=Binding(scene="bench_075", arm_mounts=(("left", LEFT),)))
+        scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.1)))
+        with self.assertRaisesRegex(ValueError, r"places arms \['left'\], and the scene has no robot"):
+            scene.build(device="cpu", warmup=False)
 
     def test_arms_at_and_a_binding_saying_the_same_are_refused(self) -> None:
         import robosimstudio as rss
@@ -192,12 +209,24 @@ LIFTED = (
 """One arm welded to a torso that rides a lift on a stand. On the root itself a lift would be
 dropped: the importer welds the root of a fixed-base robot to the world in its joint's place."""
 
-MOUNT = (0.1, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0)
+WELDED = APART.replace("</worldbody>", '</worldbody><equality><weld body1="a_l2"/></equality>')
+"""The two arms, the left one's wrist welded to the world by an equality."""
+
 WANT = (0.3, 0.4, 0.6, 0.0, 0.0, H, H)
 
 
 class TestThePlacement(unittest.TestCase):
-    def _build(self, xml: str, *, collapse: bool, mounts: dict, base_body: str = "", prefix: bool = False):
+    def _build(
+        self,
+        xml: str,
+        *,
+        collapse: bool,
+        mounts: dict,
+        base_body: str = "",
+        prefix: bool = False,
+        reverse: bool = False,
+        mount: tuple = (0.1, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0),
+    ):
         import newton
 
         from robosimstudio.robots.entity import EntityEmbodiment
@@ -210,7 +239,7 @@ class TestThePlacement(unittest.TestCase):
         arms = tuple(
             ArmSpec(
                 name=p,
-                joint_names=() if prefix else (f"{p}_j1", f"{p}_j2"),
+                joint_names=() if prefix else (f"{p}_j2", f"{p}_j1") if reverse else (f"{p}_j1", f"{p}_j2"),
                 joint_prefix=f"{p}_" if prefix else "",
                 ee_body_name=f"{p}_l2",
                 base_body_name=base_body if p == "a" else "",
@@ -220,7 +249,7 @@ class TestThePlacement(unittest.TestCase):
         )
         spec = EmbodimentSpec(name="two", asset=AssetSpec(path=str(path)), arms=arms, collapse_fixed_joints=collapse)
         builder = newton.ModelBuilder()
-        EntityEmbodiment(spec, pose=MOUNT, arm_mounts=mounts).build_into(builder, None)
+        EntityEmbodiment(spec, pose=mount, arm_mounts=mounts).build_into(builder, None)
         return builder
 
     @staticmethod
@@ -259,6 +288,28 @@ class TestThePlacement(unittest.TestCase):
         ]
         self.assertEqual(1, len(puck))
         np.testing.assert_allclose(np.asarray(builder.shape_transform[puck[0]], dtype=np.float64), WANT, atol=1e-6)
+
+    def test_a_position_keeps_the_heading(self) -> None:
+        """On a robot turned a quarter by its mount, a position moves the base and does not turn it."""
+        turned = (0.1, 0.0, 0.5, 0.0, 0.0, H, H)
+        builder = self._build(APART, collapse=False, mounts={"a": (0.3, 0.4, 0.6)}, mount=turned)
+        np.testing.assert_allclose(self._body(builder, "a_base"), (0.3, 0.4, 0.6, 0.0, 0.0, H, H), atol=1e-6)
+
+    def test_the_first_joint_is_the_first_in_the_tree(self) -> None:
+        """``joint_names`` listed wrist first still finds the base the arm stands on."""
+        builder = self._build(APART, collapse=False, mounts={"a": WANT}, reverse=True)
+        np.testing.assert_allclose(self._body(builder, "a_base"), WANT, atol=1e-6)
+
+    def test_an_equality_to_what_stays_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "equality constraint ties .*a_l2' to the world"):
+            self._build(WELDED, collapse=False, mounts={"a": WANT})
+        # The other arm's placement does not carry the welded wrist, so it is free to move.
+        builder = self._build(WELDED, collapse=False, mounts={"b": WANT})
+        np.testing.assert_allclose(self._body(builder, "b_base"), WANT, atol=1e-6)
+
+    def test_a_name_the_spec_does_not_have_is_refused_by_the_entity_too(self) -> None:
+        with self.assertRaisesRegex(ValueError, r"places arm\(s\) \['c'\], and its arms are \['a', 'b'\]"):
+            self._build(APART, collapse=False, mounts={"c": WANT})
 
     def test_an_arm_sharing_its_root_is_refused(self) -> None:
         with self.assertRaisesRegex(ValueError, r"arm 'a' stands on .*torso.* with arm\(s\) \['b'\]"):

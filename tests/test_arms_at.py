@@ -34,12 +34,19 @@ TIER = "medium"
 CELL = "bench_075"
 H = math.sqrt(0.5)
 KEYBOX = {
-    "left": (-0.36, 0.20, 0.06, 0.0, 0.0, 0.0, 1.0),
+    "left": (-0.36, 0.20, 0.06),
     "right": (0.12, -0.36, 0.22, 0.0, 0.0, H, H),
 }
 """The keybox twin's arms, which it stood by copying the YAM's file: the left
 base 60 mm up and back on the left, the right one 220 mm up on a riser, turned a
-quarter turn to face across the bench. In the work-surface frame."""
+quarter turn to face across the bench. In the work-surface frame. The left is a
+position, which keeps the heading the YAM's file gives it -- none."""
+
+
+def _full(pose) -> tuple[float, ...]:
+    """A keybox entry as a pose: a position keeps the YAM base's heading, which is the identity."""
+    return tuple(pose) if len(pose) == 7 else (*pose, 0.0, 0.0, 0.0, 1.0)
+
 
 POSITION_MM = 1.0
 ANGLE_DEG = 0.1
@@ -132,7 +139,7 @@ class TestTheYamArmsStandWhereArmsAtSays(unittest.TestCase):
     def test_each_base_lands_on_its_pose(self) -> None:
         for side, pose in KEYBOX.items():
             with self.subTest(arm=side):
-                position, angle = _pose_error(_base_from_puck(self.sim, side), _world(pose))
+                position, angle = _pose_error(_base_from_puck(self.sim, side), _world(_full(pose)))
                 print(f"[arms_at] {side} base off its pose by {position:.4f} mm, {angle:.4f} deg")
                 self.assertLess(position, POSITION_MM)
                 self.assertLess(angle, ANGLE_DEG)
@@ -171,7 +178,7 @@ class TestTheYamArmsStandWhereArmsAtSays(unittest.TestCase):
 
         for side, pose in KEYBOX.items():
             with self.subTest(arm=side):
-                target = transform_point(_world(pose), (0.30, 0.05, 0.12))
+                target = transform_point(_world(_full(pose)), (0.30, 0.05, 0.12))
                 miss = _reach(self, self.sim, side, target)
                 print(f"[arms_at] {side} TCP {miss:.2f} mm from a target beside its moved base")
                 self.assertLess(miss, 5.0)
@@ -199,7 +206,8 @@ class TestTheSameLayoutAsAMovedCopy(unittest.TestCase):
         root = tree.getroot()
         compiler = root.find("compiler")
         compiler.set("meshdir", str((source.parent / compiler.get("meshdir")).resolve()))
-        for side, (x, y, z, qx, qy, qz, qw) in KEYBOX.items():
+        for side, pose in KEYBOX.items():
+            x, y, z, qx, qy, qz, qw = _full(pose)
             body = root.find(f"./worldbody/body[@name='{side}_arm']")
             body.set("pos", f"{x!r} {y!r} {z!r}")
             body.set("quat", f"{qw!r} {qx!r} {qy!r} {qz!r}")

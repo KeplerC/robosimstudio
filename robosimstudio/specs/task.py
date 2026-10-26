@@ -152,9 +152,11 @@ class Binding:
             deriving one. Ignored when ``mount`` is set.
         arm_mounts: ``(arm name, pose)`` pairs placing single arms of the
             robot, each pose the world pose of that arm's base body (its
-            :attr:`ArmSpec.base_body_name`, else the body its first joint hangs
-            on, as the robot's file declares it). Empty leaves every arm where
-            ``mount`` and the file put it.
+            :attr:`ArmSpec.base_body_name`, else the body its first moving joint
+            hangs on, as the robot's file declares it). Seven numbers set the
+            base's heading too; three are a position that keeps the heading the
+            base already has. Empty leaves every arm where ``mount`` and the
+            file put it.
 
             Absolute, not relative to ``mount``: a named arm stands at its pose
             wherever the robot stands, and an arm left out still follows the

@@ -511,7 +511,7 @@ def _mount(request: SceneRequest, binding: Binding, scene: CellSpec | None, spec
     return request.embodiment_pose
 
 
-def _arm_mounts(request: SceneRequest, binding: Binding, spec: EmbodimentSpec) -> dict[str, Xform]:
+def _arm_mounts(request: SceneRequest, binding: Binding, spec: EmbodimentSpec) -> dict[str, tuple[float, ...]]:
     """Where each arm the pairing places on its own stands, in world coordinates, by arm name.
 
     Checked here rather than where ``arms_at`` was written because this is the
@@ -525,7 +525,7 @@ def _arm_mounts(request: SceneRequest, binding: Binding, spec: EmbodimentSpec) -
     if not binding.arm_mounts:
         return {}
     names = [a.name for a in spec.arms]
-    mounts: dict[str, Xform] = {}
+    mounts: dict[str, tuple[float, ...]] = {}
     for name, pose in binding.arm_mounts:
         if name not in names:
             raise ValueError(
@@ -534,10 +534,14 @@ def _arm_mounts(request: SceneRequest, binding: Binding, spec: EmbodimentSpec) -
         if name in mounts:
             raise ValueError(f"scene {request.full_name!r}: arms_at places arm {name!r} twice")
         values = tuple(float(v) for v in pose)
-        if len(values) != 7 or not np.all(np.isfinite(values)) or float(np.linalg.norm(values[3:])) < 1.0e-6:
+        if (
+            len(values) not in (3, 7)
+            or not np.all(np.isfinite(values))
+            or (len(values) == 7 and float(np.linalg.norm(values[3:])) < 1.0e-6)
+        ):
             raise ValueError(
-                f"scene {request.full_name!r}: arm {name!r}'s mount is a pose (x, y, z, qx, qy, qz, qw) with a "
-                f"finite position and a non-zero quaternion, and it was given {values}"
+                f"scene {request.full_name!r}: arm {name!r}'s mount is a position (x, y, z) or a pose "
+                f"(x, y, z, qx, qy, qz, qw) with a non-zero quaternion, all finite, and it was given {values}"
             )
         mounts[name] = values
     if spec.resident(binding.scene_resident):
@@ -811,6 +815,11 @@ def _build_base(
         embodiment.build_into(builder, episode)
         embodiment.apply_actuation(builder)
         entities.append(embodiment)
+    elif binding.arm_mounts:
+        raise ValueError(
+            f"scene {request.full_name!r}: the binding places arms {[n for n, _ in binding.arm_mounts]}, "
+            "and the scene has no robot"
+        )
 
     work_arm, support_arm = _roles(binding, embodiment_spec if embodiment is not None else None, request)
 

@@ -66,6 +66,20 @@ def _wp_xform(values) -> wp.transform:
     return wp.transform(wp.vec3(v[0], v[1], v[2]), wp.normalize(wp.quat(v[3], v[4], v[5], v[6])))
 
 
+def _equality_ends(builder: newton.ModelBuilder) -> list[tuple[int, int]]:
+    """Every equality constraint's two bodies, both ways round; -1 is the world.
+
+    A joint-coupling equality (a finger mimic) names joints rather than bodies,
+    so both its ends read -1 and it ties nothing to anything here.
+    """
+    if "mujoco:equality_constraint_body1" not in builder.custom_attributes:
+        return []
+    ends = list(
+        zip(builder._eq_list("equality_constraint_body1"), builder._eq_list("equality_constraint_body2"), strict=True)
+    )
+    return [(int(a), int(b)) for a, b in ends] + [(int(b), int(a)) for a, b in ends]
+
+
 def _limb_bodies(joint_parent, joint_child, joints: Sequence[int], seed_joints: Sequence[int]) -> set[int]:
     """Every body hanging off ``seed_joints``, following the tree downwards only.
 
@@ -232,7 +246,13 @@ class EntityEmbodiment(Entity):
         self.arm_mounts: dict[str, tuple[float, ...]] = {
             str(name): tuple(float(v) for v in value) for name, value in (arm_mounts or {}).items()
         }
-        """Per arm, the world pose its base was placed at, or empty: see :meth:`_place_arms`."""
+        """Per arm, the world pose its base was placed at -- or a position, keeping
+        the heading -- or empty: see :meth:`_place_arms`."""
+        unknown = sorted(set(self.arm_mounts) - {a.name for a in spec.arms})
+        if unknown:
+            raise ValueError(
+                f"{spec.name}: arm_mounts places arm(s) {unknown}, and its arms are {[a.name for a in spec.arms]}"
+            )
         self.scene_resident = bool(scene_resident)
         """Whether this robot already exists inside the task's scene asset.
 
@@ -769,8 +789,11 @@ class EntityEmbodiment(Entity):
         Runs on the import as the file declares it, before any fixed joint is
         collapsed, because that is where an arm's base is still a body: the one
         :attr:`~robosimstudio.specs.ArmSpec.base_body_name` names, else the body
-        the arm's first joint hangs on -- on ``yam_bimanual``, ``left_arm`` and
-        ``right_arm``. From the base the walk climbs welds to the arm's *root*,
+        the arm's first moving joint hangs on -- on ``yam_bimanual``, ``left_arm``
+        and ``right_arm``; first in the tree, which an importer numbers depth
+        first, whatever order ``joint_names`` lists them in. A mount of three
+        numbers is a position: the base goes there and keeps the heading the
+        import gave it. From the base the walk climbs welds to the arm's *root*,
         the body the importer welded to the world, and the whole root is carried
         rigidly by the one transform that lands the base on its pose: the root's
         weld (``joint_X_p``, which for a joint on the world is a world pose) and
@@ -786,7 +809,9 @@ class EntityEmbodiment(Entity):
         * an arm whose first joint hangs on the world: there is no base to place;
         * a base under a moving joint: its pose would hold at one posture only;
         * a root that carries another arm: placing one would silently move
-          both. Arms on one root move together, with ``at=``.
+          both. Arms on one root move together, with ``at=``;
+        * an equality constraint from the moved bodies to the world or to a body
+          that stays: it would hold the arm where the file put it.
         """
         fixed = int(newton.JointType.FIXED)
         joints = range(joint_start, builder.joint_count)
@@ -811,7 +836,7 @@ class EntityEmbodiment(Entity):
             claimed[arm.name] = moving
             arm_j = [j for j in arm_j if j in moving]
             if arm_j:
-                first[arm.name] = arm_j[0]
+                first[arm.name] = min(arm_j)
         for arm in self.spec.arms:
             want = self.arm_mounts.get(arm.name)
             if want is None:
@@ -860,6 +885,14 @@ class EntityEmbodiment(Entity):
                     f" with arm(s) {shared}, so placing it would move them too. arms_at places an arm whose root "
                     "carries no other arm; move arms that share one together with at=."
                 )
+            for end, other in _equality_ends(builder):
+                if end in carried and other not in carried:
+                    raise ValueError(
+                        f"{self.spec.name} arm {arm.name!r}: an equality constraint ties "
+                        f"{builder.body_label[end]!r} to "
+                        f"{'the world' if other < 0 else repr(builder.body_label[other])}, which arms_at does not "
+                        "move, so it would hold the arm where the file put it"
+                    )
             # The base's world pose through the welds, as the collapse composes them.
             have = wp.transform_identity()
             for joint in reversed(chain):
@@ -868,7 +901,11 @@ class EntityEmbodiment(Entity):
                     * _wp_xform(builder.joint_X_p[joint])
                     * wp.transform_inverse(_wp_xform(builder.joint_X_c[joint]))
                 )
-            delta = _wp_xform(want) * wp.transform_inverse(have)
+            if len(want) == 3:
+                target = wp.transform(wp.vec3(*want), wp.transform_get_rotation(have))
+            else:
+                target = _wp_xform(want)
+            delta = target * wp.transform_inverse(have)
             builder.joint_X_p[root] = delta * _wp_xform(builder.joint_X_p[root])
             for b in carried:
                 builder.body_q[b] = delta * _wp_xform(builder.body_q[b])
