@@ -13,7 +13,9 @@ tracer reads it:
 * a handle with a ``tube_radius`` (a rope's centerline) is a tube swept along
   its particles (:func:`~robosimstudio.core.render.visual.tube_points`);
 * a particle body (:func:`~robosimstudio.core.render.particles.draws_points`)
-  is its particles as spheres at ``point_radius``;
+  is the surface its handle grows over its particles, for a renderer that can
+  redraw a mesh of changing topology every frame (``surfaces=True``), and
+  otherwise its particles as spheres at ``point_radius``;
 * what no handle names is drawn as the tiled tracer draws it: the model's own
   triangles over those particles (``model.tri_indices``) as one mesh, and a
   particle no triangle uses as a sphere at its own radius -- which is all of a
@@ -35,7 +37,7 @@ from .palette import DEFORMABLE
 from .particles import draws_points
 from .visual import TUBE_SIDES, tube_points, tube_triangles
 
-__all__ = ["DeformableMesh", "ParticlePoints", "deformable_drawables", "vertex_normals"]
+__all__ = ["DeformableMesh", "Drawables", "ParticlePoints", "ParticleSurface", "deformable_drawables", "vertex_normals"]
 
 
 def vertex_normals(points: np.ndarray, triangles: np.ndarray) -> np.ndarray:
@@ -105,14 +107,40 @@ class ParticlePoints:
 
 
 @dataclass
+class ParticleSurface:
+    """A particle body drawn as the surface its handle grows over its particles, every frame anew.
+
+    Attributes:
+        name: The deformable's scene name.
+        particles: Indices into ``particle_q``.
+        surface: The handle's ``surface`` callable (see
+            :class:`~robosimstudio.scene.handles.DeformableHandle`).
+        color: Display RGB in [0, 1].
+    """
+
+    name: str
+    particles: np.ndarray
+    surface: Any
+    color: tuple[float, float, float] = DEFORMABLE
+
+    def mesh(self, particle_q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """This frame's ``(vertices float32 [m, 3], triangles int32 [k, 3])``; both empty when there is none."""
+        from .particles import surface_mesh
+
+        verts, tris, _ = surface_mesh(self.surface, np.asarray(particle_q)[self.particles])
+        return np.asarray(verts, dtype=np.float32).reshape(-1, 3), np.asarray(tris, dtype=np.int32).reshape(-1, 3)
+
+
+@dataclass
 class Drawables:
-    """Every deformable of a model, as meshes and as points."""
+    """Every deformable of a model, as meshes, as points, and as surfaces regrown each frame."""
 
     meshes: list[DeformableMesh] = field(default_factory=list)
     points: list[ParticlePoints] = field(default_factory=list)
+    surfaces: list[ParticleSurface] = field(default_factory=list)
 
     def __bool__(self) -> bool:
-        return bool(self.meshes or self.points)
+        return bool(self.meshes or self.points or self.surfaces)
 
 
 def _particle_radii(model: Any, index: np.ndarray) -> np.ndarray:
@@ -129,13 +157,18 @@ def deformable_drawables(
     model: Any,
     deformables: Mapping[str, Any] | None = None,
     colors: Mapping[str, Sequence[float]] | None = None,
+    *,
+    surfaces: bool = False,
 ) -> Drawables:
-    """The model's deformables as :class:`DeformableMesh` and :class:`ParticlePoints`.
+    """The model's deformables as :class:`DeformableMesh`, :class:`ParticlePoints` and :class:`ParticleSurface`.
 
     Args:
         model: The finalized model.
         deformables: ``name -> DeformableHandle`` (a scene's ``handles.deformables``), or ``None``.
         colors: ``name -> RGB`` for those (``Sim``'s ``deformable_colors``); a name left out is the palette's.
+        surfaces: Whether the caller can draw a mesh whose topology changes every frame: a particle body
+            whose handle offers a ``surface`` (a liquid, a dough) is then that surface, as the path tracer
+            draws it, rather than its grains.
     """
     out = Drawables()
     count = int(getattr(model, "particle_count", 0) or 0)
@@ -157,6 +190,8 @@ def deformable_drawables(
             out.meshes.append(DeformableMesh(name, particles[used], local.reshape(-1, 3).astype(np.int32), color))
         elif tube > 0.0 and len(particles) >= 2:
             out.meshes.append(DeformableMesh(name, particles, tube_triangles(len(particles)), color, tube))
+        elif draws_points(handle) and surfaces and getattr(handle, "surface", None) is not None:
+            out.surfaces.append(ParticleSurface(name, particles, handle.surface, color))
         elif draws_points(handle):
             radii = np.full(len(particles), float(handle.point_radius))
             out.points.append(ParticlePoints(name, particles, radii, color))

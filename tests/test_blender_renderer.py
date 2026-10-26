@@ -166,15 +166,10 @@ class TestWhatIsSent(unittest.TestCase):
         np.testing.assert_allclose(_linear((1.0, 0.5, 0.0)), [1.0, 0.21404, 0.0], atol=1e-5)
 
     def test_every_visible_shape_is_sent_once_hung_off_its_body(self) -> None:
-        import newton
-
         from robosimstudio.solvers.render.blender import _describe
 
-        builder = newton.ModelBuilder()
-        builder.add_ground_plane()
-        body = builder.add_body(xform=((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0)))
-        builder.add_shape_box(body, hx=0.05, hy=0.05, hz=0.05)
-        model = builder.finalize(device="cpu")
+        model = _tiny_model()
+        body = 0
         header, blobs, bodies, drawables = _describe(
             model, finishes=None, deformables=None, deformable_colors=None, deformable_finishes=None
         )
@@ -186,6 +181,93 @@ class TestWhatIsSent(unittest.TestCase):
         faces = np.frombuffer(blobs[box["faces"]], dtype=np.int32).reshape(-1, 3)
         self.assertLess(int(faces.max()), len(verts))
         self.assertFalse(drawables)
+
+
+def _tiny_model():
+    import newton
+
+    builder = newton.ModelBuilder()
+    builder.add_ground_plane()
+    body = builder.add_body(xform=((0.0, 0.0, 0.5), (0.0, 0.0, 0.0, 1.0)))
+    builder.add_shape_box(body, hx=0.05, hy=0.05, hz=0.05)
+    return builder.finalize(device="cpu")
+
+
+def _cam():
+    from robosimstudio.core.cameras import CameraSpec
+
+    return CameraSpec(name="c", width=32, height=24, fov_y=60.0, eye=(1, 1, 1), look_at=(0, 0, 0))
+
+
+class TestTheProcess(unittest.TestCase):
+    """What the worker's process does when it is not a Blender, before anything is rendered."""
+
+    def test_a_blender_that_exits_at_once_is_said_at_once(self) -> None:
+        import shutil
+        import time
+
+        from robosimstudio.solvers.render.blender import RendererBlender
+
+        false = shutil.which("false")
+        if false is None:
+            self.skipTest("no `false` on this machine")
+        start = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "exited 1 before it connected"):
+            RendererBlender(_tiny_model(), [_cam()], blender=false, timeout=60.0)
+        self.assertLess(time.monotonic() - start, 20.0, "not after the whole timeout")
+
+    def test_an_interpreter_without_bpy_is_said_by_name(self) -> None:
+        from robosimstudio.solvers.render.blender import RendererBlender
+
+        with self.assertRaisesRegex(RuntimeError, "bpy"):
+            RendererBlender(_tiny_model(), [_cam()], blender=sys.executable, timeout=60.0)
+
+    def test_a_broken_connection_closes_the_renderer(self) -> None:
+        """A reply half read would answer the next request, so the renderer is done with."""
+        from robosimstudio.solvers.render.blender import RendererBlender
+
+        renderer = RendererBlender.__new__(RendererBlender)
+        renderer._sock, other = socket.socketpair()
+        renderer._proc, renderer._tmp, renderer.executable = None, "", "blender"
+        renderer._log = Path("/nonexistent/blender.log")
+        other.close()
+        with self.assertRaisesRegex(RuntimeError, "stopped answering"):
+            renderer._ask({"op": "frame"})
+        self.assertIsNone(renderer._sock)
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            renderer._ask({"op": "frame"})
+
+
+class TestAiming(unittest.TestCase):
+    def test_a_backend_that_builds_its_cameras_in_refuses_to_be_aimed(self) -> None:
+        from robosimstudio.core.render.base import RendererBase
+
+        renderer = RendererBase([_cam()])
+        with self.assertRaises(NotImplementedError):
+            renderer.aim([_cam()])
+
+    def test_aiming_keeps_the_channels_it_was_built_for(self) -> None:
+        from dataclasses import replace
+
+        from robosimstudio.core.render.base import RendererBase
+
+        class Aimed(RendererBase):
+            supported_channels = ("rgb", "depth")
+            retargets = True
+
+        renderer = Aimed([_cam()], channels=("depth",))
+        other = replace(_cam(), name="d", channels=("rgb",))
+        renderer.aim([other])
+        self.assertEqual(renderer.cameras, [other])
+        self.assertEqual(renderer.channels, {"d": ("depth",)}, "the override it was built with, not the camera's")
+        self.assertTrue(backend_retargets("blender"))
+        self.assertFalse(backend_retargets("gl"))
+
+
+def backend_retargets(name: str) -> bool:
+    from robosimstudio.solvers.render import backend_class
+
+    return bool(backend_class(name).retargets)
 
 
 class TestTheRegistry(unittest.TestCase):

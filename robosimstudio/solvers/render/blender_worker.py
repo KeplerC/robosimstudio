@@ -15,10 +15,11 @@ length-prefixed (8 bytes, little-endian); the header names a blob by its index.
 
 * ``scene``: the meshes (vertices, faces, UVs, a texture, a material), which
   body each hangs off and where, the deformables' fixed topology, the particles
-  drawn as spheres, the lights, the world, the engine and its sampling. Built
-  once.
+  drawn as spheres, the particle surfaces, the lights, the world, the engine
+  and its sampling. Built once.
 * ``frame``: each body's world matrix, each deformable's vertices, the
-  particles' positions, and the cameras (intrinsics, size, pose, channels).
+  particles' positions, each particle surface's vertices and triangles (their
+  counts change), and the cameras (intrinsics, size, pose, channels).
   Answered with each camera's RGB (``uint8 [H, W, 3]``, sRGB) and depth
   (``float32 [H, W]``, metres to the image plane, 0 for a miss).
 * ``quit``.
@@ -119,7 +120,9 @@ class World:
         self.bpy, self.np = bpy, np
         bpy.ops.wm.read_factory_settings(use_empty=True)
         self.scene = scene = bpy.context.scene
-        self.tmp = tempfile.mkdtemp(prefix="rss_blender_")
+        # under the working directory the client started this in, which it removes when it closes
+        self.tmp = tempfile.mkdtemp(prefix="rss_blender_", dir=os.getcwd())
+        self.images: dict[int, object] = {}
         self.device = self._engine(header)
         settings = scene.render.image_settings
         if hasattr(settings, "media_type"):  # Blender 5: the multilayer formats are a media type of their own
@@ -142,6 +145,7 @@ class World:
             self._mesh(part, blobs)
         self.deformables = [self._deformable(d, blobs) for d in header.get("deformables", [])]
         self.points = [self._points(p, blobs) for p in header.get("points", [])]
+        self.surfaces = [self._surface(d, blobs) for d in header.get("surfaces", [])]
         cam_data = bpy.data.cameras.new("camera")
         cam_data.sensor_fit = "HORIZONTAL"
         cam_data.sensor_width = 36.0
@@ -243,7 +247,7 @@ class World:
     def _material(self, spec: dict, blobs: list[bytes]):
         bpy = self.bpy
         key = json.dumps({k: spec.get(k) for k in ("color", "roughness", "metallic", "opacity", "texture", "box")})
-        if key in self.materials and spec.get("texture", -1) < 0:
+        if key in self.materials:
             return self.materials[key]
         mat = bpy.data.materials.new(f"material{len(self.materials)}")
         mat.use_nodes = True
@@ -257,11 +261,13 @@ class World:
             bsdf.inputs["Alpha"].default_value = alpha
         texture = int(spec.get("texture", -1))
         if texture >= 0:
-            path = os.path.join(self.tmp, f"texture{texture}_{len(self.materials)}.png")
-            with open(path, "wb") as f:
-                f.write(blobs[texture])
-            image = bpy.data.images.load(path)
-            image.colorspace_settings.name = "sRGB"
+            image = self.images.get(texture)
+            if image is None:  # one image per texture sent, however many shapes share it
+                path = os.path.join(self.tmp, f"texture{texture}.png")
+                with open(path, "wb") as f:
+                    f.write(blobs[texture])
+                image = self.images[texture] = bpy.data.images.load(path)
+                image.colorspace_settings.name = "sRGB"
             node = mat.node_tree.nodes.new("ShaderNodeTexImage")
             node.image = image
             box = spec.get("box")
@@ -288,8 +294,12 @@ class World:
         return mat
 
     def _new_mesh(self, name: str, verts, faces, uv=None):
-        bpy, np = self.bpy, self.np
-        mesh = bpy.data.meshes.new(name)
+        return self._fill(self.bpy.data.meshes.new(name), verts, faces, uv)
+
+    def _fill(self, mesh, verts, faces, uv=None):
+        """``mesh`` made of these vertices and triangles (and UVs per vertex), whatever it held before."""
+        np = self.np
+        mesh.clear_geometry()
         verts = np.asarray(verts, dtype=np.float32).reshape(-1, 3)
         faces = np.asarray(faces, dtype=np.int32).reshape(-1, 3)
         mesh.vertices.add(len(verts))
@@ -304,7 +314,7 @@ class World:
             layer.data.foreach_set("uv", np.asarray(uv, dtype=np.float32).reshape(-1, 2)[faces.ravel()].ravel())
         mesh.update(calc_edges=True)
         mesh.validate(clean_customdata=False)
-        mesh.polygons.foreach_set("use_smooth", np.full(len(faces), bool(len(faces) > 64)))
+        mesh.polygons.foreach_set("use_smooth", np.full(len(mesh.polygons), len(mesh.polygons) > 64))
         return mesh
 
     def _mesh(self, part: dict, blobs: list[bytes]) -> None:
@@ -333,7 +343,7 @@ class World:
         bpy, np = self.bpy, self.np
         faces = np.frombuffer(blobs[spec["faces"]], dtype=np.int32).reshape(-1, 3)
         mesh = self._new_mesh(spec["name"], np.frombuffer(blobs[spec["verts"]], dtype=np.float32), faces)
-        mesh.polygons.foreach_set("use_smooth", np.ones(len(faces), dtype=bool))
+        mesh.polygons.foreach_set("use_smooth", np.ones(len(mesh.polygons), dtype=bool))
         mesh.materials.append(self._material(spec, blobs))
         obj = bpy.data.objects.new(spec["name"], mesh)
         self.scene.collection.objects.link(obj)
@@ -351,6 +361,15 @@ class World:
         self.scene.collection.objects.link(obj)
         return cloud
 
+    def _surface(self, spec: dict, blobs: list[bytes]):
+        """A particle body's surface: a mesh rebuilt every frame, its vertex and face counts changing."""
+        bpy = self.bpy
+        mesh = bpy.data.meshes.new(spec["name"])
+        mesh.materials.append(self._material(spec, blobs))
+        obj = bpy.data.objects.new(spec["name"], mesh)
+        self.scene.collection.objects.link(obj)
+        return mesh
+
     # -------------------------------------------------------------- one frame
     def frame(self, header: dict, blobs: list[bytes]) -> tuple[dict, list]:
         np = self.np
@@ -365,8 +384,11 @@ class World:
             mesh.vertices.foreach_set("co", np.frombuffer(blobs[index], dtype=np.float32))
             mesh.update()
         for cloud, index in zip(self.points, header.get("points", []), strict=True):
-            cloud.points.foreach_set("position", np.frombuffer(blobs[index], dtype=np.float32))
+            cloud.points.foreach_set("co", np.frombuffer(blobs[index], dtype=np.float32))
             cloud.update_tag()
+        for mesh, (verts, faces) in zip(self.surfaces, header.get("surfaces", []), strict=True):
+            self._fill(mesh, np.frombuffer(blobs[verts], dtype=np.float32), np.frombuffer(blobs[faces], dtype=np.int32))
+            mesh.polygons.foreach_set("use_smooth", np.ones(len(mesh.polygons), dtype=bool))
         out, replies = [], []
         for cam in header["cameras"]:
             t = time.time()
@@ -447,20 +469,24 @@ class World:
             self._black.use_nodes = True
             self._black.node_tree.nodes["Background"].inputs["Color"].default_value = (0.0, 0.0, 0.0, 1.0)
         layer, world = scene.view_layers[0], scene.world
-        kept = {}
         if scene.render.engine == "CYCLES":
-            cycles = scene.cycles
-            for key, value in (("samples", 1), ("use_adaptive_sampling", False), ("use_denoising", False),
-                               ("filter_width", 0.01), ("max_bounces", 0), ("seed", 0)):  # fmt: skip
-                kept[key] = getattr(cycles, key)
-                setattr(cycles, key, value)
+            one_sample = (scene.cycles, (("samples", 1), ("use_adaptive_sampling", False), ("use_denoising", False),
+                          ("filter_width", 0.01), ("max_bounces", 0), ("seed", 0)))  # fmt: skip
+        else:  # EEVEE: one sample, no pixel filter
+            one_sample = (scene.eevee, (("taa_render_samples", 1),))
+        owner, settings = one_sample
+        kept = [(owner, key, getattr(owner, key)) for key, _ in settings]
+        kept.append((scene.render, "filter_size", scene.render.filter_size))
+        for key, value in settings:
+            setattr(owner, key, value)
+        scene.render.filter_size = 0.01
         layer.material_override, scene.world = self._depth_mat, self._black
         try:
             z = self._still(w, h)[..., 0]
         finally:
             layer.material_override, scene.world = None, world
-            for key, value in kept.items():
-                setattr(scene.cycles, key, value)
+            for target, key, value in kept:
+                setattr(target, key, value)
         return np.where((z > 0.0) & (z <= far) & np.isfinite(z), z, 0.0).astype(np.float32)
 
     def _read_exr(self, path: str, w: int, h: int):
@@ -499,6 +525,10 @@ def main(argv: list[str]) -> int:
         op = header.get("op")
         try:
             if op == "quit":
+                if world is not None:
+                    import shutil
+
+                    shutil.rmtree(world.tmp, ignore_errors=True)
                 send(sock, {"ok": True})
                 return 0
             if op == "scene":

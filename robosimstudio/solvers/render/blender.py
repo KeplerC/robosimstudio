@@ -25,7 +25,8 @@ the worker is the same.
 * Geometry: :func:`~robosimstudio.core.render.visual.model_visual_parts`, the
   meshes ``gl`` draws, each an object parented to an empty per body. A
   deformable is a mesh of fixed topology whose vertices move, a rope a tube, a
-  particle body a point cloud Cycles draws as spheres
+  particle body the surface its handle grows each frame (a liquid, a dough) or
+  else a point cloud Cycles draws as spheres
   (:func:`~robosimstudio.core.render.deformables.deformable_drawables`).
 * Materials: a Principled BSDF per shape, base colour decoded from the
   palette's display values to linear albedo (as ``rtx`` does), the mesh's own
@@ -44,8 +45,9 @@ the worker is the same.
   Combined pass alone).
 
 **Cost.** Cycles at ``preview`` (32 samples, denoised) is about a second a
-960x540 frame on a GPU through OptiX and several on a many-core CPU; ``final``
-takes four times the samples. EEVEE is faster where it has a GPU context and is
+960x540 frame through CUDA or on a many-core CPU (a frame is two renders: the
+picture, and a one-sample depth pass); ``final`` takes four times the
+samples. EEVEE is faster where it has a GPU context and is
 not offered where it has none. Starting Blender costs a second or two, and the
 scene a second or two more.
 """
@@ -59,6 +61,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -79,7 +82,7 @@ ENGINE_ENV = "ROBOSIMSTUDIO_BLENDER_ENGINE"
 """``cycles`` (the default) or ``eevee``, for a machine; ``engine=`` in code wins."""
 
 DEVICE_ENV = "ROBOSIMSTUDIO_BLENDER_DEVICE"
-"""Cycles' device for a machine: ``auto`` (the default: OptiX, CUDA, Metal, HIP or oneAPI, else the CPU),
+"""Cycles' device for a machine: ``auto`` (the default: CUDA, Metal, HIP, oneAPI or OptiX, else the CPU),
 ``cpu``, or one of those backends by name; ``device=`` in code wins."""
 
 MAC_APP = "/Applications/Blender.app/Contents/MacOS/Blender"
@@ -141,9 +144,10 @@ def blender_argv(executable: str, port: int) -> list[str]:
 
 
 def _linear(rgb: Sequence[float]) -> list[float]:
-    """Display values (the palette's, a texture's factor) as the linear albedo Blender shades with."""
-    c = np.clip(np.asarray(rgb, dtype=np.float64)[:3], 0.0, 1.0)
-    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4).tolist()
+    """Display values (the palette's, a texture's factor) as the linear albedo Blender shades with, as ``rtx`` decodes them."""
+    from robosimstudio.core.render.palette import srgb_to_linear
+
+    return list(srgb_to_linear(list(rgb)[:3]))
 
 
 def _png(image: Any) -> bytes:
@@ -166,7 +170,7 @@ class RendererBlender(RendererBase):
         device: Cycles' device; :data:`DEVICE_ENV`, else ``auto``.
         quality: ``preview`` or ``final``; picks ``samples`` unless that is stated.
         samples: Samples per pixel.
-        denoise: Whether Cycles denoises (OpenImageDenoise, or OptiX's on an OptiX device).
+        denoise: Whether Cycles denoises (OpenImageDenoise).
         threads: CPU threads for Cycles; 0 lets Blender use every core.
         timeout: Seconds to wait for Blender to start, build the scene, or render a frame.
         light_direction: The way the key light travels, for the sun rig.
@@ -186,6 +190,7 @@ class RendererBlender(RendererBase):
 
     name = "blender"
     supported_channels = ("rgb", "depth")
+    retargets = True  # every frame sends its cameras: a new viewpoint costs no new Blender
     devices = ("cpu", "cuda")  # Blender is its own process and renders wherever it can, whatever device the model is on
     wants: tuple[str, ...] = (
         "finishes",
@@ -254,6 +259,7 @@ class RendererBlender(RendererBase):
         self._sock: socket.socket | None = None
         self._tmp = tempfile.mkdtemp(prefix="rss_blender_")
         self._log = Path(self._tmp) / "blender.log"
+        self._rest = model.particle_q.numpy() if int(getattr(model, "particle_count", 0) or 0) else None
         header, blobs, self._bodies, self._drawables = _describe(
             model,
             finishes=finishes,
@@ -284,7 +290,6 @@ class RendererBlender(RendererBase):
     # ------------------------------------------------------------------ the worker
     def _start(self) -> None:
         server = socket.create_server(("127.0.0.1", 0))
-        server.settimeout(self.timeout)
         try:
             port = server.getsockname()[1]
             with open(self._log, "wb") as log:
@@ -295,10 +300,21 @@ class RendererBlender(RendererBase):
                     stderr=subprocess.STDOUT,
                     cwd=self._tmp,
                 )
-            try:
-                self._sock, _ = server.accept()
-            except TimeoutError as exc:
-                raise RuntimeError(f"Blender did not connect within {self.timeout:.0f} s; {self._tail()}") from exc
+            # in short waits, so a Blender that exits at once (a missing library, a flag it rejects) is said at once
+            server.settimeout(0.5)
+            deadline = time.monotonic() + self.timeout
+            while self._sock is None:
+                try:
+                    self._sock, _ = server.accept()
+                except TimeoutError:
+                    if self._proc.poll() is not None:
+                        raise RuntimeError(
+                            f"Blender exited {self._proc.returncode} before it connected; {self._tail()}"
+                        ) from None
+                    if time.monotonic() > deadline:
+                        raise RuntimeError(
+                            f"Blender did not connect within {self.timeout:.0f} s; {self._tail()}"
+                        ) from None
         finally:
             server.close()
         self._sock.settimeout(self.timeout)
@@ -322,7 +338,10 @@ class RendererBlender(RendererBase):
         except (OSError, ConnectionError) as exc:
             died = self._proc is not None and self._proc.poll() is not None
             why = f"exited {self._proc.returncode}" if died else f"stopped answering ({type(exc).__name__}: {exc})"
-            raise RuntimeError(f"Blender {why}; {self._tail()}") from exc
+            tail = self._tail()
+            # a reply half read, or still to come, would answer the next request: this Blender is done
+            self.close()
+            raise RuntimeError(f"Blender {why}; {tail}") from exc
         if not reply.get("ok"):
             raise RuntimeError(
                 f"Blender could not {header.get('op')}: {reply.get('error')}\n{reply.get('traceback', '')}"
@@ -341,14 +360,21 @@ class RendererBlender(RendererBase):
             header["body_ids"] = list(self._bodies)
             header["bodies"] = len(blobs)
             blobs.append(np.stack([transform_matrix(body_q[b]) for b in self._bodies]).astype(np.float32))
+        header["surfaces"] = []
+        particle_q = state.particle_q.numpy() if self._drawables and state.particle_q is not None else None
+        if particle_q is None:
+            particle_q = self._rest  # a state without particles: the deformables as built
         if self._drawables:
-            particle_q = state.particle_q.numpy()
             for part in self._drawables.meshes:
                 header["deformables"].append(len(blobs))
                 blobs.append(np.ascontiguousarray(part.vertices(particle_q)[0], dtype=np.float32))
             for batch in self._drawables.points:
                 header["points"].append(len(blobs))
                 blobs.append(np.ascontiguousarray(batch.positions(particle_q), dtype=np.float32))
+            for surface in self._drawables.surfaces:
+                verts, tris = surface.mesh(particle_q)
+                header["surfaces"].append([len(blobs), len(blobs) + 1])
+                blobs += [verts, tris]
         header["cameras"] = []
         for cam in self.cameras:
             k = cam.intrinsics
@@ -423,6 +449,8 @@ def _describe(
     from robosimstudio.solvers.render.gl import _rgba
 
     finishes = dict(finishes or {})
+    colors = getattr(model, "shape_color", None)
+    shape_colors = np.asarray(colors.numpy() if hasattr(colors, "numpy") else (colors if colors is not None else ()))
     blobs: list[Any] = []
     meshes: list[dict] = []
     bodies: set[int] = set()
@@ -432,7 +460,9 @@ def _describe(
         if len(getattr(mesh, "faces", ())) == 0:
             continue
         rgba, image, uv = _rgba(mesh)
-        finish = finishes.get(part.shape) or finish_for(tuple(rgba[:3]))
+        # a finish is keyed by the colour as the model states it: trimesh's copy is rounded to bytes
+        stated = tuple(float(v) for v in shape_colors[part.shape][:3]) if 0 <= part.shape < len(shape_colors) else None
+        finish = finishes.get(part.shape) or finish_for(stated or tuple(rgba[:3]))
         entry: dict[str, Any] = {
             "name": f"shape{part.shape}",
             "body": int(part.body),
@@ -469,7 +499,7 @@ def _describe(
             bodies.add(int(part.body))
         meshes.append(entry)
 
-    drawables = deformable_drawables(model, deformables, deformable_colors)
+    drawables = deformable_drawables(model, deformables, deformable_colors, surfaces=True)
     rest = model.particle_q.numpy() if drawables else None
     deformable_list, point_list = [], []
     for i, part in enumerate(drawables.meshes):
@@ -498,7 +528,19 @@ def _describe(
             }
         )
         blobs.append(np.ascontiguousarray(batch.radii, dtype=np.float32))
-    header = {"meshes": meshes, "deformables": deformable_list, "points": point_list}
+    surface_list = []
+    for i, surface in enumerate(drawables.surfaces):
+        finish = (deformable_finishes or {}).get(surface.name) or finish_for(surface.color)
+        surface_list.append(
+            {
+                "name": f"surface{i}",
+                "color": [*_linear(surface.color), 1.0],
+                "roughness": float(finish.roughness),
+                "metallic": float(finish.metallic),
+                "opacity": float(finish.opacity),
+            }
+        )
+    header = {"meshes": meshes, "deformables": deformable_list, "points": point_list, "surfaces": surface_list}
     return header, blobs, sorted(bodies), drawables
 
 

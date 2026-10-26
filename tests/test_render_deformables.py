@@ -78,6 +78,23 @@ class TestDrawables(unittest.TestCase):
         np.testing.assert_allclose(points.radii, 0.002)
         self.assertFalse(drawn.meshes)
 
+    def test_a_surfaced_body_is_its_surface_for_a_renderer_that_can_regrow_one(self) -> None:
+        from robosimstudio.core.render.deformables import deformable_drawables
+
+        def surface(positions):
+            return positions[:3], np.array([0, 1, 2])
+
+        pool = _handle(range(4), point_radius=0.002, surface=surface)
+        self.assertEqual(len(deformable_drawables(_model(4), {"water": pool}).points), 1, "gl draws its grains")
+        drawn = deformable_drawables(_model(4), {"water": pool}, surfaces=True)
+        self.assertFalse(drawn.points)
+        (grown,) = drawn.surfaces
+        q = np.arange(12, dtype=np.float64).reshape(4, 3)
+        verts, tris = grown.mesh(q)
+        self.assertEqual((verts.dtype, tris.dtype), (np.float32, np.int32))
+        np.testing.assert_allclose(verts, q[:3])
+        self.assertEqual(tris.tolist(), [[0, 1, 2]])
+
     def test_a_handle_into_another_models_particles_draws_nothing_of_it(self) -> None:
         from robosimstudio.core.render.deformables import deformable_drawables
 

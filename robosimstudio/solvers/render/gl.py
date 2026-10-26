@@ -426,6 +426,8 @@ class RendererGL(RendererBase):
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, self._gl)
         self._scene = mujoco.MjvScene(self.mj_model, maxgeom=self.mj_model.ngeom + self._points + 16)
         self._particle_q: np.ndarray | None = None
+        self._point_frame: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        """This frame's spheres, per batch: centres, sizes and colour (see :meth:`_add_points`)."""
         self._point_range = (0, 0)
         """Where in the drawn scene :meth:`_add_points` put its spheres, for the segmentation lookup."""
         self._option = mujoco.MjvOption()
@@ -467,30 +469,33 @@ class RendererGL(RendererBase):
             mujoco.mjr_uploadMesh(m, self._gl, mesh)
 
     def _add_points(self) -> None:
-        """Every particle drawn as a sphere, appended to the scene after MuJoCo's own geoms."""
+        """Every particle drawn as a sphere, appended to the scene after MuJoCo's own geoms.
+
+        One ``mjv_initGeom`` a particle, from the positions :meth:`render` gathered once for the frame: about a
+        microsecond each, so a heap of a hundred thousand grains costs a tenth of a second a camera.
+        """
         mujoco, scene = self._mujoco, self._scene
         self._point_range = (int(scene.ngeom), int(scene.ngeom))
-        if not self._points or self._particle_q is None:
-            return
-        eye = np.eye(3).ravel()
-        for batch in self._drawables.points:
-            rgba = np.array([*batch.color, 1.0], dtype=np.float32)
-            for centre, radius in zip(batch.positions(self._particle_q), batch.radii, strict=True):
-                if scene.ngeom >= scene.maxgeom:
-                    break
-                geom = scene.geoms[scene.ngeom]
-                mujoco.mjv_initGeom(geom, mujoco.mjtGeom.mjGEOM_SPHERE, np.array([radius, 0.0, 0.0]), centre, eye, rgba)
-                geom.segid = scene.ngeom
-                scene.ngeom += 1
+        init, sphere, eye = mujoco.mjv_initGeom, mujoco.mjtGeom.mjGEOM_SPHERE, np.eye(3).ravel()
+        for centres, sizes, rgba in self._point_frame:
+            room = min(len(centres), int(scene.maxgeom) - int(scene.ngeom))
+            for k in range(room):
+                n = scene.ngeom
+                geom = scene.geoms[n]
+                init(geom, sphere, sizes[k], centres[k], eye, rgba)
+                geom.segid = n
+                scene.ngeom = n + 1
         self._point_range = (self._point_range[0], int(scene.ngeom))
 
-    def _draw(self, cam: CameraSpec, camera_id: int, segment: bool) -> Any:
+    def _draw(self, cam: CameraSpec, camera_id: int, segment: bool, update: bool = True) -> Any:
+        """Draw one camera; ``update=False`` redraws the scene the last call built (rgb, then seg, of one camera)."""
         mujoco = self._mujoco
-        self._camera.fixedcamid = camera_id
-        mujoco.mjv_updateScene(
-            self.mj_model, self.mj_data, self._option, None, self._camera, mujoco.mjtCatBit.mjCAT_ALL, self._scene
-        )
-        self._add_points()
+        if update:
+            self._camera.fixedcamid = camera_id
+            mujoco.mjv_updateScene(
+                self.mj_model, self.mj_data, self._option, None, self._camera, mujoco.mjtCatBit.mjCAT_ALL, self._scene
+            )
+            self._add_points()
         self._scene.flags[mujoco.mjtRndFlag.mjRND_SEGMENT] = segment
         self._scene.flags[mujoco.mjtRndFlag.mjRND_IDCOLOR] = segment
         viewport = mujoco.MjrRect(0, 0, int(cam.width), int(cam.height))
@@ -520,10 +525,17 @@ class RendererGL(RendererBase):
         mujoco = self._mujoco
         self._context.make_current()
         self._pose(state.body_q.numpy() if state.body_q is not None else None)
+        self._point_frame = []
         if self._drawables:
             self._particle_q = state.particle_q.numpy() if state.particle_q is not None else None
             if self._particle_q is not None and self._deforming:
                 self._deform(self._particle_q)
+            if self._particle_q is not None:
+                for batch in self._drawables.points:  # gathered once a frame, drawn once a camera
+                    sizes = np.zeros((len(batch.radii), 3))
+                    sizes[:, 0] = batch.radii
+                    rgba = np.array([*batch.color, 1.0], dtype=np.float32)
+                    self._point_frame.append((batch.positions(self._particle_q), sizes, rgba))
         extent = float(self.mj_model.stat.extent)
         near = float(self.mj_model.vis.map.znear) * extent
         far = float(self.mj_model.vis.map.zfar) * extent
@@ -546,7 +558,8 @@ class RendererGL(RendererBase):
                     miss = (depth[::-1] >= 1.0) | (metres > float(cam.far))
                     frame["depth"] = np.where(miss, 0.0, metres).astype(np.float32)
             if "seg" in wanted:
-                viewport = self._draw(cam, camera_id, segment=True)
+                drawn = "rgb" in wanted or "depth" in wanted  # the scene just built for this camera, drawn again
+                viewport = self._draw(cam, camera_id, segment=True, update=not drawn)
                 ids = np.empty((h, w, 3), dtype=np.uint8)
                 mujoco.mjr_readPixels(ids, None, viewport, self._gl)
                 ids = ids[::-1].astype(np.int64)

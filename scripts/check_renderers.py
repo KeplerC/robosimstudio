@@ -34,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--renderers", default="tiled,gl,blender,rtx", help="comma-separated, tiled first")
     parser.add_argument("--out", default="outputs/check_renderers", help="where the frames go")
+    parser.add_argument("-v", "--verbose", action="store_true", help="the traceback of each renderer that fails")
     args = parser.parse_args(argv)
 
     import robosimstudio as rss
@@ -84,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
                 renderer.close()
         except Exception as exc:  # what this machine cannot run, said and passed over
             rows.append((name, "no", f"{type(exc).__name__}: {str(exc).splitlines()[0][:160]}"))
-            if "-v" in sys.argv:
+            if args.verbose:
                 traceback.print_exc()
             continue
         from PIL import Image

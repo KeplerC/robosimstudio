@@ -96,13 +96,31 @@ class RendererBase:
         del look
         return {}
 
+    retargets: bool = False
+    """Whether the backend reads its cameras afresh every frame, so :meth:`aim` may replace them on a built
+    renderer -- what lets a caller keep one renderer across viewpoints rather than build one per camera, which
+    for a backend that starts a process and hands it the scene (``blender``) is seconds each time."""
+
     def __init__(self, cameras: Sequence[CameraSpec], *, channels: Sequence[str] | None = None) -> None:
+        self._channel_override = tuple(channels) if channels is not None else None
+        self._take_cameras(cameras)
+
+    def aim(self, cameras: Sequence[CameraSpec]) -> None:
+        """Render these cameras from the next frame on, with the channels this renderer was built for.
+
+        Raises:
+            NotImplementedError: If the backend builds its cameras in (:attr:`retargets` is false).
+        """
+        if not self.retargets:
+            raise NotImplementedError(f"renderer {self.name!r} builds its cameras in; build another for these")
+        self._take_cameras(cameras)
+
+    def _take_cameras(self, cameras: Sequence[CameraSpec]) -> None:
         if not cameras:
             raise ValueError("a renderer needs at least one camera")
-        self.cameras = list(cameras)
-        override = tuple(channels) if channels is not None else None
-        self.channels: dict[str, tuple[str, ...]] = {}
-        for cam in self.cameras:
+        override = getattr(self, "_channel_override", None)
+        wanted_by: dict[str, tuple[str, ...]] = {}
+        for cam in cameras:
             wanted = override if override is not None else cam.channels
             missing = set(wanted) - set(self.supported_channels)
             if missing:
@@ -110,7 +128,9 @@ class RendererBase:
                     f"renderer {self.name!r} cannot produce {sorted(missing)} for camera {cam.name!r}; "
                     f"it supports {list(self.supported_channels)}"
                 )
-            self.channels[cam.name] = tuple(wanted)
+            wanted_by[cam.name] = tuple(wanted)
+        self.cameras = list(cameras)
+        self.channels: dict[str, tuple[str, ...]] = wanted_by
 
     def __getitem__(self, name: str) -> CameraSpec:
         for cam in self.cameras:

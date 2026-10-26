@@ -91,6 +91,45 @@ class TestItDrawsWhatTiledDraws(unittest.TestCase):
         red = blender["top"]["rgb"][cloth].astype(np.float64).mean(axis=0)
         self.assertGreater(red[0], 1.5 * red[2], "in its own colour")
 
+    def test_grains_and_a_regrown_surface_are_drawn_where_the_particles_are(self) -> None:
+        import types
+
+        towel = self.sim.scene.handles.deformables["towel"]
+        cam = _camera("top", eye=(0.51, -0.14, 1.3), look_at=(0.51, -0.13, 0.75))
+        tiled = self.sim.make_renderer("tiled", cameras=[cam], channels=("depth",)).render(self.sim.state)["top"]
+        cloth = tiled["depth"] > 0
+
+        def surface(positions):  # the sheet's own triangles, as a particle body's surface callable returns them
+            return positions, towel.triangles
+
+        for drawn in ("grains", "surface"):
+            body = types.SimpleNamespace(
+                particles=towel.particles, triangles=np.zeros((0, 3)), tube_radius=0.0, point_radius=0.004,
+                surface=surface if drawn == "surface" else None,
+            )  # fmt: skip
+            blender = self.sim.make_renderer("blender", cameras=[cam], channels=("depth",), deformables={"towel": body})
+            try:
+                depth = blender.render(self.sim.state)["top"]["depth"]
+            finally:
+                blender.close()
+            near = (depth > 0) & (depth < tiled["depth"].max() - 0.01)
+            self.assertGreater(int(near.sum()), 200, f"the towel as {drawn}")
+            self.assertLess(float(np.median(np.abs(depth[near & cloth] - tiled["depth"][near & cloth]))), 0.006, drawn)
+
+    def test_a_still_keeps_one_blender_across_cameras(self) -> None:
+        import os
+        from unittest import mock
+
+        side = _camera("side", eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))
+        top = _camera("top", eye=(0.51, -0.14, 1.3), look_at=(0.51, -0.13, 0.75))
+        with mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_RENDERER": "blender"}):
+            first = self.sim.render(side, channels=("depth",))["depth"]
+            renderer = self.sim._still_renderer
+            second = self.sim.render(top, channels=("depth",))["depth"]
+            self.assertIs(self.sim._still_renderer, renderer, "re-aimed, not started again")
+            self.assertEqual(renderer.cameras, [top])
+            self.assertFalse(np.allclose(first, second))
+
     def test_a_picture_follows_the_state(self) -> None:
         cam = _camera("side", eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))
         blender = self.sim.make_renderer("blender", cameras=[cam], channels=("depth",))

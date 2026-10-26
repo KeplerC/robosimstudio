@@ -204,7 +204,7 @@ clean plate composites under all four, and `compare`'s per-thing readings
 | --- | --- | --- | --- |
 | `rtx` (default) | the path tracer: materials, the `lab` room's light, the scenery | an NVIDIA GPU with RT cores | under a second; the first in a process compiles shaders |
 | `blender` | Cycles: the finishes and the `lab` light, as `rtx` does; no scenery | anywhere Blender 5 is installed (`ROBOSIMSTUDIO_BLENDER`, `blender` on the PATH, or Blender.app); Metal on a Mac | about a second on a GPU or a many-core CPU |
-| `gl` | flat colour and a sun, from the shapes as drawn; cloth, ropes and grains from their particles | anywhere: EGL on a GPU, software GL on a CPU | milliseconds |
+| `gl` | flat colour and a sun, from the shapes as drawn; cloth, ropes and grains from their particles (a liquid as its grains) | anywhere: EGL on a GPU, software GL on a CPU, CGL on a Mac | milliseconds, and about 5 µs more a grain |
 | `tiled` | flat colour, from the colliders | anywhere Warp runs | milliseconds on a GPU, a second or two on a CPU |
 
 On a machine with no NVIDIA GPU -- a Mac -- the page steps on the CPU

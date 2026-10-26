@@ -382,7 +382,9 @@ class Sim(EnvBase):
         asked = tuple(channels)
         if spec.background and "rgb" in asked and "depth" not in asked and "depth" in supported_channels(backend):
             asked += ("depth",)  # the plate goes wherever the render's own depth is the static scene's
-        key = (backend, spec, asked)
+        # a backend that takes its cameras every frame keeps one renderer across viewpoints (RendererBase.aim)
+        retargets = bool(getattr(_backend_class(backend), "retargets", False))
+        key = (backend, asked) if retargets else (backend, spec, asked)
         if self._still_renderer is None or self._still_key != key:
             if self._still_renderer is not None:
                 self._still_renderer.close()
@@ -391,6 +393,8 @@ class Sim(EnvBase):
             self._still_key = key
             if backend == PUBLIC:
                 self._still_renderer.render(self.state)  # the path tracer's first frame only builds the stage
+        elif retargets and self._still_renderer.cameras != [spec]:
+            self._still_renderer.aim([spec])
         self.sync()
         frame = self._still_renderer.render(self.state)[spec.name]
         if spec.background and "rgb" in frame:
