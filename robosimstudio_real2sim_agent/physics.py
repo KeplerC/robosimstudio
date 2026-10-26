@@ -1367,6 +1367,9 @@ class AsBuilt:
         self.sim, self.heavier = sim, float(heavier)
         self.saved: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         """Per array: the rows changed, and what they held."""
+        self.lowered = {"friction": 0, "torque": 0}
+        """How many shapes' friction and arm joints' torque :meth:`apply` lowered: none of either, and the scene was
+        already as built."""
 
     def _change(self, name: str, rows: np.ndarray, new: np.ndarray) -> None:
         array = getattr(self.sim.model, name)
@@ -1383,6 +1386,7 @@ class AsBuilt:
         flags = _SHAPE_PROPERTIES if len(grippy) else 0
         if len(grippy):
             self._change("shape_material_mu", grippy, np.full(len(grippy), REAL_MU, dtype=mu.dtype))
+        self.lowered["friction"] = int(len(grippy))
         dofs, caps = [], []
         for arm in self.sim.scene.handles.arms.values():
             limits = real_arm_torque(self.sim, arm)
@@ -1392,7 +1396,9 @@ class AsBuilt:
         if dofs:
             effort = m.joint_effort_limit.numpy()
             rows = np.asarray(dofs, dtype=np.int64)
-            self._change("joint_effort_limit", rows, np.minimum(effort[rows], np.asarray(caps, dtype=effort.dtype)))
+            capped = np.minimum(effort[rows], np.asarray(caps, dtype=effort.dtype))
+            self._change("joint_effort_limit", rows, capped)
+            self.lowered["torque"] = int(np.count_nonzero(capped < effort[rows]))
             flags |= _JOINT_DOF
         if self.heavier != 1.0:
             fixed = _fixed_bodies(m)
@@ -1531,6 +1537,8 @@ def replay(
         if built is not None:
             built.restore()
         store[mode] = tap.summary(outcome) if tap is not None else {"outcome": outcome, "steps": 0, "things": {}}
+        if built is not None:
+            store[mode]["lowered"] = dict(built.lowered)
 
 
 _ABSENT = object()
@@ -2148,7 +2156,25 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         return True, f"finished with {what}, the things ending where the written run left them"
 
     built = runs.get("built")
-    if built:
+    if built and built.get("lowered") == {"friction": 0, "torque": 0}:
+        # nothing was above the real robot, so built only played the written run again: a different end there is the
+        # scene's own spread from run to run, not a grip that needs more than the real hand
+        ok, detail = held(built, robot)
+        same = f"built changed nothing: no friction here is above {REAL_MU:g} and the arm's torque is the real one's"
+        if ok:
+            line(True, "built", same)
+        elif ok is None:
+            line(None, "built", detail)
+        else:
+            again = (
+                f"stopped ({built['outcome']})"
+                if built["outcome"] != "finished"
+                else _ended_elsewhere(built, written, names, round_axes=axes)
+            )
+            line(
+                None, "built", f"{same}; played again, {again}: the outcome is not repeatable, so say so in the report"
+            )
+    elif built:
         ok, detail = held(built, robot)
         line(ok, "built", detail)
     heavy = runs.get("heavy")

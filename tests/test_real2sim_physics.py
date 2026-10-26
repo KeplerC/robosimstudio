@@ -116,6 +116,20 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(result)["built"], False)
         self.assertIn("crate ended 300 mm from where the written run left it", result["report"])
 
+    def test_built_that_lowered_nothing_reads_a_different_end_as_spread(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = {**_run(end=(0.4, 0.0, 0.9), turn=0.0), "lowered": {"friction": 0, "torque": 0}}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["built"])  # the scene was already as built: run-to-run spread, not a grip
+        self.assertIn("built changed nothing", result["report"])
+        self.assertIn("crate ended 300 mm from where the written run left it", result["report"])
+        runs["built"] = {**_run(outcome="RuntimeError: lost it"), "lowered": {"friction": 0, "torque": 0}}
+        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["built"])
+        runs["built"] = {**_run(), "lowered": {"friction": 0, "torque": 0}}
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], True)
+        runs["built"] = {**_run(end=(0.4, 0.0, 0.9), turn=0.0), "lowered": {"friction": 2, "torque": 0}}
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)  # lowered something, and it slipped
+
     def test_built_is_not_read_when_the_written_run_failed(self) -> None:
         runs = _clean_runs()
         runs["written"]["outcome"] = runs["built"]["outcome"] = "RoutineError: the loop did not seat"
