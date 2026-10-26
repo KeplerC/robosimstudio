@@ -64,6 +64,15 @@ def _words(result: dict) -> dict[str, bool | None]:
     return {c["name"]: c["ok"] for c in result["checks"]}
 
 
+def linear_4310_clamp():
+    """The registered YAM's arena hand's own servo (its 50 N clamp), or None where it has none."""
+    from robosimstudio.robots.registry import get_embodiment, resolve_gripper
+
+    yam = get_embodiment("yam_bimanual")
+    hand = resolve_gripper(yam, yam.arms[0])
+    return getattr(hand, "actuation", None)
+
+
 class Verdict(unittest.TestCase):
     def test_real_physics_passes_every_line(self) -> None:
         result = physics.verdict(CLEAN, _clean_runs())
@@ -1275,7 +1284,15 @@ class StudyLines(unittest.TestCase):
 
     def test_the_robot_line_holds_the_robot_to_the_registered_one(self) -> None:
         runs = _clean_runs()
-        same = {"name": "yam_bimanual", "registered": True, "file": "", "arm": "", "gripper": ""}
+        same = {
+            "name": "yam_bimanual",
+            "registered": True,
+            "file": "",
+            "arm": "",
+            "gripper": "",
+            "hand": "",
+            "other": "",
+        }
         self.assertIs(_words(physics.verdict({**CLEAN, "robot_spec": same}, runs))["robot"], True)
         copied = {**same, "file": "its file is twin/assets/yam/arms.xml, not the registered embodiments/yam/..."}
         result = physics.verdict({**CLEAN, "robot_spec": copied}, runs)
@@ -1299,16 +1316,42 @@ class StudyLines(unittest.TestCase):
         yam = get_embodiment("yam_bimanual")
         here = Path(__file__).resolve().parent / "twin_robot_probe" / "arms.xml"
         own = replace(yam, name="study_twin_registered_yam", asset=rss.AssetSpec(path=str(here)))
-        if "study_twin_registered_yam" not in EMBODIMENTS._items:
-            register_embodiment(own)
+        register_embodiment(own)
+        self.addCleanup(EMBODIMENTS.forget, "study_twin_registered_yam")
 
         def sim(spec):
             return types.SimpleNamespace(scene=types.SimpleNamespace(embodiment=types.SimpleNamespace(spec=spec)))
 
         self.assertEqual(
             physics.robot_departures(sim(yam)),
-            {"name": "yam_bimanual", "registered": True, "file": "", "arm": "", "gripper": ""},
+            {
+                "name": "yam_bimanual",
+                "registered": True,
+                "as": "yam_bimanual",
+                "file": "",
+                "arm": "",
+                "gripper": "",
+                "hand": "",
+                "other": "",
+            },
         )
+        renamed = replace(
+            yam,
+            name="yam_of_the_twin",
+            gripper_actuation=rss.ActuationSpec(target_ke=2000, target_kd=40, effort_limit=500),
+        )
+        read = physics.robot_departures(sim(renamed))
+        self.assertEqual((read["registered"], read["as"]), (True, "yam_bimanual"), "a renamed YAM is still the YAM")
+        self.assertIn("gripper servo is the twin's own", read["gripper"])
+        swapped = physics.robot_departures(sim(replace(yam, enable_self_collisions=True, gripper="franka_hand")))
+        self.assertIn("enable_self_collisions", swapped["other"])
+        self.assertEqual(swapped["hand"], "", "each YAM arm names its own hand, so the robot-wide one is not used")
+        same_file = replace(yam, asset=rss.AssetSpec(path=str(physics._robot_file(yam))))
+        self.assertEqual(physics.robot_departures(sim(same_file))["file"], "", "the same file, however it is named")
+        hand = linear_4310_clamp()
+        if hand is not None:
+            clamp = physics.robot_departures(sim(replace(yam, gripper_actuation=hand)))
+            self.assertEqual(clamp["gripper"], "", "gripper= the hand's own servo is no departure")
         read = physics.robot_departures(sim(own))
         self.assertIs(read["registered"], False, "registered by the twin, from a file the library does not ship")
         self.assertEqual(read["file"], str(here))
