@@ -37,6 +37,7 @@ import numpy as np
 __all__ = [
     "LABEL_MOVING",
     "LABEL_STATIC",
+    "collider_bounds",
     "composite",
     "load_plate",
     "nearer",
@@ -161,6 +162,24 @@ def shade(
     return ratio
 
 
+def collider_bounds(seg: np.ndarray, moving_depth: np.ndarray, grow: int = 2) -> tuple[np.ndarray, np.ndarray]:
+    """Per pixel, the farthest and the nearest moving collider within ``grow`` pixels (0 and infinity where there is
+    none): what :func:`nearer` holds a render's depth to, the same for every renderer drawing one state."""
+    from scipy.ndimage import maximum_filter, minimum_filter
+
+    own = np.asarray(moving_depth, dtype=np.float32)
+    seg = np.asarray(seg).reshape(own.shape[:2])
+    own = own.reshape(seg.shape)
+    mine = ((seg == LABEL_MOVING) | (seg < 0)) & (own > 0)
+    farthest = np.where(mine, own, 0.0)
+    nearest = np.where(mine, own, np.inf)
+    if grow > 0:
+        size = 2 * int(grow) + 1
+        farthest = maximum_filter(farthest, size=size)
+        nearest = minimum_filter(nearest, size=size)
+    return farthest, nearest
+
+
 def nearer(
     seg: np.ndarray,
     depth: np.ndarray,
@@ -168,6 +187,7 @@ def nearer(
     moving_depth: np.ndarray | None = None,
     grow: int = 2,
     slack: float = 0.0015,
+    bounds: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> np.ndarray:
     """``seg`` with its moving pixels kept only where the render drew the moving thing itself.
 
@@ -189,33 +209,32 @@ def nearer(
     those as room, and left the plate's wall as a pale outline round every
     protruding part.) What this lets through is render-only scenery standing
     between a moving thing's rim and a farther moving collider within ``grow``
-    pixels -- a prop of the render's room between a rope and the arm behind it.
+    pixels -- a prop of the render's room between a rope and the arm behind it;
+    what it still sends to the plate is a recess deeper than that bound under a
+    collider that closes over it (a mug's inside, under a convex hull).
+    ``bounds`` is :func:`collider_bounds`'s, taken once for several renders of
+    one state; without it they are read off ``moving_depth``.
 
     In the ``grow``-pixel band outside the colliders, a pixel the render drew
     nearer than the static scene, and no farther than the nearest moving
     collider around it by 2 cm and 2 % of the range, is moving: a visual mesh
     that overhangs its collider.
     """
-    from scipy.ndimage import binary_dilation, maximum_filter, minimum_filter
+    from scipy.ndimage import binary_dilation
 
     seg = np.asarray(seg).reshape(np.shape(depth)[:2])
     moving = (seg == LABEL_MOVING) | (seg < 0)
     region = binary_dilation(moving, iterations=int(grow)) if grow > 0 else moving
-    size = 2 * int(grow) + 1
     d = np.asarray(depth, dtype=np.float32).reshape(seg.shape)
     behind = np.asarray(static_depth, dtype=np.float32).reshape(seg.shape)
     behind = np.where(behind > 0, behind, np.inf)
     near = (d > 0) & (d < behind - (slack + 0.001 * d))  # drawn in front of the static scene
     keep = moving & near
     add = region & ~moving & near
-    if moving_depth is not None:
-        own = np.asarray(moving_depth, dtype=np.float32).reshape(seg.shape)
-        mine = moving & (own > 0)
-        farthest = np.where(mine, own, 0.0)
-        nearest = np.where(mine, own, np.inf)
-        if grow > 0:
-            farthest = maximum_filter(farthest, size=size)
-            nearest = minimum_filter(nearest, size=size)
+    if bounds is None and moving_depth is not None:
+        bounds = collider_bounds(seg, moving_depth, grow)
+    if bounds is not None:
+        farthest, nearest = bounds
         keep &= ~((farthest > 0) & (d > farthest + 0.02 + 0.02 * d))
         add &= d <= nearest + 0.02 + 0.02 * d
     out = np.where(moving & ~keep, LABEL_STATIC, seg)

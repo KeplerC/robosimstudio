@@ -1532,6 +1532,7 @@ class TakeProbe(unittest.TestCase):
         rec.sim = types.SimpleNamespace(step_count=7, reset_count=0)
         rec._probed = None
         rec.also, rec.grid = {}, None  # no --also renderers
+        rec.run_dir, rec.name = Path(tempfile.mkdtemp(prefix="take-probe-")), "take"
         rec.looks, rec.encoded, rec.captured = [], [], []
         rec._look = lambda strict=False: (rec.looks.append(1), (np.zeros((540, 960, 3), np.uint8), "seg", None, {}))[1]
         rec.writer = types.SimpleNamespace(try_encode=lambda frame: rec.encoded.append(frame.shape))

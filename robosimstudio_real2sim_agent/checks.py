@@ -460,7 +460,10 @@ class Recorder:
         """The probe's step count, reset mark and frame: :meth:`start`'s frame 0 when the scene has not stepped since."""
         self.also: dict[str, dict[str, Any]] = {}
         """Per renderer ``--also`` names: its renderer, its video's writer and path. Each films the take's own states."""
-        self.grid = None
+        self.grid: dict[str, Any] | None = None
+        """The side-by-side video's writer and path, while ``--also`` names another renderer."""
+        self.also_skipped: list[str] = []
+        """``--also`` names that are the page's own renderer, which films the take itself."""
         try:
             self._open_also(also, VideoWriter)
         except Exception:
@@ -479,13 +482,14 @@ class Recorder:
             return next((a for a, path in RENDERERS.items() if path == b), b)
 
         own = alias(self.sim.platform.renderer_for("")[0])
-        # an earlier take of this name's side videos would read as this one's
-        for stale in [*RENDERERS, "renderers"]:
-            (self.run_dir / f"{self.name}.{stale}.mp4").unlink(missing_ok=True)
         names = [alias(str(b).strip()) for b in (also.split(",") if isinstance(also, str) else also) if str(b).strip()]
         for b in names:
             backend_class(b)  # an unknown name fails here, before anything is filmed
-        names = [b for b in dict.fromkeys(names) if backend_class(b) is not backend_class(own)]
+        names = list(dict.fromkeys(names))
+        self.also_skipped = [b for b in names if backend_class(b) is backend_class(own)]
+        if self.also_skipped:
+            print(f"[rss] take {self.name!r}: {own} is the page's own renderer, which films the take itself")
+        names = [b for b in names if b not in self.also_skipped]
         if not names:
             return
         bare = replace(self.cam, background="")
@@ -496,9 +500,8 @@ class Recorder:
             if getattr(backend_class(b), "warms_up", False):
                 entry["renderer"].render(self.sim.state)  # the first frame only builds the stage
             entry["writer"] = writer(entry["video"], fps=self.fps)
-        self.grid_video = self.run_dir / f"{self.name}.renderers.mp4"
-        self.grid = writer(self.grid_video, fps=self.fps)
-        self.grid_entry: dict[str, Any] = {"writer": self.grid, "video": self.grid_video}
+        grid = self.run_dir / f"{self.name}.renderers.mp4"
+        self.grid = {"video": grid, "writer": writer(grid, fps=self.fps)}
         self.grid_labels = [own, *names]
 
     def _look_also(
@@ -507,10 +510,11 @@ class Recorder:
         """The state the take films now, through each ``--also`` renderer, over the camera's plate (``passed``,
         the plate pass the take's own picture was composited on) when it has one.
 
-        A renderer that fails mid-take (a Blender that died, a contended card) is stopped, its video ends there and
-        its tile goes black for the rest of the take, said in :meth:`finish`; the take itself, and every other
-        renderer, carry on. ``strict`` (the probe, before anything is filmed) raises instead: a renderer that cannot
-        draw the first frame is refused."""
+        A frame a renderer fails is black in its video and tile, as :meth:`Sim.render` keeps a renderer that failed
+        one frame; one that is done (``closed``: a Blender that died) or fails :data:`ALSO_MISSES` frames running is
+        stopped, its video ends there and its tile stays black, said in :meth:`finish`. The take itself, and every
+        other renderer, carry on. ``strict`` (the probe, before anything is filmed) raises instead: a renderer that
+        cannot draw the first frame is refused."""
         out: dict[str, np.ndarray] = {}
         for b, entry in self.also.items():
             if "failed" in entry:
@@ -523,11 +527,17 @@ class Recorder:
                     rgb = stills.to_uint8(
                         self.sim.over_plate(self.cam, rgb, depth=frame.get("depth"), plate_pass=passed)
                     )
+                entry["running"] = 0
             except Exception as exc:
                 if strict:
                     raise RuntimeError(
                         f"--also {b}: the first frame would not draw: {type(exc).__name__}: {exc}"
                     ) from exc
+                entry["running"] = entry.get("running", 0) + 1
+                entry["missed"] = entry.get("missed", 0) + 1
+                if entry["running"] < ALSO_MISSES and not getattr(entry["renderer"], "closed", False):
+                    out[b] = np.zeros((*size, 3), np.uint8)
+                    continue
                 entry["failed"] = f"{type(exc).__name__}: {exc}"[:300]
                 print(
                     f"[rss] take {self.name!r}: the {b} renderer stopped ({entry['failed']}); its tile is black from here"
@@ -547,9 +557,9 @@ class Recorder:
         sim = self.sim
         sim.sync()
         frame = self.renderer.render(sim.state)[self.cam.name]
-        live = any("failed" not in e for e in self.also.values())
-        passed = sim.plate_pass(self.cam) if live and self.cam.background else None
-        rgb = stills.to_uint8(sim.render(self.cam, plate_pass=passed)["rgb"][..., :3])
+        shared = bool(self.cam.background) and any("failed" not in e for e in self.also.values())
+        passed = sim.plate_pass(self.cam) if shared else None
+        rgb = stills.to_uint8(sim.render(self.cam, plate_pass=(passed or False) if shared else None)["rgb"][..., :3])
         q = _particles(sim) if self.deformable_labels else None  # once a frame, for the ids and the samples both
         seg = name_deformables(sim, self.cam, np.asarray(frame["seg"]).astype(np.int32), self.deformable_labels, q)
         return rgb, seg, q, self._look_also(rgb.shape[:2], passed, strict=strict)
@@ -568,11 +578,11 @@ class Recorder:
         rgb, extra = look[0], look[3]
         (self.writer.try_encode if encode else self.writer.append)(rgb)  # the take's own: its failure is the take's
         sides = [(self.also[b], f) for b, f in extra.items() if "writer" in self.also[b]]
-        if self.grid is not None and "writer" in self.grid_entry:
+        if self.grid is not None and "writer" in self.grid:
             labels = [self.grid_labels[0]] + [
                 f"{b} (stopped)" if "failed" in self.also[b] else b for b in self.grid_labels[1:]
             ]
-            sides.append((self.grid_entry, grid_frame([rgb, *extra.values()], labels)))
+            sides.append((self.grid, grid_frame([rgb, *extra.values()], labels)))
         for entry, frame in sides:  # an --also video or the grid that will not encode stops alone, said in finish
             try:
                 (entry["writer"].try_encode if encode else entry["writer"].append)(frame)
@@ -592,14 +602,27 @@ class Recorder:
         says something else may have moved it (a dropped routine's cleanup moves things without a step)."""
         self._raw, self._mark, self.steps = int(self.sim.step_count), reset_mark(self.sim), 0
         self.started = time.perf_counter()
+        self._clear_stale()
         probed, self._probed = self._probed, None
         same = not fresh and probed is not None and probed[:2] == (self._raw, self._mark)
         self.capture(probed[2] if same else None)
 
+    def _clear_stale(self) -> None:
+        """Remove an earlier take of this name's side videos this take does not write (its own are written over),
+        once the probe has passed and the take begins, so they cannot read as this one's."""
+        from robosimstudio.solvers.render import RENDERERS
+
+        mine = {e["video"] for e in [*self.also.values(), *([self.grid] if self.grid else [])]}
+        for stale in [*RENDERERS, "renderers"]:
+            path = self.run_dir / f"{self.name}.{stale}.mp4"
+            if path not in mine:
+                path.unlink(missing_ok=True)
+
     def close(self) -> None:
         """Close the video writers and the renderers (the id renderer, any ``--also``); safe to call twice."""
-        extra = [e[k] for e in getattr(self, "also", {}).values() for k in ("writer", "renderer") if k in e]
-        for thing in (self.writer, self.renderer, getattr(self, "grid", None), *extra):
+        sides = [*getattr(self, "also", {}).values(), *([self.grid] if getattr(self, "grid", None) else [])]
+        extra = [e[k] for e in sides for k in ("writer", "renderer") if k in e]
+        for thing in (self.writer, self.renderer, *extra):
             if thing is None:
                 continue
             try:
@@ -658,7 +681,7 @@ class Recorder:
         finally:
             # the --also videos and the grid first, each on its own: one that cannot be written is said, not left
             # looking written
-            for entry in [*self.also.values(), *([self.grid_entry] if self.grid is not None else [])]:
+            for entry in [*self.also.values(), *([self.grid] if self.grid is not None else [])]:
                 writer = entry.pop("writer", None)
                 try:
                     if writer is not None:
@@ -683,17 +706,22 @@ class Recorder:
             "wall_seconds": round(time.perf_counter() - self.started, 1),
             "frames": self.frames,
         }
-        if self.also:
+        if self.also and self.grid is not None:
             meta["also"] = {b: str(e["video"]) for b, e in self.also.items() if not {"failed", "video_failed"} & set(e)}
-            if "video_failed" not in self.grid_entry:
-                meta["renderers"] = str(self.grid_video)
+            if "video_failed" not in self.grid:
+                meta["renderers"] = str(self.grid["video"])
             failed = {
                 b: e.get("failed") or e["video_failed"]
-                for b, e in [*self.also.items(), ("grid", self.grid_entry)]
+                for b, e in [*self.also.items(), ("grid", self.grid)]
                 if {"failed", "video_failed"} & set(e)
             }
             if failed:
                 meta["also_failed"] = failed
+            missed = {b: e["missed"] for b, e in self.also.items() if e.get("missed") and "failed" not in e}
+            if missed:
+                meta["also_missed"] = missed  # frames drawn black, the renderer carrying on
+        if self.also_skipped:
+            meta["also_skipped"] = self.also_skipped
         (self.run_dir / f"{self.name}.json").write_text(json.dumps(meta, default=_plain))
         if self.segs:
             np.savez_compressed(self.run_dir / f"{self.name}_seg.npz", seg=np.stack(self.segs))
@@ -703,7 +731,7 @@ class Recorder:
             "frames": len(self.frames),
             "seconds": self.frames[-1]["t"] if self.frames else 0.0,
             "wall_seconds": meta["wall_seconds"],
-            **({k: meta[k] for k in ("also", "renderers", "also_failed") if k in meta}),
+            **({k: meta[k] for k in ("also", "renderers", "also_failed", "also_missed", "also_skipped") if k in meta}),
         }
 
 
@@ -728,6 +756,9 @@ def grid_frame(frames: list[np.ndarray], labels: list[str]) -> np.ndarray:
         sheet.paste(tile, ((i % cols) * w, (i // cols) * h))
     return np.asarray(sheet)
 
+
+ALSO_MISSES = 3
+"""Frames running an ``--also`` renderer may fail before it is stopped for the rest of the take."""
 
 PARTS_KEPT = 16
 """Bodies a take keeps per jointed thing; a chain of more is sampled along its length."""

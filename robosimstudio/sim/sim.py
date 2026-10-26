@@ -25,7 +25,7 @@ without the caller learning the index layout of a replicated model.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -346,7 +346,7 @@ class Sim(EnvBase):
         camera: CameraSpec | str | None = None,
         *,
         channels: Sequence[str] = ("rgb",),
-        plate_pass: dict[str, Any] | None = None,
+        plate_pass: dict[str, Any] | Literal[False] | None = None,
     ) -> dict[str, np.ndarray]:
         """One frame of the scene as it stands, through the renderer.
 
@@ -365,8 +365,8 @@ class Sim(EnvBase):
                 or, on a scene that declares none, a three-quarter view of the
                 work surface.
             channels: Which of ``"rgb"``, ``"depth"`` to produce.
-            plate_pass: :meth:`plate_pass`'s for this state, for a caller drawing it through other renderers too
-                (:meth:`over_plate`).
+            plate_pass: :meth:`plate_pass`'s for this state, for a caller drawing it through other renderers too,
+                or ``False`` where that pass came back with nothing (:meth:`over_plate`).
 
         Returns:
             ``{"rgb": uint8 [H, W, 3], "depth": float32 [H, W], ...}``.
@@ -429,7 +429,7 @@ class Sim(EnvBase):
         spec: CameraSpec,
         rgb: np.ndarray,
         depth: np.ndarray | None = None,
-        plate_pass: dict[str, Any] | None = None,
+        plate_pass: dict[str, Any] | Literal[False] | None = None,
     ) -> np.ndarray:
         """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py).
 
@@ -443,7 +443,9 @@ class Sim(EnvBase):
 
         ``plate_pass`` is :meth:`plate_pass`'s, taken once for this state, for a
         caller compositing several renderers' pictures of one frame (a take's
-        ``--also``); without it the pass is taken here.
+        ``--also``), and ``False`` where it came back with nothing, so this
+        frame is drawn without its plate as the others are; without it the pass
+        is taken here.
 
         A plate that cannot be read (no file at the path, read beside the
         working directory or the asset roots) leaves the picture as rendered,
@@ -452,12 +454,12 @@ class Sim(EnvBase):
         from robosimstudio.core.render import plate
 
         passed = plate_pass if plate_pass is not None else self.plate_pass(spec)
-        if passed is None:
+        if not passed:
             return rgb
         seg = passed["seg"]
         if depth is not None:
             seg = plate.nearer(
-                seg, depth, passed["static_depth"], passed["moving_depth"], grow=max(2, spec.width // 320)
+                seg, depth, passed["static_depth"], bounds=passed["bounds"], grow=max(2, spec.width // 320)
             )
         return plate.composite(rgb, seg, passed["backdrop"], passed["shadow"])
 
@@ -515,6 +517,7 @@ class Sim(EnvBase):
             "shadow": plate.shade(full["rgb"], bare["rgb"], seg, soften=max(2.0, spec.width / 100.0), strength=0.6),
             "static_depth": bare["depth"],
             "moving_depth": full["depth"],
+            "bounds": plate.collider_bounds(seg, full["depth"], grow=max(2, spec.width // 320)),
         }
 
     def _plate_passes(self, key: CameraSpec):

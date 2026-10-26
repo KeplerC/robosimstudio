@@ -93,6 +93,90 @@ class AlsoRenderers(unittest.TestCase):
                 n = len(json.loads((Path(tmp) / "dies.json").read_text())["frames"])
                 self.assertEqual((_frames(Path(out["video"])), _frames(Path(out["renderers"]))), (n, n))
 
+    def test_over_a_plate_each_renderer_is_composited_on_one_pass(self) -> None:
+        from PIL import Image
+
+        import robosimstudio as rss
+        from robosimstudio_real2sim_agent import checks
+
+        with tempfile.TemporaryDirectory() as tmp:
+            Image.new("RGB", (320, 180), (20, 60, 230)).save(Path(tmp) / "plate.png")
+            scene = rss.Scene(cell="bench_075", name="take_renderers_plate")
+            scene.add(rss.box(name="cube", half=(0.05,) * 3, at=(0.0, 0.0, 0.05), color=(0.9, 0.15, 0.1)))
+            scene.add(
+                rss.CameraSpec(
+                    name="front",
+                    width=320,
+                    height=180,
+                    fov_y=40.0,
+                    eye=(1.5, 0.0, 1.1),
+                    look_at=(0.6, 0.0, 0.78),
+                    background=str(Path(tmp) / "plate.png"),
+                )
+            )
+            (Path(tmp) / "plated.blender.mp4").write_bytes(b"an earlier take's")
+            with mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_RENDERER": "gl"}), redirect_stdout(io.StringIO()):
+                sim = scene.build()
+                server = types.SimpleNamespace(sim=sim, scene=scene, run_dir=tmp)
+                rec = checks.Recorder(server, "plated", camera="front", every=2, also="tiled")
+                rec.probe()
+                self.assertTrue((Path(tmp) / "plated.blender.mp4").exists(), "kept until the take begins")
+                rec.start()
+                self.assertFalse((Path(tmp) / "plated.blender.mp4").exists(), "an earlier take's side video goes")
+                passes = []
+                real = sim.plate_pass
+                sim.plate_pass = lambda spec: passes.append(1) or real(spec)
+                for _ in range(6):
+                    sim.run(1)
+                    rec.maybe()
+                out = rec.finish()
+                import imageio.v2 as imageio
+
+                n = len(json.loads((Path(tmp) / "plated.json").read_text())["frames"])
+                self.assertEqual(len(passes), n - 1, "one plate pass a frame filmed after start, for every renderer")
+                last = imageio.get_reader(out["also"]["tiled"], "ffmpeg").get_data(n - 1).astype(int)
+                corner = last[5, 5]
+                self.assertLess(abs(corner[2] - 230) + abs(corner[0] - 20), 40, "the tiled tile is over the plate")
+                u, v = rec.cam.project(np.array([[0.6, 0.0, 0.8]]))[0][0]
+                self.assertGreater(last[int(v), int(u), 0], 120, "and the cube is the render's")
+
+    def test_a_frame_missed_is_black_and_the_page_renderer_is_left_out(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio_real2sim_agent import checks
+
+        scene = rss.Scene(cell="bench_075", name="take_renderers_miss")
+        scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.2)))
+        with mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_RENDERER": "gl"}), redirect_stdout(io.StringIO()):
+            sim = scene.build()
+            with tempfile.TemporaryDirectory() as tmp:
+                server = types.SimpleNamespace(sim=sim, scene=scene, run_dir=tmp)
+                own = checks.Recorder(server, "own", every=2, also="gl")
+                self.assertIsNone(own.grid)
+                own.probe()
+                own.start()
+                self.assertEqual(own.finish()["also_skipped"], ["gl"], "the page's own renderer, said")
+                rec = checks.Recorder(server, "miss", every=2, also="tiled")
+                rec.probe()
+                rec.start()
+                real = rec.also["tiled"]["renderer"]
+                calls = {"n": 0}
+
+                def once(state):
+                    calls["n"] += 1
+                    if calls["n"] == 2:
+                        raise RuntimeError("one frame lost")
+                    return real.render(state)
+
+                rec.also["tiled"]["renderer"] = types.SimpleNamespace(render=once, close=real.close)
+                for _ in range(8):
+                    sim.run(1)
+                    rec.maybe()
+                out = rec.finish()
+                self.assertEqual(out["also_missed"], {"tiled": 1})
+                self.assertIn("tiled", out["also"], "a renderer that missed one frame carries on")
+                n = len(json.loads((Path(tmp) / "miss.json").read_text())["frames"])
+                self.assertEqual(_frames(Path(out["also"]["tiled"])), n)
+
     def test_an_unknown_renderer_is_refused_before_filming(self) -> None:
         import robosimstudio as rss
         from robosimstudio_real2sim_agent import checks
