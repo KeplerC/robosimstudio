@@ -346,6 +346,7 @@ class Sim(EnvBase):
         camera: CameraSpec | str | None = None,
         *,
         channels: Sequence[str] = ("rgb",),
+        plate_pass: dict[str, Any] | None = None,
     ) -> dict[str, np.ndarray]:
         """One frame of the scene as it stands, through the renderer.
 
@@ -364,6 +365,8 @@ class Sim(EnvBase):
                 or, on a scene that declares none, a three-quarter view of the
                 work surface.
             channels: Which of ``"rgb"``, ``"depth"`` to produce.
+            plate_pass: :meth:`plate_pass`'s for this state, for a caller drawing it through other renderers too
+                (:meth:`over_plate`).
 
         Returns:
             ``{"rgb": uint8 [H, W, 3], "depth": float32 [H, W], ...}``.
@@ -416,7 +419,9 @@ class Sim(EnvBase):
                     pass
             raise
         if spec.background and "rgb" in frame:
-            frame = dict(frame, rgb=self.over_plate(spec, frame["rgb"], depth=frame.get("depth")))
+            frame = dict(
+                frame, rgb=self.over_plate(spec, frame["rgb"], depth=frame.get("depth"), plate_pass=plate_pass)
+            )
         return {c: np.asarray(frame[c]) for c in channels if c in frame}
 
     def over_plate(

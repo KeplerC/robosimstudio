@@ -1533,7 +1533,7 @@ class TakeProbe(unittest.TestCase):
         rec._probed = None
         rec.also, rec.grid = {}, None  # no --also renderers
         rec.looks, rec.encoded, rec.captured = [], [], []
-        rec._look = lambda: (rec.looks.append(1), (np.zeros((540, 960, 3), np.uint8), "seg", None, {}))[1]
+        rec._look = lambda strict=False: (rec.looks.append(1), (np.zeros((540, 960, 3), np.uint8), "seg", None, {}))[1]
         rec.writer = types.SimpleNamespace(try_encode=lambda frame: rec.encoded.append(frame.shape))
         rec.capture = lambda look=None: rec.captured.append(look)
         return rec

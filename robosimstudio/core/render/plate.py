@@ -187,7 +187,9 @@ def nearer(
     recess, the box behind a gripper whose collider bulges past its drawn mesh.
     (Holding each pixel to the *nearest* moving collider around it instead read
     those as room, and left the plate's wall as a pale outline round every
-    protruding part.)
+    protruding part.) What this lets through is render-only scenery standing
+    between a moving thing's rim and a farther moving collider within ``grow``
+    pixels -- a prop of the render's room between a rope and the arm behind it.
 
     In the ``grow``-pixel band outside the colliders, a pixel the render drew
     nearer than the static scene, and no farther than the nearest moving
@@ -208,14 +210,13 @@ def nearer(
     add = region & ~moving & near
     if moving_depth is not None:
         own = np.asarray(moving_depth, dtype=np.float32).reshape(seg.shape)
-        own = np.where(moving & (own > 0), own, np.nan)
-        farthest = np.nan_to_num(own, nan=0.0)
+        mine = moving & (own > 0)
+        farthest = np.where(mine, own, 0.0)
+        nearest = np.where(mine, own, np.inf)
         if grow > 0:
             farthest = maximum_filter(farthest, size=size)
-        keep &= ~((farthest > 0) & (d > farthest + 0.02 + 0.02 * d))
-        nearest = np.nan_to_num(own, nan=np.inf)
-        if grow > 0:
             nearest = minimum_filter(nearest, size=size)
+        keep &= ~((farthest > 0) & (d > farthest + 0.02 + 0.02 * d))
         add &= d <= nearest + 0.02 + 0.02 * d
     out = np.where(moving & ~keep, LABEL_STATIC, seg)
     return np.where(add, LABEL_MOVING, out).astype(seg.dtype)
