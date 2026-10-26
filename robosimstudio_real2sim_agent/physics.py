@@ -801,6 +801,12 @@ class Overrun(BaseException):
     """
 
 
+def _carried_at(row: dict, i: int) -> bool:
+    """Up there in the fingers (their force, or their touch where only the touch is read), or touching nothing at all:
+    what drop releases. A thing lifted with nothing on it is the one most worth dropping."""
+    return sum(row["hand"][i]) > 0.5 or sum(row["touch"][i]) > 0 or row["near"][i] == 0
+
+
 class Replay:
     """Holds the robot's targets for ``frozen`` and ``open`` before each step (a pre-step hook), logs after (a post).
 
@@ -1293,18 +1299,14 @@ class Replay:
                 continue
             rise = z - z[0]
             top = int(np.argmax(rise >= 0.9 * rise.max()))
-            if sum(rows[top]["hand"][i]) > 0.5 or sum(rows[top]["touch"][i]) > 0:
+            if _carried_at(rows[top], i):
                 tops[k] = top
         if tops:
             # early in a carry (90% of its height), not over where it is set down: a thing dropped above its own goal
             # lands where it was going anyway; the earliest carry, where a weld or a write would start
             start = min(tops.values())
             at = rows[start]
-            carried = [
-                k
-                for k in tops
-                if sum(at["hand"][self.names.index(k)]) > 0.5 or sum(at["touch"][self.names.index(k)]) > 0
-            ]
+            carried = [k for k in tops if _carried_at(at, self.names.index(k))]
             out["apex_step"] = start
             out["carried"] = carried
             out["carried_later"] = sorted(k for k in tops if k not in carried)

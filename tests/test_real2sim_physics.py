@@ -910,6 +910,14 @@ class StudyLines(unittest.TestCase):
         door = {**CLEAN, "elastic_parts": ["stem#1"]}  # one sprung joint (a door) is not a stem
         self.assertIs(_words(physics.verdict(door, runs))["frozen"], False)
 
+    def test_a_thing_lifted_with_nothing_on_it_is_carried(self) -> None:
+        held = {"hand": [[3.0, 0.0]], "touch": [[0, 0]], "near": [4]}
+        free = {"hand": [[0.0, 0.0]], "touch": [[0, 0]], "near": [0]}
+        resting = {"hand": [[0.0, 0.0]], "touch": [[0, 0]], "near": [2]}
+        self.assertTrue(physics._carried_at(held, 0))
+        self.assertTrue(physics._carried_at(free, 0))  # nothing touches it up there: the one most worth dropping
+        self.assertFalse(physics._carried_at(resting, 0))  # on a support, not in the hand
+
     def test_shape_volumes(self) -> None:
         import newton
 
