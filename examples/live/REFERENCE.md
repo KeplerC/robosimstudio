@@ -385,9 +385,9 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   out of something it starts inside (a finger, the table) or by something
   other than the robot; one that moves 2 to 5 mm (a key in a tight socket, a
   bottle loose in a tray) and a deformable still settling (a heap, a liquid,
-  a draped cloth) are NOTEs. A thing the `contact` line names as attached
-  fails past 2 mm. `--settle-mm` sets the 2 mm, and the 5 mm moves with it
-  (2.5 times).
+  a draped cloth) are NOTEs. When the `contact` line names an attachment,
+  anything that moves past 2 mm fails. `--settle-mm` sets the 2 mm, and the
+  5 mm moves with it (2.5 times).
 - **open** holds the fingers fully open and moves the arms as written. A
   pinch fails; a task that still happens is carried by a support, a hook or
   two arms squeezing, and the report says which. What happened is read off
@@ -405,7 +405,8 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   played the routine again), a different end or a stop is a NOTE: the
   outcome is not repeatable, and the report says so. When it lowered
   something, a different end is a NOTE only where `plain`, which changes
-  nothing, ended the same things about as far off (at least half as far);
+  nothing, ended the same things off by the same measure (position, shape or
+  turn) and at least half as far;
   a thing it lost on the way, a thing it knocked over that the written run
   left alone, or a routine that stops, still fails.
   When the written replay did not finish, there is no end to hold it to, and
