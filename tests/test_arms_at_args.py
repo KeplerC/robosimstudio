@@ -116,6 +116,27 @@ class TestTheNames(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"has arms \['right'\]"):
             self._mounts("panda", left=LEFT)
 
+    def test_a_pose_without_a_rotation_is_refused(self) -> None:
+        """A zero quaternion normalizes to nothing and would carry every body to a degenerate frame."""
+        from robosimstudio.robots.registry import get_embodiment
+        from robosimstudio.scene.compiler import _arm_mounts
+        from robosimstudio.scene.request import BuildRequest
+        from robosimstudio.specs import Binding
+
+        binding = Binding(scene="bench_075", embodiment="panda", arm_mounts=(("right", (0, 0, 1, 0, 0, 0, 0)),))
+        request = BuildRequest(cell="bench_075", embodiment="panda", binding=binding)
+        with self.assertRaisesRegex(ValueError, "non-zero quaternion"):
+            _arm_mounts(request, binding, get_embodiment("panda"))
+
+    def test_a_binding_may_state_them_as_a_mapping(self) -> None:
+        from robosimstudio.specs import Binding
+
+        binding = Binding(scene="bench_075", embodiment="panda", arm_mounts={"right": [0, 0, 1, 0, 0, 0, 1]})
+        self.assertEqual((("right", (0, 0, 1, 0, 0, 0, 1)),), binding.arm_mounts)
+        hash(binding)
+        with self.assertRaisesRegex(TypeError, "Binding.arm_mounts is"):
+            Binding(arm_mounts=("right",))
+
     def test_a_robot_inside_the_scenes_import_is_refused(self) -> None:
         from dataclasses import replace
 
@@ -155,12 +176,28 @@ SHARED = (
 )
 """The same two arms on one torso."""
 
+MOUNTED = (
+    '<mujoco><worldbody><body name="a_base" pos="0 0.2 0"><geom type="cylinder" size="0.03 0.01"/>'
+    '<body name="a_mount" pos="0.05 0 0.02" quat="0.9238795 0 0 0.3826834"><geom type="box" size="0.01 0.01 0.01"/>'
+    f"{ARM.format(p='a')}</body></body></worldbody></mujoco>"
+)
+"""One arm on a mount plate welded between its root and its first joint, yawed 45 degrees: the
+weld's auto-named joint, ``a_mount_joint``, matches the arm's ``a_`` prefix and comes first."""
+LIFTED = (
+    '<mujoco><worldbody><body name="stand"><geom type="box" size="0.1 0.1 0.02"/>'
+    '<body name="torso" pos="0 0 0.3"><joint name="lift" type="slide" axis="0 0 1"/>'
+    '<geom type="box" size="0.05 0.05 0.05"/>'
+    f"{_arm('a', '0 0.2 0')}</body></body></worldbody></mujoco>"
+)
+"""One arm welded to a torso that rides a lift on a stand. On the root itself a lift would be
+dropped: the importer welds the root of a fixed-base robot to the world in its joint's place."""
+
 MOUNT = (0.1, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0)
 WANT = (0.3, 0.4, 0.6, 0.0, 0.0, H, H)
 
 
 class TestThePlacement(unittest.TestCase):
-    def _build(self, xml: str, *, collapse: bool, mounts: dict, base_body: str = ""):
+    def _build(self, xml: str, *, collapse: bool, mounts: dict, base_body: str = "", prefix: bool = False):
         import newton
 
         from robosimstudio.robots.entity import EntityEmbodiment
@@ -173,11 +210,13 @@ class TestThePlacement(unittest.TestCase):
         arms = tuple(
             ArmSpec(
                 name=p,
-                joint_names=(f"{p}_j1", f"{p}_j2"),
+                joint_names=() if prefix else (f"{p}_j1", f"{p}_j2"),
+                joint_prefix=f"{p}_" if prefix else "",
                 ee_body_name=f"{p}_l2",
                 base_body_name=base_body if p == "a" else "",
             )
             for p in ("a", "b")
+            if f'"{p}_j1"' in xml
         )
         spec = EmbodimentSpec(name="two", asset=AssetSpec(path=str(path)), arms=arms, collapse_fixed_joints=collapse)
         builder = newton.ModelBuilder()
@@ -226,8 +265,28 @@ class TestThePlacement(unittest.TestCase):
             self._build(SHARED, collapse=False, mounts={"a": WANT})
 
     def test_a_base_on_a_moving_joint_is_refused(self) -> None:
-        with self.assertRaisesRegex(ValueError, "hangs on the moving joint"):
+        with self.assertRaisesRegex(ValueError, "a_l1' hangs on the moving joint"):
             self._build(APART, collapse=False, mounts={"a": WANT}, base_body="a_l1")
+
+    def test_a_base_under_a_moving_ancestor_names_the_ancestor(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError, r"a_base' is welded to '[^']*torso', which hangs on the moving joint '[^']*lift'"
+        ):
+            self._build(LIFTED, collapse=False, mounts={"a": WANT})
+
+    def test_the_base_is_what_the_first_moving_joint_hangs_on(self) -> None:
+        """Not the root: a weld between them matches the prefix too, and the plate is the base."""
+        for collapse in (False, True):
+            with self.subTest(collapse=collapse):
+                builder = self._build(MOUNTED, collapse=collapse, mounts={"a": WANT}, prefix=True)
+                # Either way the first joint's frame is the plate's, 50 mm up the plate's own z.
+                np.testing.assert_allclose(
+                    self._parent_frame(builder, "a_j1")[:3] if collapse else self._body(builder, "a_l1")[:3],
+                    (0.3, 0.4, 0.65),
+                    atol=1e-6,
+                )
+                if not collapse:
+                    np.testing.assert_allclose(self._body(builder, "a_mount"), WANT, atol=1e-6)
 
 
 if __name__ == "__main__":

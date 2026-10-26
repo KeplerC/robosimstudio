@@ -16,7 +16,7 @@ change without touching the runtime -- a compiled goal tree is the ``Evaluator``
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
@@ -160,7 +160,8 @@ class Binding:
             wherever the robot stands, and an arm left out still follows the
             robot. What a cell whose arms stand on separate mounts needs, said
             without copying the robot's file to move the arms inside it.
-            ``rss.robot(arms_at=...)`` writes it from work-surface poses.
+            ``rss.robot(arms_at=...)`` writes it from work-surface poses. A
+            mapping ``{arm name: pose}`` is taken too, and held as pairs.
         work_arm: Which arm does the task. ``""`` is the embodiment's first.
         support_arm: Which arm holds, anchors or steadies. ``""`` means the task
             needs only one arm; naming one on an embodiment that has no such arm
@@ -203,6 +204,20 @@ class Binding:
     scene_resident: bool = False
     static_overrides: tuple[tuple[str, str], ...] = ()
     notes: str = ""
+
+    def __post_init__(self) -> None:
+        # Pairs whichever way they were written, so the binding stays hashable
+        # and the compiler reads one shape; what the pairs say is checked there.
+        mounts = self.arm_mounts
+        if isinstance(mounts, Mapping):
+            mounts = tuple(mounts.items())
+        try:
+            pairs = tuple((name, tuple(pose)) for name, pose in mounts)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(
+                f"Binding.arm_mounts is (arm name, pose) pairs or a mapping of arm names to poses, not {mounts!r}"
+            ) from exc
+        object.__setattr__(self, "arm_mounts", pairs)
 
     def key(self, task: TaskSpec) -> tuple[str, str, str]:
         """This binding's ``(scene, embodiment, gripper)``, task defaults filled in.

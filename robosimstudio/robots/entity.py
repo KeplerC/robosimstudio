@@ -364,13 +364,22 @@ class EntityEmbodiment(Entity):
                 # static -- see EntityStatic._add_usd.
                 from robosimstudio.scene.build.imports import add_usd_stage
 
-                add_usd_stage(
+                stage = add_usd_stage(
                     builder,
                     source,
                     collapse_fixed_joints=collapse,
                     verbose=False,
                     **({} if mount is None else {"xform": mount}),
                 )
+                if placing and stage.get("collapse_results"):
+                    # A stage may fold its own welds whatever the importer is
+                    # told (``newton:collapse_fixed_joints`` on its PhysicsScene),
+                    # and then the bases the placement moves are already gone.
+                    raise RuntimeError(
+                        f"{self.spec.name}: {source} collapses its own fixed joints at import, so its arms' bases "
+                        "are folded into the world before arms_at can place them. Clear "
+                        "newton:collapse_fixed_joints on the stage's PhysicsScene to place its arms."
+                    )
             elif path.suffix.lower() == ".urdf":
                 builder.add_urdf(
                     source,
@@ -791,9 +800,16 @@ class EntityEmbodiment(Entity):
             # after this, so its fingers cannot be looked up yet -- and they
             # hang under the wrist, so the arm joints already say whose root
             # an arm stands on.
+            #
+            # Moving joints only. Uncollapsed, a prefix scan also matches the
+            # welds the collapse is about to fold away -- a mount between the
+            # root and the first joint, say -- and the base is the body the
+            # first *moving* joint hangs on, which is the joint the finalized
+            # model's handle reads its base from.
             arm_j, finger_j = self._arm_joints(labels, arm, joint_types=types, fingers=False)
-            claimed[arm.name] = [j for j in (*arm_j, *finger_j) if j >= joint_start]
-            arm_j = [j for j in arm_j if j >= joint_start]
+            moving = [j for j in (*arm_j, *finger_j) if j >= joint_start and int(types[j]) != fixed]
+            claimed[arm.name] = moving
+            arm_j = [j for j in arm_j if j in moving]
             if arm_j:
                 first[arm.name] = arm_j[0]
         for arm in self.spec.arms:
@@ -821,10 +837,11 @@ class EntityEmbodiment(Entity):
                         "this robot's import, so arms_at cannot move it"
                     )
                 if int(types[joint]) != fixed:
+                    where = "hangs on" if body == base else f"is welded to {builder.body_label[body]!r}, which hangs on"
                     raise ValueError(
-                        f"{self.spec.name} arm {arm.name!r}: base body {builder.body_label[base]!r} hangs on the moving "
-                        f"joint {labels[joint]!r}, so a pose for it would hold at one posture only. arms_at places "
-                        "an arm whose base is welded to the world."
+                        f"{self.spec.name} arm {arm.name!r}: base body {builder.body_label[base]!r} {where} the "
+                        f"moving joint {labels[joint]!r}, so a pose for it would hold at one posture only. arms_at "
+                        "places an arm whose base is welded to the world."
                     )
                 chain.append(joint)
                 if int(builder.joint_parent[joint]) < 0:

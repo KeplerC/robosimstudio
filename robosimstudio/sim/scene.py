@@ -186,8 +186,9 @@ def _arms_at(
     """``arms_at`` as ``(arm name, pose)`` pairs, each pose spelled out in full.
 
     Takes the mapping :func:`robot` is given or the pairs :class:`Robot` holds, so
-    a placement built either way reads the same. Whether the names are the
-    robot's is the compiler's question: only it knows which robot gets built.
+    a placement built either way reads the same. Only the spelling is checked
+    here; whether the names are the robot's, and once each, is the compiler's
+    question (``_arm_mounts``): only it knows which robot gets built.
     """
     if not arms_at:
         return ()
@@ -197,8 +198,6 @@ def _arms_at(
         if isinstance(item, str) or len(item) != 2 or not isinstance(item[0], str) or not item[0]:
             raise TypeError(f"rss.robot: arms_at= maps an arm's name to its base's pose, and got {item!r}")
         name, pose = item
-        if any(name == seen for seen, _ in pairs):
-            raise ValueError(f"rss.robot: arms_at= places arm {name!r} twice")
         placed = _base_at(pose, f"arms_at[{name!r}]")
         if placed is None:
             raise TypeError(f"rss.robot: arms_at[{name!r}] is None; leave the arm out to keep it where at= puts it")

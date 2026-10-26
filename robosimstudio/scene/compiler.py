@@ -519,7 +519,8 @@ def _arm_mounts(request: SceneRequest, binding: Binding, spec: EmbodimentSpec) -
     robot than the request did. A name the robot does not have is refused with
     the names it has, as :func:`_roles` refuses an arm role; so is a robot that
     arrives inside the scene's own import, which this compiler never imports
-    and so cannot take apart.
+    and so cannot take apart. The one place a binding's arm mounts are checked,
+    whichever way they were written: ``rss.robot(arms_at=...)`` or a task's own.
     """
     if not binding.arm_mounts:
         return {}
@@ -533,10 +534,10 @@ def _arm_mounts(request: SceneRequest, binding: Binding, spec: EmbodimentSpec) -
         if name in mounts:
             raise ValueError(f"scene {request.full_name!r}: arms_at places arm {name!r} twice")
         values = tuple(float(v) for v in pose)
-        if len(values) != 7:
+        if len(values) != 7 or not np.all(np.isfinite(values)) or float(np.linalg.norm(values[3:])) < 1.0e-6:
             raise ValueError(
-                f"scene {request.full_name!r}: arm {name!r}'s mount is a pose (x, y, z, qx, qy, qz, qw), "
-                f"and it was given {len(values)} numbers"
+                f"scene {request.full_name!r}: arm {name!r}'s mount is a pose (x, y, z, qx, qy, qz, qw) with a "
+                f"finite position and a non-zero quaternion, and it was given {values}"
             )
         mounts[name] = values
     if spec.resident(binding.scene_resident):
