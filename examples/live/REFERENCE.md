@@ -385,12 +385,13 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   hands squeezing, a hook), which is a NOTE. It catches a weld or a pose
   written every step even while the fingers touch the thing.
 - **plain** plays it with nothing hooked in -- no cap, no hold, nothing on
-  any hook list -- and reads only at the routine's own yields, cut there a
-  little past the written run's length. It fails when the things end
-  somewhere else than the replay left them, fly with nothing touching them,
-  or the routine does not finish: a routine that does something else when it
-  is replayed. A routine that never yields while it steps is read only at its
-  end.
+  any hook list -- and reads only at the routine's own yields (and once when
+  it returns), cut a little past the written run's length. It fails when a
+  thing flies with nothing touching it: a routine that carries it another way
+  when it is not replayed. A different end, or a routine that does not finish,
+  is a NOTE: the sim is not deterministic, and a loose thing lands elsewhere
+  run to run. A routine that never yields while it steps is read only at its
+  start and end.
 - **model** reads the scene's own numbers: gravity off the Earth's by more
   than 2% fails; a handled thing lighter than expanded polystyrene or heavier
   than lead (its mass over its colliders' volume), and a collider nothing

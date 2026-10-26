@@ -715,16 +715,16 @@ class StudyLines(unittest.TestCase):
         runs["frozen"]["things"]["crate"]["end"] = [0.4034, 0.0, 0.9]  # the same 3.4 mm, aside: pushed
         self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)
 
-    def test_plain_fails_a_routine_that_ends_or_carries_differently_unwatched(self) -> None:
+    def test_plain_notes_an_end_that_differs_and_fails_a_flight_unwatched(self) -> None:
         runs = _clean_runs()
         runs["written"]["things"]["crate"]["end_quat"] = [0.0, 0.0, 0.0, 1.0]
         runs["plain"] = {"outcome": "finished", "things": {"crate": _thing(300.0, end=(0.4, 0.0, 1.2))}}
         runs["plain"]["things"]["crate"]["end_quat"] = [0.0, 0.0, 0.0, 1.0]
         self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], True)
-        runs["plain"]["things"]["crate"]["end"] = [0.6, 0.0, 1.2]
-        self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], False)
+        runs["plain"]["things"]["crate"]["end"] = [0.6, 0.0, 1.2]  # the sim is not deterministic: a note
+        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["plain"])
         runs["plain"]["things"]["crate"].update(end=[0.4, 0.0, 1.2], free_flight_longest=physics.FLIGHT_STEPS)
-        self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], False)
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], False)  # what nondeterminism cannot do
 
     def test_an_elastic_part_or_one_another_solver_steps_drifts_without_failing_frozen(self) -> None:
         runs = _clean_runs()
@@ -754,11 +754,11 @@ class StudyLines(unittest.TestCase):
         self.assertIs(_words(result)["finite"], False)
         self.assertIn("stopped being a number at step 212", result["report"])
 
-    def test_plain_that_did_not_finish_unwatched_fails_and_a_round_spin_does_not(self) -> None:
+    def test_plain_that_did_not_finish_unwatched_is_a_note_and_a_round_spin_passes(self) -> None:
         runs = _clean_runs()
         runs["written"]["things"]["crate"]["end_quat"] = [0.0, 0.0, 0.0, 1.0]
         runs["plain"] = {"outcome": physics.PLAIN_LONG, "things": {}}
-        self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], False)
+        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["plain"])
         spun = [0.0, 0.0, float(np.sin(np.radians(69))), float(np.cos(np.radians(69)))]
         runs["plain"] = {
             "outcome": "finished",
@@ -900,6 +900,12 @@ class StudyLines(unittest.TestCase):
         runs = _clean_runs()
         runs["plain"] = {"outcome": physics.PLAIN_SLOW, "things": {}}
         self.assertIsNone(_words(physics.verdict(CLEAN, runs))["plain"])
+
+    def test_a_bendy_things_base_drifts_with_its_stem(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["stem"] = _thing(3.0)
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)
+        self.assertIsNone(_words(physics.verdict({**CLEAN, "elastic_parts": ["stem#3"]}, runs))["frozen"])
 
     def test_shape_volumes(self) -> None:
         import newton

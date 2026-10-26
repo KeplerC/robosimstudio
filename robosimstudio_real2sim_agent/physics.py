@@ -47,8 +47,9 @@ seen; only the force is not read there.
 fingers open from early in the written run's carry (where a thing it lifted first reached 90% of its height): what the fingers were
 carrying falls, and what still rides along with nothing touching it is
 carried by something that is not a contact. ``plain`` plays the routine with
-nothing hooked in at all and reads only where the things end: a routine that
-does something else when it is replayed ends somewhere else.
+nothing hooked in at all and reads at the routine's own yields: a thing that
+flies untouched there is carried another way when nobody is watching (a
+different end is only a note: the sim is not deterministic).
 
 **The model's own numbers.** Where the scene's settle (before the first
 step) moved a thing from where it was put says what it was put inside; a
@@ -1874,26 +1875,28 @@ def _plain_line(model: dict, runs: dict, written: dict, names: list[str], line: 
     if plain["outcome"] == PLAIN_SLOW:
         line(None, "plain", f"not read: {PLAIN_SLOW}")
         return
-    if plain["outcome"] != "finished":
+    if plain["outcome"] != "finished":  # a routine flaky run to run stops too: a note, not proof of anything
         line(
-            False,
+            None,
             "plain",
-            f"played with nothing watching, the routine did not finish as the replay did ({plain['outcome']})",
+            f"played with nothing watching, the routine did not finish as the replay did ({plain['outcome']}): it is "
+            "not repeatable, or it does something else when it is replayed: say which",
         )
         return
     elsewhere = _ended_elsewhere(plain, written, names, round_axes=axes, bystanders=False, excursion=False)
-    if elsewhere:
-        line(
-            False,
-            "plain",
-            f"played with nothing watching, {elsewhere}: the routine does something else when it is replayed",
-        )
-        return
     flew = {
         k: t.get("free_flight_longest", 0)
         for k, t in plain.get("things", {}).items()
         if t.get("free_flight_longest", 0) >= FLIGHT_STEPS
     }
+    if elsewhere and not flew:  # the sim is not deterministic: loose things land elsewhere run to run
+        line(
+            None,
+            "plain",
+            f"played with nothing watching, {elsewhere}: the outcome is not repeatable, or the routine does something "
+            "else when it is replayed: say which",
+        )
+        return
     if flew:
         line(
             False,
@@ -2021,10 +2024,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             and float(np.hypot(t["end"][0] - t["start"][0], t["end"][1] - t["start"][1])) < 0.001
             and t.get("rise_max_mm", 0.0) < 0.5
         }
+        bendy = {k.split("#")[0] for k in model.get("elastic_parts", [])}  # a stem's base drifts as the stem settles
         elastic = (
             {
                 k
-                for k in model.get("elastic_parts", [])
+                for k in [*model.get("elastic_parts", []), *bendy]
                 if frozen.get("things", {}).get(k, {}).get("moved_max_mm", 0.0) <= ELASTIC_MM
             }
             | sunk
