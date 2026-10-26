@@ -105,10 +105,6 @@ FAILED = "the replay itself failed"
 SETTLE_MM = 2.0
 """How far a thing may move with the robot frozen: a resting contact settles by a fraction of a millimetre."""
 
-TORQUE_SLACK = 0.05
-"""A torque limit within this fraction above the real arm's counts as the real arm's when ``built`` says what it lowered:
-data sheets and robot files round (the YAM file's 28 Nm shoulders against the real 27)."""
-
 END_MM, END_DEG = 50.0, 30.0
 """How near a replay must end each handled thing to where the written run left it [mm, deg]."""
 
@@ -607,6 +603,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
     tstart = getattr(m, "joint_target_q_start", None)
     tstart = tstart.numpy() if tstart is not None else (m.joint_q_start.numpy() if _by_coord(sim) else qd0)
     ties, welds, drives, drive_rows = [], [], [], []
+    tie_things, drive_things = [], []  # the things those name, for the frozen line
     enabled = getattr(m, "joint_enabled", None)
     live = enabled.numpy() if enabled is not None else np.ones(len(jt), dtype=bool)
     for j in range(len(jt)):
@@ -615,12 +612,14 @@ def model_facts(sim: Any) -> dict[str, Any]:
             continue
         if parent in owner and child in robot_bodies:  # a robot link hung off a thing: the same tie the other way
             ties.append(f"{owner[parent]} by a {kinds.get(int(jt[j]), 'joint')} joint to the robot")
+            tie_things.append(owner[parent])
             continue
         if child not in owner or int(jt[j]) == free:
             continue
         thing, kind = owner[child], kinds.get(int(jt[j]), "joint")
         if parent in robot_bodies:
             ties.append(f"{thing} by a {kind} joint to the robot")
+            tie_things.append(thing)
             continue
         if int(jt[j]) == fixed_kind and owner.get(parent) != thing:
             welds.append(f"{thing} welded to {'the world' if parent == -1 else owner.get(parent, f'body {parent}')}")
@@ -628,6 +627,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
         stiff = [d for d in range(int(qd0[j]), end) if ke[d] > 0]
         if stiff:
             drives.append(f"{thing}'s {kind} joint {j} (ke {float(max(ke[d] for d in stiff)):g})")
+            drive_things.append(thing)
             # where the target of each stiff dof sits in joint_target_q (a hinge's or a slide's one coordinate is its
             # dof's; a ball joint's four coordinates do not line up with its three dofs, and are read as they fall)
             drive_rows += [int(tstart[j]) + (d - int(qd0[j])) for d in stiff]
@@ -647,9 +647,16 @@ def model_facts(sim: Any) -> dict[str, Any]:
         for k, (body1, body2, label) in rows.items()
         if {body1, body2} & robot_bodies and ({body1, body2} - robot_bodies) & set(owner)
     }
+    out["robot_equality_things"] = {
+        str(k): next(owner[b] for b in (body1, body2) if b in owner and b not in robot_bodies)
+        for k, (body1, body2, _label) in rows.items()
+        if str(k) in out["robot_equalities"]
+    }
     out["ties"] = ties
+    out["tie_things"] = tie_things
     out["welds"] = welds
     out["drives"] = drives
+    out["drive_things"] = drive_things
     out["drive_rows"] = drive_rows
     out["kinematic"] = [name for name, t in out["things"].items() if t["kinematic"]]
     out["gravity"] = round(float(np.linalg.norm(np.ravel(m.gravity.numpy())[:3])), 4)
@@ -1413,9 +1420,7 @@ class AsBuilt:
             rows = np.asarray(dofs, dtype=np.int64)
             before = effort[rows].copy()  # numpy() is a view on a CPU device: read it before the write
             real = np.asarray(caps, dtype=effort.dtype)
-            # a joint the solver already holds within TORQUE_SLACK of the real arm's is left alone, so "lowered nothing"
-            # is an unchanged replay (an actuator's force range can hold a joint below Newton's own limit)
-            cut = _enforced_effort(m, rows, before) > real * (1.0 + TORQUE_SLACK)
+            cut = real < before  # what is written is what is counted, so "lowered nothing" is an unchanged replay
             lowered["torque"] = int(np.count_nonzero(cut))
             if cut.any():
                 self._change("joint_effort_limit", rows[cut], np.minimum(before[cut], real[cut]))
@@ -1446,30 +1451,6 @@ class AsBuilt:
         self.saved = {}
         if flags:
             tuning.notify(self.sim.pipeline, flags)
-
-
-def _enforced_effort(m: Any, dofs: np.ndarray, effort: np.ndarray) -> np.ndarray:
-    """Each DOF's torque limit as the solver enforces it: ``effort`` (Newton's limit on those DOFs, often its 1e6
-    default), or the force range of a force-limited MuJoCo joint actuator on that DOF where that is lower. Newton
-    rebuilds a joint-target actuator with unit gear and keeps its force range, so the gear is not read."""
-    effort = np.asarray(effort, dtype=np.float64).copy()
-    mj = getattr(m, "mujoco", None)
-    try:
-        kind, trn = mj.actuator_trntype.numpy(), mj.actuator_trnid.numpy()
-        span, has = mj.actuator_forcerange.numpy(), mj.actuator_has_forcerange.numpy()
-    except AttributeError:
-        return effort
-    limited = getattr(mj, "actuator_forcelimited", None)
-    limited = limited.numpy() if limited is not None else np.full(len(kind), 2)
-    where = {int(d): i for i, d in enumerate(dofs)}
-    for a in range(len(kind)):
-        on = int(limited[a]) == 1 or (int(limited[a]) == 2 and int(has[a]))  # MuJoCo's false, true, auto
-        if int(kind[a]) != 0 or not on:  # a joint actuator whose force limit the solver applies
-            continue
-        i = where.get(int(trn[a, 0]))  # Newton stores a joint actuator's DOF there, not its joint
-        if i is not None:
-            effort[i] = min(effort[i], float(np.max(np.abs(span[a]))))
-    return effort
 
 
 def cap_limit(steps: int) -> int:
@@ -1758,14 +1739,6 @@ def _misses(
     return out
 
 
-def _label_thing(label: str, things: Any) -> str:
-    """The thing an equality row's label names: the longest of ``things`` it holds whole ("key_weld" names key,
-    "key_2_weld" names key_2; letters, digits, dots and hyphens are part of a name, an underscore or a space ends it),
-    or ``""``."""
-    hits = [k for k in things if re.search(rf"(?<![0-9A-Za-z.\-]){re.escape(k)}(?![0-9A-Za-z.\-])", label)]
-    return max(hits, key=len, default="")
-
-
 def _miss_words(k: str, measure: str, amount: float) -> str:
     """A thing's end missed by one measure, in a few words: ``position`` [mm], ``shape`` or ``turn`` [deg]."""
     return {
@@ -2030,8 +2003,8 @@ def _plain_gate(runs: dict, written: dict) -> tuple[dict | None, str]:
         return plain, "not read: the written replay did not finish"
     if plain.get("nonfinite"):
         return plain, "not read: the solver blew up in it"
-    if plain["outcome"] == PLAIN_SLOW:
-        return plain, f"not read: {PLAIN_SLOW}"
+    if plain["outcome"] == PLAIN_SLOW or plain["outcome"].startswith((STOPPED, FAILED)):
+        return plain, f"not read: {plain['outcome']}"
     if plain["outcome"] != "finished":  # a routine flaky run to run stops too: a note, not proof of anything
         return plain, (
             f"played with nothing watching, the routine did not finish as the replay did ({plain['outcome']}): it is "
@@ -2049,7 +2022,16 @@ def _flew(run: dict) -> dict[str, int]:
     }
 
 
-def _plain_reading(runs: dict, written: dict, names: list[str], axes: dict | None = None) -> dict[str, Any]:
+class _PlainReading(NamedTuple):
+    """Plain read once (:func:`_plain_reading`)."""
+
+    run: dict | None
+    why: str
+    flew: dict[str, int]
+    misses: list[_Miss]
+
+
+def _plain_reading(runs: dict, written: dict, names: list[str], axes: dict | None = None) -> _PlainReading:
     """Plain read once for the plain line and for built's spread: the run (``None`` without one), why its end cannot be
     read (:func:`_plain_gate`), what it carried without contact (:func:`_flew`), and its misses (handled things only,
     none when it flew)."""
@@ -2061,29 +2043,29 @@ def _plain_reading(runs: dict, written: dict, names: list[str], axes: dict | Non
         if readable and not flew
         else []
     )
-    return {"run": plain, "why": why, "flew": flew, "misses": seen}
+    return _PlainReading(plain, why, flew, seen)
 
 
-def _plain_line(plain: dict[str, Any], line: Any) -> None:
+def _plain_line(plain: _PlainReading, line: Any) -> None:
     """``plain``: the routine played with nothing hooked in; the things should end where the written replay left them."""
-    if plain["run"] is None:
+    if plain.run is None:
         return
-    if plain["why"]:
-        line(None, "plain", plain["why"])
+    if plain.why:
+        line(None, "plain", plain.why)
         return
-    if plain["misses"]:  # the sim is not deterministic: loose things land elsewhere run to run
+    if plain.misses:  # the sim is not deterministic: loose things land elsewhere run to run
         line(
             None,
             "plain",
-            f"played with nothing watching, {plain['misses'][0].words}: the outcome is not repeatable, or the routine "
+            f"played with nothing watching, {plain.misses[0].words}: the outcome is not repeatable, or the routine "
             "does something else when it is replayed: say which",
         )
         return
-    if plain["flew"]:
+    if plain.flew:
         line(
             False,
             "plain",
-            f"played with nothing watching, free of every contact but not falling at g, steps: {plain['flew']}: the "
+            f"played with nothing watching, free of every contact but not falling at g, steps: {plain.flew}: the "
             "routine carries it another way when it is not replayed",
         )
         return
@@ -2104,10 +2086,24 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     if driven:
         found.append("a target on a thing's own joint moved while the routine played: a motor")
     labels = model.get("robot_equalities", {})
+    # the things `found` holds, as names (older model reads carry only the words, in their fixed forms), and whether
+    # it holds something it names no thing for (a hook, an equality row whose thing is not known)
+    held_things = set(
+        model.get("tie_things", [f.split(" by a ", 1)[0] for f in model.get("ties", [])])
+        + (model.get("drive_things", [f.split("'s ", 1)[0] for f in model.get("drives", [])]) if driven else [])
+        + list(model.get("kinematic", []))
+        + list((runs.get("written") or {}).get("latched", []))
+    )
+    held_unnamed = bool((runs.get("written") or {}).get("hooks_added", 0))
     for k in (runs.get("written") or {}).get("robot_equalities_on", []):
         label = labels.get(str(k), "")
         if "suction" not in label:
             found.append(f"equality row {k} ({label or 'a weld'}) held a thing to the robot while the routine played")
+            thing = model.get("robot_equality_things", {}).get(str(k), "")
+            if thing:
+                held_things.add(thing)
+            else:
+                held_unnamed = True
     for name in (runs.get("written") or {}).get("latched", []):
         found.append(f"{name}'s grasp latch held it to a hand while the routine played")
     added = (runs.get("written") or {}).get("hooks_added", 0)
@@ -2233,17 +2229,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # a move up to PUSHED_MM (scaled with --settle-mm) is a wobble for the report; an attachment fails on the
         # contact line whatever it moves, and frozen names it (the contact line's entries name a thing by its own name)
         pushed = PUSHED_MM * settle_mm / SETTLE_MM
-        base = worst.split("#")[0]
-        known = {k.split("#")[0] for k in (*model.get("things", {}), *frozen.get("things", {}))}
-        labels = model.get("robot_equalities", {})
-        rows = [
-            _label_thing(labels.get(str(k), ""), known)
-            for k in (runs.get("written") or {}).get("robot_equalities_on", [])
-            if "suction" not in labels.get(str(k), "")
-        ]
-        # an entry names its thing first ("crate by a ...", "lid's ..."); an equality row, by its label
-        named = bool(worst) and (any(f.startswith((f"{base} ", f"{base}'s ")) for f in found) or base in rows)
-        unnamed = "" in rows or any("substep hook" in f for f in found)
+        named = bool(worst) and worst.split("#")[0] in held_things
         if moved > settle_mm:
             pushed_far = moved > pushed
             if named:
@@ -2259,7 +2245,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 cause = "it starts inside something, or something other than the robot pushes it"
             else:
                 cause = "a few millimetres, but a thing at rest stays put: say in the report what moves it"
-            if unnamed and not named:  # an equality row whose label names no thing, or a hook: it may be the cause
+            if held_unnamed and not named:  # a hook, or an equality row whose thing is not known: it may be it
                 cause += "; the contact line names a hold (an equality row, a hook) that names no thing: say if it holds this"
             if drift:  # a deformable still settling is said too
                 k = max(drift, key=drift.get)
@@ -2339,7 +2325,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # there is the scene's own spread from run to run, not a grip that needs more than the real hand
         ok, detail, misses = held(built, robot)
         same = f"built changed nothing: no rigid shape's friction here is above {REAL_MU:g}" + (
-            " and the arm's torque is already the real arm's" if per_arm or torque else " (no torque limits known)"
+            " and the arm's torque is already the real arm's"
+            if (per_arm and all(model.get("arm_torque", {}).values())) or (torque and not model.get("arm_torque"))
+            else " (no torque limits known for every arm)"
         )
         if ok:
             line(True, "built", same)
@@ -2357,7 +2345,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             line(None, "built", f"{same}, so it only played the same model again, and {miss}: {why}")
     elif built:
         ok, detail, misses = held(built, robot)
-        seen = _within_spread(misses, plain["misses"]) if ok is False else ""
+        seen = _within_spread(misses, plain.misses) if ok is False else ""
         spread = f"{seen} too" if seen else ""
         if spread:
             # plain, which changes nothing, ended the same things about as far off: built cannot tell a slip from that

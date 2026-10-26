@@ -256,7 +256,7 @@ class Verdict(unittest.TestCase):
         self.assertIn("a hold (an equality row, a hook) that names no thing: say if it holds this", result["report"])
         self.assertIn("crate moved 3.0 mm with the robot frozen: a few millimetres", result["report"])
         runs["written"]["robot_equalities_on"] = [3]
-        model = {**CLEAN, "robot_equalities": {"3": "crate_weld"}}  # the row's label names the crate
+        model = {**CLEAN, "robot_equalities": {"3": "a weld"}, "robot_equality_things": {"3": "crate"}}
         self.assertIn(
             "crate moved 3.0 mm with the robot frozen: the attachment", physics.verdict(model, runs)["report"]
         )
@@ -277,9 +277,26 @@ class Verdict(unittest.TestCase):
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
         runs["frozen"]["things"]["key"] = _thing(0.1)
         runs["written"]["robot_equalities_on"] = [3]
-        model = {**CLEAN, "robot_equalities": {"3": "key_weld"}}
+        model = {**CLEAN, "robot_equalities": {"3": "key_weld"}, "robot_equality_things": {"3": "key"}}
         result = physics.verdict(model, runs)
         self.assertIn("crate moved 3.0 mm with the robot frozen: a few millimetres", result["report"])
+        self.assertNotIn("names no thing", result["report"])  # the row's thing is known, and it is the key
+
+    def test_a_thing_named_like_the_fixed_words_is_not_held(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["1"] = _thing(3.0)
+        runs["written"]["hooks_added"] = 1  # "1 substep hook(s) attached ...": names no thing
+        result = physics.verdict(CLEAN, runs)
+        self.assertNotIn("the attachment the contact line names", result["report"])
+        self.assertIn("names no thing: say if it holds this", result["report"])
+
+    def test_a_plain_replay_cut_or_broken_is_not_read(self) -> None:
+        runs = _clean_runs()
+        for outcome in (physics.STOPPED, physics.FAILED + ": RuntimeError: x"):
+            runs["plain"] = _run(outcome=outcome)
+            result = physics.verdict(CLEAN, runs)
+            self.assertIsNone(_words(result)["plain"])
+            self.assertIn("not read: " + outcome[:20], result["report"])
 
     def test_a_built_replay_the_page_cut_is_not_read(self) -> None:
         runs = _clean_runs()
@@ -292,7 +309,7 @@ class Verdict(unittest.TestCase):
         runs = _clean_runs()
         runs["built"] = {**_run(), "lowered": {"friction": 0, "torque": 0}}
         result = physics.verdict({k: v for k, v in CLEAN.items() if k != "real_arm_torque"}, runs)
-        self.assertIn("no rigid shape's friction here is above 1 (no torque limits known)", result["report"])
+        self.assertIn("no rigid shape's friction here is above 1 (no torque limits known for every arm)", result["report"])
         runs["built"] = {**_run(end=(0.4, 0.0, 0.9), turn=0.0), "lowered": None}  # apply() did not finish
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
 
@@ -1094,30 +1111,6 @@ class StudyLines(unittest.TestCase):
         self.assertIsNone(_words(physics.verdict(stem, runs))["frozen"])
         door = {**CLEAN, "elastic_parts": ["stem#1"]}  # one sprung joint (a door) is not a stem
         self.assertIs(_words(physics.verdict(door, runs))["frozen"], False)
-
-    def test_the_enforced_torque_reads_an_actuator_by_its_dof(self) -> None:
-        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
-        # a free box first (joint 0, DOFs 0-5), then a three-joint arm on DOFs 6-8 and a finger on DOF 9
-        mj = types.SimpleNamespace(
-            actuator_trntype=arr([0, 0, 0, 0]),
-            actuator_trnid=arr([[6, 0], [7, 0], [8, 0], [9, 0]]),  # Newton stores the DOF, not the joint
-            actuator_forcerange=arr([[-28, 28], [-28, 28], [-10, 10], [-100, 100]]),
-            actuator_has_forcerange=arr([1, 1, 1, 1]),
-            actuator_forcelimited=arr([2, 0, 1, 2]),  # auto, off, on, auto
-            actuator_gear=arr([[1.0], [1.0], [2.0], [1.0]]),  # rebuilt with unit gear: not read
-        )
-        m = types.SimpleNamespace(mujoco=mj)
-        got = physics._enforced_effort(m, np.array([6, 7, 8]), np.array([1e6, 1e6, 1e6]))
-        np.testing.assert_allclose(got, [28.0, 1e6, 10.0])  # DOF 7's force limit is off: the solver holds nothing
-        np.testing.assert_allclose(physics._enforced_effort(types.SimpleNamespace(), np.array([6]), [50.0]), [50.0])
-
-    def test_an_equality_label_names_the_longest_thing_it_holds_whole(self) -> None:
-        things = {"key", "key_2", "white_bottle"}
-        self.assertEqual(physics._label_thing("key_weld", things), "key")
-        self.assertEqual(physics._label_thing("key_2_weld", things), "key_2")
-        self.assertEqual(physics._label_thing("key-ring_weld", things), "")
-        self.assertEqual(physics._label_thing("white_bottle_seal", things), "white_bottle")
-        self.assertEqual(physics._label_thing("a weld", things), "")
 
     def test_shape_volumes(self) -> None:
         import newton
