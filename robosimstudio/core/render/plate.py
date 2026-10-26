@@ -168,38 +168,57 @@ def nearer(
     moving_depth: np.ndarray | None = None,
     grow: int = 2,
     slack: float = 0.0015,
+    room: float = 0.1,
 ) -> np.ndarray:
     """``seg`` with its moving pixels kept only where the render drew the moving thing itself.
 
     ``seg`` comes off the colliders, ``depth`` off what the render drew: a
     rope's collider spheres are wider than its tube, and a visual mesh can
-    overhang its collider. So the moving region is grown by ``grow`` pixels,
-    and inside it a pixel is moving where the drawn surface is nearer than the
-    static scene (``static_depth``, 0 where nothing static is hit) by more than
-    ``slack`` metres plus a thousandth of the range -- under a rope lying on the
-    bench, over the path tracer's own mat (0.75 mm) -- and, given the colliders'
-    own ``moving_depth``, no farther than the nearest moving collider around it
-    by more than 2 cm and 2 % of the range: where nothing static stands behind
-    a rope in the air, the render's own room there is far behind the rope.
-    The rest is static.
+    overhang its collider. A pixel the render drew no nearer than the static
+    scene (``static_depth``, 0 where nothing static is hit) by ``slack`` metres
+    plus a thousandth of the range -- under a rope lying on the bench, over the
+    path tracer's own mat (0.75 mm) -- is static.
+
+    Inside the colliders' moving region a pixel stays moving otherwise, unless,
+    given the colliders' own ``moving_depth``, the render drew something
+    farther than every moving collider around it (``grow`` pixels) by more than
+    ``room`` metres and a tenth of the range: the render's own room behind a
+    rope in the air. A surface of the moving things themselves is never that
+    far: the face behind a protruding key, a seam's recess, the box behind a
+    gripper whose collider bulges past its drawn mesh. (Holding each pixel to
+    the *nearest* moving collider around it instead read those as room, and
+    left the plate's wall as a pale outline round every protruding part.)
+
+    In the ``grow``-pixel band outside the colliders, a pixel the render drew
+    nearer than the static scene, and no farther than the nearest moving
+    collider around it by 2 cm and 2 % of the range, is moving: a visual mesh
+    that overhangs its collider.
     """
-    from scipy.ndimage import binary_dilation, minimum_filter
+    from scipy.ndimage import binary_dilation, maximum_filter, minimum_filter
 
     seg = np.asarray(seg).reshape(np.shape(depth)[:2])
     moving = (seg == LABEL_MOVING) | (seg < 0)
     region = binary_dilation(moving, iterations=int(grow)) if grow > 0 else moving
+    size = 2 * int(grow) + 1
     d = np.asarray(depth, dtype=np.float32).reshape(seg.shape)
     behind = np.asarray(static_depth, dtype=np.float32).reshape(seg.shape)
     behind = np.where(behind > 0, behind, np.inf)
-    drawn = region & (d > 0) & (d < behind - (slack + 0.001 * d))
+    near = (d > 0) & (d < behind - (slack + 0.001 * d))  # drawn in front of the static scene
+    keep = moving & near
+    add = region & ~moving & near
     if moving_depth is not None:
         own = np.asarray(moving_depth, dtype=np.float32).reshape(seg.shape)
-        own = np.where(moving & (own > 0), own, np.inf)
+        own = np.where(moving & (own > 0), own, np.nan)
+        farthest = np.nan_to_num(own, nan=0.0)
         if grow > 0:
-            own = minimum_filter(own, size=2 * int(grow) + 1)
-        drawn &= d <= own + 0.02 + 0.02 * d
-    out = np.where(moving & ~drawn, LABEL_STATIC, seg)
-    return np.where(drawn & ~moving, LABEL_MOVING, out).astype(seg.dtype)
+            farthest = maximum_filter(farthest, size=size)
+        keep &= ~((farthest > 0) & (d > farthest + np.maximum(room, 0.1 * farthest)))
+        nearest = np.nan_to_num(own, nan=np.inf)
+        if grow > 0:
+            nearest = minimum_filter(nearest, size=size)
+        add &= d <= nearest + 0.02 + 0.02 * d
+    out = np.where(moving & ~keep, LABEL_STATIC, seg)
+    return np.where(add, LABEL_MOVING, out).astype(seg.dtype)
 
 
 def composite(rgb: np.ndarray, seg: np.ndarray, plate: np.ndarray, shadow: np.ndarray | None = None) -> np.ndarray:
