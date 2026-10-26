@@ -695,7 +695,7 @@ class EntityEmbodiment(Entity):
     @property
     def resident(self) -> bool:
         """Whether the robot is already in the scene rather than imported here."""
-        return self.scene_resident or self.spec.asset is None
+        return self.spec.resident(self.scene_resident)
 
     def _mount_xform(self):
         """This robot's base pose as a Warp transform, or ``None`` at identity.

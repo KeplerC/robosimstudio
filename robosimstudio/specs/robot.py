@@ -863,6 +863,14 @@ class EmbodimentSpec:
     finish: Finish | None = None
     appearance: Callable[..., int] | None = None
 
+    def resident(self, scene_resident: bool = False) -> bool:
+        """Whether this robot arrives inside the scene rather than by its own import.
+
+        Placed so by its binding, or with no asset of its own to import. The one rule
+        the entity builds by and the compiler decides arm collisions by.
+        """
+        return bool(scene_resident) or self.asset is None
+
     @property
     def import_self_collisions(self) -> bool:
         """What the *importer* is told, which is not what the robot ends up with.
