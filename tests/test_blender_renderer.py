@@ -227,11 +227,12 @@ class TestTheProcess(unittest.TestCase):
         from robosimstudio.solvers.render import blender as B
 
         def impostor(executable, port):
+            root = str(Path(B.__file__).resolve().parents[3])
             code = (
-                "import socket, sys; sys.path.insert(0, %r)\n"
+                f"import socket, sys; sys.path.insert(0, {root!r})\n"
                 "from robosimstudio.solvers.render.blender_worker import send\n"
-                "s = socket.create_connection(('127.0.0.1', %d)); send(s, {'token': 'guess'}); s.recv(1)\n"
-            ) % (str(Path(B.__file__).resolve().parents[3]), port)
+                f"s = socket.create_connection(('127.0.0.1', {port})); send(s, {{'token': 'guess'}}); s.recv(1)\n"
+            )
             return [sys.executable, "-c", code]
 
         with mock.patch.object(B, "blender_argv", impostor):
