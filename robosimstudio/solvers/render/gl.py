@@ -67,6 +67,21 @@ MAX_SPHERES = 50_000
 """The most grains drawn as spheres a camera: each is one MuJoCo geom set from Python, about 5 us, so a heap of
 more draws every k-th grain, each k^(1/3) times larger, and says so once."""
 
+SMALL_BATCH = 1000
+"""A particle body this small is never thinned: thinning is for heaps, and a few loose particles would show it."""
+
+
+def sphere_strides(sizes: Sequence[int], budget: int = MAX_SPHERES) -> list[int]:
+    """Per batch of grains, draw every k-th: 1 for all when they fit the budget; else the small batches whole
+    and the large ones one stride, enough to bring them under what the small ones leave."""
+    if sum(sizes) <= budget:
+        return [1] * len(sizes)
+    small = sum(n for n in sizes if n < SMALL_BATCH)
+    large = sum(n for n in sizes if n >= SMALL_BATCH)
+    stride = max(1, -(-large // max(1, budget - small)))
+    return [1 if n < SMALL_BATCH else stride for n in sizes]
+
+
 _KEY_DIFFUSE = 0.6
 """A light's diffuse level per unit of intensity: the key's at ``key_intensity`` 1."""
 
@@ -442,10 +457,15 @@ class RendererGL(RendererBase):
         self._point_range = (0, 0)
         """Where in the drawn scene :meth:`_add_points` put its spheres, for the segmentation lookup."""
         self._told_full = False
-        if self._points > MAX_SPHERES:
+        self._strides = sphere_strides([len(b.particles) for b in self._drawables.points])
+        if any(k > 1 for k in self._strides):
+            thinned = [
+                f"{b.name or 'particles'} every {k}th"
+                for b, k in zip(self._drawables.points, self._strides, strict=True)
+                if k > 1
+            ]
             print(
-                f"[gl] {self._points} grains: drawing every {-(-self._points // MAX_SPHERES)}th, larger, "
-                f"to stay under {MAX_SPHERES} spheres a camera",
+                f"[gl] {self._points} grains, past {MAX_SPHERES} spheres a camera: drawing {', '.join(thinned)}, larger",
                 flush=True,
             )
         self._option = mujoco.MjvOption()
@@ -556,9 +576,8 @@ class RendererGL(RendererBase):
             if self._particle_q is not None and self._deforming:
                 self._deform(self._particle_q)
             if self._particle_q is not None:
-                # every k-th grain past MAX_SPHERES, each 3rd-root-of-k larger, so a heap keeps its volume
-                stride = max(1, -(-self._points // MAX_SPHERES))
-                for batch in self._drawables.points:  # gathered once a frame, drawn once a camera
+                for batch, stride in zip(self._drawables.points, self._strides, strict=True):  # once a frame
+                    # every k-th grain of a heap past the budget, each 3rd-root-of-k larger, so it keeps its volume
                     sizes = np.zeros((len(batch.radii[::stride]), 3))
                     sizes[:, 0] = batch.radii[::stride] * stride ** (1.0 / 3.0)
                     rgba = np.array([*batch.color, 1.0], dtype=np.float32)

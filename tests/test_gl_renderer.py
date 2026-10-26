@@ -81,6 +81,17 @@ class TestWhichOpenGL(unittest.TestCase):
             self.assertEqual(gl._platform(), "egl", "a headless server exporting glfw for MuJoCo's viewer keeps EGL")
 
 
+class TestGrainBudget(unittest.TestCase):
+    def test_only_a_heap_past_the_budget_is_thinned(self) -> None:
+        from robosimstudio.solvers.render.gl import sphere_strides
+
+        self.assertEqual(sphere_strides([10, 2000], budget=5000), [1, 1])
+        self.assertEqual(sphere_strides([12, 200_000], budget=50_000), [1, 5], "the dozen loose particles whole")
+        strides = sphere_strides([100_000, 60_000, 30], budget=50_000)
+        self.assertEqual(strides[2], 1)
+        self.assertLessEqual(100_000 // strides[0] + 60_000 // strides[1] + 30, 50_000)
+
+
 class TestColours(unittest.TestCase):
     def test_a_texture_is_drawn_at_its_own_brightness(self) -> None:
         """MuJoCo multiplies a texture by its geom's colour; trimesh's default for a texture with no factor is 40 % grey."""

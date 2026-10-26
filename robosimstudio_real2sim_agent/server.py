@@ -434,6 +434,7 @@ class LiveServer:
         # the file's names first: adopt() rebuilds the page, and its buttons are the routines the file binds
         self.ns, self.scene, self.sim = loaded.ns, loaded.scene, loaded.sim
         self.generation += 1
+        self.renderer()  # for the status the socket thread answers
         self.session.adopt(loaded.sim, label="live")
         self.session.begin_run()
         self.last_error = self.build_error = ""
@@ -1016,6 +1017,7 @@ class LiveServer:
         # viser takes the next port up when the one asked for is busy
         self.url = f"http://localhost:{self.session.server.get_port()}"
         self.generation += 1
+        self.renderer()  # for the status the socket thread answers
         self.last_error = self.build_error = error
         self.loaded_at = time.time()
         self.load_seconds = loaded.seconds
@@ -1110,7 +1112,7 @@ class LiveServer:
             "share_url": self.share_url,
             "pid": os.getpid(),
             "renderer_asked": getattr(self, "renderer_asked", ""),
-            "renderer_drawing": self.renderer()[0] if hasattr(self, "sim") else "",
+            "renderer_drawing": getattr(self, "renderer_drawing", ""),  # worked out on the main thread
             "file": str(self.path),
             "run_dir": str(self.run_dir),
             "pending_save": self._pending_save(stamps),
@@ -1132,14 +1134,18 @@ class LiveServer:
 
     def renderer(self) -> tuple[str, str]:
         """The renderer the page's pictures are drawn with, and why: ``ROBOSIMSTUDIO_RENDERER`` (``up --renderer``),
-        or what the machine can run. ``("", why)`` when the name set cannot be built here."""
-        platform = getattr(self.sim, "platform", None)
+        or what the machine can run. ``("", why)`` when the name set cannot be built here. Kept as
+        :attr:`renderer_drawing` for the status the socket thread answers, which never works it out itself."""
+        platform = getattr(getattr(self, "sim", None), "platform", None)
         if platform is None:
-            return "", "no scene"
-        try:
-            return platform.renderer_for("")
-        except (ValueError, ImportError) as exc:
-            return "", str(exc)
+            found = ("", "no scene")
+        else:
+            try:
+                found = platform.renderer_for("")
+            except Exception as exc:  # a bad name, or a dotted path whose module will not import
+                found = ("", f"{type(exc).__name__}: {exc}")
+        self.renderer_drawing = found[0]
+        return found
 
     def light_status(self, stamps: Any = MISSING_STAMPS) -> dict:
         """The status a waiting client polls: the busy one, with where the scene is in time; nothing read off it."""

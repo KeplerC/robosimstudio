@@ -16,10 +16,13 @@ tracer reads it:
   is the surface its handle grows over its particles, for a renderer that can
   redraw a mesh of changing topology every frame (``surfaces=True``), and
   otherwise its particles as spheres at ``point_radius``;
-* what no handle names is drawn as the tiled tracer draws it: the model's own
-  triangles over those particles (``model.tri_indices``) as one mesh, and a
-  particle no triangle uses as a sphere at its own radius -- which is all of a
-  model's deformables for a renderer built by hand with no handle table.
+* nothing else, as the path tracer draws a scene: a proxy particle a coupling
+  adds is in no handle and not in the picture.
+
+With no handle table at all -- a renderer built by hand over a bare model --
+the deformables are drawn as the tiled tracer draws them: the model's
+triangles (``model.tri_indices``) as one mesh, and each active particle no
+triangle uses as a sphere at its own radius.
 
 The topology is fixed at construction, so a renderer allocates once and moves
 vertices each frame (:meth:`DeformableMesh.vertices`).
@@ -184,9 +187,10 @@ def deformable_drawables(
     covered = np.zeros(count, dtype=bool)
     for name, handle in (deformables or {}).items():
         particles = np.asarray(getattr(handle, "particles", ()), dtype=np.int64).reshape(-1)
-        if not len(particles) or particles.min() < 0 or particles.max() >= count:
+        inside = particles[(particles >= 0) & (particles < count)]
+        covered[inside] = True  # a handle's particles are its own to draw, or nobody's
+        if not len(particles) or len(inside) != len(particles):
             continue  # a handle into another model's particles: nothing of it is drawn rather than the wrong ones
-        covered[particles] = True
         color = tuple(float(v) for v in colors.get(name, DEFORMABLE))[:3]
         triangles = np.asarray(getattr(handle, "triangles", ()), dtype=np.int64).reshape(-1, 3)
         tube = float(getattr(handle, "tube_radius", 0.0) or 0.0)
@@ -203,8 +207,10 @@ def deformable_drawables(
             out.points.append(ParticlePoints(name, particles, radii, color))
         else:  # a handle that says nothing about its look: its particles, as the tiled tracer draws them
             out.points.append(ParticlePoints(name, particles, _particle_radii(model, particles), color))
-    # what no handle names: the model's own triangles over those particles as one mesh, as the tiled tracer
-    # draws them, and the particles no triangle uses as spheres
+    if deformables is not None:
+        return out  # a scene's handle table: its deformables and nothing else, as the path tracer draws them
+    # no handle table (a renderer built by hand over a bare model): the model's triangles as one mesh, as the
+    # tiled tracer draws them, and the active particles no triangle uses as spheres
     tri = getattr(model, "tri_indices", None)
     tris = np.asarray(tri.numpy() if hasattr(tri, "numpy") else (tri if tri is not None else ()), dtype=np.int64)
     tris = tris.reshape(-1, 3)
@@ -214,6 +220,13 @@ def deformable_drawables(
         used, local = np.unique(tris, return_inverse=True)
         out.meshes.append(DeformableMesh("", used, local.reshape(-1, 3).astype(np.int32)))
         covered[used] = True
+    flags = getattr(model, "particle_flags", None)
+    if flags is not None:  # a parked or inactive particle is not drawn
+        import newton
+
+        flags = np.asarray(flags.numpy() if hasattr(flags, "numpy") else flags).reshape(-1)
+        if len(flags) == count:
+            covered |= (flags & int(newton.ParticleFlags.ACTIVE)) == 0
     rest = np.flatnonzero(~covered)
     if len(rest):
         out.points.append(ParticlePoints("", rest, _particle_radii(model, rest)))

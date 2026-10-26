@@ -77,6 +77,25 @@ class TestWhichBlender(unittest.TestCase):
         self.assertEqual(blender_argv("/venv313/bin/python3.13", 7)[1:], [str(worker), "7"])
 
 
+class TestWhichGpu(unittest.TestCase):
+    def test_blender_sees_the_scenes_own_gpu_alone(self) -> None:
+        from robosimstudio.solvers.render.blender import gpu_env
+
+        cuda1 = types.SimpleNamespace(is_cuda=True, ordinal=1)
+        cpu = types.SimpleNamespace(is_cuda=False, ordinal=-1)
+        with mock.patch("warp.get_device", return_value=cuda1):
+            with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "3,5"}):
+                self.assertEqual(gpu_env("cuda:1"), {"CUDA_VISIBLE_DEVICES": "5"}, "the process's cuda:1 is card 5")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+                self.assertEqual(gpu_env("cuda:1"), {"CUDA_VISIBLE_DEVICES": "1"})
+        with mock.patch("warp.get_device", return_value=cpu):
+            with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": ""}):
+                self.assertEqual(gpu_env("cpu"), {"CUDA_VISIBLE_DEVICES": ""}, "none seen, none given")
+            with mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "4,6"}):
+                self.assertEqual(gpu_env("cpu"), {"CUDA_VISIBLE_DEVICES": "4"}, "a CPU scene: the first it sees")
+
+
 class TestTheWire(unittest.TestCase):
     def test_a_header_and_its_blobs_arrive_whole(self) -> None:
         from robosimstudio.solvers.render.blender_worker import receive, send

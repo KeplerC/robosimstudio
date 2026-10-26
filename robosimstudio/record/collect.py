@@ -79,7 +79,8 @@ class CollectSpec:
         cameras: Which of the scene's cameras to film; empty films every one.
         device: Where the physics runs: ``"cpu"`` or ``"cuda"``.
         renderer: ``"gl"``, ``"tiled"``, or ``"auto"`` -- ``gl``, and ``tiled``
-            where ``gl`` has no OpenGL context.
+            for a heap of more grains than ``gl`` draws whole or where ``gl`` has
+            no OpenGL context.
         workers: Worker processes; 0 picks from the cores, about one per six.
         gpus: The GPUs workers render on (and step on, with ``device="cuda"``),
             round-robin, as ``CUDA_VISIBLE_DEVICES`` names them. Empty uses every
@@ -164,7 +165,10 @@ def _build(spec: CollectSpec):
         raise ValueError(f"the scene has no camera {missing or 'at all'}; it has {[c.name for c in sim.cameras]}")
     name = spec.renderer
     if name == "auto":
-        name = "gl"  # which draws cloth, ropes and grains from their particles too
+        from robosimstudio.solvers.render.gl import MAX_SPHERES
+
+        # gl draws cloth, ropes and grains from their particles too; a heap past its sphere budget it would thin
+        name = "tiled" if int(sim.model.particle_count) > MAX_SPHERES else "gl"
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
     except (RuntimeError, ValueError) as exc:  # no context, or a visual MuJoCo will not compile

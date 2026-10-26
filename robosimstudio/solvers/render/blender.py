@@ -73,7 +73,7 @@ from robosimstudio.core.cameras import CameraSpec
 from robosimstudio.core.render.base import FrameSet, RendererBase
 from robosimstudio.core.render.spec import put
 
-__all__ = ["ENV", "QUALITY_SAMPLES", "RendererBlender", "blender_argv", "find_blender"]
+__all__ = ["ENV", "QUALITY_SAMPLES", "RendererBlender", "blender_argv", "find_blender", "gpu_env"]
 
 ENV = "ROBOSIMSTUDIO_BLENDER"
 """The Blender to run: its executable, or a Python interpreter that imports ``bpy``."""
@@ -142,6 +142,29 @@ def blender_argv(executable: str, port: int) -> list[str]:
     if Path(executable).name.lower().startswith("python"):
         return [executable, worker, str(port)]
     return [executable, "-b", "--factory-startup", "--python-exit-code", "1", "--python", worker, "--", str(port)]
+
+
+def gpu_env(device: Any) -> dict[str, str]:
+    """``CUDA_VISIBLE_DEVICES`` for Blender: the scene's own GPU alone, so Cycles renders on the card the scene
+    runs on and not on every card of a shared machine (CUDA's numbering, as this process's).
+
+    A model on a CPU takes the first GPU this process can see, as ``gl`` does; a process that sees none passes
+    that on, and Blender renders on the CPU.
+    """
+    try:
+        import warp as wp
+
+        target = wp.get_device(device)
+    except Exception:
+        return {}
+    ordinal = int(target.ordinal) if target.is_cuda else 0
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is None:
+        return {"CUDA_VISIBLE_DEVICES": str(ordinal)}
+    ids = [v.strip() for v in visible.split(",") if v.strip()]
+    if not ids:
+        return {"CUDA_VISIBLE_DEVICES": ""}
+    return {"CUDA_VISIBLE_DEVICES": ids[ordinal] if ordinal < len(ids) else ids[0]}
 
 
 def _linear(rgb: Sequence[float]) -> list[float]:
@@ -309,7 +332,7 @@ class RendererBlender(RendererBase):
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     cwd=self._tmp,
-                    env={**os.environ, TOKEN_ENV: token},
+                    env={**os.environ, TOKEN_ENV: token, **gpu_env(self.model.device)},
                 )
             # in short waits, so a Blender that exits at once (a missing library, a flag it rejects) is said at once
             server.settimeout(0.5)

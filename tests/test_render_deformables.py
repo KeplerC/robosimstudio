@@ -48,10 +48,7 @@ class TestDrawables(unittest.TestCase):
         self.assertEqual(mesh.particles.tolist(), [10, 11, 12, 14])
         self.assertEqual(mesh.triangles.tolist(), [[0, 1, 2], [0, 2, 3]])
         self.assertEqual(mesh.color, (0.8, 0.2, 0.2))
-        # particle 13 is the towel's and drawn by nobody; every particle no handle names is a sphere
-        (rest,) = drawn.points
-        self.assertEqual(rest.name, "")
-        self.assertEqual(rest.particles.tolist(), [*range(10), *range(15, 20)])
+        self.assertFalse(drawn.points, "what no handle names is not drawn, as the path tracer draws a scene")
 
     def test_a_rope_is_a_tube_round_its_nodes(self) -> None:
         from robosimstudio.core.render.deformables import deformable_drawables
@@ -99,9 +96,9 @@ class TestDrawables(unittest.TestCase):
         from robosimstudio.core.render.deformables import deformable_drawables
 
         drawn = deformable_drawables(_model(3), {"stale": _handle([1, 2, 7], [[0, 1, 2]])})
-        self.assertFalse(drawn.meshes)
-        (rest,) = drawn.points
-        self.assertEqual(rest.particles.tolist(), [0, 1, 2], "the particles are still drawn, as nobody's")
+        self.assertFalse(drawn)
+        model = _model(3, tri_indices=[[0, 1, 2]])
+        self.assertFalse(deformable_drawables(model, {"stale": _handle([1, 2, 7])}), "nor its particles as nobody's")
 
     def test_without_handles_the_models_triangles_are_one_mesh(self) -> None:
         from robosimstudio.core.render.deformables import deformable_drawables
@@ -114,15 +111,25 @@ class TestDrawables(unittest.TestCase):
         self.assertEqual(rest.particles.tolist(), [0, 5])
         np.testing.assert_allclose(rest.radii, 0.004)
 
-    def test_a_handles_particles_are_not_drawn_twice_by_the_models_triangles(self) -> None:
+    def test_a_handle_table_is_all_that_is_drawn(self) -> None:
+        """A proxy particle a coupling adds is in no handle, and not in the path tracer's picture either."""
         from robosimstudio.core.render.deformables import deformable_drawables
 
         model = _model(8, tri_indices=[[0, 1, 2], [4, 5, 6]])
         drawn = deformable_drawables(model, {"towel": _handle([0, 1, 2], [[0, 1, 2]])})
-        self.assertEqual([m.name for m in drawn.meshes], ["towel", ""])
-        self.assertEqual(drawn.meshes[1].particles.tolist(), [4, 5, 6], "only what no handle names")
-        (rest,) = drawn.points
-        self.assertEqual(rest.particles.tolist(), [3, 7])
+        self.assertEqual([m.name for m in drawn.meshes], ["towel"])
+        self.assertFalse(drawn.points)
+
+    def test_an_inactive_particle_is_not_drawn(self) -> None:
+        import newton
+
+        from robosimstudio.core.render.deformables import deformable_drawables
+
+        model = _model(4)
+        active = int(newton.ParticleFlags.ACTIVE)
+        model.particle_flags = np.array([active, 0, active, 0], dtype=np.int32)
+        (points,) = deformable_drawables(model).points
+        self.assertEqual(points.particles.tolist(), [0, 2])
 
     def test_a_model_without_particles_has_nothing_to_draw(self) -> None:
         from robosimstudio.core.render.deformables import deformable_drawables

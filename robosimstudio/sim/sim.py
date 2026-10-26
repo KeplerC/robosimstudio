@@ -406,8 +406,11 @@ class Sim(EnvBase):
         try:
             frame = self._still_renderer.render(self.state)[spec.name]
         except Exception:  # a renderer that failed (a dead Blender, a lost context) is built afresh next time
-            self._still_renderer.close()
-            self._still_renderer = self._still_key = None
+            failed, self._still_renderer, self._still_key = self._still_renderer, None, None
+            try:
+                failed.close()
+            except Exception:  # its close failing too says nothing the render's own error does not
+                pass
             raise
         if spec.background and "rgb" in frame:
             frame = dict(frame, rgb=self.over_plate(spec, frame["rgb"], depth=frame.get("depth")))
