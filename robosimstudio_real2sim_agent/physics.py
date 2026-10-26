@@ -87,9 +87,10 @@ HEAVY = 2.0
 """How much heavier ``heavy`` makes every handled thing."""
 
 STOPPED = "stopped before it ended (a reset, a save or Stop)"
+"""The outcome of a replay the page stopped: not a reading, so ``./ctl physics`` plays it again."""
 
 PLAIN_LONG = "still going, played with nothing watching, when the written replay had long ended"
-"""The outcome of a replay the page stopped: not a reading, so ``./ctl physics`` plays it again."""
+"""plain's cut: a reading (the routine does not end unwatched as it does replayed), not a replay to play again."""
 
 FAILED = "the replay itself failed"
 """The start of the outcome of a replay that failed in its own code (not the routine's): not a reading either."""
@@ -404,7 +405,9 @@ def _round_axis(m: Any, shapes: list[int]) -> list[float] | None:
             axis, point = a / np.linalg.norm(a), p
         elif abs(abs(float(np.dot(a, axis))) - 1.0) > 1e-3 or np.linalg.norm(np.cross(p - point, axis)) > 1e-3:
             return None
-    if axis is None:
+    if axis is None:  # spheres alone: round about every axis when they share a centre
+        if spheres and all(np.linalg.norm(c - spheres[0]) < 1e-3 for c in spheres):
+            return [0.0, 0.0, 0.0]
         return None
     if any(np.linalg.norm(np.cross(c - point, axis)) > 1e-3 for c in spheres):
         return None
@@ -432,7 +435,8 @@ class _SideContacts:
     def __init__(self, sim: Any) -> None:
         self.sim = sim
         cap = int(getattr(sim.model, "rigid_contact_max", 0) or 0)
-        self.pipe = newton.CollisionPipeline(sim.model, rigid_contact_max=max(cap, 4096), soft_contact_max=0)
+        self.pipe = newton.CollisionPipeline(sim.model, rigid_contact_max=max(cap, 16384), soft_contact_max=0)
+        self.overflowed = False
         self.contacts = self.pipe.contacts()
         self.shape_body = sim.model.shape_body.numpy()
 
@@ -440,7 +444,9 @@ class _SideContacts:
         """This state's contacting shape pairs and their separation [m] (negative: overlapping)."""
         self.pipe.collide(self.sim.state, self.contacts)
         c = self.contacts
-        n = min(int(c.rigid_contact_count.numpy()[0]), len(c.rigid_contact_shape0))
+        count = int(c.rigid_contact_count.numpy()[0])
+        n = min(count, len(c.rigid_contact_shape0))
+        self.overflowed = self.overflowed or count > n  # pairs past the buffer are lost: what it says is incomplete
         a, b = c.rigid_contact_shape0.numpy()[:n], c.rigid_contact_shape1.numpy()[:n]
         if not n:
             return a, b, np.zeros(0)
@@ -610,7 +616,6 @@ def model_facts(sim: Any) -> dict[str, Any]:
         Exception
     ) as exc:  # a model no collision pass can be built over: the settle's own reading stands, and says so
         out["settle_error"] = f"the start overlap could not be read ({type(exc).__name__}: {exc})"[:300]
-    out["hidden"] = sorted(set(_hidden_colliders(sim).values()))
     for name, t in th.items():
         if len(t["bodies"]) == 1:
             axis = _round_axis(m, list(t["shapes"]))
@@ -739,8 +744,7 @@ class Replay:
         soft_scene = bool(sim.particle_probes())
         self.unread = unread_things(sim, self.names)
         self.side = None
-        coupled = getattr(getattr(getattr(sim, "pipeline", None), "program", None), "coupled", False)
-        if (self.unread or coupled) and not soft_scene:  # contacts across islands read by a pass of the replay's own
+        if self.unread and not soft_scene:  # contacts across islands read by a pass of the replay's own
             try:
                 self.side = _SideContacts.of(sim)
             except Exception:
@@ -775,9 +779,6 @@ class Replay:
         self.com_local[:, 6] = 1.0
         self.rows: list[dict] = []
         self.stamps: list[int] = []
-        self.kept: list = []
-        self.hooks0: set[int] = set()
-        self._hold_hook = self._after_hook = self._cap_hook = None
         self.soft0: dict[str, np.ndarray] = {}
         self.mu_seen: list[float] = []
         self.steps = 0
@@ -1122,14 +1123,20 @@ class Replay:
                     t["robot_after_release_N"] = (
                         round(float(np.median([r["robot"][i] for r in after])), 2) if after else 0.0
                     )
-                if name in self.free and t["moved_max_mm"] > FLIGHT_MM:
+                read_by_pass = name in self.unread and self.side is not None
+                if read_by_pass and self.side.overflowed:
+                    t["flight_unread"] = "the replay's collision pass overflowed its buffer"
+                elif name in self.free and t["moved_max_mm"] > FLIGHT_MM:
                     stepped = rows[1:]  # row 0 is the start, read without contacts
                     near = np.array([r["near"][i] for r in stepped]) == 0
                     span_all = np.maximum(np.diff(np.asarray(self.stamps, dtype=np.float64)), 1.0) * self.dt
                     pos = np.array([r["pose"][name][:3] for r in rows])
                     v = np.diff(pos, axis=0) / span_all[: len(pos) - 1, None]  # what the poses did, not what qd says
                     free = near[1:-1] & near[:-2] & near[2:] & (np.linalg.norm(v[1:-1], axis=1) > 0.01)
-                    acc = (v[2:] - v[1:-1]) / span_all[1 : len(v) - 1, None]
+                    mid = 0.5 * (
+                        span_all[1 : len(v) - 1] + span_all[2 : len(v)]
+                    )  # between the two velocities' midpoints
+                    acc = (v[2:] - v[1:-1]) / mid[:, None]
                     g = np.ravel(self.sim.model.gravity.numpy())[:3]
                     off = np.linalg.norm(acc - g, axis=1)
                     t["free_flight_steps"] = int(free.sum())
@@ -1432,6 +1439,7 @@ def _ended_elsewhere(
     deg: float = 30.0,
     round_axes: dict | None = None,
     bystanders: bool = True,
+    excursion: bool = True,
 ) -> str:
     """What did not end where the written run left it, said in a few words; ``""`` when everything did.
 
@@ -1447,7 +1455,7 @@ def _ended_elsewhere(
         b = written.get("things", {}).get(k) or written.get("deformables", {}).get(k)
         if not a or not b:
             continue
-        if a.get("moved_max_mm", 0.0) < b.get("moved_max_mm", 0.0) / 3:
+        if excursion and a.get("moved_max_mm", 0.0) < b.get("moved_max_mm", 0.0) / 3:
             return (
                 f"{k} moved {a.get('moved_max_mm', 0.0):.0f} mm where the written run moved it {b['moved_max_mm']:.0f}"
             )
@@ -1457,7 +1465,9 @@ def _ended_elsewhere(
         if abs(a.get("particle_end_mm", 0.0) - b.get("particle_end_mm", 0.0)) > mm / 2:
             return f"{k}'s shape ended unlike the written run's"
         axis = (round_axes or {}).get(k)
-        if axis is not None and "end_quat" in a and "end_quat" in b:  # round about it: only a tilt of the axis counts
+        if axis is not None and not any(axis):  # a ball: no turn of it is a different end
+            turn = 0.0
+        elif axis is not None and "end_quat" in a and "end_quat" in b:  # round about it: only a tilt of the axis counts
             ua = compose_many(np.array([[0, 0, 0, *a["end_quat"]]]), np.array([[*axis, 0, 0, 0, 1.0]]))[0, :3]
             ub = compose_many(np.array([[0, 0, 0, *b["end_quat"]]]), np.array([[*axis, 0, 0, 0, 1.0]]))[0, :3]
             turn = math.degrees(math.acos(max(-1.0, min(1.0, float(np.dot(ua, ub))))))
@@ -1470,7 +1480,7 @@ def _ended_elsewhere(
     return ""
 
 
-def _model_lines(model: dict, written: dict, names: list[str], line: Any) -> None:
+def _model_lines(model: dict, written: dict, names: list[str], line: Any, settle_mm: float = SETTLE_MM) -> None:
     """The ``model`` line (gravity, densities, invisible props) and the ``settle`` line (how the scene's own settle,
     before the first step, moved each thing from where it was put)."""
     bad, notes = [], []
@@ -1498,9 +1508,9 @@ def _model_lines(model: dict, written: dict, names: list[str], line: Any) -> Non
         line(True, "model", f"gravity {model['gravity']:g} m/s²; the handled things' densities are ones objects have")
     settle = model.get("settle") or {}
     if settle:
-        pushed = {k: v for k, v in settle.items() if v["rise_mm"] > SETTLE_MM}
+        pushed = {k: v for k, v in settle.items() if v["rise_mm"] > settle_mm}
         inside = {k: v for k, v in settle.items() if v.get("overlap_mm", 0.0) > OVERLAP_MM}
-        rolled = {k: v for k, v in settle.items() if v["aside_mm"] > 1.5 * SETTLE_MM and abs(v["rise_mm"]) <= SETTLE_MM}
+        rolled = {k: v for k, v in settle.items() if v["aside_mm"] > 1.5 * settle_mm and abs(v["rise_mm"]) <= settle_mm}
         if inside:
             k = max(inside, key=lambda n: inside[n]["overlap_mm"])
             line(
@@ -1559,7 +1569,9 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
         falls at g), or ending somewhere else than the written run left it."""
         a, b = (drop.get("z_after") or {}).get(k, []), (written.get("z_after") or {}).get(k, [])
         n = min(len(a), len(b))
-        if n > 10 and min(np.subtract(a[10:n], b[10:n])) < -0.015:
+        start = (written.get("things", {}).get(k) or {}).get("start")
+        height = (b[0] - start[2]) if (b and start) else 0.015
+        if n > 10 and min(np.subtract(a[10:n], b[10:n])) < -min(0.015, 0.5 * max(height, 0.0)):
             return True
         axes = {n: t["round_axis"] for n, t in model.get("things", {}).items() if t.get("round_axis")}
         return bool(_ended_elsewhere(drop, written, [k], round_axes=axes, bystanders=False))
@@ -1614,7 +1626,7 @@ def _plain_line(model: dict, runs: dict, written: dict, names: list[str], line: 
         )
         return
     axes = {k: t["round_axis"] for k, t in model.get("things", {}).items() if t.get("round_axis")}
-    elsewhere = _ended_elsewhere(plain, written, names, round_axes=axes)
+    elsewhere = _ended_elsewhere(plain, written, names, round_axes=axes, bystanders=False, excursion=False)
     if elsewhere:
         line(
             False,
@@ -1689,7 +1701,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         )
     written = runs.get("written") or {}
     names = _moved(written)
-    _model_lines(model, written, names, line)
+    _model_lines(model, written, names, line, settle_mm)
     if written:
         flew = {
             k: t.get("free_flight_not_falling", 0)
@@ -1836,9 +1848,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         for k in names:
             for i, (_p50, p95) in enumerate(written["things"].get(k, {}).get("hand_force_p50_p95_N", [])):
                 real = HAND_FORCE.get(hands[i]) if i < len(hands) and hands[i] else None
-                if real and p95 > HAND_FORCE_MARGIN * real[1]:
+                # the log adds both fingers' contact forces (and the friction that bears the weight): two jaws' worth
+                if real and p95 > HAND_FORCE_MARGIN * 2.0 * real[1]:
                     crushed.append(
-                        f"{k} {p95:g} N by hand {i + 1}, {p95 / real[1]:.1f}x the most {real[0]} squeezes ({real[1]:g} N)"
+                        f"{k} {p95:g} N by hand {i + 1}'s two fingers, {p95 / (2.0 * real[1]):.1f}x the most {real[0]} "
+                        f"squeezes ({real[1]:g} N a jaw)"
                     )
         if grip:
             detail = "the fingers pressed " + "; ".join(grip)

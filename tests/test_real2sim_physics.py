@@ -757,7 +757,10 @@ class StudyLines(unittest.TestCase):
         runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[900.0, 950.0], [0.0, 0.0]]
         result = physics.verdict({**CLEAN, "hands": ["robotiq_2f85", "robotiq_2f85"]}, runs)
         self.assertIs(_words(result)["grip"], False)
-        self.assertIn("4.0x the most a Robotiq 2F-85 squeezes (235 N)", result["report"])
+        self.assertIn("2.0x the most a Robotiq 2F-85 squeezes (235 N a jaw)", result["report"])
+        # a YAM squeezing its real 50 N a jaw reads about 100 N over its two fingers: a real squeeze
+        runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[98.0, 104.0], [0.0, 0.0]]
+        self.assertIsNot(_words(physics.verdict({**CLEAN, "hands": ["yam", "yam"]}, runs))["grip"], False)
         runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[200.0, 229.0], [0.0, 0.0]]
         self.assertIsNot(_words(physics.verdict({**CLEAN, "hands": ["robotiq_2f85"] * 2}, runs))["grip"], False)
 
@@ -774,6 +777,20 @@ class StudyLines(unittest.TestCase):
             self.assertEqual(physics.real_hand(robotiq, arm), "robotiq_2f85")
             self.assertEqual(physics.real_hand(sim([], name="yam_bimanual"), arm), "yam")
             self.assertIsNone(physics.real_hand(sim(["j1"], name="arm"), arm))
+
+    def test_a_ball_ends_the_same_however_it_turned(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"]["end_quat"] = [0.0, 0.0, 0.0, 1.0]
+        runs["built"]["things"]["crate"].update(turn_end_deg=90.0, end_quat=[0.7071068, 0.0, 0.0, 0.7071068])
+        self.assertIs(
+            _words(physics.verdict({**CLEAN, "things": {"crate": {"round_axis": [0.0, 0.0, 0.0]}}}, runs))["built"],
+            True,
+        )
+
+    def test_settle_honours_the_bar_it_is_given(self) -> None:
+        model = {**CLEAN, "settle": {"crate": {"rise_mm": 3.0, "aside_mm": 0.0, "turn_deg": 0.0}}}
+        self.assertIs(_words(physics.verdict(model, _clean_runs()))["settle"], False)
+        self.assertIs(_words(physics.verdict(model, _clean_runs(), settle_mm=5.0))["settle"], True)
 
     def test_shape_volumes(self) -> None:
         import newton
