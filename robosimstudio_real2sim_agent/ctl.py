@@ -433,7 +433,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         metavar="R,R",
         help="with --record: draw the same run with these renderers too (gl, tiled, blender, rtx): "
-        "<run-dir>/NAME.<renderer>.mp4 each, and NAME.renderers.mp4 side by side",
+        "<run-dir>/NAME.renderers/<renderer>.mp4 each, and all.mp4 there side by side",
     )
     _wait_flags(play, "return when the routine ends, saying how, its output streamed")
     phys = sub.add_parser(

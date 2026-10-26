@@ -171,12 +171,17 @@ def collider_bounds(seg: np.ndarray, moving_depth: np.ndarray, grow: int = 2) ->
     seg = np.asarray(seg).reshape(own.shape[:2])
     own = own.reshape(seg.shape)
     mine = ((seg == LABEL_MOVING) | (seg < 0)) & (own > 0)
-    farthest = np.where(mine, own, 0.0)
-    nearest = np.where(mine, own, np.inf)
-    if grow > 0:
-        size = 2 * int(grow) + 1
-        farthest = maximum_filter(farthest, size=size)
-        nearest = minimum_filter(nearest, size=size)
+    farthest = np.zeros(seg.shape, np.float32)
+    nearest = np.full(seg.shape, np.inf, np.float32)
+    ys, xs = np.nonzero(mine)
+    if not len(ys):
+        return farthest, nearest
+    g = max(0, int(grow))  # filtered over the moving things' box and the window round it, not the whole frame
+    box = (slice(max(0, ys.min() - g), ys.max() + g + 1), slice(max(0, xs.min() - g), xs.max() + g + 1))
+    far, near = np.where(mine[box], own[box], 0.0), np.where(mine[box], own[box], np.inf)
+    if g:
+        far, near = maximum_filter(far, size=2 * g + 1), minimum_filter(near, size=2 * g + 1)
+    farthest[box], nearest[box] = far, near
     return farthest, nearest
 
 
@@ -184,10 +189,9 @@ def nearer(
     seg: np.ndarray,
     depth: np.ndarray,
     static_depth: np.ndarray,
-    moving_depth: np.ndarray | None = None,
+    bounds: tuple[np.ndarray, np.ndarray] | None = None,
     grow: int = 2,
     slack: float = 0.0015,
-    bounds: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> np.ndarray:
     """``seg`` with its moving pixels kept only where the render drew the moving thing itself.
 
@@ -199,7 +203,7 @@ def nearer(
     path tracer's own mat (0.75 mm) -- is static.
 
     Inside the colliders' moving region a pixel stays moving otherwise, unless,
-    given the colliders' own ``moving_depth``, the render drew something
+    given the colliders' own depth (``bounds``), the render drew something
     farther than every moving collider around it (``grow`` pixels) by more than
     2 cm and 2 % of the range: the render's own room behind a rope in the air.
     A surface of the moving things themselves lies within that of the farthest
@@ -213,7 +217,7 @@ def nearer(
     what it still sends to the plate is a recess deeper than that bound under a
     collider that closes over it (a mug's inside, under a convex hull).
     ``bounds`` is :func:`collider_bounds`'s, taken once for several renders of
-    one state; without it they are read off ``moving_depth``.
+    one state; without it only the static scene is held to.
 
     In the ``grow``-pixel band outside the colliders, a pixel the render drew
     nearer than the static scene, and no farther than the nearest moving
@@ -231,8 +235,6 @@ def nearer(
     near = (d > 0) & (d < behind - (slack + 0.001 * d))  # drawn in front of the static scene
     keep = moving & near
     add = region & ~moving & near
-    if bounds is None and moving_depth is not None:
-        bounds = collider_bounds(seg, moving_depth, grow)
     if bounds is not None:
         farthest, nearest = bounds
         keep &= ~((farthest > 0) & (d > farthest + 0.02 + 0.02 * d))
