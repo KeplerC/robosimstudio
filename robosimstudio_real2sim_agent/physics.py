@@ -150,6 +150,10 @@ NEAR_MM = 2.0
 """Within this gap [mm] a pair the replay's own collision pass reports is touching: Newton reports every pair inside
 the contact margin, which can be centimetres."""
 
+ELASTIC_MM = 10.0
+"""How far an elastic part (a stem, a spring) may bend or sag at the reset with the robot frozen before it reads as pushed
+[mm]."""
+
 SINK_MM = 5.0
 """A rigid thing that, with the robot frozen, only sinks into what it rests on (no more than this [mm], straight down) is
 settling into a soft contact, a drift for the report rather than a push."""
@@ -744,6 +748,11 @@ class Replay:
                 self.side = None
                 self.side_error = f"the replay's collision pass could not be built ({type(exc).__name__})"
         self.unread_mask = np.array([name in self.unread for name in self.names] + [False], dtype=bool)
+        self.single_free = {
+            name
+            for name in self.names
+            if len(self.th[name]["bodies"]) == 1 and self.th[name]["bodies"][0] in free_bodies
+        }
         self.free = {
             name
             for name in self.names
@@ -932,10 +941,11 @@ class Replay:
 
     def log(self, contacts: bool = True) -> None:
         sim = self.sim
-        bq, bqd = sim.state.body_q.numpy(), sim.state.body_qd.numpy()
+        bq = sim.state.body_q.numpy()
         n = len(self.names)
         hand = np.zeros((n, len(self.arms)))
         touch = np.zeros((n, len(self.arms)))
+        overflow = False
         robot_touch = np.zeros(n)
         robot, near, depth_robot = np.zeros(n), np.zeros(n), np.zeros(n)
         probe = getattr(sim, "contacts", None)
@@ -981,9 +991,10 @@ class Replay:
                         self.hidden_touch.setdefault(int(i), set()).add(self.hidden[int(sh)])
                 if self.steps % 10 == 0:
                     self._mixed_friction(probe)
-        if self.side is not None and n and contacts:
+        if self.side is not None and n and contacts and self.mode in ("written", "drop", "plain"):
             a, b, gap = self.side.read(bq)
             self.side_overflowed += int(self.side.overflowed)
+            overflow = bool(self.side.overflowed)
             close = gap < NEAR_MM / 1000.0
             a, b, gap = a[close], b[close], gap[close]
             for x, y in ((a, b), (b, a)):
@@ -1006,9 +1017,8 @@ class Replay:
         rows = self.pose_bodies
         com = compose_many(bq[rows], self.com_local)[:, :3]  # each body's centre of mass, not its origin
         pose = {name: [*com[i], *bq[b, 3:]] for i, (name, b) in enumerate(zip(self.pose_names, rows, strict=True))}
-        vel = {name: bqd[self.th[name]["bodies"][0], :3].tolist() for name in self.names}
         soft, jaw = {}, {}
-        sampled = self.steps % SAMPLE_EVERY == 0
+        sampled = self.steps % SAMPLE_EVERY == 0 or self.mode == "plain"  # plain's reads are already sparse
         if self.drive0 is not None:  # every step: a target pulsed between samples is still a motor
             moved = np.abs(sim.control.joint_target_q.numpy()[self.drive_rows] - self.drive0)
             self.drive_moved = max(self.drive_moved, float(moved.max()))
@@ -1033,10 +1043,10 @@ class Replay:
         self.rows.append(
             {
                 "pose": pose,
-                "vel": vel,
                 "hand": hand.tolist(),
                 "touch": touch.tolist(),
                 "robot_touch": robot_touch.tolist(),
+                "overflow": overflow,
                 "robot": robot.tolist(),
                 "near": near.tolist(),
                 "depth": depth_robot.tolist(),
@@ -1119,6 +1129,7 @@ class Replay:
                 if self.mode == "drop" and self.hold_from:
                     after = rows[self.hold_from + skip : self.hold_from + skip + RELEASE_WINDOW]
                     t["robot_after_release_steps"] = int(sum(1 for r in after if r["robot_touch"][i]))
+                    t["robot_touch_read"] = name not in self.unread or self.side is not None
                     t["robot_after_release_N"] = (
                         round(float(np.median([r["robot"][i] for r in after])), 2) if after else 0.0
                     )
@@ -1130,7 +1141,7 @@ class Replay:
                     )
                 elif name in self.free and t["moved_max_mm"] > FLIGHT_MM:
                     stepped = rows[1:]  # row 0 is the start, read without contacts
-                    near = np.array([r["near"][i] for r in stepped]) == 0
+                    near = np.array([r["near"][i] == 0 and not r.get("overflow") for r in stepped])
                     span_all = np.maximum(np.diff(np.asarray(self.stamps, dtype=np.float64)), 1.0) * self.dt
                     pos = np.array([r["pose"][name][:3] for r in rows])
                     v = np.diff(pos, axis=0) / span_all[: len(pos) - 1, None]  # what the poses did, not what qd says
@@ -1144,13 +1155,21 @@ class Replay:
                     t["free_flight_steps"] = int(free.sum())
                     flying = free & (off > 3.0)
                     t["free_flight_not_falling"] = int(flying.sum())
-                    runs_ = np.diff(np.concatenate([[0], flying.astype(np.int8), [0]]))
+                    # the longest run of flying reads, counted in steps (plain reads at yields that span several)
+                    steps_of = np.maximum(np.diff(np.asarray(self.stamps, dtype=np.float64)), 1.0)[1 : 1 + len(flying)]
+                    edges = np.diff(np.concatenate([[0], flying.astype(np.int8), [0]]))
                     t["free_flight_longest"] = int(
-                        (np.flatnonzero(runs_ == -1) - np.flatnonzero(runs_ == 1)).max(initial=0)
+                        max(
+                            (
+                                steps_of[a:b].sum()
+                                for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1), strict=True)
+                            ),
+                            default=0,
+                        )
                     )
             out["things"][name] = t
         # the top of the carry: the step where a thing lifted off its start was highest, what drop releases at
-        carried = [k for k in self.names if out["things"][k]["rise_max_mm"] > CARRIED_MM]
+        carried = [k for k in self.names if k in self.single_free and out["things"][k]["rise_max_mm"] > CARRIED_MM]
         if carried:
             Z = np.array([[r["pose"][k][2] for k in carried] for r in rows])
             good = np.isfinite(Z).all(axis=1)
@@ -1160,7 +1179,15 @@ class Replay:
             # early in the carry (where it first reaches 90% of its height), not over where it is set down: a thing
             # dropped above its own goal lands where it was going anyway
             out["apex_step"] = int(np.argmax(rise >= 0.9 * rise.max())) if len(rise) else 0
-            out["carried"] = carried if len(rise) else []
+            # held there by the fingers (their force, or their touch where only the touch is read)
+            at = rows[min(out["apex_step"], len(rows) - 1)] if len(rise) else None
+            carried = [
+                k
+                for k in carried
+                if at is not None
+                and (sum(at["hand"][self.names.index(k)]) > 0.5 or sum(at["touch"][self.names.index(k)]) > 0)
+            ]
+            out["carried"] = carried
             start = out["apex_step"]
             out["z_after"] = {
                 k: [round(float(z), 4) for z in Z[start : start + skip + 40, j]] for j, k in enumerate(carried)
@@ -1500,7 +1527,9 @@ def _ended_elsewhere(
     return ""
 
 
-def _model_lines(model: dict, written: dict, names: list[str], line: Any, settle_mm: float = SETTLE_MM) -> None:
+def _model_lines(
+    model: dict, written: dict, names: list[str], line: Any, settle_mm: float = SETTLE_MM, frozen: dict | None = None
+) -> None:
     """The ``model`` line (gravity, densities, invisible props) and the ``settle`` line (how the scene's own settle,
     before the first step, moved each thing from where it was put)."""
     bad, notes = [], []
@@ -1529,7 +1558,15 @@ def _model_lines(model: dict, written: dict, names: list[str], line: Any, settle
     settle = model.get("settle") or {}
     if settle:
         pushed = {k: v for k, v in settle.items() if v["rise_mm"] > settle_mm}
-        inside = {k: v for k, v in settle.items() if v.get("overlap_mm", 0.0) > OVERLAP_MM}
+        pushed_out = {
+            k for k, t in ((frozen or {}).get("things") or {}).items() if t.get("moved_max_mm", 0.0) > settle_mm
+        }
+        resting = {
+            k: v
+            for k, v in settle.items()
+            if OVERLAP_MM < v.get("overlap_mm", 0.0) <= SINK_MM and k not in pushed_out and frozen is not None
+        }
+        inside = {k: v for k, v in settle.items() if v.get("overlap_mm", 0.0) > OVERLAP_MM and k not in resting}
         rolled = {k: v for k, v in settle.items() if v["aside_mm"] > 1.5 * settle_mm and abs(v["rise_mm"]) <= settle_mm}
         if inside:
             k = max(inside, key=lambda n: inside[n]["overlap_mm"])
@@ -1546,6 +1583,14 @@ def _model_lines(model: dict, written: dict, names: list[str], line: Any, settle
                 "settle",
                 f"the scene's settle pushed {k} {v['rise_mm']:.1f} mm up and {v['aside_mm']:.1f} mm aside before the "
                 "first step: it was put inside something",
+            )
+        elif resting:
+            k = max(resting, key=lambda n: resting[n]["overlap_mm"])
+            line(
+                None,
+                "settle",
+                f"{k} rests {resting[k]['overlap_mm']:.1f} mm into {resting[k].get('inside', 'its support')} and stays "
+                "there with the robot frozen: a contact that soft, say why",
             )
         elif rolled:
             k = max(rolled, key=lambda n: rolled[n]["aside_mm"])
@@ -1612,6 +1657,17 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
         )
         return
     unread = written.get("contacts_unread") or {}
+
+    unknown = [k for k in stayed if not drop["things"].get(k, {}).get("robot_touch_read", True)]
+    if unknown:
+        line(
+            None,
+            "drop",
+            f"with the fingers opened at the top of the carry, {', '.join(unknown)} still ended where the written run "
+            "left it, and what touches it after the release is not read (its contacts are another solver's): say what "
+            "holds it",
+        )
+        return
 
     def held_by_robot(k: str) -> bool:
         """Touched, and (where the force is read) pressed hard enough to bear the thing's weight between them."""
@@ -1731,7 +1787,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         )
     written = runs.get("written") or {}
     names = _moved(written)
-    _model_lines(model, written, names, line, settle_mm)
+    _model_lines(model, written, names, line, settle_mm, runs.get("frozen"))
     if written:
         flew = {
             k: t.get("free_flight_not_falling", 0)
@@ -1795,7 +1851,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             and t.get("rise_max_mm", 0.0) < 0.5
         }
         elastic = (
-            set(model.get("elastic_parts", []))
+            {
+                k
+                for k in model.get("elastic_parts", [])
+                if frozen.get("things", {}).get(k, {}).get("moved_max_mm", 0.0) <= ELASTIC_MM
+            }
             | sunk
             | {
                 k

@@ -428,7 +428,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=lambda text: [m.strip() for m in text.split(",") if m.strip()],
         default=[],
         metavar="A,B",
-        help="these replays after `written`, comma-separated (default: frozen,open,built,heavy)",
+        help="these replays after `written`, comma-separated (default: frozen,open,built,heavy,drop,plain)",
     )
     phys.add_argument(
         "--settle-mm", type=float, default=None, help="how far a thing may move with the robot frozen (default 2)"
@@ -845,6 +845,7 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
         if first.get("run_under_way"):  # pausing would end it, and resuming after would leave the page running free
             return show({"ok": False, "error": "a `run N` is under way: let it end, or `pause` it"}, args.json)
         was_paused = bool(first.get("paused"))
+        written_s = 0.0
         ask({"cmd": "pause"}, TIMEOUTS["pause"])
         try:
             for mode in ["written", *later]:
@@ -855,11 +856,20 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                 if not started.get("ok"):
                     return show(started, args.json)
                 _say(f"physics: {mode} ...")  # on stderr, as every wait's progress is: --json stays one document
-                ended = wait_for_script(sock, started, quiet, 0, args.wait_limit)
+                t0 = time.monotonic()
+                # plain has no cap of its own (nothing hooked in): it gets a few written runs' time, and a plain that
+                # is still going then is read as not ending unwatched rather than waited on for an hour
+                limit = args.wait_limit if mode != "plain" else min(args.wait_limit, max(120.0, 3.0 * written_s))
+                ended = wait_for_script(sock, started, quiet, 0, limit)
+                if mode == "written":
+                    written_s = time.monotonic() - t0
                 if not ended.get("ok"):
                     # still playing past --wait-limit, or failed: a reset stops it, and its own cleanup puts the
                     # robot back (the friction, the torque, the masses); then say what happened
                     ask({"cmd": "reset"}, TIMEOUTS["reset"])
+                    if mode == "plain":
+                        _say(f"physics: plain still going after {limit:.0f} s, read as not ending unwatched")
+                        continue
                     return show(ended, args.json)
             done = reset()
             if not done.get("ok"):

@@ -567,6 +567,32 @@ class CommandLine(unittest.TestCase):
             self.assertEqual(ctl.main(["physics"]), 1)
         self.assertEqual(asked, ["status"])
 
+    def test_a_plain_that_does_not_end_unwatched_goes_on_to_the_report(self) -> None:
+        asked, resets = [], [0]
+
+        def page(sock, req, timeout):
+            asked.append((req["cmd"], req.get("op", ""), req.get("mode", "")))
+            if req["cmd"] == "reset":
+                resets[0] += 1
+            if req["cmd"] == "physics" and req.get("op") == "report":
+                return {"ok": True, "passed": False, "report": "FAIL  plain  ..."}
+            return {"ok": True, "playing": 0, "paused": True, "resets": resets[0], "serial": 1}
+
+        def wait(sock, started, quiet, skip, limit):
+            mode = asked[-1][2]
+            return {"ok": mode != "plain", "error": "still playing"}
+
+        with (
+            mock.patch.object(ctl, "request", side_effect=page),
+            mock.patch.object(ctl, "wait_for_script", side_effect=wait),
+            mock.patch.object(ctl, "poll", return_value={"ok": True}),
+            mock.patch.object(ctl, "wait_until_free", return_value={"ok": True}),
+            mock.patch("sys.stderr"),
+            mock.patch("sys.stdout"),
+        ):
+            ctl.main(["physics", "--only", "plain"])
+        self.assertIn(("physics", "report", ""), asked)
+
     def test_an_unknown_replay_is_refused_before_the_page_is_asked(self) -> None:
         with mock.patch.object(ctl, "request", side_effect=AssertionError("asked the page")):
             with mock.patch("sys.stderr"):
@@ -751,8 +777,15 @@ class StudyLines(unittest.TestCase):
     def test_a_thing_the_settle_slid_aside_is_a_note(self) -> None:
         model = {**CLEAN, "settle": {"ball": {"rise_mm": 0.0, "aside_mm": 4.0, "turn_deg": 20.0}}}
         self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["settle"])
-        model["settle"]["ball"]["overlap_mm"] = 3.0
+        model["settle"]["ball"]["overlap_mm"] = 6.0  # deeper than any soft contact sinks
         self.assertIs(_words(physics.verdict(model, _clean_runs()))["settle"], False)
+
+    def test_a_shallow_rest_the_frozen_run_leaves_is_a_note_and_one_it_pushes_out_fails(self) -> None:
+        model = {**CLEAN, "settle": {"crate": {"rise_mm": 0.0, "aside_mm": 0.0, "turn_deg": 0.0, "overlap_mm": 3.0}}}
+        self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["settle"])
+        runs = _clean_runs()
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.1  # the frozen run pushed it out
+        self.assertIs(_words(physics.verdict(model, runs))["settle"], False)
 
     def test_a_squeeze_no_real_hand_gives_fails_grip(self) -> None:
         runs = _clean_runs()
