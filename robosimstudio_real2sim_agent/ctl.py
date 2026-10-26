@@ -845,7 +845,7 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
         if first.get("run_under_way"):  # pausing would end it, and resuming after would leave the page running free
             return show({"ok": False, "error": "a `run N` is under way: let it end, or `pause` it"}, args.json)
         was_paused = bool(first.get("paused"))
-        written_s = 0.0
+        written_s, plain_cut = 0.0, False
         ask({"cmd": "pause"}, TIMEOUTS["pause"])
         try:
             for mode in ["written", *later]:
@@ -867,15 +867,23 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                     # still playing past --wait-limit, or failed: a reset stops it, and its own cleanup puts the
                     # robot back (the friction, the torque, the masses); then say what happened
                     ask({"cmd": "reset"}, TIMEOUTS["reset"])
-                    if mode == "plain":
+                    if mode == "plain" and "still" in str(ended.get("error", "")):  # past its time, not failed
                         _say(f"physics: plain still going after {limit:.0f} s, read as not ending unwatched")
+                        plain_cut = True
                         continue
                     return show(ended, args.json)
             done = reset()
             if not done.get("ok"):
                 return show(done, args.json)
             reply = ask(
-                {"cmd": "physics", "op": "report", "settle_mm": args.settle_mm, "note": args.note}, TIMEOUTS["physics"]
+                {
+                    "cmd": "physics",
+                    "op": "report",
+                    "settle_mm": args.settle_mm,
+                    "note": args.note,
+                    "plain_cut": plain_cut,
+                },
+                TIMEOUTS["physics"],
             )
         except BaseException:
             # interrupted mid-replay: a reset stops it, and its own cleanup takes the hold and the changed friction,

@@ -365,9 +365,16 @@ def _shape_volume(m: Any, s: int, tables: tuple | None = None) -> float:
     shape_scale, shape_source)`` already on the host, for a caller asking about many."""
     types_, scales, sources = tables or (m.shape_type.numpy(), m.shape_scale.numpy(), getattr(m, "shape_source", None))
     src = (sources or [None] * (s + 1))[s]
+    solid = getattr(m, "shape_is_solid", None)
+    thick = getattr(m, "shape_thickness", None)
+    kw = {}
+    if solid is not None:
+        kw["is_solid"] = bool(np.asarray(solid.numpy() if hasattr(solid, "numpy") else solid)[s])
+    if thick is not None:
+        kw["thickness"] = float(np.asarray(thick.numpy() if hasattr(thick, "numpy") else thick)[s])
     try:
         mass, _com, _inertia = newton.geometry.compute_inertia_shape(
-            int(types_[s]), wp.vec3(*(float(v) for v in scales[s][:3])), src, density=1.0
+            int(types_[s]), wp.vec3(*(float(v) for v in scales[s][:3])), src, density=1.0, **kw
         )
         return max(float(mass), 0.0)
     except Exception:  # a shape Newton gives no mass to (a plane, a field): no volume to weigh it by
@@ -406,6 +413,32 @@ def _round_axis(m: Any, shapes: list[int]) -> list[float] | None:
     return [round(float(v), 6) for v in axis]
 
 
+@wp.kernel
+def _contact_gap(
+    body_q: wp.array(dtype=wp.transform),
+    shape_body: wp.array(dtype=wp.int32),
+    shape0: wp.array(dtype=wp.int32),
+    shape1: wp.array(dtype=wp.int32),
+    point0: wp.array(dtype=wp.vec3),
+    point1: wp.array(dtype=wp.vec3),
+    normal: wp.array(dtype=wp.vec3),
+    margin0: wp.array(dtype=float),
+    margin1: wp.array(dtype=float),
+    gap: wp.array(dtype=float),
+):
+    """A contact's separation along its normal less both surfaces' thickness [m]: negative is overlapping."""
+    i = wp.tid()
+    a = shape_body[shape0[i]]
+    b = shape_body[shape1[i]]
+    p0 = point0[i]
+    p1 = point1[i]
+    if a >= 0:
+        p0 = wp.transform_point(body_q[a], p0)
+    if b >= 0:
+        p1 = wp.transform_point(body_q[b], p1)
+    gap[i] = wp.dot(p1 - p0, normal[i]) - margin0[i] - margin1[i]
+
+
 class _SideContacts:
     """A collision pass of the replay's own over the whole model: the contacts a thing in another island has, which
     MuJoCo's list never holds. Read-only, after a step, on the state it left; nothing is solved from it. One per model,
@@ -428,6 +461,7 @@ class _SideContacts:
         cap = int(getattr(sim.model, "rigid_contact_max", 0) or 0)
         self.pipe = newton.CollisionPipeline(sim.model, rigid_contact_max=max(cap, 16384), soft_contact_max=0)
         self.overflowed = False
+        self._gap = None
         self.contacts = self.pipe.contacts()
         self.shape_body = sim.model.shape_body.numpy()
 
@@ -441,27 +475,26 @@ class _SideContacts:
         a, b = c.rigid_contact_shape0[:n].numpy(), c.rigid_contact_shape1[:n].numpy()
         if not n:
             return a, b, np.zeros(0)
-        bq = self.sim.state.body_q.numpy() if bq is None else bq
-
-        def world(shapes: np.ndarray, local: np.ndarray) -> np.ndarray:
-            body = self.shape_body[shapes]
-            out = local.astype(np.float64).copy()
-            on = body >= 0
-            if on.any():
-                out[on] = compose_many(
-                    bq[body[on]], np.concatenate([local[on], np.tile([0, 0, 0, 1.0], (int(on.sum()), 1))], axis=1)
-                )[:, :3]
-            return out
-
-        p0 = world(a, c.rigid_contact_point0[:n].numpy())
-        p1 = world(b, c.rigid_contact_point1[:n].numpy())
-        normal = c.rigid_contact_normal[:n].numpy()
-        gap = (
-            np.einsum("ij,ij->i", p1 - p0, normal)
-            - c.rigid_contact_margin0[:n].numpy()
-            - c.rigid_contact_margin1[:n].numpy()
+        if self._gap is None or len(self._gap) < n:
+            self._gap = wp.zeros(max(n, 1024), dtype=float, device=self.model.device)
+        wp.launch(
+            _contact_gap,
+            dim=n,
+            inputs=[
+                self.sim.state.body_q,
+                self.model.shape_body,
+                c.rigid_contact_shape0,
+                c.rigid_contact_shape1,
+                c.rigid_contact_point0,
+                c.rigid_contact_point1,
+                c.rigid_contact_normal,
+                c.rigid_contact_margin0,
+                c.rigid_contact_margin1,
+            ],
+            outputs=[self._gap],
+            device=self.model.device,
         )
-        return a, b, gap
+        return a, b, self._gap[:n].numpy().astype(np.float64)
 
 
 def model_facts(sim: Any) -> dict[str, Any]:
@@ -562,7 +595,8 @@ def model_facts(sim: Any) -> dict[str, Any]:
     out["elastic_parts"] = sorted(
         f"{owner[int(jc[j])]}#{th[owner[int(jc[j])]]['bodies'].index(int(jc[j]))}"
         for j in range(len(jt))
-        if int(jc[j]) in owner
+        if live[j]
+        and int(jc[j]) in owner
         and th[owner[int(jc[j])]]["bodies"].index(int(jc[j])) > 0
         and any(ke[d] > 0 for d in range(int(qd0[j]), int(qd0[j + 1]) if j + 1 < len(qd0) else int(m.joint_dof_count)))
     )
@@ -1163,34 +1197,40 @@ class Replay:
                             (
                                 steps_of[a:b].sum()
                                 for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1), strict=True)
+                                if b - a >= 3  # three reads at least: one read across many steps misses a contact
                             ),
                             default=0,
                         )
                     )
             out["things"][name] = t
         # the top of the carry: the step where a thing lifted off its start was highest, what drop releases at
-        carried = [k for k in self.names if k in self.single_free and out["things"][k]["rise_max_mm"] > CARRIED_MM]
-        if carried:
-            Z = np.array([[r["pose"][k][2] for k in carried] for r in rows])
-            good = np.isfinite(Z).all(axis=1)
-            Z = Z[: int(np.argmin(good))] if not good.all() else Z  # up to the first row that is not a number
-            Z = Z.reshape(-1, len(carried))
-            rise = (Z - Z[0]).max(axis=1) if len(Z) else np.zeros(0)
-            # early in the carry (where it first reaches 90% of its height), not over where it is set down: a thing
-            # dropped above its own goal lands where it was going anyway
-            out["apex_step"] = int(np.argmax(rise >= 0.9 * rise.max())) if len(rise) else 0
-            # held there by the fingers (their force, or their touch where only the touch is read)
-            at = rows[min(out["apex_step"], len(rows) - 1)] if len(rise) else None
+        lifted = [k for k in self.names if k in self.single_free and out["things"][k]["rise_max_mm"] > CARRIED_MM]
+        tops = {}  # thing -> the step it first reached 90% of its own height, with the fingers on it
+        for k in lifted:
+            i = self.names.index(k)
+            z = np.array([r["pose"][k][2] for r in rows])
+            good = np.isfinite(z)
+            z = z[: int(np.argmin(good))] if not good.all() else z  # up to the first row that is not a number
+            if len(z) < 2:
+                continue
+            rise = z - z[0]
+            top = int(np.argmax(rise >= 0.9 * rise.max()))
+            if sum(rows[top]["hand"][i]) > 0.5 or sum(rows[top]["touch"][i]) > 0:
+                tops[k] = top
+        if tops:
+            # early in a carry (90% of its height), not over where it is set down: a thing dropped above its own goal
+            # lands where it was going anyway; the earliest carry, where a weld or a write would start
+            start = min(tops.values())
+            at = rows[start]
             carried = [
                 k
-                for k in carried
-                if at is not None
-                and (sum(at["hand"][self.names.index(k)]) > 0.5 or sum(at["touch"][self.names.index(k)]) > 0)
+                for k in tops
+                if sum(at["hand"][self.names.index(k)]) > 0.5 or sum(at["touch"][self.names.index(k)]) > 0
             ]
+            out["apex_step"] = start
             out["carried"] = carried
-            start = out["apex_step"]
             out["z_after"] = {
-                k: [round(float(z), 4) for z in Z[start : start + skip + 40, j]] for j, k in enumerate(carried)
+                k: [round(float(r["pose"][k][2]), 4) for r in rows[start : start + skip + 40]] for k in carried
             }
         out["release_skip"] = skip
         if self.mode == "drop" and self.hold_from:
@@ -1433,6 +1473,20 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
         except Exception:
             reader.error = reader.error or traceback.format_exc()[-800:]
 
+    wrapped = False
+    if limit:
+        run = sim.run
+
+        def capped(count: int = 1, *a: Any, **kw: Any) -> Any:
+            if past_limit():
+                raise Overrun(int(getattr(sim, "step_count", 0) or 0) - start)
+            return run(count, *a, **kw)
+
+        try:
+            sim.run = capped  # an instance attribute, gone in the finally: the class's own run is untouched
+            wrapped = True
+        except AttributeError:  # a sim that takes no attribute: cut at yields only
+            pass
     try:
         reader = Replay(sim, "plain")
         reader.kept = [fn for hooks in sim.hook_lists().values() for fn in hooks]
@@ -1454,6 +1508,12 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
                 except Exception:
                     pass
                 break
+    except Overrun:  # the cap on its own stepping
+        outcome = PLAIN_LONG
+        try:
+            routine.close()
+        except BaseException:
+            pass
     except GeneratorExit:
         outcome = PLAIN_LONG if past_limit() else STOPPED
         try:
@@ -1464,6 +1524,11 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
     except Exception as exc:
         outcome = f"{type(exc).__name__}: {str(exc)[:300]}" if reader is not None else f"{FAILED}: {exc}"[:300]
     finally:
+        if wrapped:
+            try:
+                del sim.run
+            except AttributeError:
+                pass
         store["plain"] = (
             reader.summary(outcome) if reader is not None else {"outcome": outcome, "steps": 0, "things": {}}
         )
@@ -1613,7 +1678,7 @@ def _model_lines(
             )
 
 
-def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
+def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | None = None) -> None:
     """``drop``: the fingers opened at the top of the written run's carry; what they carried should fall."""
     drop = runs.get("drop")
     if not drop:
@@ -1645,7 +1710,6 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
         height = (b[0] - start[2]) if (b and start) else 0.015
         if n > skip + 5 and min(np.subtract(a[skip:n], b[skip:n])) < -min(0.015, 0.5 * max(height, 0.0)):
             return True
-        axes = {n: t["round_axis"] for n, t in model.get("things", {}).items() if t.get("round_axis")}
         return bool(_ended_elsewhere(drop, written, [k], round_axes=axes, bystanders=False))
 
     stayed = [k for k in carried if not fell(k)]
@@ -1693,7 +1757,7 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
         )
 
 
-def _plain_line(model: dict, runs: dict, written: dict, names: list[str], line: Any) -> None:
+def _plain_line(model: dict, runs: dict, written: dict, names: list[str], line: Any, axes: dict | None = None) -> None:
     """``plain``: the routine played with nothing hooked in; the things should end where the written replay left them."""
     plain = runs.get("plain")
     if not plain:
@@ -1711,7 +1775,6 @@ def _plain_line(model: dict, runs: dict, written: dict, names: list[str], line: 
             f"played with nothing watching, the routine did not finish as the replay did ({plain['outcome']})",
         )
         return
-    axes = {k: t["round_axis"] for k, t in model.get("things", {}).items() if t.get("round_axis")}
     elsewhere = _ended_elsewhere(plain, written, names, round_axes=axes, bystanders=False, excursion=False)
     if elsewhere:
         line(
@@ -1999,8 +2062,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             "grip",
             detail + (" (above any real pad: the built line is the one to trust)" if mu and mu[1] > REAL_MU else ""),
         )
-    _drop_line(model, runs, written, line)
-    _plain_line(model, runs, written, names, line)
+    _drop_line(model, runs, written, line, axes)
+    _plain_line(model, runs, written, names, line, axes)
     word = {True: "PASS", False: "FAIL", None: "NOTE"}
     return {
         "passed": all(c["ok"] is not False for c in lines),

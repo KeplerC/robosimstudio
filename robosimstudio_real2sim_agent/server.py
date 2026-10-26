@@ -1620,7 +1620,13 @@ class LiveServer:
         return reply
 
     def cmd_physics(
-        self, op: str = "replay", mode: str = "written", name: str = "", settle_mm: float | None = None, note: str = ""
+        self,
+        op: str = "replay",
+        mode: str = "written",
+        name: str = "",
+        settle_mm: float | None = None,
+        note: str = "",
+        plain_cut: bool = False,
     ) -> dict:
         """One physics replay of a routine (``op="replay"``), or the verdict on the ones played (``op="report"``).
 
@@ -1635,6 +1641,9 @@ class LiveServer:
                     "ok": False,
                     "error": "no physics replays of this scene: `./ctl physics` plays them (a save since starts them over)",
                 }
+            plain = self.physics.get("plain")
+            if plain_cut and plain and plain.get("outcome") == physics.STOPPED:  # the ctl cut it on its wall clock
+                plain["outcome"] = physics.PLAIN_LONG
             unread = [mode for mode, run in self.physics.items() if not _read_replay(run)]
             if unread:
                 return {
