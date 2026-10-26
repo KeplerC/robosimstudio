@@ -81,6 +81,42 @@ class TestWhichOpenGL(unittest.TestCase):
             self.assertEqual(gl._platform(), "egl", "a headless server exporting glfw for MuJoCo's viewer keeps EGL")
 
 
+class TestACollapsedDeformable(unittest.TestCase):
+    def test_a_sheet_and_a_rope_built_on_one_point_still_draw(self) -> None:
+        """MuJoCo refuses a mesh with no area; a deformable's vertices are rewritten every frame, so gl builds."""
+        import newton
+
+        from robosimstudio.core.cameras import CameraSpec
+        from robosimstudio.solvers.render.gl import RendererGL
+
+        builder = newton.ModelBuilder()
+        builder.add_ground_plane()
+        for _ in range(6):
+            builder.add_particle(pos=(0.0, 0.0, 0.3), vel=(0.0, 0.0, 0.0), mass=0.01, radius=0.01)
+        model = builder.finalize(device="cpu")
+
+        def handle(particles, triangles=(), tube=0.0):
+            return types.SimpleNamespace(particles=np.array(particles), triangles=np.array(triangles).reshape(-1, 3),
+                                         tube_radius=tube, point_radius=0.0, surface=None)  # fmt: skip
+
+        handles = {"sheet": handle([0, 1, 2], [[0, 1, 2]]), "rope": handle([3, 4, 5], tube=0.005)}
+        cam = CameraSpec(name="c", width=32, height=24, fov_y=60.0, eye=(1, 1, 1), look_at=(0, 0, 0))
+        try:
+            gl = RendererGL(model, [cam], channels=("rgb", "depth"), deformables=handles)
+        except RuntimeError as exc:
+            self.skipTest(f"no OpenGL context here: {exc}")
+        try:
+            state = model.state()
+            q = state.particle_q.numpy()
+            q[:3] = [[0.0, 0.0, 0.3], [0.1, 0.0, 0.3], [0.0, 0.1, 0.3]]
+            q[3:] = [[0.0, -0.1, 0.2], [0.05, -0.1, 0.2], [0.1, -0.1, 0.2]]
+            state.particle_q.assign(q)
+            frame = gl.render(state)["c"]
+        finally:
+            gl.close()
+        self.assertTrue(np.isfinite(frame["depth"]).all())
+
+
 class TestGrainBudget(unittest.TestCase):
     def test_only_a_heap_past_the_budget_is_thinned(self) -> None:
         from robosimstudio.solvers.render.gl import sphere_strides

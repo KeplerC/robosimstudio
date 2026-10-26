@@ -167,6 +167,35 @@ def gpu_env(device: Any) -> dict[str, str]:
     return {"CUDA_VISIBLE_DEVICES": ids[ordinal] if ordinal < len(ids) else ids[0]}
 
 
+def _greeting(sock: socket.socket, deadline: float, most: int = 4096) -> str:
+    """The token a connection says first, or ``""``: read whole by ``deadline`` (a ``time.monotonic`` value), at most
+    ``most`` bytes, so a connection that trickles or floods cannot hold up the renderer's start."""
+    import json
+    import struct
+
+    def read(n: int) -> bytes:
+        got = b""
+        while len(got) < n:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError
+            sock.settimeout(left)
+            chunk = sock.recv(n - len(got))
+            if not chunk:
+                raise ConnectionError
+            got += chunk
+        return got
+
+    try:
+        (n,) = struct.unpack("<Q", read(8))
+        if n > most:
+            return ""
+        hello = json.loads(read(n).decode("utf-8"))
+    except (OSError, ConnectionError, ValueError):
+        return ""
+    return str(hello.get("token", "")) if isinstance(hello, dict) else ""
+
+
 def _linear(rgb: Sequence[float]) -> list[float]:
     """Display values (the palette's, a texture's factor) as the linear albedo Blender shades with, as ``rtx`` decodes them."""
     from robosimstudio.core.render.palette import srgb_to_linear
@@ -318,7 +347,7 @@ class RendererBlender(RendererBase):
     def _start(self) -> None:
         import secrets
 
-        from robosimstudio.solvers.render.blender_worker import TOKEN_ENV, receive
+        from robosimstudio.solvers.render.blender_worker import TOKEN_ENV
 
         server = socket.create_server(("127.0.0.1", 0))
         # the worker says this first: a connection from anything else on the machine is dropped, not given the scene
@@ -340,13 +369,8 @@ class RendererBlender(RendererBase):
             while self._sock is None:
                 try:
                     candidate, _ = server.accept()
-                    candidate.settimeout(5.0)
-                    try:
-                        hello, _ = receive(candidate)
-                    except (OSError, ConnectionError, ValueError):
-                        hello = {}
-                    said = hello.get("token", "") if isinstance(hello, dict) else ""
-                    if secrets.compare_digest(str(said), token):
+                    said = _greeting(candidate, time.monotonic() + 5.0)
+                    if secrets.compare_digest(said, token):
                         self._sock = candidate
                     else:
                         candidate.close()
@@ -485,7 +509,7 @@ def _describe(
     deformables: Mapping[str, Any] | None,
     deformable_colors: Mapping[str, Sequence[float]] | None,
     deformable_finishes: Mapping[str, Any] | None,
-    rest: np.ndarray | None = None,
+    rest: np.ndarray | None,
 ) -> tuple[dict, list[Any], list[int], Any]:
     """The ``scene`` message: every visible shape, the deformables and the particles, and the bodies to pose."""
     from robosimstudio.core.render.deformables import deformable_drawables
@@ -500,6 +524,7 @@ def _describe(
     meshes: list[dict] = []
     bodies: set[int] = set()
     textures: dict[str, int] = {}
+    images: dict[int, int] = {}
     for part in model_visual_parts(model):
         mesh = part.mesh
         if len(getattr(mesh, "faces", ())) == 0:
@@ -526,8 +551,10 @@ def _describe(
         if image is not None:
             entry["uv"] = len(blobs)
             blobs.append(np.ascontiguousarray(uv, dtype=np.float32))
-            entry["texture"] = len(blobs)
-            blobs.append(_png(image))
+            if id(image) not in images:  # one blob per image, however many shapes share it (an atlas)
+                images[id(image)] = len(blobs)
+                blobs.append(_png(image))
+            entry["texture"] = images[id(image)]
         elif finish.texture:
             try:
                 path = texture_path(finish.texture)
@@ -545,8 +572,6 @@ def _describe(
         meshes.append(entry)
 
     drawables = deformable_drawables(model, deformables, deformable_colors, surfaces=True)
-    if drawables and rest is None:
-        rest = model.particle_q.numpy()
     deformable_list, point_list = [], []
     for i, part in enumerate(drawables.meshes):
         finish = (deformable_finishes or {}).get(part.name) or finish_for(part.color)

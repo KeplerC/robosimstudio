@@ -206,7 +206,7 @@ class TestWhatIsSent(unittest.TestCase):
         model = _tiny_model()
         body = 0
         header, blobs, bodies, drawables = _describe(
-            model, finishes=None, deformables=None, deformable_colors=None, deformable_finishes=None
+            model, finishes=None, deformables=None, deformable_colors=None, deformable_finishes=None, rest=None
         )
         self.assertEqual(bodies, [body])
         self.assertEqual(sorted(m["body"] for m in header["meshes"]), [-1, body])

@@ -418,7 +418,8 @@ class PanelRenderView(Panel):
             channels = ["rgb", "depth"] if getattr(spec, "background", "") else ["rgb"]
             renderer = self.env.make_renderer(self.backend, cameras=[spec], channels=channels, **extra)
             self._renderers[key] = renderer
-            renderer.render(self.env.state)
+            if getattr(renderer, "warms_up", False):  # a renderer whose first frame only builds its stage
+                renderer.render(self.env.state)
         except Exception as exc:  # no GPU, a contended card, a GPU the rule misjudged
             self._failed(f"{self.backend} would not build -- {type(exc).__name__}: {exc}")
             return False

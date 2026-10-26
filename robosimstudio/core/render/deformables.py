@@ -213,7 +213,6 @@ def deformable_drawables(
     tris = np.asarray(tri.numpy() if hasattr(tri, "numpy") else (tri if tri is not None else ()), dtype=np.int64)
     tris = tris.reshape(-1, 3)
     tris = tris[(tris.min(axis=1) >= 0) & (tris.max(axis=1) < count)] if len(tris) else tris
-    tris = tris[~covered[tris].any(axis=1)] if len(tris) else tris
     if len(tris):
         used, local = np.unique(tris, return_inverse=True)
         out.meshes.append(DeformableMesh("", used, local.reshape(-1, 3).astype(np.int32)))

@@ -88,9 +88,10 @@ TIMEOUTS = {
 """Seconds to wait for a reply, per command; :data:`DEFAULT_TIMEOUT` for the rest.
 
 ``play`` and ``eval`` wait longest: with ``--record`` both render the take's
-first frame before they answer, which in a fresh process compiles the path
-tracer's shaders. ``snapshot`` waits as long as ``compare``: the
-first path-traced picture in a process compiles the renderer, for minutes.
+first frame before they answer, which under ``rtx`` in a fresh process compiles
+the path tracer's shaders (and under ``blender`` starts Blender, for seconds).
+``snapshot`` waits as long as ``compare``: the first path-traced picture in a
+process compiles the renderer, for minutes.
 The commands that stop or hold what plays wait as long as ``reload``: they go
 in between two of a routine's steps, and one step can outlast 30 s, which
 ``status --wait`` does not wait out (a routine playing is not a busy page)."""

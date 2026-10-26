@@ -93,6 +93,15 @@ _EGL_CUDA_DEVICE_NV = 0x323A
 _EGL_EXTENSIONS = 0x3055
 
 
+def _area(verts: np.ndarray, faces: np.ndarray) -> float:
+    """A triangle mesh's surface area [m^2]."""
+    if not len(faces):
+        return 0.0
+    v = np.asarray(verts, dtype=np.float64)
+    f = np.asarray(faces, dtype=np.int64)
+    return float(0.5 * np.linalg.norm(np.cross(v[f[:, 1]] - v[f[:, 0]], v[f[:, 2]] - v[f[:, 0]]), axis=1).sum())
+
+
 def _quat_wxyz(rotation: np.ndarray) -> np.ndarray:
     import mujoco
 
@@ -388,8 +397,14 @@ class RendererGL(RendererBase):
         self._drawables = deformable_drawables(model, deformables, deformable_colors)
         particle_q = model.particle_q.numpy() if self._drawables.meshes else None
         for index, part in enumerate(self._drawables.meshes):
-            verts, normals = part.vertices(particle_q)
+            verts, normals = (np.nan_to_num(a) for a in part.vertices(particle_q))  # a collapsed tube has no frame
             faces = np.asarray(part.triangles, dtype=np.int32)
+            if _area(verts, faces) < 1.0e-10:
+                # collapsed as built (particles on one point): MuJoCo refuses a mesh with no area, and these
+                # vertices are rewritten before every frame, so the compile is given a spread copy
+                verts = verts + 1.0e-3 * np.stack(
+                    [np.arange(len(verts)) % 7, np.arange(len(verts)) % 5, np.arange(len(verts)) % 3], 1
+                )
             if part.tube_radius <= 0.0:
                 faces = np.concatenate([faces, faces[:, ::-1] + len(verts)])
                 verts, normals = np.concatenate([verts, verts]), np.concatenate([normals, -normals])
@@ -467,6 +482,13 @@ class RendererGL(RendererBase):
         """Where in the drawn scene :meth:`_add_points` put its spheres, for the segmentation lookup."""
         self._told_full = False
         self._strides = sphere_strides([len(b.particles) for b in self._drawables.points])
+        # each batch's grains as drawn: every k-th of a heap past the budget, each 3rd-root-of-k larger, so it keeps
+        # its volume; the sizes and colours fixed, the positions gathered each frame
+        self._point_batches = []
+        for batch, stride in zip(self._drawables.points, self._strides, strict=True):
+            sizes = np.zeros((len(batch.particles[::stride]), 3))
+            sizes[:, 0] = batch.radii[::stride] * stride ** (1.0 / 3.0)
+            self._point_batches.append((batch.particles[::stride], sizes, np.array([*batch.color, 1.0], np.float32)))
         if any(k > 1 for k in self._strides):
             thinned = [
                 f"{b.name or 'particles'} every {k}th"
@@ -505,7 +527,7 @@ class RendererGL(RendererBase):
         """
         mujoco, m, d = self._mujoco, self.mj_model, self.mj_data
         for mesh, geom, part in self._deforming:
-            verts, normals = part.vertices(particle_q)
+            verts, normals = (np.nan_to_num(a) for a in part.vertices(particle_q))
             rotation, origin = d.geom_xmat[geom].reshape(3, 3), d.geom_xpos[geom]
             local = (verts - origin) @ rotation
             turned = normals @ rotation
@@ -585,12 +607,8 @@ class RendererGL(RendererBase):
             if self._particle_q is not None and self._deforming:
                 self._deform(self._particle_q)
             if self._particle_q is not None:
-                for batch, stride in zip(self._drawables.points, self._strides, strict=True):  # once a frame
-                    # every k-th grain of a heap past the budget, each 3rd-root-of-k larger, so it keeps its volume
-                    sizes = np.zeros((len(batch.radii[::stride]), 3))
-                    sizes[:, 0] = batch.radii[::stride] * stride ** (1.0 / 3.0)
-                    rgba = np.array([*batch.color, 1.0], dtype=np.float32)
-                    self._point_frame.append((batch.positions(self._particle_q)[::stride], sizes, rgba))
+                for particles, sizes, rgba in self._point_batches:  # gathered once a frame, drawn once a camera
+                    self._point_frame.append((np.asarray(self._particle_q, dtype=np.float64)[particles], sizes, rgba))
         extent = float(self.mj_model.stat.extent)
         near = float(self.mj_model.vis.map.znear) * extent
         far = float(self.mj_model.vis.map.zfar) * extent
