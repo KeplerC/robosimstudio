@@ -322,6 +322,23 @@ class Verdict(unittest.TestCase):
         runs["written"]["latched"] = ["crate"]  # latched in both: the contact line fails it, frozen names it
         self.assertIsNone(_words(physics.verdict(CLEAN, runs))["frozen"])
 
+    def test_a_frozen_replay_cut_or_broken_is_not_read(self) -> None:
+        runs = _clean_runs()
+        for outcome in (physics.STOPPED, physics.FAILED + ": RuntimeError: x"):
+            runs["frozen"] = _run(outcome=outcome, moved=0.3, end=(0.4, 0.0, 0.9), turn=0.0)
+            result = physics.verdict(CLEAN, runs)
+            self.assertIsNone(_words(result)["frozen"])
+            self.assertIn("not read: " + outcome[:20], result["report"])
+
+    def test_a_lost_grip_after_another_miss_is_said(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["bottle"] = _thing(300.0, end=(0.1, 0.1, 0.8))
+        runs["built"] = {**_run(end=(0.4, 0.0, 0.9)), "lowered": {"friction": 0, "torque": 0}}
+        runs["built"]["things"]["bottle"] = _thing(20.0, end=(0.1, 0.1, 0.8))  # let go on the way
+        result = physics.verdict(CLEAN, runs)
+        self.assertIn("bottle moved 20 mm where the written run moved it 300", result["report"])
+        self.assertIn("the grasp is that marginal", result["report"])
+
     def test_a_built_replay_the_page_cut_is_not_read(self) -> None:
         runs = _clean_runs()
         runs["built"] = {**_run(outcome=physics.STOPPED), "lowered": {"friction": 0, "torque": 0}}

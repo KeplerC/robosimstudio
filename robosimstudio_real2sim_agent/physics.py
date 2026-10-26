@@ -1414,12 +1414,13 @@ class AsBuilt:
         if dofs:
             effort = m.joint_effort_limit.numpy()
             rows = np.asarray(dofs, dtype=np.int64)
-            before = effort[rows].copy()  # numpy() is a view on a CPU device: read it before the write
             real = np.asarray(caps, dtype=effort.dtype)
-            cut = real < before  # what is written is what is counted, so "lowered nothing" is an unchanged replay
+            # what is written is what is counted, so "lowered nothing" is an unchanged replay; Newton hands this limit
+            # to MuJoCo as the joint's actfrcrange, which clamps every actuator on it
+            cut = real < effort[rows]
             lowered["torque"] = int(np.count_nonzero(cut))
             if cut.any():
-                self._change("joint_effort_limit", rows[cut], np.minimum(before[cut], real[cut]))
+                self._change("joint_effort_limit", rows[cut], real[cut])
                 flags |= _JOINT_DOF
         if self.heavier != 1.0:
             fixed = _fixed_bodies(m)
@@ -2010,6 +2011,21 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
         )
 
 
+def _held_things(model: dict, run: dict) -> tuple[set[str], bool]:
+    """What held things to the robot or moved them in ``run``: a tie or a kinematic flag always, a grasp latch, an
+    equality row or a motor on a thing's joint only if it engaged there; and whether a hold there names no thing (a
+    hook, an equality row whose thing is not known). The model facts carry the names; older ones only the words, in
+    their fixed forms."""
+    labels = model.get("robot_equalities", {})
+    held = set(model.get("tie_things", [f.split(" by a ", 1)[0] for f in model.get("ties", [])]))
+    held |= set(model.get("kinematic", [])) | set(run.get("latched", []))
+    if run.get("thing_targets_moved", 0.0) > 1e-6:
+        held |= set(model.get("drive_things", [f.split("'s ", 1)[0] for f in model.get("drives", [])]))
+    rows = [k for k in run.get("robot_equalities_on", []) if "suction" not in labels.get(str(k), "")]
+    things = [model.get("robot_equality_things", {}).get(str(k), "") for k in rows]
+    return held | (set(things) - {""}), bool(run.get("hooks_added", 0)) or "" in things
+
+
 def _plain_gate(runs: dict, written: dict) -> tuple[dict | None, str]:
     """The plain replay, and why its end cannot be read (the plain line's NOTE), ``""`` when it can: both it and the
     written run finished and nothing blew up. ``(None, "")`` when there is no plain replay."""
@@ -2194,6 +2210,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     frozen = runs.get("frozen")
     if frozen and frozen.get("nonfinite"):
         line(None, "frozen", "not read: the solver blew up in it")
+    elif frozen and _cut(frozen):
+        line(None, "frozen", _cut(frozen))
     elif frozen:
         # a rigid thing has nothing to settle into; a heap, a liquid or a draped cloth can still be relaxing at the
         # reset, so its drift is a note for the report, not a fault
@@ -2229,27 +2247,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         drift = {k: v for k, v in soft.items() if v > settle_mm}
         # what held things during the frozen replay itself: a tie or a kinematic flag always, a latch, an equality row
         # or a motor only if it engaged there; such a thing fails on the contact line, and frozen only names it
-        holding = set(model.get("tie_things", [f.split(" by a ", 1)[0] for f in model.get("ties", [])]))
-        holding |= set(model.get("kinematic", [])) | set(frozen.get("latched", []))
-        if frozen.get("thing_targets_moved", 0.0) > 1e-6:
-            holding |= set(model.get("drive_things", [f.split("'s ", 1)[0] for f in model.get("drives", [])]))
-        rows_on = [k for k in frozen.get("robot_equalities_on", []) if "suction" not in labels.get(str(k), "")]
-        holding |= {model.get("robot_equality_things", {}).get(str(k), "") for k in rows_on} - {""}
         # ... and that the contact line names too (it reads the written run): only then does its FAIL cover the move
-        w = runs.get("written") or {}
-        named = set(model.get("tie_things", [f.split(" by a ", 1)[0] for f in model.get("ties", [])]))
-        named |= set(model.get("kinematic", [])) | set(w.get("latched", []))
-        if driven:
-            named |= set(model.get("drive_things", [f.split("'s ", 1)[0] for f in model.get("drives", [])]))
-        named |= {
-            model.get("robot_equality_things", {}).get(str(k), "")
-            for k in w.get("robot_equalities_on", [])
-            if "suction" not in labels.get(str(k), "")
-        }
-        holding &= named
-        unknown_hold = bool(frozen.get("hooks_added", 0)) or any(
-            not model.get("robot_equality_things", {}).get(str(k)) for k in rows_on
-        )
+        holding, unknown_hold = _held_things(model, frozen)
+        holding &= _held_things(model, written)[0]
         named_moves = {k: v for k, v in rigid.items() if k.split("#")[0] in holding}
         free_moves = {k: v for k, v in rigid.items() if k not in named_moves}
         worst = max(free_moves, key=free_moves.get) if free_moves else ""
@@ -2262,6 +2262,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             if held_worst and named_moves[held_worst] > settle_mm
             else ""
         )
+        k = max(drift, key=drift.get) if drift else ""
+        settling = f"; and {k} drifted {drift[k]:.1f} mm: still settling" if k else ""  # a deformable is said too
         if moved > settle_mm:
             pushed_far = moved > pushed
             if "#" in worst:  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
@@ -2279,20 +2281,14 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 cause += (
                     "; a hold the contact line names (an equality row, a hook) names no thing: say if it holds this"
                 )
-            if drift:  # a deformable still settling is said too
-                k = max(drift, key=drift.get)
-                cause += f"; and {k} drifted {drift[k]:.1f} mm: still settling"
             line(
                 False if pushed_far else None,
                 "frozen",
-                f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}{also}",
+                f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}{settling}{also}",
             )
         elif also:  # only held things moved: the contact line fails them, frozen says so
-            k = max(drift, key=drift.get) if drift else ""
-            settling = f"; and {k} drifted {drift[k]:.1f} mm: still settling" if k else ""
             line(None, "frozen", f"with the robot frozen nothing free moved more than {moved:.1f} mm{also}{settling}")
         elif drift:
-            k = max(drift, key=drift.get)
             line(
                 None,
                 "frozen",
@@ -2376,10 +2372,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         elif built["outcome"].startswith(FAILED):  # the replay machinery broke: nothing was read, and that fails
             line(False, "built", detail)
         else:  # the same model played again: whatever went otherwise is the scene's spread, not friction or torque
-            miss = misses[0].words if misses else f"it stopped ({built['outcome']})"
+            lost = [m for m in misses if m.kind == "lost"]
+            miss = (lost or misses)[0].words if misses else f"it stopped ({built['outcome']})"
             why = (
                 "the grasp is that marginal, or the outcome differs from run to run: say which in the report"
-                if misses and misses[0].kind == "lost"
+                if any(m.kind == "lost" for m in misses)
                 else "the outcome differs from run to run, so say so in the report"
             )
             line(None, "built", f"{same}, so it only played the same model again, and {miss}: {why}")
