@@ -581,6 +581,7 @@ class LiveServer:
         record: str = "",
         every: int = 4,
         camera: str = "",
+        also: Any = (),
     ) -> int:
         """Queue a generator to play one step per loop pass, filming it when asked.
 
@@ -603,7 +604,7 @@ class LiveServer:
             dropping = self.recorder is not None or bool(self.script)
             recorder = None
             try:
-                recorder = checks.Recorder(self, record, camera=camera, every=every)
+                recorder = checks.Recorder(self, record, camera=camera, every=every, also=also)
                 recorder.probe()
             except Exception:
                 if recorder is not None:
@@ -1662,7 +1663,7 @@ class LiveServer:
             }
         return gen, wants_session
 
-    def cmd_play(self, name: str = "", record: str = "", every: int = 4, camera: str = "") -> dict:
+    def cmd_play(self, name: str = "", record: str = "", every: int = 4, camera: str = "", also: str = "") -> dict:
         """Play a routine the scene file binds, the way its button does."""
         named = self._routine_named(name)
         if isinstance(named, dict):
@@ -1672,7 +1673,9 @@ class LiveServer:
         if isinstance(started, dict):
             return started
         gen, wants_session = started
-        serial = self.start_script(gen, name=name, drives_page=wants_session, record=record, every=every, camera=camera)
+        serial = self.start_script(
+            gen, name=name, drives_page=wants_session, record=record, every=every, camera=camera, also=also
+        )
         reply = {"ok": True, "playing": name, "serial": serial}
         if record:
             reply["recording"] = str(self.run_dir / f"{record}.mp4")

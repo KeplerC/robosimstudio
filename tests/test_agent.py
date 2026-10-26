@@ -368,6 +368,10 @@ class TestTheCommandLine(unittest.TestCase):
         self.assertEqual(req, {"cmd": "log", "last": 3})
         req, _ = ctl.build_request(parser.parse_args(["play", "tidy", "--record", "t1"]), parser)
         self.assertEqual((req["name"], req["record"], req["every"]), ("tidy", "t1", 4))
+        req, _ = ctl.build_request(
+            parser.parse_args(["play", "tidy", "--record", "t1", "--also", "gl,blender"]), parser
+        )
+        self.assertEqual(req["also"], "gl,blender")
         req, _ = ctl.build_request(parser.parse_args(["show", "p.png", "--label", "pair"]), parser)
         self.assertTrue(Path(req["path"]).is_absolute() and req["label"] == "pair" and not req["clear"])
         self.assertEqual(ctl.build_request(parser.parse_args(["show", "--clear"]), parser)[0]["clear"], True)

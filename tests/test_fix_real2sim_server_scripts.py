@@ -168,7 +168,7 @@ def _hash_checked(cached: Path) -> bool:
 
 
 class FakeRecorder:
-    def __init__(self, server, name, *, camera="", every=4) -> None:
+    def __init__(self, server, name, *, camera="", every=4, also=()) -> None:
         if camera == "phnoe":
             raise KeyError("no camera named phnoe")
         self.name = name
