@@ -556,7 +556,8 @@ def _overlay_stage(frames: dict[str, Any], stage: str) -> dict[str, Any]:
 
 
 @functools.lru_cache(maxsize=8)
-def _label_font(size: int) -> Any:
+def label_font(size: int) -> Any:
+    """Pillow's default font at ``size`` pixels, or its one bitmap size on an older Pillow."""
     from PIL import ImageFont
 
     try:
@@ -570,7 +571,7 @@ def draw_label(image: Any, label: str, *, size: int, right: bool = True) -> None
     from PIL import ImageDraw
 
     draw = ImageDraw.Draw(image)
-    font = _label_font(size)
+    font = label_font(size)
     box = draw.multiline_textbbox((0, 0), label, font=font, spacing=3)
     width, height = box[2] - box[0], box[3] - box[1]
     padding = max(5, image.height // 100)

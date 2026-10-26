@@ -114,7 +114,10 @@ class AlsoRenderers(unittest.TestCase):
                     background=str(Path(tmp) / "plate.png"),
                 )
             )
-            (Path(tmp) / "plated.blender.mp4").write_bytes(b"an earlier take's")
+            old = Path(tmp) / "plated.blender.mp4"
+            old.write_bytes(b"an earlier take's")
+            (Path(tmp) / "plated.json").write_text(json.dumps({"also": {"blender": str(old)}}))
+            (Path(tmp) / "plated.gl.mp4").write_bytes(b"the take named plated.gl")  # not a side video of this one
             with mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_RENDERER": "gl"}), redirect_stdout(io.StringIO()):
                 sim = scene.build()
                 server = types.SimpleNamespace(sim=sim, scene=scene, run_dir=tmp)
@@ -122,7 +125,8 @@ class AlsoRenderers(unittest.TestCase):
                 rec.probe()
                 self.assertTrue((Path(tmp) / "plated.blender.mp4").exists(), "kept until the take begins")
                 rec.start()
-                self.assertFalse((Path(tmp) / "plated.blender.mp4").exists(), "an earlier take's side video goes")
+                self.assertFalse(old.exists(), "the side video an earlier take of this name wrote goes")
+                self.assertTrue((Path(tmp) / "plated.gl.mp4").exists(), "another take's own video stays")
                 passes = []
                 real = sim.plate_pass
                 sim.plate_pass = lambda spec: passes.append(1) or real(spec)

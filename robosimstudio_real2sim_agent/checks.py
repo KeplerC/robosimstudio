@@ -495,7 +495,7 @@ class Recorder:
         bare = replace(self.cam, background="")
         for b in names:
             channels = ["rgb"] + (["depth"] if self.cam.background and "depth" in supported_channels(b) else [])
-            entry = self.also[b] = {"video": self.run_dir / f"{self.name}.{b.rsplit('.', 1)[-1]}.mp4"}
+            entry = self.also[b] = {"video": self.run_dir / f"{self.name}.{b}.mp4"}  # an alias, or the whole path
             entry["renderer"] = self.sim.make_renderer(b, cameras=[bare], channels=channels)
             if getattr(backend_class(b), "warms_up", False):
                 entry["renderer"].render(self.sim.state)  # the first frame only builds the stage
@@ -523,10 +523,6 @@ class Recorder:
             try:
                 frame = entry["renderer"].render(self.sim.state)[self.cam.name]
                 rgb = stills.to_uint8(np.asarray(frame["rgb"])[..., :3])
-                if passed is not None:
-                    rgb = stills.to_uint8(
-                        self.sim.over_plate(self.cam, rgb, depth=frame.get("depth"), plate_pass=passed)
-                    )
                 entry["running"] = 0
             except Exception as exc:
                 if strict:
@@ -548,6 +544,16 @@ class Recorder:
                     except Exception:
                         pass
                 rgb = np.zeros((*size, 3), np.uint8)
+            else:
+                if passed:
+                    try:  # the renderer drew: a composite that fails leaves its picture raw, not the renderer stopped
+                        rgb = stills.to_uint8(
+                            self.sim.over_plate(self.cam, rgb, depth=frame.get("depth"), plate_pass=passed)
+                        )
+                    except Exception as exc:
+                        if "raw" not in entry:
+                            entry["raw"] = f"{type(exc).__name__}: {exc}"[:300]
+                            print(f"[rss] take {self.name!r}: {b}'s frames go unplated ({entry['raw']})")
             out[b] = rgb
         return out
 
@@ -559,7 +565,7 @@ class Recorder:
         frame = self.renderer.render(sim.state)[self.cam.name]
         shared = bool(self.cam.background) and any("failed" not in e for e in self.also.values())
         passed = sim.plate_pass(self.cam) if shared else None
-        rgb = stills.to_uint8(sim.render(self.cam, plate_pass=(passed or False) if shared else None)["rgb"][..., :3])
+        rgb = stills.to_uint8(sim.render(self.cam, plate_pass=passed)["rgb"][..., :3])
         q = _particles(sim) if self.deformable_labels else None  # once a frame, for the ids and the samples both
         seg = name_deformables(sim, self.cam, np.asarray(frame["seg"]).astype(np.int32), self.deformable_labels, q)
         return rgb, seg, q, self._look_also(rgb.shape[:2], passed, strict=strict)
@@ -608,14 +614,21 @@ class Recorder:
         self.capture(probed[2] if same else None)
 
     def _clear_stale(self) -> None:
-        """Remove an earlier take of this name's side videos this take does not write (its own are written over),
-        once the probe has passed and the take begins, so they cannot read as this one's."""
-        from robosimstudio.solvers.render import RENDERERS
-
-        mine = {e["video"] for e in [*self.also.values(), *([self.grid] if self.grid else [])]}
-        for stale in [*RENDERERS, "renderers"]:
-            path = self.run_dir / f"{self.name}.{stale}.mp4"
-            if path not in mine:
+        """Remove the side videos an earlier take of this name wrote (its ``TAKE.json`` names them) that this take
+        does not write over, once the probe has passed and the take begins, so they cannot read as this one's. Only
+        what that take wrote: another take's own video (one named ``pour.gl``) is never touched."""
+        try:
+            old = json.loads((self.run_dir / f"{self.name}.json").read_text())
+        except (OSError, ValueError):
+            return
+        mine = {Path(e["video"]) for e in [*self.also.values(), *([self.grid] if self.grid else [])]}
+        named = [
+            *dict(old.get("also") or {}).values(),
+            old.get("renderers"),
+            *(self.run_dir / f"{self.name}.{b}.mp4" for b in dict(old.get("also_failed") or {}) if b != "grid"),
+        ]
+        for path in {Path(p) for p in named if p}:
+            if path not in mine and path.parent == self.run_dir and path.name.startswith(f"{self.name}."):
                 path.unlink(missing_ok=True)
 
     def close(self) -> None:
@@ -720,6 +733,9 @@ class Recorder:
             missed = {b: e["missed"] for b, e in self.also.items() if e.get("missed") and "failed" not in e}
             if missed:
                 meta["also_missed"] = missed  # frames drawn black, the renderer carrying on
+            unplated = {b: e["raw"] for b, e in self.also.items() if "raw" in e}
+            if unplated:
+                meta["also_unplated"] = unplated  # a composite that failed: those frames as the renderer drew them
         if self.also_skipped:
             meta["also_skipped"] = self.also_skipped
         (self.run_dir / f"{self.name}.json").write_text(json.dumps(meta, default=_plain))
@@ -731,7 +747,13 @@ class Recorder:
             "frames": len(self.frames),
             "seconds": self.frames[-1]["t"] if self.frames else 0.0,
             "wall_seconds": meta["wall_seconds"],
-            **({k: meta[k] for k in ("also", "renderers", "also_failed", "also_missed", "also_skipped") if k in meta}),
+            **(
+                {
+                    k: meta[k]
+                    for k in ("also", "renderers", "also_failed", "also_missed", "also_unplated", "also_skipped")
+                    if k in meta
+                }
+            ),
         }
 
 

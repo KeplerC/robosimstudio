@@ -25,7 +25,7 @@ without the caller learning the index layout of a replicated model.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 
@@ -346,7 +346,7 @@ class Sim(EnvBase):
         camera: CameraSpec | str | None = None,
         *,
         channels: Sequence[str] = ("rgb",),
-        plate_pass: dict[str, Any] | Literal[False] | None = None,
+        plate_pass: dict[str, Any] | None = None,
     ) -> dict[str, np.ndarray]:
         """One frame of the scene as it stands, through the renderer.
 
@@ -365,8 +365,8 @@ class Sim(EnvBase):
                 or, on a scene that declares none, a three-quarter view of the
                 work surface.
             channels: Which of ``"rgb"``, ``"depth"`` to produce.
-            plate_pass: :meth:`plate_pass`'s for this state, for a caller drawing it through other renderers too,
-                or ``False`` where that pass came back with nothing (:meth:`over_plate`).
+            plate_pass: :meth:`plate_pass`'s for this state, for a caller drawing it through other renderers too
+                (:meth:`over_plate`).
 
         Returns:
             ``{"rgb": uint8 [H, W, 3], "depth": float32 [H, W], ...}``.
@@ -429,7 +429,7 @@ class Sim(EnvBase):
         spec: CameraSpec,
         rgb: np.ndarray,
         depth: np.ndarray | None = None,
-        plate_pass: dict[str, Any] | Literal[False] | None = None,
+        plate_pass: dict[str, Any] | None = None,
     ) -> np.ndarray:
         """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py).
 
@@ -443,9 +443,8 @@ class Sim(EnvBase):
 
         ``plate_pass`` is :meth:`plate_pass`'s, taken once for this state, for a
         caller compositing several renderers' pictures of one frame (a take's
-        ``--also``), and ``False`` where it came back with nothing, so this
-        frame is drawn without its plate as the others are; without it the pass
-        is taken here.
+        ``--also``) -- one that came back with nothing leaves this frame without
+        its plate, as the others are; without it the pass is taken here.
 
         A plate that cannot be read (no file at the path, read beside the
         working directory or the asset roots) leaves the picture as rendered,
@@ -458,32 +457,33 @@ class Sim(EnvBase):
             return rgb
         seg = passed["seg"]
         if depth is not None:
-            seg = plate.nearer(
-                seg, depth, passed["static_depth"], bounds=passed["bounds"], grow=max(2, spec.width // 320)
-            )
+            grow = max(2, spec.width // 320)
+            if "bounds" not in passed:  # once a pass, for every renderer composited on it
+                passed["bounds"] = plate.collider_bounds(seg, passed["moving_depth"], grow=grow)
+            seg = plate.nearer(seg, depth, passed["static_depth"], bounds=passed["bounds"], grow=grow)
         return plate.composite(rgb, seg, passed["backdrop"], passed["shadow"])
 
-    def plate_pass(self, spec: CameraSpec) -> dict[str, Any] | None:
+    def plate_pass(self, spec: CameraSpec) -> dict[str, Any]:
         """The collider tracer's pass over the camera's plate for the state as it stands -- the plate, the moving
-        things' segmentation and depth, the static scene's depth, the shadow ratio -- or ``None`` where the camera
-        has no plate it can use (said once, as :meth:`over_plate` says it)."""
+        things' segmentation and depth, the static scene's depth, the shadow ratio -- or nothing (``{}``) where the
+        camera has no plate it can use (said once, as :meth:`over_plate` says it)."""
         from dataclasses import replace
 
         from robosimstudio.core.render import plate
 
         if not spec.background:
-            return None
+            return {}
         if spec.parent_body >= 0 or spec.parent_frame:
             self._plate_refused(
                 spec.background, f"camera {spec.name!r} rides on a body, and a plate is one viewpoint's"
             )
-            return None
+            return {}
         path = self._plate_path(spec.background)
         if path is None:
-            return None
+            return {}
         key = replace(spec, background="", channels=("rgb", "seg", "depth"))
         if key in self.__dict__.setdefault("_plates_failed", set()):
-            return None
+            return {}
         cache = self.__dict__.setdefault("_plates", {})
         entry = cache.pop(key, None)
         if entry is None:
@@ -494,7 +494,7 @@ class Sim(EnvBase):
                 print(
                     f"[rss] the plate passes for camera {spec.name!r} failed ({type(exc).__name__}: {exc}); drawing it without its plate"
                 )
-                return None
+                return {}
             while len(cache) >= 4:  # a twin's plate cameras, at the sizes its stills and viewport ask for
                 cache.pop(next(iter(cache)))[0].close()
         if entry[2] != self._static_poses():  # a reset re-placed a weld, or a person dragged a fixture
@@ -509,7 +509,7 @@ class Sim(EnvBase):
             self._plate_refused(
                 spec.background, f"camera {spec.name!r}'s plate pass failed ({type(exc).__name__}: {exc})"
             )
-            return None
+            return {}
         seg = full["seg"]
         return {
             "backdrop": backdrop,
@@ -517,7 +517,6 @@ class Sim(EnvBase):
             "shadow": plate.shade(full["rgb"], bare["rgb"], seg, soften=max(2.0, spec.width / 100.0), strength=0.6),
             "static_depth": bare["depth"],
             "moving_depth": full["depth"],
-            "bounds": plate.collider_bounds(seg, full["depth"], grow=max(2, spec.width // 320)),
         }
 
     def _plate_passes(self, key: CameraSpec):
