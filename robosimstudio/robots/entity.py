@@ -74,8 +74,11 @@ def _arm_base(arm: ArmSpec, arm_j: Sequence[int], joint_parent, joint_types, bod
     prefix scan of an uncollapsed import also sweeps up welds, which are not the
     arm's. One rule, read by :meth:`EntityEmbodiment.bind` for the handle's
     ``base_body`` and by :meth:`EntityEmbodiment._place_arms` for the body
-    ``arms_at`` places, so the two are always the same body. -1 is the world,
-    or no moving joint at all.
+    ``arms_at`` places, so the two are the same body wherever the base survives
+    the import as a body. A collapse folds a welded base into the world, and the
+    handle then reads -1 (``yam_bimanual``): the arm still stands where it was
+    placed, and IK measures its frame off the model. -1 is the world, or no
+    moving joint at all.
     """
     if arm.base_body_name:
         return label_index(body_labels, arm.base_body_name)
@@ -819,8 +822,9 @@ class EntityEmbodiment(Entity):
         the wrist camera ride their bodies, so the arm is the file's own arm in a
         new place. A collapse afterwards folds the moved weld exactly as it would
         have folded the file's, and everything that reads the arm's frame off
-        the finalized model -- IK, the handles' ``base_body``, a planner's base
-        -- reads the base where it now stands.
+        the finalized model -- IK, a planner's base, the handle's ``base_body``
+        where the base survives as a body (a collapse folds it into the world,
+        and the handle reads -1) -- reads the base where it now stands.
 
         Refused rather than approximated:
 
@@ -828,8 +832,9 @@ class EntityEmbodiment(Entity):
         * a base under a moving joint: its pose would hold at one posture only;
         * a root that carries another arm: placing one would silently move
           both. Arms on one root move together, with ``at=``;
-        * an equality constraint from the moved bodies to the world or to a body
-          that stays: it would hold the arm where the file put it.
+        * an equality constraint, or a second joint, from the moved bodies to the
+          world or to a body that stays: it would hold the arm where the file
+          put it.
         """
         fixed = int(newton.JointType.FIXED)
         joints = range(joint_start, builder.joint_count)
@@ -891,6 +896,16 @@ class EntityEmbodiment(Entity):
                     f"{self.spec.name} arm {arm.name!r} stands on {builder.body_label[int(builder.joint_child[root])]!r}"
                     f" with arm(s) {shared}, so placing it would move them too. arms_at places an arm whose root "
                     "carries no other arm; move arms that share one together with at=."
+                )
+            crossing = [
+                j
+                for j in joints
+                if j != root and (int(builder.joint_child[j]) in carried) != (int(builder.joint_parent[j]) in carried)
+            ]
+            if crossing:
+                raise ValueError(
+                    f"{self.spec.name} arm {arm.name!r}: joint {labels[crossing[0]]!r} ties the moved bodies to "
+                    "the world or to a body arms_at does not move, so it would hold the arm where the file put it"
                 )
             for end, other in ends:
                 if end in carried and other not in carried:

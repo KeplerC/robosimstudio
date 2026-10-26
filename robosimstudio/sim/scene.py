@@ -217,7 +217,12 @@ def _arms_at(
         name, pose = item
         if pose is None:
             raise TypeError(f"rss.robot: arms_at[{name!r}] is None; leave the arm out to keep it where at= puts it")
-        pairs.append((name, _spelled(pose, f"arms_at[{name!r}]")))
+        values = _spelled(pose, f"arms_at[{name!r}]")
+        if len(values) == 7 and not sum(v * v for v in values[3:]) > 1.0e-12:
+            # The surface frame's own composition reads a zero quaternion as no
+            # rotation, so it would turn the base silently rather than fail here.
+            raise ValueError(f"rss.robot: arms_at[{name!r}] has a zero quaternion; give a position to keep the heading")
+        pairs.append((name, values))
     return tuple(pairs)
 
 

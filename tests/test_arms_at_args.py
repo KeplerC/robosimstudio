@@ -58,6 +58,12 @@ class TestTheArgument(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, r"arms_at\['left'\] is None"):
             rss.robot("yam_bimanual", arms_at={"left": None})
 
+    def test_a_zero_rotation_is_refused_before_the_frame_hides_it(self) -> None:
+        import robosimstudio as rss
+
+        with self.assertRaisesRegex(ValueError, r"arms_at\['right'\] has a zero quaternion"):
+            rss.robot("yam_bimanual", arms_at={"right": (0.1, -0.3, 0.2, 0.0, 0.0, 0.0, 0.0)})
+
     def test_not_a_mapping_of_names_is_refused(self) -> None:
         import robosimstudio as rss
 
@@ -155,6 +161,7 @@ class TestTheNames(unittest.TestCase):
         hash(binding)
         with self.assertRaisesRegex(TypeError, "Binding.arm_mounts is"):
             Binding(arm_mounts=("right",))
+        self.assertEqual((), Binding(arm_mounts=None).arm_mounts)
 
     def test_a_robot_inside_the_scenes_import_is_refused(self) -> None:
         from dataclasses import replace
@@ -305,11 +312,26 @@ class TestThePlacement(unittest.TestCase):
         np.testing.assert_allclose(self._body(builder, "a_base"), WANT, atol=1e-6)
 
     def test_an_equality_to_what_stays_is_refused(self) -> None:
-        with self.assertRaisesRegex(ValueError, "equality constraint ties .*a_l2' to the world"):
+        # The importer carries the weld as an equality and as a loop joint; either refusal holds.
+        with self.assertRaisesRegex(ValueError, "would hold the arm where the file put it"):
             self._build(WELDED, collapse=False, mounts={"a": WANT})
         # The other arm's placement does not carry the welded wrist, so it is free to move.
         builder = self._build(WELDED, collapse=False, mounts={"b": WANT})
         np.testing.assert_allclose(self._body(builder, "b_base"), WANT, atol=1e-6)
+
+    def test_a_second_joint_to_what_stays_is_refused(self) -> None:
+        """A loop-closing joint from the world to the wrist would hold the arm where the file put it."""
+        import warp as wp
+
+        from robosimstudio.scene.entity import label_index
+
+        builder = self._build(APART, collapse=False, mounts={})
+        entity = self._entities[0]
+        wrist = label_index(builder.body_label, "a_l2")
+        builder.add_joint_ball(parent=-1, child=wrist, parent_xform=wp.transform_identity(), label="a_tie")
+        entity.arm_mounts = {"a": WANT}
+        with self.assertRaisesRegex(ValueError, "joint 'a_tie' ties the moved bodies to the world"):
+            entity._place_arms(builder, 0)
 
     def test_a_name_the_spec_does_not_have_is_refused_by_the_entity_too(self) -> None:
         with self.assertRaisesRegex(ValueError, r"places arm\(s\) \['c'\], and its arms are \['a', 'b'\]"):

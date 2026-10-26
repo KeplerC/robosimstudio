@@ -210,7 +210,7 @@ class Binding:
     def __post_init__(self) -> None:
         # Pairs whichever way they were written, so the binding stays hashable
         # and the compiler reads one shape; what the pairs say is checked there.
-        mounts = self.arm_mounts
+        mounts = self.arm_mounts or ()
         if isinstance(mounts, Mapping):
             mounts = tuple(mounts.items())
         try:
