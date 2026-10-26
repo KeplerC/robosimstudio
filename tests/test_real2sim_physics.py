@@ -97,7 +97,7 @@ class Verdict(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertIs(_words(result)["contact"], False)
         self.assertIsNone(_words(result)["frozen"])  # the contact line fails it; frozen names it
-        self.assertIn("key moved 6.0 mm, held by the attachment the contact line names", result["report"])
+        self.assertIn("key moved 6.0 mm, held by what the contact line names (a tie", result["report"])
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 7.0  # a push of a free thing beside it fails, and leads
         result = physics.verdict(model, runs)
         self.assertIs(_words(result)["frozen"], False)
@@ -319,7 +319,7 @@ class Verdict(unittest.TestCase):
         runs["frozen"]["things"]["1"] = _thing(3.0)
         runs["written"]["hooks_added"] = 1  # "1 substep hook(s) ...": names no thing
         result = physics.verdict(CLEAN, runs)
-        self.assertNotIn("held by the attachment", result["report"])
+        self.assertNotIn("held by what the contact line names", result["report"])
         self.assertIn("names no thing: say if it holds this", result["report"])
 
     def test_a_plain_replay_cut_or_broken_is_not_read(self) -> None:
@@ -443,6 +443,13 @@ class Verdict(unittest.TestCase):
         runs["frozen"]["things"]["box#1"] = _thing(6.0)
         model = {**CLEAN, "ties": ["box by a fixed joint to the robot"], "tie_things": ["box"]}
         self.assertIn("the thing it is part of is held", physics.verdict(model, runs)["report"])
+
+    def test_a_written_run_whose_log_failed_says_why_it_was_not_read(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["log_error"] = "Traceback\nRuntimeError: rows"
+        result = physics.verdict(CLEAN, runs)
+        self.assertIn("not read: its log failed: RuntimeError: rows", result["report"])
+        self.assertEqual(physics.cut_short({"log_error": "\n"}), "its log failed: no message")
 
     def test_frozen_pass_says_the_largest_move_of_any_rigid_thing(self) -> None:
         runs = _clean_runs()

@@ -1784,7 +1784,8 @@ def cut_short(run: dict) -> str:
     machinery broke (``FAILED``), or its log failed (rows are missing, and it would read as nothing having moved). The
     server reports nothing while any replay is cut short, and says this."""
     if run.get("log_error"):
-        return f"its log failed: {str(run['log_error']).strip().splitlines()[-1]}"
+        lines = str(run["log_error"]).strip().splitlines()
+        return f"its log failed: {lines[-1] if lines else 'no message'}"
     out = str(run.get("outcome", ""))
     return out if out.startswith((STOPPED, FAILED)) else ""
 
@@ -2242,13 +2243,14 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                     + "; ".join(f"{mode} ({k} at step {at})" for mode, (k, at) in blew.items())
                     + ": that replay's reading stops there",
                 )
+        short = cut_short(written)
         line(
-            None if cut_short(written) else written["outcome"] == "finished",
+            None if short else written["outcome"] == "finished",
             "written",
-            f"finished; moved {', '.join(names) or 'nothing'}"
+            f"not read: {short}"
+            if short
+            else f"finished; moved {', '.join(names) or 'nothing'}"
             if written["outcome"] == "finished"
-            else f"not read: {cut_short(written)}"
-            if cut_short(written)
             else f"stopped: {written['outcome']}",
         )
         unjudged = {k: t["flight_unread"] for k, t in written["things"].items() if t.get("flight_unread")}
@@ -2314,7 +2316,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # a move up to PUSHED_MM (scaled with --settle-mm) is a wobble for the report
         pushed = PUSHED_MM * settle_mm / SETTLE_MM
         also = (
-            f"; {held_worst} moved {named_moves[held_worst]:.1f} mm, held by the attachment the contact line names"
+            f"; {held_worst} moved {named_moves[held_worst]:.1f} mm, held by what the contact line names (a tie or a "
+            "kinematic flag)"
             if held_worst and named_moves[held_worst] > settle_mm
             else ""
         )
@@ -2470,6 +2473,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 for m in misses
                 if plain.readable
                 and m.kind in ("lost", "end")
+                and _entry(plain.run, m.thing)  # plain recorded it
                 and not _carried(plain.run, written, m.thing, sampled=True)
             ]
             if failed:
