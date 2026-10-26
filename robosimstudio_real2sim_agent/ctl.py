@@ -866,7 +866,7 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                 t0 = time.monotonic()
                 # plain has no cap of its own (nothing hooked in): it gets a few written runs' time, and a plain that
                 # is still going then is read as not ending unwatched rather than waited on for an hour
-                limit = args.wait_limit if mode != "plain" else min(args.wait_limit, max(120.0, 3.0 * written_s))
+                limit = args.wait_limit if mode != "plain" else min(args.wait_limit, max(300.0, 5.0 * written_s))
                 ended = wait_for_script(sock, started, quiet, 0, limit)
                 if mode == "written":
                     written_s = time.monotonic() - t0

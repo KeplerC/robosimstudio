@@ -886,6 +886,21 @@ class StudyLines(unittest.TestCase):
         result = physics.verdict(CLEAN, runs)
         self.assertIn("not judged for box", result["report"])
 
+    def test_drop_fails_a_read_thing_riding_on_beside_an_unread_one(self) -> None:
+        model = {**CLEAN, "things": {"crate": {"mass_kg": 1.0}, "pot": {"mass_kg": 1.0}}}
+        runs = self._drop_runs(fell=False)
+        runs["written"]["carried"] = ["crate", "pot"]
+        runs["written"]["things"]["pot"] = _thing(300.0, end=(0.4, 0.0, 1.2))
+        runs["drop"]["things"]["pot"] = {**_thing(300.0, end=(0.4, 0.0, 1.2)), "robot_touch_read": False}
+        result = physics.verdict(model, runs)
+        self.assertIs(_words(result)["drop"], False)
+        self.assertIn("pot also stayed", result["report"])
+
+    def test_a_plain_cut_on_a_slow_page_is_not_read(self) -> None:
+        runs = _clean_runs()
+        runs["plain"] = {"outcome": physics.PLAIN_SLOW, "things": {}}
+        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["plain"])
+
     def test_shape_volumes(self) -> None:
         import newton
 

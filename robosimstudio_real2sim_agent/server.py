@@ -1643,7 +1643,9 @@ class LiveServer:
                 }
             plain = self.physics.get("plain")
             if plain_cut and plain and plain.get("outcome") == physics.STOPPED:  # the ctl cut it on its wall clock
-                plain["outcome"] = physics.PLAIN_LONG
+                steps = int(self.physics.get("written", {}).get("steps") or 0)
+                over = int(plain.get("sim_steps", 0)) > steps + max(25, int(physics.OVERRUN * steps))
+                plain["outcome"] = physics.PLAIN_LONG if over else physics.PLAIN_SLOW
             unread = [mode for mode, run in self.physics.items() if not _read_replay(run)]
             if unread:
                 return {
