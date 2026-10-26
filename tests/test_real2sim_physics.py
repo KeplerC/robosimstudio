@@ -230,6 +230,31 @@ class Verdict(unittest.TestCase):
         runs["built"] = {**_run(outcome=physics.FAILED + ": RuntimeError: x"), "lowered": {"friction": 0, "torque": 0}}
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
 
+    def test_spread_shows_plain_in_the_measure_built_missed_by(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = _run(turn=100.0)  # in place, turned 80 degrees
+        runs["plain"] = _run(end=(0.4, 0.0, 1.14), turn=130.0)  # 60 mm off and turned 50 degrees
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["built"])
+        self.assertIn(
+            "played with nothing changed, crate ended turned 50° from how the written run left it too", result["report"]
+        )
+
+    def test_a_push_and_a_drift_are_both_said(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 6.0
+        runs["frozen"]["deformables"] = {"towel": _thing(40.0)}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["frozen"], False)
+        self.assertIn("towel drifted 40.0 mm", result["report"])
+
+    def test_a_hold_that_names_no_thing_is_pointed_at(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
+        runs["written"]["robot_equalities_on"] = [7]
+        result = physics.verdict(CLEAN, runs)
+        self.assertIn("a hold that names no thing (an equality row, a hook)", result["report"])
+
     def test_a_built_replay_the_page_cut_is_not_read(self) -> None:
         runs = _clean_runs()
         runs["built"] = {**_run(outcome=physics.STOPPED), "lowered": {"friction": 0, "torque": 0}}

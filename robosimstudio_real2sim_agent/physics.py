@@ -1407,9 +1407,10 @@ class AsBuilt:
         if dofs:
             effort = m.joint_effort_limit.numpy()
             rows = np.asarray(dofs, dtype=np.int64)
-            capped = np.minimum(effort[rows], np.asarray(caps, dtype=effort.dtype))
+            before = effort[rows].copy()  # numpy() is a view on a CPU device: read it before the write
+            capped = np.minimum(before, np.asarray(caps, dtype=effort.dtype))
+            lowered["torque"] = int(np.count_nonzero(capped < before))
             self._change("joint_effort_limit", rows, capped)
-            lowered["torque"] = int(np.count_nonzero(capped < effort[rows]))
             flags |= _JOINT_DOF
         if self.heavier != 1.0:
             fixed = _fixed_bodies(m)
@@ -1766,7 +1767,14 @@ def _within_spread(misses: list, plain: dict, written: dict, names: list[str], a
         for dim, v in far.items():
             if v > 1.0 and (k not in seen or seen[k][0][dim] <= 1.0 or seen[k][0][dim] < v / 2):
                 return ""
-    return seen[max(misses, key=lambda m: max(m[2].values()))[0]][1]
+    k, _, far, _ = max(misses, key=lambda m: max(m[2].values()))
+    dim = max(far, key=far.get)  # the measure the run missed most by, as plain missed it
+    p = seen[k][0][dim]
+    return {
+        "position": f"{k} ended {p * END_MM:.0f} mm from where the written run left it",
+        "shape": f"{k}'s shape ended unlike the written run's",
+        "turn": f"{k} ended turned {p * END_DEG:.0f}° from how the written run left it",
+    }[dim]
 
 
 def _model_lines(
@@ -2166,26 +2174,28 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         own = re.compile(rf"(?<![\w#.\-]){re.escape(worst.split('#')[0])}(?![\w#\-])")
         named = bool(worst) and any(own.search(f) for f in found)
         if moved > settle_mm:
-            hinged = "#" in worst  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
-            if moved > pushed:
-                if named:
-                    cause = "the attachment the contact line names"
-                elif hinged:
-                    cause = "a part on a joint swung or settled, so the mechanism is not at rest at the start"
-                else:
-                    cause = "it starts inside something, or something other than the robot pushes it"
-                line(False, "frozen", f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}")
+            pushed_far = moved > pushed
+            if named:
+                cause = "the attachment the contact line names"
+            elif any(f.startswith("equality row") or "substep hook" in f for f in found):  # they name no thing
+                cause = "the contact line names a hold that names no thing (an equality row, a hook): say if it is this"
+            elif "#" in worst:  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
+                cause = (
+                    "a part on a joint swung or settled, so the mechanism is not at rest at the start"
+                    if pushed_far
+                    else "a part on a joint swung or settled a few millimetres: say in the report why the mechanism "
+                    "is not at rest"
+                )
+            elif pushed_far:
+                cause = "it starts inside something, or something other than the robot pushes it"
             else:
-                if named:
-                    cause = "the attachment the contact line names"
-                elif hinged:
-                    cause = "a part on a joint swung or settled a few millimetres: say in the report why the mechanism is not at rest"
-                else:
-                    cause = "a few millimetres, but a thing at rest stays put: say in the report what moves it"
-                if drift:  # a deformable still settling is said too
-                    k = max(drift, key=drift.get)
-                    cause += f"; and {k} drifted {drift[k]:.1f} mm: still settling"
-                line(None, "frozen", f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}")
+                cause = "a few millimetres, but a thing at rest stays put: say in the report what moves it"
+            if drift:  # a deformable still settling is said too
+                k = max(drift, key=drift.get)
+                cause += f"; and {k} drifted {drift[k]:.1f} mm: still settling"
+            line(
+                False if pushed_far else None, "frozen", f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}"
+            )
         elif drift:
             k = max(drift, key=drift.get)
             line(
