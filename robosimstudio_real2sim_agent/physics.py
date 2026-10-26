@@ -104,6 +104,11 @@ FAILED = "the replay itself failed"
 SETTLE_MM = 2.0
 """How far a thing may move with the robot frozen: a resting contact settles by a fraction of a millimetre."""
 
+PUSHED_MM = 5.0
+"""How far past :data:`SETTLE_MM` a rigid thing may move with the robot frozen and still be a wobble for the report (a
+key in a tight socket, a bottle loose in a tray) rather than a push [mm]: honest twins moved up to 3.1 mm, and a start
+inside something or a part driven by a motor 8.6 mm and more."""
+
 # The real arms' joint torque limits [Nm], from their makers' data sheets, by a word in the robot's name or its own
 # joints' names: a robot file's own numbers are a claim (the bimanual YAM's are right; a UR5e built for a twin gave
 # its wrists 150). A Universal Robots arm whose size the names do not give is left uncapped rather than guessed.
@@ -1900,6 +1905,17 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
         )
 
 
+def _spread(runs: dict, written: dict, names: list[str], axes: dict | None = None) -> str:
+    """What the plain replay, which changes nothing, ended away from the written run, carried by contact alone; ``""``
+    when it ended the same, was not read, or carried a thing some other way (that is plain's own FAIL)."""
+    plain = runs.get("plain")
+    if not plain or plain.get("nonfinite") or plain["outcome"] != "finished" or written.get("outcome") != "finished":
+        return ""
+    if any(t.get("free_flight_longest", 0) >= FLIGHT_STEPS for t in plain.get("things", {}).values()):
+        return ""
+    return _ended_elsewhere(plain, written, names, round_axes=axes, bystanders=False, excursion=False)
+
+
 def _plain_line(model: dict, runs: dict, written: dict, names: list[str], line: Any, axes: dict | None = None) -> None:
     """``plain``: the routine played with nothing hooked in; the things should end where the written replay left them."""
     plain = runs.get("plain")
@@ -2093,7 +2109,15 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 cause = "a part on a joint swung or settled, so the mechanism is not at rest at the start"
             else:
                 cause = "it starts inside something, or something other than the robot pushes it"
-            line(False, "frozen", f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}")
+            if moved > PUSHED_MM or "attachment" in cause:
+                line(False, "frozen", f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}")
+            else:
+                line(
+                    None,
+                    "frozen",
+                    f"{worst} moved {moved:.1f} mm with the robot frozen: a few millimetres, but a thing at rest stays "
+                    "put: say in the report what moves it",
+                )
         elif drift:
             k = max(drift, key=drift.get)
             line(
@@ -2176,7 +2200,17 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             )
     elif built:
         ok, detail = held(built, robot)
-        line(ok, "built", detail)
+        spread = _spread(runs, written, names, axes)
+        if ok is False and built["outcome"] == "finished" and spread:
+            # a scene whose plain replay, which changes nothing, also ends elsewhere cannot tell a slip from its spread
+            line(
+                None,
+                "built",
+                f"{detail}; but played with nothing changed, {spread}: this scene's end is not "
+                "repeatable, so built cannot tell a slip from that: say which in the report",
+            )
+        else:
+            line(ok, "built", detail)
     heavy = runs.get("heavy")
     if heavy:
         ok, detail = held(heavy, f"the handled things {HEAVY:g} times as heavy")

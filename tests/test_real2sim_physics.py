@@ -82,12 +82,21 @@ class Verdict(unittest.TestCase):
 
     def test_a_hinged_part_that_settles_is_said_so(self) -> None:
         runs = _clean_runs()
-        runs["frozen"]["things"]["lockbox#2"] = _thing(2.5)
+        runs["frozen"]["things"]["lockbox#2"] = _thing(6.0)
         result = physics.verdict(CLEAN, runs)
         self.assertIs(_words(result)["frozen"], False)
         self.assertIn(
-            "lockbox#2 moved 2.5 mm with the robot frozen: a part on a joint swung or settled", result["report"]
+            "lockbox#2 moved 6.0 mm with the robot frozen: a part on a joint swung or settled", result["report"]
         )
+
+    def test_a_few_millimetres_with_the_robot_frozen_is_a_note(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.1  # a bottle loose in a tray, a key in a tight socket
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["frozen"])
+        self.assertIn("crate moved 3.1 mm with the robot frozen: a few millimetres", result["report"])
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = physics.PUSHED_MM + 0.1
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)
 
     def test_a_task_done_with_the_fingers_open_is_a_note_not_a_fail(self) -> None:
         runs = _clean_runs()
@@ -129,6 +138,19 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], True)
         runs["built"] = {**_run(end=(0.4, 0.0, 0.9), turn=0.0), "lowered": {"friction": 2, "torque": 0}}
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)  # lowered something, and it slipped
+
+    def test_built_cannot_tell_a_slip_where_plain_also_ends_elsewhere(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = _run(end=(0.4, 0.0, 0.9), turn=0.0)
+        runs["plain"] = _run(end=(0.6, 0.1, 0.9), turn=0.0)  # nothing changed, and it still landed elsewhere
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["built"])
+        self.assertIn("this scene's end is not repeatable", result["report"])
+        runs["plain"] = _run()  # plain ends where the written run did: the slip is built's
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+        runs["built"] = _run(outcome="RuntimeError: the tray slipped")  # a stop is not spread
+        runs["plain"] = _run(end=(0.6, 0.1, 0.9), turn=0.0)
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
 
     def test_built_is_not_read_when_the_written_run_failed(self) -> None:
         runs = _clean_runs()
@@ -726,7 +748,11 @@ class StudyLines(unittest.TestCase):
             moved_max_mm=3.4, start=[0.4, 0.0, 0.9], end=[0.4, 0.0, 0.8966], rise_max_mm=0.0
         )
         self.assertIsNone(_words(physics.verdict(CLEAN, runs))["frozen"])
-        runs["frozen"]["things"]["crate"]["end"] = [0.4034, 0.0, 0.9]  # the same 3.4 mm, aside: pushed
+        runs["frozen"]["things"]["crate"]["end"] = [0.4034, 0.0, 0.9]  # the same 3.4 mm, aside: a wobble to explain
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["frozen"])
+        self.assertIn("a few millimetres", result["report"])
+        runs["frozen"]["things"]["crate"].update(moved_max_mm=6.0, end=[0.406, 0.0, 0.9])  # farther aside: pushed
         self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)
 
     def test_plain_notes_an_end_that_differs_and_fails_a_flight_unwatched(self) -> None:
@@ -917,7 +943,7 @@ class StudyLines(unittest.TestCase):
 
     def test_a_bendy_things_base_drifts_with_its_stem(self) -> None:
         runs = _clean_runs()
-        runs["frozen"]["things"]["stem"] = _thing(3.0)
+        runs["frozen"]["things"]["stem"] = _thing(7.0)
         self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)
         stem = {**CLEAN, "elastic_parts": ["stem#1", "stem#2", "stem#3"]}  # a chain of bending joints
         self.assertIsNone(_words(physics.verdict(stem, runs))["frozen"])
