@@ -610,11 +610,19 @@ class TestUp(unittest.TestCase):
 
     def test_up_on_a_running_page_says_when_it_draws_with_another_renderer(self) -> None:
         scene = _write(self.tmp, SCENE)
-        status = {"file": str(scene.resolve()), "share_url": None, "url": "u", "pid": 1, "renderer_asked": ""}
+        status = {
+            "file": str(scene.resolve()),
+            "share_url": None,
+            "url": "u",
+            "pid": 1,
+            "renderer_asked": "",
+            "renderer_drawing": "rtx",
+        }
         page = _FakePage(self.tmp / "ctl.sock", status)
         self.addCleanup(page.close)
         argv = ["--run-dir", str(self.tmp), "up", "--scene", str(scene)]
         self.assertEqual(ctl.main([*argv, "--renderer", "auto"]), 0, "the machine's pick is what it draws with")
+        self.assertEqual(ctl.main([*argv, "--renderer", "rtx"]), 0, "and the renderer that pick is")
         self.assertEqual(ctl.main([*argv, "--renderer", "gl"]), 1, "another renderer is not silently ignored")
         self.assertEqual(ctl.main([*argv, "--renderer", "blendr"]), 2, "a misspelling is said before the page is")
 

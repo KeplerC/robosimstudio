@@ -1110,6 +1110,7 @@ class LiveServer:
             "share_url": self.share_url,
             "pid": os.getpid(),
             "renderer_asked": getattr(self, "renderer_asked", ""),
+            "renderer_drawing": self.renderer()[0] if hasattr(self, "sim") else "",
             "file": str(self.path),
             "run_dir": str(self.run_dir),
             "pending_save": self._pending_save(stamps),

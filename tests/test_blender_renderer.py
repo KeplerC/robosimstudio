@@ -223,6 +223,21 @@ class TestTheProcess(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "bpy"):
             RendererBlender(_tiny_model(), [_cam()], blender=sys.executable, timeout=60.0)
 
+    def test_a_connection_that_does_not_say_the_token_is_not_given_the_scene(self) -> None:
+        from robosimstudio.solvers.render import blender as B
+
+        def impostor(executable, port):
+            code = (
+                "import socket, sys; sys.path.insert(0, %r)\n"
+                "from robosimstudio.solvers.render.blender_worker import send\n"
+                "s = socket.create_connection(('127.0.0.1', %d)); send(s, {'token': 'guess'}); s.recv(1)\n"
+            ) % (str(Path(B.__file__).resolve().parents[3]), port)
+            return [sys.executable, "-c", code]
+
+        with mock.patch.object(B, "blender_argv", impostor):
+            with self.assertRaisesRegex(RuntimeError, "before it connected"):
+                B.RendererBlender(_tiny_model(), [_cam()], blender=sys.executable, timeout=30.0)
+
     def test_a_broken_connection_closes_the_renderer(self) -> None:
         """A reply half read would answer the next request, so the renderer is done with."""
         from robosimstudio.solvers.render.blender import RendererBlender

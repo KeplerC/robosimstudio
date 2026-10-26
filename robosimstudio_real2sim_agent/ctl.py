@@ -820,8 +820,12 @@ def _differs_from_running(args: argparse.Namespace, status: dict) -> str:
     if args.share and not status.get("share_url"):
         return "a page is already up with no public URL; `quit` it and run `up --share` again"
     asked = str(getattr(args, "renderer", "") or "").strip()
-    if asked and asked.replace("auto", "") != str(status.get("renderer_asked") or "").replace("auto", ""):
-        running = status.get("renderer_asked") or "the machine's pick"
+    started = str(status.get("renderer_asked") or "")
+    drawing = str(status.get("renderer_drawing") or "")
+    # the renderer it was started under, or the one it draws with (rtx, picked by the machine), or "auto" for a page
+    # left to the machine's pick
+    if asked and asked not in (started, drawing) and not (asked == "auto" and started in ("", "auto")):
+        running = drawing or started or "the machine's pick"
         return f"a page is already up drawing with {running}; `quit` it and run `up --renderer {asked}` again"
     return ""
 

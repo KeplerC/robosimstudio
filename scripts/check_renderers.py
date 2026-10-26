@@ -5,8 +5,9 @@ A machine with no NVIDIA GPU -- a Mac -- steps scenes on the CPU and cannot
 run ``rtx``; this says what it can do instead. It builds a small bench (two
 YAMs, a cube, a cloth) where the machine puts it, steps it, and asks each
 renderer for a 640x360 frame through a calibrated camera (principal point off
-centre): how long the first frame took (building the renderer) and the next,
-and how far its depth is from the tiled tracer's, which every machine runs.
+centre) of one state: how long the first frame took (building the renderer)
+and the next, and how far its depth is from the tiled tracer's, which every
+machine runs.
 The frames go to ``--out``.
 
     uv run python scripts/check_renderers.py                       # every renderer
@@ -77,8 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 renderer.render(sim.state)
                 first = time.perf_counter() - t
-                sim.run(5).sync()
-                t = time.perf_counter()
+                t = time.perf_counter()  # the same state for every renderer, so the depths compare
                 frame = renderer.render(sim.state)["cam"]
                 second = time.perf_counter() - t
             finally:

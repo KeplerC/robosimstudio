@@ -78,8 +78,8 @@ class CollectSpec:
         mode: The control mode the policy's actions are in.
         cameras: Which of the scene's cameras to film; empty films every one.
         device: Where the physics runs: ``"cpu"`` or ``"cuda"``.
-        renderer: ``"gl"``, ``"tiled"``, or ``"auto"`` -- ``gl`` for a scene
-            without particles, else ``tiled``.
+        renderer: ``"gl"``, ``"tiled"``, or ``"auto"`` -- ``gl``, and ``tiled``
+            where ``gl`` has no OpenGL context.
         workers: Worker processes; 0 picks from the cores, about one per six.
         gpus: The GPUs workers render on (and step on, with ``device="cuda"``),
             round-robin, as ``CUDA_VISIBLE_DEVICES`` names them. Empty uses every
@@ -164,7 +164,7 @@ def _build(spec: CollectSpec):
         raise ValueError(f"the scene has no camera {missing or 'at all'}; it has {[c.name for c in sim.cameras]}")
     name = spec.renderer
     if name == "auto":
-        name = "tiled" if int(sim.model.particle_count) else "gl"
+        name = "gl"  # which draws cloth, ropes and grains from their particles too
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
     except (RuntimeError, ValueError) as exc:  # no context, or a visual MuJoCo will not compile

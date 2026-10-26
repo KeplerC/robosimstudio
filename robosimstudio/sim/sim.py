@@ -386,13 +386,18 @@ class Sim(EnvBase):
         # (RendererBase.aim): a camera over a plate asks depth as well, another does not
         key = (backend,) if retargets else (backend, spec, asked)
         if self._still_renderer is None or self._still_key != key:
-            if self._still_renderer is not None:
-                self._still_renderer.close()
+            old, self._still_renderer, self._still_key = self._still_renderer, None, None
+            if old is not None:
+                old.close()
             self._say_fallback(backend, why)
-            self._still_renderer = self.make_renderer(backend, cameras=[spec], channels=list(asked))
-            self._still_key = key
+            renderer = self.make_renderer(backend, cameras=[spec], channels=list(asked))
             if getattr(cls, "warms_up", False):
-                self._still_renderer.render(self.state)  # the first frame only builds the stage
+                try:
+                    renderer.render(self.state)  # the first frame only builds the stage
+                except Exception:
+                    renderer.close()
+                    raise
+            self._still_renderer, self._still_key = renderer, key
         elif retargets and (
             self._still_renderer.cameras != [spec] or self._still_renderer.channels[spec.name] != asked
         ):

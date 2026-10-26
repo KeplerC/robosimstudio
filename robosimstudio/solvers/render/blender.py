@@ -119,8 +119,9 @@ def find_blender(blender: str = "") -> str:
             found = shutil.which(name) or (name if os.path.isfile(name) else "")
             if not found:
                 raise FileNotFoundError(f"no Blender at {name!r} (given {source})")
-            return found
+            return os.path.abspath(found)  # Blender is started in a folder of its own
     found = shutil.which("blender") or (MAC_APP if sys.platform == "darwin" and os.path.isfile(MAC_APP) else "")
+    found = os.path.abspath(found) if found else ""
     if not found:
         raise FileNotFoundError(
             "the blender renderer needs Blender (5.x; tested on 5.2 LTS): install it (blender.org; on a Mac, Blender.app in "
@@ -292,7 +293,13 @@ class RendererBlender(RendererBase):
 
     # ------------------------------------------------------------------ the worker
     def _start(self) -> None:
+        import secrets
+
+        from robosimstudio.solvers.render.blender_worker import TOKEN_ENV, receive
+
         server = socket.create_server(("127.0.0.1", 0))
+        # the worker says this first: a connection from anything else on the machine is dropped, not given the scene
+        token = secrets.token_hex(16)
         try:
             port = server.getsockname()[1]
             with open(self._log, "wb") as log:
@@ -302,13 +309,23 @@ class RendererBlender(RendererBase):
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     cwd=self._tmp,
+                    env={**os.environ, TOKEN_ENV: token},
                 )
             # in short waits, so a Blender that exits at once (a missing library, a flag it rejects) is said at once
             server.settimeout(0.5)
             deadline = time.monotonic() + self.timeout
             while self._sock is None:
                 try:
-                    self._sock, _ = server.accept()
+                    candidate, _ = server.accept()
+                    candidate.settimeout(5.0)
+                    try:
+                        hello, _ = receive(candidate)
+                    except (OSError, ConnectionError, ValueError):
+                        hello = {}
+                    if secrets.compare_digest(str(hello.get("token", "")), token):
+                        self._sock = candidate
+                    else:
+                        candidate.close()
                 except TimeoutError:
                     if self._proc.poll() is not None:
                         raise RuntimeError(

@@ -44,6 +44,8 @@ import tempfile
 import time
 
 _LEN = struct.Struct("<Q")
+TOKEN_ENV = "ROBOSIMSTUDIO_BLENDER_TOKEN"
+"""What the worker says first, from its environment: the renderer drops a connection that does not."""
 
 
 # ------------------------------------------------------------------ framing (shared with the client)
@@ -521,6 +523,7 @@ def main(argv: list[str]) -> int:
     port = int(argv[0])
     sock = socket.create_connection(("127.0.0.1", port))
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    send(sock, {"token": os.environ.get(TOKEN_ENV, "")})
     world = None
     while True:
         try:

@@ -577,15 +577,10 @@ def _viewer_class():
 
 
 def _vertex_normals(points: np.ndarray, tris: np.ndarray) -> np.ndarray:
-    """Area-weighted smooth normals, so a sheet does not render faceted."""
-    p = np.asarray(points, dtype=np.float32)
-    a, b, c = p[tris[:, 0]], p[tris[:, 1]], p[tris[:, 2]]
-    fn = np.cross(b - a, c - a)
-    n = np.zeros_like(p)
-    for k in range(3):
-        np.add.at(n, tris[:, k], fn)
-    length = np.linalg.norm(n, axis=1, keepdims=True)
-    return n / np.maximum(length, 1.0e-12)
+    """Area-weighted smooth normals, so a sheet does not render faceted: the shared ones, as ``float32``."""
+    from robosimstudio.core.render.deformables import vertex_normals
+
+    return vertex_normals(points, tris).astype(np.float32)
 
 
 # ----------------------------------------------------------------- colour
