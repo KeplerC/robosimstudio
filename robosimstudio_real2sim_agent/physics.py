@@ -112,7 +112,7 @@ PUSHED_MM = 5.0
 """How far a rigid thing may move with the robot frozen and still be a wobble for the report (a key in a tight socket,
 a bottle loose in a tray) rather than a push [mm], at the default :data:`SETTLE_MM`; ``--settle-mm`` scales it with
 itself. A move under the settle bar is none at all. An attached thing is the contact line's FAIL whatever it moves; the
-frozen line only names it. Honest twins moved up to 3.1 mm, and a start inside something or a part driven by a motor
+frozen line only names it (a NOTE). Honest twins moved up to 3.1 mm, and a start inside something or a part driven by a motor
 8.6 mm and more."""
 
 # The real arms' joint torque limits [Nm], from their makers' data sheets, by a word in the robot's name or its own
@@ -642,16 +642,12 @@ def model_facts(sim: Any) -> dict[str, Any]:
             welds.append(f"{hit} by equality constraint {k}")
     # a row between a thing and the robot ties it only while enabled (a suction cup's rows are built off and switch
     # on at a hold): the written replay watches them, and the verdict reads whether one was on
-    out["robot_equalities"] = {
-        str(k): label
-        for k, (body1, body2, label) in rows.items()
-        if {body1, body2} & robot_bodies and ({body1, body2} - robot_bodies) & set(owner)
-    }
-    out["robot_equality_things"] = {
-        str(k): next(owner[b] for b in (body1, body2) if b in owner and b not in robot_bodies)
-        for k, (body1, body2, _label) in rows.items()
-        if str(k) in out["robot_equalities"]
-    }
+    out["robot_equalities"], out["robot_equality_things"] = {}, {}
+    for k, (body1, body2, label) in rows.items():
+        thing = next((owner[b] for b in (body1, body2) if b in owner and b not in robot_bodies), None)
+        if {body1, body2} & robot_bodies and thing is not None:
+            out["robot_equalities"][str(k)] = label
+            out["robot_equality_things"][str(k)] = thing
     out["ties"] = ties
     out["tie_things"] = tie_things
     out["welds"] = welds
@@ -1782,23 +1778,33 @@ def _end_offset(a: dict, b: dict, axis: list[float] | None = None) -> tuple[floa
     return off, shape, turn
 
 
-def _within_spread(misses: list[_Miss], seen: list[_Miss]) -> str:
-    """Plain's evidence, in a few words, that a run's ``misses`` are no more than the scene's own spread, which plain's
-    misses (``seen``: plain changed nothing) show; ``""`` when they are more. They are more when the run knocked a thing
-    the written run left alone or lost one on the way (a grip that let go), or when, for each thing and each of
-    position, shape and turn the run missed by, plain did not miss that same thing by that same measure too, and at
-    least half as far."""
+def _within_spread(misses: list[_Miss], run: dict, plain: dict, written: dict, axes: dict | None = None) -> str:
+    """Plain's evidence, in a few words, that a run's ``misses`` are no more than the scene's own spread; ``""`` when
+    they are more. Plain changed nothing, so it and the written run are two samples of the scene. The misses are spread
+    when each is an end (not a thing lost on the way or a bystander knocked: a grip that let go), and for each thing and
+    each of position, shape and turn the run missed by, plain missed that same thing by that same measure too, and the
+    run ended no farther from plain's end than plain's end is from the written one (or within the tolerance of it): a
+    slip the other way from plain's spread is not spread."""
     if not misses or any(m.kind != "end" for m in misses):
         return ""
-    by = {m.thing: m for m in seen if m.kind == "end"}
+    tol = {"position": END_MM, "shape": END_MM / 2, "turn": END_DEG}
     for m in misses:
+        a = run.get("things", {}).get(m.thing) or run.get("deformables", {}).get(m.thing)
+        p = plain.get("things", {}).get(m.thing) or plain.get("deformables", {}).get(m.thing)
+        b = written.get("things", {}).get(m.thing) or written.get("deformables", {}).get(m.thing)
+        if not (a and p and b):
+            return ""
+        apart = dict(zip(tol, _end_offset(a, p, (axes or {}).get(m.thing)), strict=True))  # the run from plain
+        spread = dict(zip(tol, _end_offset(p, b, (axes or {}).get(m.thing)), strict=True))  # plain from written
         for dim, v in m.far.items():
-            p = by.get(m.thing)
-            if v > 1.0 and (p is None or p.far[dim] <= 1.0 or p.far[dim] < v / 2):
+            if v > 1.0 and (spread[dim] <= tol[dim] or apart[dim] > max(tol[dim], spread[dim])):
                 return ""
     worst = max(misses, key=lambda m: max(m.far.values()))
     dim = max(worst.far, key=worst.far.get)  # the measure the run missed most by, as plain missed it
-    return _miss_words(worst.thing, dim, by[worst.thing].amount[dim])
+    p = plain.get("things", {}).get(worst.thing) or plain.get("deformables", {}).get(worst.thing)
+    b = written.get("things", {}).get(worst.thing) or written.get("deformables", {}).get(worst.thing)
+    off = dict(zip(tol, _end_offset(p, b, (axes or {}).get(worst.thing)), strict=True))
+    return _miss_words(worst.thing, dim, off[dim])
 
 
 def _model_lines(
@@ -2086,24 +2092,10 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     if driven:
         found.append("a target on a thing's own joint moved while the routine played: a motor")
     labels = model.get("robot_equalities", {})
-    # the things `found` holds, as names (older model reads carry only the words, in their fixed forms), and whether
-    # it holds something it names no thing for (a hook, an equality row whose thing is not known)
-    held_things = set(
-        model.get("tie_things", [f.split(" by a ", 1)[0] for f in model.get("ties", [])])
-        + (model.get("drive_things", [f.split("'s ", 1)[0] for f in model.get("drives", [])]) if driven else [])
-        + list(model.get("kinematic", []))
-        + list((runs.get("written") or {}).get("latched", []))
-    )
-    held_unnamed = bool((runs.get("written") or {}).get("hooks_added", 0))
     for k in (runs.get("written") or {}).get("robot_equalities_on", []):
         label = labels.get(str(k), "")
         if "suction" not in label:
             found.append(f"equality row {k} ({label or 'a weld'}) held a thing to the robot while the routine played")
-            thing = model.get("robot_equality_things", {}).get(str(k), "")
-            if thing:
-                held_things.add(thing)
-            else:
-                held_unnamed = True
     for name in (runs.get("written") or {}).get("latched", []):
         found.append(f"{name}'s grasp latch held it to a hand while the routine played")
     added = (runs.get("written") or {}).get("hooks_added", 0)
@@ -2223,18 +2215,33 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         rigid = {k: t["moved_max_mm"] for k, t in frozen.get("things", {}).items() if k not in elastic}
         soft = {k: t["moved_max_mm"] for k, t in frozen.get("deformables", {}).items()}
         soft |= {k: t["moved_max_mm"] for k, t in frozen.get("things", {}).items() if k in elastic}
-        worst = max(rigid, key=rigid.get) if rigid else ""
-        moved = rigid.get(worst, 0.0)
         drift = {k: v for k, v in soft.items() if v > settle_mm}
-        # a move up to PUSHED_MM (scaled with --settle-mm) is a wobble for the report; an attachment fails on the
-        # contact line whatever it moves, and frozen names it (the contact line's entries name a thing by its own name)
+        # what held things during the frozen replay itself: a tie or a kinematic flag always, a latch, an equality row
+        # or a motor only if it engaged there; such a thing fails on the contact line, and frozen only names it
+        holding = set(model.get("tie_things", [f.split(" by a ", 1)[0] for f in model.get("ties", [])]))
+        holding |= set(model.get("kinematic", [])) | set(frozen.get("latched", []))
+        if frozen.get("thing_targets_moved", 0.0) > 1e-6:
+            holding |= set(model.get("drive_things", [f.split("'s ", 1)[0] for f in model.get("drives", [])]))
+        rows_on = [k for k in frozen.get("robot_equalities_on", []) if "suction" not in labels.get(str(k), "")]
+        holding |= {model.get("robot_equality_things", {}).get(str(k), "") for k in rows_on} - {""}
+        unknown_hold = bool(frozen.get("hooks_added", 0)) or any(
+            not model.get("robot_equality_things", {}).get(str(k)) for k in rows_on
+        )
+        named_moves = {k: v for k, v in rigid.items() if k.split("#")[0] in holding}
+        free_moves = {k: v for k, v in rigid.items() if k not in named_moves}
+        worst = max(free_moves, key=free_moves.get) if free_moves else ""
+        moved = free_moves.get(worst, 0.0)
+        held_worst = max(named_moves, key=named_moves.get) if named_moves else ""
+        # a move up to PUSHED_MM (scaled with --settle-mm) is a wobble for the report
         pushed = PUSHED_MM * settle_mm / SETTLE_MM
-        named = bool(worst) and worst.split("#")[0] in held_things
+        also = (
+            f"; {held_worst} moved {named_moves[held_worst]:.1f} mm, held by the attachment the contact line names"
+            if held_worst and named_moves[held_worst] > settle_mm
+            else ""
+        )
         if moved > settle_mm:
             pushed_far = moved > pushed
-            if named:
-                cause = "the attachment the contact line names"
-            elif "#" in worst:  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
+            if "#" in worst:  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
                 cause = (
                     "a part on a joint swung or settled, so the mechanism is not at rest at the start"
                     if pushed_far
@@ -2245,14 +2252,22 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 cause = "it starts inside something, or something other than the robot pushes it"
             else:
                 cause = "a few millimetres, but a thing at rest stays put: say in the report what moves it"
-            if held_unnamed and not named:  # a hook, or an equality row whose thing is not known: it may be it
-                cause += "; the contact line names a hold (an equality row, a hook) that names no thing: say if it holds this"
+            if unknown_hold:  # a hook, or an equality row whose thing is not known: it may be what moves it
+                cause += (
+                    "; a hold the contact line names (an equality row, a hook) names no thing: say if it holds this"
+                )
             if drift:  # a deformable still settling is said too
                 k = max(drift, key=drift.get)
                 cause += f"; and {k} drifted {drift[k]:.1f} mm: still settling"
             line(
-                False if pushed_far else None, "frozen", f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}"
+                False if pushed_far else None,
+                "frozen",
+                f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}{also}",
             )
+        elif also:  # only held things moved: the contact line fails them, frozen says so
+            k = max(drift, key=drift.get) if drift else ""
+            settling = f"; and {k} drifted {drift[k]:.1f} mm: still settling" if k else ""
+            line(None, "frozen", f"with the robot frozen nothing free moved more than {moved:.1f} mm{also}{settling}")
         elif drift:
             k = max(drift, key=drift.get)
             line(
@@ -2345,7 +2360,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             line(None, "built", f"{same}, so it only played the same model again, and {miss}: {why}")
     elif built:
         ok, detail, misses = held(built, robot)
-        seen = _within_spread(misses, plain.misses) if ok is False else ""
+        seen = (
+            _within_spread(misses, built, plain.run, written, axes)
+            if ok is False and plain.run is not None and not plain.why and not plain.flew
+            else ""
+        )
         spread = f"{seen} too" if seen else ""
         if spread:
             # plain, which changes nothing, ended the same things about as far off: built cannot tell a slip from that
