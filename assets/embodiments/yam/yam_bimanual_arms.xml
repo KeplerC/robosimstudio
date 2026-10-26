@@ -32,8 +32,8 @@
         </default>
       </default>
       <default class="finger">
-        <joint type="slide" armature="0.1" frictionloss="0.1" damping="230" />
-        <position ctrlrange="0.0 0.0495" kp="300000" kv="300" forcerange="-100 100" inheritrange="0" />
+        <joint type="slide" armature="0.1" frictionloss="0.1" />
+        <position ctrlrange="0.0 0.0495" kp="200" kv="14" forcerange="-100 100" inheritrange="0" />
       </default>
     </default>
     <default class="cp2">

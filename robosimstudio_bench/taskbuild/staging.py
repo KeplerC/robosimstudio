@@ -145,19 +145,17 @@ class Staging:
 
     Either clause also takes ``(:effort-limit 12)``, the force or torque ceiling
     per DOF [N or N·m] (``ActuationSpec.effort_limit``). Unstated keeps the
-    import's own joint ceiling: 1e6 N on the arena YAM's fingers, whose actuator
-    the asset caps at 100 N, and 50 N on the i2rt YAM's. Then Close at
-    ``(:ke 1500)`` first pushes ke times the finger's 47.5 mm to go, 71 N, where
-    ``03_materials/08_tape``'s 12 N caps it. Over that first control step the
-    finger moves 4.1 mm uncapped and 1.9 mm capped. From the third step on, both
-    close at about the same speed, and both hold the tab at 5.8 N. So
+    import's own: on the arena YAM's finger joints 1e6 N, no ceiling, under its
+    actuator's 100 N, the real driver's limit. Then
+    Close at ``(:ke 1500)`` first pushes ke times the finger's 47.5 mm to go,
+    71 N, where ``03_materials/08_tape``'s 12 N caps it. Over that first control
+    step the finger moves 4.1 mm uncapped and 1.9 mm capped. From the third step
+    on, both close at about the same speed, and both hold the tab at 5.8 N. So
     ``examples/06_tasks/08_tape_scored`` states 12 N, to drive the fingers the
-    way the material page it scores does.
-
-    And ``(:joint-damping 0.5)``, the finger joints' damping
-    (``ActuationSpec.joint_damping``). A task that states its own servo states
-    this too: the YAM's fingers carry 230 N*s/m each, the speed limit at their
-    own 100 N clamp, and under a 12 N cap that moves each finger at 26 mm/s."""
+    way the material page it scores does. A stated finger servo replaces the
+    hand's own clamp whole (``GripperSpec.actuation``), its damping and ceiling
+    included. ``(:joint-damping x)`` and ``(:joint-friction x)`` set the joints'
+    damping and friction loss as well, over the whole finger linkage."""
     terminate_on_success: bool | None = None
     """``(:terminate-on-success false)``: whether success ends the episode. Unstated is true."""
     servo_speed_mps: float | None = None

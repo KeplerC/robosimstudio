@@ -30,12 +30,11 @@ puts the shoulder at the height the suites had it; the wrist residual is the
 arm, and is what the suites' own graphs were re-measured against before these
 became their native pairing.
 
-**Gains** are stated in the asset, so ``arm_actuation`` and
-``gripper_actuation`` stay ``None``: the MJCF's, only checked. The arm's are
-the arena's actuator classes (kp 80 kv 6 on joints 1-3, kp 30 kv 2 on the
-wrist), not the hardware's 80/10 of i2rt's ``yam_v1.yml``; the hand is
-``yam_bimanual``'s, the real driver's 50 N-per-jaw clamp (see
-``assets/PROVENANCE.md``).
+**Gains**: ``arm_actuation`` and ``gripper_actuation`` stay ``None``. The
+arm's are the asset's, the arena's actuator classes (kp 80 kv 6 on joints 1-3,
+kp 30 kv 2 on the wrist), not the hardware's 80/10 of i2rt's ``yam_v1.yml``;
+the hand's are ``yam_linear_arena``'s own, the real driver's 50 N-per-jaw
+clamp (see ``assets/PROVENANCE.md``).
 """
 
 from __future__ import annotations

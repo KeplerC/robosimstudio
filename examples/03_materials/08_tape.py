@@ -33,8 +33,8 @@ def main():
     # The right arm's joints [rad]: pointing down, jaws closing along y, the tool centre 100 mm over
     # the bench above the tab (``sim.arm("right").solve_q_full``).
     over_tab = (0.604, 2.485, 2.452, -1.539, 0.0, 0.604)
-    # [N] per finger; kd so the jaws reach the tab in 0.4 s (at 60, 8 mm a step); damping 0.5, as 230 crawls at 12 N.
-    grip = rss.ActuationSpec(target_ke=1500.0, target_kd=240.0, effort_limit=12.0, joint_damping=0.5)
+    # [N] per finger. Damped so the jaws reach the tab in 0.4 s: at kd 60 they hit it at 8 mm a step.
+    grip = rss.ActuationSpec(target_ke=1500.0, target_kd=240.0, effort_limit=12.0)
 
     yam = get_embodiment("yam_bimanual")
     left, right = yam.arms

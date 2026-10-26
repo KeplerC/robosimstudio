@@ -190,12 +190,10 @@ def main():
         ),
         collision=rss.CollisionSpec(contact_matching="sticky"),
     )
-    # A cable dragged across the jaws pries them open. At the i2rt fingers' old 600 N/m it
+    # A cable dragged across the jaws pries them open. At the i2rt fingers' own 600 N/m it
     # slid out of 3 drags of 7; at 2000 N/m the carry round the second spool still pried
     # them 5 mm apart and lost the cable in 3 runs of 26. At 6000 N/m: 16 of 16, 1-9 mm.
-    # Those runs had two uncoupled blades at 2 N*s/m, capped at 80 N; the blades are coupled and capped at 50 N now,
-    # and this servo keeps their 2 N*s/m (the demo's test passes; the 16 runs are not re-made).
-    fingers = rss.ActuationSpec(target_ke=6000.0, target_kd=120.0, joint_damping=2.0)
+    fingers = rss.ActuationSpec(target_ke=6000.0, target_kd=120.0)
 
     scene = rss.Scene(cell=board.CELL, physics=physics, name="route_the_cable")
     scene.add(rss.robot("yam_i2rt", gripper=fingers))

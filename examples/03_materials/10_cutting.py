@@ -24,8 +24,7 @@ def main():
     # The right arm's joints [rad]: pointing down, jaws closing along y, the tool centre 100 mm over
     # the bench above the knife's handle (``sim.arm("right").solve_q_full``).
     over_knife = (0.0, 1.792, 1.376, -1.154, 0.0, 0.0)
-    # The page's own servo, its damping too: the YAM's 230 N*s/m a finger, the speed limit at 100 N, crawls at 12 N.
-    grip = rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=12.0, joint_damping=0.5)  # [N] per finger
+    grip = rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=12.0)  # [N] per finger
 
     yam = get_embodiment("yam_bimanual")
     yam = rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_knife)))

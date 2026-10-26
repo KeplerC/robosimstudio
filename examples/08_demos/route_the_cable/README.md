@@ -67,13 +67,10 @@ between the pads, and it is carried 30 mm up at 50 mm/s.
   three runs of three, at a quarter of the speed.
 - `RodSpec(scene_friction=True)`: the pads take the rod's `mu_gripper` (60),
   the bench its `mu_surface` (0.02); `allow_grasp_latch=False`.
-- `rss.robot("yam_i2rt", gripper=rss.ActuationSpec(target_ke=6000, target_kd=120, joint_damping=2))`:
-  a cable dragged across the jaws pries them open. At the i2rt fingers' old
+- `rss.robot("yam_i2rt", gripper=rss.ActuationSpec(target_ke=6000, target_kd=120))`:
+  a cable dragged across the jaws pries them open. At the i2rt fingers' own
   600 N/m it slid out of 3 drags of 7; at 2000 N/m the carry round the second
-  spool pried them 5 mm apart and lost the cable in 3 runs of 26. Those runs had
-  two uncoupled blades at 2 N*s/m, capped at 80 N; the blades are coupled by
-  their equality and capped at 50 N now, and the servo keeps the 2 N*s/m (the
-  demo's test passes; the 16 runs are not re-made).
+  spool pried them 5 mm apart and lost the cable in 3 runs of 26.
 
 ## Measured
 

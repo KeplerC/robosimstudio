@@ -120,9 +120,8 @@ class ActuationSpec:
         joint_damping: Per-DOF joint damping, or ``None`` to keep the import's.
             Written, like :attr:`armature`, to the group's DOFs and to every
             joint geared to them: on a hand whose second finger rides an
-            equality the damping acts on the pair, and a servo stated over the
-            YAM's hand replaces the damping on both its fingers -- the 230 N*s/m
-            each that is the closing-speed limit at its own 100 N clamp.
+            equality the damping acts on the pair -- on the YAM's hand, the
+            230 N*s/m a finger that is its closing-speed limit.
         joint_friction: Per-DOF joint friction loss, or ``None`` to keep the
             import's. Written to the same DOFs as :attr:`joint_damping`.
     """

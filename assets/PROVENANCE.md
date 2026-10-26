@@ -61,10 +61,9 @@ The ±0.31 shoulder separation is kept; 0.2525 and 0.75 became
 `EmbodimentSpec.base_offset` against a scene's work surface.
 
 **What changed on the way in** -- the hand, edited in the checked-in file on
-2026-10-26 so it grips like the robot it models: the clamp the i2rt driver puts
-on the real arm (`i2rt-robotics/i2rt` @ `120c3c8`, v1.3.6). Measured on a
-top-down grasp of a free box (mu 0.3) with the right hand, the box in the arm's
-MuJoCo island (`MUJOCO_500HZ`), before and after:
+2026-10-26 so it grips like the robot it models (`i2rt-robotics/i2rt` @
+`120c3c8`, v1.3.6). Measured on a top-down grasp of a free box (mu 0.3) with the
+right hand, the box in the arm's MuJoCo island (`MUJOCO_500HZ`):
 
 * **Collider friction 1.0**, from 2.0 on the `collision` class and 4.0 on the
   0.6 mm pad nubs (`sphere_collision`). MuJoCo gives a contact the larger of its
@@ -72,36 +71,41 @@ MuJoCo island (`MUJOCO_500HZ`), before and after:
   object said: the mu 0.3 box read `[2.0, 4.0]` in `mjw_data.contact.friction`,
   and reads `[1.0]` now. 1.0 is what i2rt's own `linear_4310.xml` leaves on its
   tips (MuJoCo's default).
-* **The finger servo is the driver's clamp.** i2rt runs the real arm with
-  `limit_gripper_force=50.0` (`i2rt/robots/get_robot.py`), and its
-  `GripperForceLimiter` (`i2rt/robots/utils.py`) sees a blocked jaw and holds the
-  motor at the torque that makes 50 N of grip, whatever the width
-  (`i2rt/robots/config/linear_4310.yml`: a DM4310 at kp 20, 6.57 rad of motor
-  per 0.096 m of jaw, so about 94 kN/m at the jaw before the limiter). The
-  arena's servo was kp 200 N/m, kv 14 and no force range: a spring whose squeeze
-  grew with the object, 0.3 N a jaw on a 6 mm box, 1.5 N on 30 mm and 2.5 N on
-  50 mm. It is now `kp="300000" kv="300" forcerange="-100 100"`. The one
-  actuator drives both fingers through the equality, which splits its force onto
-  the two jaws, so 100 N is 50 N a jaw, reached 0.33 mm past contact: 50 N a jaw
-  measured on boxes of 1, 2, 6, 30 and 60 mm.
-* **230 N*s/m of damping on each finger joint** (from the class's 0.5). It
-  sets the closing speed: a clamp this stiff and undamped slams the pads, and
-  at kp 200 kN/m they crossed 56 mm through each other shut on nothing and went
-  through a 1-2 mm plate. The equality ties the two joints, so the pair carries
-  460: pulling at the 100 N cap a finger runs at 100/460 = 0.22 m/s and the jaw
-  at 0.43 m/s, the DM4310 at 30 rad/s (the velocity range i2rt's motor table
-  gives it) through 6.57 rad per 96 mm. That is an upper bound, since no
-  closing time is published for the hardware: shut on nothing from full open
-  takes 0.20 s to 90 % at 50, 60 and 240 Hz control (0.16 s before). On both
-  joints rather than the driven one: with the carried finger left at 0.5 it rang
-  against the stiff equality, flung a held box under `GENERIC` and crossed a
-  6 mm plate at 240 Hz. A page that states its own finger servo
-  (`ActuationSpec`) replaces the damping on both, and should state it, since
-  under a 12 N cap 460 moves a finger at 26 mm/s.
 * **The finger equality is stiff** (`solref="0.004 1" solimp="0.95 0.99 0.001"`,
   from MuJoCo's default 0.02). At the default the carried finger gave 4 mm under
   a 24 N squeeze, so the hand pinched off centre and lost force to the coupling;
   the box now sits within 0.2 mm of the grasp point.
+* **The finger actuator's `forcerange="-100 100"`** (it had none): the driver's
+  limit. i2rt runs the real arm with `limit_gripper_force=50.0`
+  (`i2rt/robots/get_robot.py`), and its `GripperForceLimiter`
+  (`i2rt/robots/utils.py`) sees a blocked jaw and holds the motor at the torque
+  that makes 50 N of grip, whatever the width. The one actuator drives both
+  fingers through the equality, which splits its force onto the two jaws, so
+  100 N is 50 N a jaw.
+
+**The finger gains are not the file's.** The file keeps the arena's, kp 200 N/m,
+kv 14: a spring whose squeeze grew with the object, 0.3 N a jaw on a 6 mm box,
+1.5 N on 30 mm and 2.5 N on 50 mm. The library drives the hand with its spec's
+own servo instead (`yam_linear_arena.CLAMP`, a `GripperSpec.actuation`), so a
+page that states its own servo replaces it and gets this file's joint physics
+back, under the same cap:
+
+* **A stiff servo**, kp 300000, kv 300, the real one's stiffness in kind
+  (`i2rt/robots/config/linear_4310.yml`: a DM4310 at kp 20, 6.57 rad of motor per
+  0.096 m of jaw, so about 94 kN/m at the jaw before the limiter): the cap is
+  reached 0.33 mm past contact, and 50 N a jaw measured on boxes of 1, 2, 6, 30
+  and 60 mm.
+* **230 N*s/m of damping on each finger joint.** It sets the closing speed: a
+  clamp this stiff and undamped slams the pads, and at kp 200 kN/m they crossed
+  56 mm through each other shut on nothing and went through a 1-2 mm plate. The
+  equality ties the two joints, so the pair carries 460: pulling at the 100 N
+  cap a finger runs at 100/460 = 0.22 m/s and the jaw at 0.43 m/s, the DM4310 at
+  30 rad/s (the velocity range i2rt's motor table gives it) through 6.57 rad per
+  96 mm. That is an upper bound, since no closing time is published for the
+  hardware: shut on nothing from full open takes 0.20 s to 90 % at 50, 60 and
+  240 Hz control (0.16 s on the spring). On both joints rather than the driven
+  one: with the carried finger left at 0.5 it rang against the stiff equality,
+  flung a held box under `GENERIC` and crossed a 6 mm plate at 240 Hz.
 
 After: every box from 1 to 60 mm held to the 2 kg the probe stops at (the YAM's
 payload; the arm itself sags 28 mm at 2 kg), where the arena hand dropped the
@@ -231,7 +235,7 @@ licensed; `LICENSE` copied beside the meshes.
 * Actuator physics the stock MJCF omits, from that builder verbatim:
   reflected armature `N²·I_rotor`, damping, frictionloss and true DM4340/DM4310
   torque limits per joint; position actuators kp=300/kv=30 (arms) and
-  kp=600/kv=20 (fingers) -- the fingers' since edited in the checked-in file,
+  kp=600/kv=20 (fingers) -- the fingers' not what the library drives now,
   below.
 * `gravcomp="1"` baked onto every body — the sims set `mujoco:gravcomp = 1.0`
   on every robot body in code; baking it lets the importer harvest it.
@@ -246,31 +250,26 @@ licensed; `LICENSE` copied beside the meshes.
 * Two prefixed copies merged into one worldbody at bases
   `(0.2525, ∓0.31, 0.75)` (right = active), per-side contact excludes kept.
 
-**Edited in the checked-in `yam_i2rt_arms.xml` on 2026-10-26**, to clamp like
-the real driver (the reasoning and the i2rt sources are under `embodiments/yam/`
-above; this hand has an actuator per finger, so each carries the per-jaw
-figure). The generator does not make these: a file regenerated from it drops
-them and has to have them put back:
+**Edited in the checked-in `yam_i2rt_arms.xml` on 2026-10-26** (the generator
+does not make these: a file regenerated from it drops them): the finger
+actuators' `forcerange` and the joints' `actuatorfrcrange` are -50..50, from
++-80, the driver's 50 N a blade (each blade has its own actuator; sources under
+`embodiments/yam/` above); and **the `joint7 == joint8` equality is back** (`polycoef="0 1 0 0 0"`, with the stiff `solref="0.004 1"
+solimp="0.95 0.99 0.001"`). Newton 1.7 imports it with the right sign
+(`eq_data` `[0, 1, 0, 0, 0]`; both fingers commanded to 20 mm read 20.0 and
+20.0), and it is what the real hand is, one motor: two capped servos without it
+hold a part anywhere between them. Both fingers stay actuated and commanded
+alike, as before. Tip and link friction are unchanged: the file authors none,
+so MuJoCo's 1.0.
 
-* Finger servos `kp="150000" kv="150" forcerange="-50 50"` and the joints'
-  `actuatorfrcrange` -50..50, from kp 600, kv 20 and +-80: 50 N a jaw on a
-  blocked part, i2rt's `limit_gripper_force`. At kp 600 the squeeze grew with
-  the part, 0.9 N a jaw on a 1 mm box, 2.3 N on 6 mm, 9.5 N on 30 mm.
-* Finger joint damping 230 N*s/m, from 2: pulling at the 50 N cap a blade runs
-  at 0.22 m/s, the DM4310's 30 rad/s bound as above; full open to shut in 0.20 s
-  to 90 % (0.08 s before).
-* **The `joint7 == joint8` equality is back** (`polycoef="0 1 0 0 0"`, with the
-  stiff `solref="0.004 1" solimp="0.95 0.99 0.001"`). Newton 1.7 imports it with
-  the right sign (`eq_data` `[0, 1, 0, 0, 0]`; both fingers commanded to 20 mm
-  read 20.0 and 20.0), and it is what the real hand is, one motor: two capped
-  servos without it hold a part anywhere between them. Both fingers stay
-  actuated and commanded alike, as before.
-* Tip and link friction unchanged: the file authors none, so MuJoCo's 1.0.
-
-After (`MUJOCO_500HZ`): 50 N a jaw on 30 and 60 mm boxes, both held to 2 kg.
-A thin plate standing on edge is the limit of these colliders at the real
-force: the decomposed tip hulls' faces are not parallel, and at 50 N they turn a
-6 mm plate in the pinch (83 degrees; it dropped at 0.47 kg, where the kp 600
+The file's finger gains (kp 600, kv 20, damping 2) are not what the library
+drives: `linear_4310.CLAMP` is, as under `embodiments/yam/` above -- kp 150000,
+kv 150 and 230 N*s/m a blade (0.22 m/s at the cap). At kp 600 the squeeze grew with the part, 0.9 N a blade on a 1 mm box, 2.3 N on 6 mm,
+9.5 N on 30 mm; full open to shut took 0.08 s, now 0.20 s. After
+(`MUJOCO_500HZ`): 50 N a blade on 30 and 60 mm boxes, both held to 2 kg. A thin
+plate standing on edge is the limit of these colliders at the real force: the
+decomposed tip hulls' faces are not parallel, and at 50 N they turn a 6 mm
+plate in the pinch (83 degrees; it dropped at 0.47 kg, where the kp 600
 servo's 2.3 N held 0.55 kg). The arm's kp 300/kv 30 are the reference sims',
 not the hardware's (i2rt's `yam_v1.yml`: kp 80/80/80/10/10/10, kd
 5/5/5/1.5/1.5/1.5), and are unchanged.
@@ -292,12 +291,12 @@ comes from Isaac Lab Arena (Apache-2.0, see `embodiments/yam/` above and
 `robosimstudio/robots/embodiments/yam_i2rt_arena.py`.
 
 **Edited in the checked-in file on 2026-10-26:** the grafted hand carries the
-same edits as `embodiments/yam/` above -- collider friction 1.0, the finger
-servo at kp 300000 kv 300 capped at 100 N (50 N a jaw), 230 N*s/m on each
-finger, the stiff finger equality. Measured the same way
-(`MUJOCO_500HZ`): 2, 6 and 30 mm boxes held to the probe's 2 kg, where the
-arena hand dropped them at 0.11, 0.29 and 1.31 kg. The arm keeps its arena
-gains, as `embodiments/yam/` says.
+same edits as `embodiments/yam/` above -- collider friction 1.0, the stiff
+finger equality and the actuator's 100 N range -- and is driven by the same
+`yam_linear_arena.CLAMP`. Measured
+the same way (`MUJOCO_500HZ`): 2, 6 and 30 mm boxes held to the probe's 2 kg,
+where the arena hand dropped them at 0.11, 0.29 and 1.31 kg. The arm keeps its
+arena gains, as `embodiments/yam/` says.
 
 ---
 
