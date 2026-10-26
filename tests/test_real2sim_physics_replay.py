@@ -4,11 +4,11 @@
 A routine that turns the right arm's base joint and shuts its gripper, played
 under each replay: written, the arm turns; frozen, it does not and the cube it
 never touched stays put; open, the fingers stay open while the arm turns; built,
-every friction reads at most 1 while it plays and the hand's own 2 and 4 are
-back after; heavy, the cube weighs twice as much while it plays and its own
-mass after. Measured on the bimanual YAM: the base joint turns 0.267 rad of
-the 0.3 commanded written and 0.000 frozen; the jaw reads -1.8 mm shut and
-94 mm under ``open``.
+every friction reads at most 1 while it plays and the cube's own 2 is back
+after (the YAM's hand is at the real 1 already); heavy, the cube weighs twice as
+much while it plays and its own mass after. Measured on the bimanual YAM: the
+base joint turns 0.267 rad of the 0.3 commanded written and 0.000 frozen; the
+jaw reads 0.0 mm shut and 95 mm under ``open``.
 """
 
 from __future__ import annotations
@@ -57,7 +57,8 @@ class Replays(unittest.TestCase):
 
         scene = rss.Scene(cell="bench_075", name="physics_replays")
         scene.add(rss.robot("yam_bimanual"))
-        scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.03)))
+        # mu 2: a surface over the real 1 for ``built`` to cap, now that the hand's pads are at 1.
+        scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.03), friction=2.0))
         with redirect_stdout(io.StringIO()):
             cls.sim = scene.build()
         cls.sim.run(30)  # the cube settles on the bench
@@ -369,7 +370,7 @@ class Replays(unittest.TestCase):
         self.assertIn("cube", facts["things"])
         self.assertEqual((facts["ties"], facts["welds"], facts["drives"], facts["kinematic"]), ([], [], [], []))
         self.assertEqual(facts["real_arm_torque"], physics.ARM_TORQUE["yam"])
-        self.assertTrue(np.isclose(max(max(v) for v in facts["finger_mu"].values()), 4.0))
+        self.assertTrue(np.isclose(max(max(v) for v in facts["finger_mu"].values()), 1.0))
 
 
 if __name__ == "__main__":
