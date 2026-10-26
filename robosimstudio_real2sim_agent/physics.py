@@ -105,6 +105,10 @@ FAILED = "the replay itself failed"
 SETTLE_MM = 2.0
 """How far a thing may move with the robot frozen: a resting contact settles by a fraction of a millimetre."""
 
+TORQUE_SLACK = 0.05
+"""A torque limit within this fraction above the real arm's counts as the real arm's when ``built`` says what it lowered:
+data sheets and robot files round (the YAM file's 28 Nm shoulders against the real 27)."""
+
 END_MM, END_DEG = 50.0, 30.0
 """How near a replay must end each handled thing to where the written run left it [mm, deg]."""
 
@@ -1409,7 +1413,8 @@ class AsBuilt:
             rows = np.asarray(dofs, dtype=np.int64)
             before = effort[rows].copy()  # numpy() is a view on a CPU device: read it before the write
             capped = np.minimum(before, np.asarray(caps, dtype=effort.dtype))
-            lowered["torque"] = int(np.count_nonzero(capped < before))
+            enforced = _enforced_effort(m, rows)  # an actuator's force range can hold the joint below Newton's limit
+            lowered["torque"] = int(np.count_nonzero(np.asarray(caps) < enforced * (1.0 - TORQUE_SLACK)))
             self._change("joint_effort_limit", rows, capped)
             flags |= _JOINT_DOF
         if self.heavier != 1.0:
@@ -1438,6 +1443,29 @@ class AsBuilt:
         self.saved = {}
         if flags:
             tuning.notify(self.sim.pipeline, flags)
+
+
+def _enforced_effort(m: Any, dofs: np.ndarray) -> np.ndarray:
+    """Each DOF's torque limit as the solver enforces it: Newton's effort limit, or the force range (times the gear)
+    of a MuJoCo actuator on that joint where that is lower. Newton's own limit is often its 1e6 default, and the robot
+    file's actuator is what holds the arm."""
+    effort = m.joint_effort_limit.numpy()[dofs].astype(np.float64)
+    mj = getattr(m, "mujoco", None)
+    try:
+        kind, trn = mj.actuator_trntype.numpy(), mj.actuator_trnid.numpy()
+        span, has, gear = mj.actuator_forcerange.numpy(), mj.actuator_has_forcerange.numpy(), mj.actuator_gear.numpy()
+    except AttributeError:
+        return effort
+    qd0 = m.joint_qd_start.numpy()
+    where = {int(d): i for i, d in enumerate(dofs)}
+    for a in range(len(kind)):
+        j = int(trn[a, 0])
+        if int(kind[a]) != 0 or not int(has[a]) or not 0 <= j < len(qd0):  # a joint actuator with a force range
+            continue
+        i = where.get(int(qd0[j]))
+        if i is not None:
+            effort[i] = min(effort[i], float(np.max(np.abs(span[a]))) * abs(float(gear[a, 0])))
+    return effort
 
 
 def cap_limit(steps: int) -> int:
@@ -1705,16 +1733,20 @@ def _misses(
             out.append((k, "lost", {}, words))
             continue
         off, shape, turn = _end_offset(a, b, (round_axes or {}).get(k))
-        if off > mm:
-            words = f"{k} ended {off:.0f} mm from where the written run left it"
-        elif shape > mm / 2:
-            words = f"{k}'s shape ended unlike the written run's"
-        elif turn > deg:
-            words = f"{k} ended turned {turn:.0f}° from how the written run left it"
-        else:
-            continue
-        out.append((k, "end", {"position": off / mm, "shape": shape / (mm / 2), "turn": turn / deg}, words))
+        far = {"position": off / mm, "shape": shape / (mm / 2), "turn": turn / deg}
+        first = next((d for d in ("position", "shape", "turn") if far[d] > 1.0), None)
+        if first:
+            out.append((k, "end", far, _miss_words(k, first, {"position": off, "shape": shape, "turn": turn}[first])))
     return out
+
+
+def _miss_words(k: str, measure: str, amount: float) -> str:
+    """A thing's end missed by one measure, in a few words: ``position`` [mm], ``shape`` or ``turn`` [deg]."""
+    return {
+        "position": f"{k} ended {amount:.0f} mm from where the written run left it",
+        "shape": f"{k}'s shape ended unlike the written run's",
+        "turn": f"{k} ended turned {amount:.0f}° from how the written run left it",
+    }[measure]
 
 
 def _ended_elsewhere(
@@ -1760,21 +1792,15 @@ def _within_spread(misses: list, plain: dict, written: dict, names: list[str], a
     if not misses or any(kind != "end" for _, kind, _, _ in misses):
         return ""
     seen = {
-        k: (far, words)
-        for k, _, far, words in _misses(plain, written, names, round_axes=axes, bystanders=False, excursion=False)
+        k: far for k, _, far, _ in _misses(plain, written, names, round_axes=axes, bystanders=False, excursion=False)
     }
     for k, _, far, _ in misses:
         for dim, v in far.items():
-            if v > 1.0 and (k not in seen or seen[k][0][dim] <= 1.0 or seen[k][0][dim] < v / 2):
+            if v > 1.0 and (k not in seen or seen[k][dim] <= 1.0 or seen[k][dim] < v / 2):
                 return ""
     k, _, far, _ = max(misses, key=lambda m: max(m[2].values()))
     dim = max(far, key=far.get)  # the measure the run missed most by, as plain missed it
-    p = seen[k][0][dim]
-    return {
-        "position": f"{k} ended {p * END_MM:.0f} mm from where the written run left it",
-        "shape": f"{k}'s shape ended unlike the written run's",
-        "turn": f"{k} ended turned {p * END_DEG:.0f}° from how the written run left it",
-    }[dim]
+    return _miss_words(k, dim, seen[k][dim] * {"position": END_MM, "shape": END_MM / 2, "turn": END_DEG}[dim])
 
 
 def _model_lines(
@@ -2171,14 +2197,21 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # a move up to PUSHED_MM (scaled with --settle-mm) is a wobble for the report; an attachment fails on the
         # contact line whatever it moves, and frozen names it (the contact line's entries name a thing by its own name)
         pushed = PUSHED_MM * settle_mm / SETTLE_MM
-        own = re.compile(rf"(?<![\w#.\-]){re.escape(worst.split('#')[0])}(?![\w#\-])")
-        named = bool(worst) and any(own.search(f) for f in found)
+        base = worst.split("#")[0]
+        in_label = re.compile(rf"(?<![0-9A-Za-z]){re.escape(base)}(?![0-9A-Za-z])")  # "key" in "key_weld"
+
+        def names_it(f: str) -> bool:  # an entry names its thing first ("crate by a ...", "lid's ..."); a row, by label
+            if f.startswith((f"{base} ", f"{base}'s ")):
+                return True
+            return f.startswith("equality row") and bool(in_label.search(f[f.find("(") + 1 : f.find(")")]))
+
+        named = bool(worst) and any(names_it(f) for f in found)
         if moved > settle_mm:
             pushed_far = moved > pushed
             if named:
                 cause = "the attachment the contact line names"
             elif any(f.startswith("equality row") or "substep hook" in f for f in found):  # they name no thing
-                cause = "the contact line names a hold that names no thing (an equality row, a hook): say if it is this"
+                cause = "the contact line names a hold (an equality row, a hook) that may be holding it: say if it is"
             elif "#" in worst:  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
                 cause = (
                     "a part on a joint swung or settled, so the mechanism is not at rest at the start"

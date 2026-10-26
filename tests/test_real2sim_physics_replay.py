@@ -353,7 +353,7 @@ class Replays(unittest.TestCase):
         built = physics.AsBuilt(self.sim, heavier=2.0)
         built.apply()
         self.assertEqual(built.lowered["friction"], int(grippy.sum()))  # what the built line reads as changed
-        self.assertGreater(built.lowered["torque"], 0)  # the YAM file's limits sit above the real arm's
+        self.assertEqual(built.lowered["torque"], 0)  # the YAM file's actuators hold 28/10 Nm: the real arm's, rounded
         moved = m.shape_material_mu.numpy()
         moved[mild] = 0.3  # the slider, mid-replay
         m.shape_material_mu.assign(moved)

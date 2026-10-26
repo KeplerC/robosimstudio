@@ -402,8 +402,10 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   left them (within 50 mm and 30°): a grip that only holds at a friction no
   rubber pad has fails here, even when the routine's own checks miss it.
   When `built` lowered nothing (the scene was already as built, so it only
-  played the routine again), a different end or a stop is a NOTE: the
-  outcome is not repeatable, and the report says so. When it lowered
+  played the routine again), a different end or a routine's stop is a
+  NOTE: the outcome is not repeatable, and the report says so. A torque
+  limit within 5% of the real arm's counts as the real one (robot files
+  round), and a replay that fails in its own code still fails. When it lowered
   something, a different end is a NOTE only where `plain`, which changes
   nothing, ended the same things off by the same measure (position, shape or
   turn) and at least half as far. A thing it lost on the way or a thing it

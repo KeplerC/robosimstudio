@@ -253,7 +253,16 @@ class Verdict(unittest.TestCase):
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
         runs["written"]["robot_equalities_on"] = [7]
         result = physics.verdict(CLEAN, runs)
-        self.assertIn("a hold that names no thing (an equality row, a hook)", result["report"])
+        self.assertIn("a hold (an equality row, a hook) that may be holding it", result["report"])
+        runs["written"]["robot_equalities_on"] = [3]
+        model = {**CLEAN, "robot_equalities": {"3": "crate_weld"}}  # the row's label names the crate
+        self.assertIn(
+            "crate moved 3.0 mm with the robot frozen: the attachment", physics.verdict(model, runs)["report"]
+        )
+        runs["written"]["robot_equalities_on"] = []
+        runs["written"]["hooks_added"] = 1  # "1 substep hook(s) ...": a thing named in the fixed words is not named
+        runs["frozen"]["things"]["hook"] = runs["frozen"]["things"].pop("crate")
+        self.assertNotIn("the attachment the contact line names", physics.verdict(CLEAN, runs)["report"])
 
     def test_a_built_replay_the_page_cut_is_not_read(self) -> None:
         runs = _clean_runs()
