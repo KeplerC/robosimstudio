@@ -84,7 +84,10 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
 - The light is `rss.Scene(..., render=...)`; left out, it is the house room.
   Which fields count depends on the renderer that draws every `snapshot`,
   `compare` and take: the path tracer where the GPU has RT cores and ovrtx is
-  installed, else the tiled tracer.
+  installed, else the tiled tracer, unless the page was started with
+  `up --renderer` (*Renderers*, below; `status` says which draws). Blender
+  under `environment="lab"` reads the fields as the path tracer does, and
+  otherwise as the tiled tracer does.
   - The path tracer, under `environment="lab"`, lights the scene with one
     soft panel overhead and a neutral dome. Start from the lab room and
     change what it reads:
@@ -150,10 +153,10 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
 | Command | Does |
 | --- | --- |
 | `new NAME [--ref FILE ...] [--dir D]` | Make a twin's folder, `twins/NAME/` beside the run directory (or `D`): a starter `scene.py`, the files copied into `ref/`, `REPORT.md` with its four headings, and the folder's own `ctl`. Needs no page. Refused from a twin's own folder, and for a `D` inside another scene's own code (where that page would take the twin for its helpers). |
-| `up [--port N] [--scene F] [--share]` | Start a server on the file (default: the `scene.py` beside the run directory), wait for the page, and print its URL (the next free port if N is busy). With a page already up, names it; refuses if that page is on another scene file or lacks a requested `--share`. |
+| `up [--port N] [--scene F] [--share] [--renderer R]` | Start a server on the file (default: the `scene.py` beside the run directory), wait for the page, and print its URL (the next free port if N is busy). `--renderer` names what draws every picture: `rtx`, `blender`, `gl` or `tiled` (*Renderers*). With a page already up, names it; refuses if that page is on another scene file, lacks a requested `--share`, or draws with another renderer. |
 | `status [--wait [--wait-limit S]]` | What is loaded, the names in it and where they are, the last error, the page's address, how the last routine ended (`last_script`), and `speed`: simulated seconds per wall second. While the page is building or rendering it answers at once with `busy` and for how long; during a routine's step, within 5 s. `--wait` returns once the page is not building or rendering and every save is built (a routine may still be playing: `play --wait` waits on one), giving up after `--wait-limit` seconds (3600). |
 | `reload` | Rebuild now. Saving the file does this too. |
-| `snapshot [--camera N] [--beside REF] [--eye x,y,z --look-at x,y,z] [--size WxH] [--note TEXT]` | A path-traced PNG of the current state, with a reference picture beside it. A snapshot draws the room, the mat and the textures; the page draws only the bench and what you added. |
+| `snapshot [--camera N] [--beside REF] [--eye x,y,z --look-at x,y,z] [--size WxH] [--note TEXT]` | A PNG of the current state from the page's renderer (path-traced by default), with a reference picture beside it. A snapshot draws the room, the mat and the textures; the page draws only the bench and what you added. |
 | `ref frames CLIP [--at 0:closed,4.5:lid_open,end] [--every S] [--out D] [--width W]` | Stills out of a clip at those seconds, a contact sheet with the seconds burnt in, and `ref/timeline.json` anchoring them, in `ref/` beside the scene file or `--out`, at the clip's width or `--width`. Needs no page. |
 | `ref plate CLIP [--window 0:5,36:52] [--count N] [--paint MASK] [--name F] [--out D]` | A clean plate of a fixed camera's clip: the per-pixel median of `N` (60) frames drawn from those seconds (default: all of it), so whatever passes through a pixel for under half of them is gone, and `ref/plate_<clip>_spread.png`, the share of frames each pixel differs from the plate in (white: half, where a ghost can be). `--paint` fills the white of a mask the clip's size from around it (the nearest pixel outside, blurred across the hole, so a wide hole comes out smeared: fill a large one from another window instead): a thing that stayed put all along. Needs no page. A camera takes it as its `background` (*The contract*). |
 | `camera fit --point X,Y,Z=U,V ... --ref STILL [--name N] [--fov DEG] [--free-center]` | The pinhole that puts world points (metres, the frame `CameraSpec` uses) on their pixels in the still: six or more, spread over the picture and in depth. Prints the `rss.CameraSpec(...)` to paste, its field of view, and each point's reprojection error in pixels (a point read off wrong is the one far above the rest); `run/camfit_<name>.png` marks each clicked pixel (yellow) and where the fit puts its point (cyan). `--fov` holds the field of view, `--free-center` solves the principal point too (ten or more points). Needs no page. |
@@ -187,6 +190,27 @@ continues from the files already in `run/`, across restarts):
 - from `ref frames`: `ref/tSSS.SS.jpg`, `ref/contact.jpg`, `ref/timeline.json`
 - from `ref plate`: `ref/plate_<clip>.png`, `ref/plate_<clip>_spread.png`; from
   `camera fit --ref`: `run/camfit_<name>.png`
+
+## Renderers
+
+Every `snapshot`, `compare` and take is drawn by one renderer, named by
+`./ctl up --renderer` (or `ROBOSIMSTUDIO_RENDERER`); `status` says which and
+why, and each reading's reply and log line carry its name. A camera over a
+clean plate composites under all four, and `compare`'s per-thing readings
+(size, place, IoU) come off the colliders whichever draws, so only the
+`picture` line changes with the renderer.
+
+| Renderer | Draws | Runs where | A 960x540 still |
+| --- | --- | --- | --- |
+| `rtx` (default) | the path tracer: materials, the `lab` room's light, the scenery | an NVIDIA GPU with RT cores | under a second; the first in a process compiles shaders |
+| `blender` | Cycles: the finishes and the `lab` light, as `rtx` does; no scenery | anywhere Blender 5 is installed (`ROBOSIMSTUDIO_BLENDER`, `blender` on the PATH, or Blender.app); Metal on a Mac | about a second on a GPU or a many-core CPU |
+| `gl` | flat colour and a sun, from the shapes as drawn; cloth, ropes and grains from their particles (a liquid as its grains) | anywhere: EGL on a GPU, software GL on a CPU, CGL on a Mac | milliseconds, and about 5 µs more a grain |
+| `tiled` | flat colour, from the colliders | anywhere Warp runs | milliseconds on a GPU, a second or two on a CPU |
+
+On a machine with no NVIDIA GPU -- a Mac -- the page steps on the CPU
+(MuJoCo's C library) and `rtx` cannot run: start it with `--renderer gl` to
+work fast, or `--renderer blender` for pictures that read like the path
+tracer's. Do not set the variable in `scene.py`: it outlives the save.
 
 ## Acting
 

@@ -373,8 +373,6 @@ class Sim(EnvBase):
             frame = sim.render()
             imageio.imwrite("still.png", frame["rgb"])
         """
-        from robosimstudio.solvers.render import FALLBACK
-
         spec = self._camera_for(camera)
         backend, why = self.platform.renderer_for("")
         from robosimstudio.solvers.render import supported_channels
@@ -382,17 +380,41 @@ class Sim(EnvBase):
         asked = tuple(channels)
         if spec.background and "rgb" in asked and "depth" not in asked and "depth" in supported_channels(backend):
             asked += ("depth",)  # the plate goes wherever the render's own depth is the static scene's
-        key = (backend, spec, asked)
+        cls = _backend_class(backend)
+        retargets = bool(getattr(cls, "retargets", False))
+        # a backend that takes its cameras and channels every frame keeps one renderer across viewpoints
+        # (RendererBase.aim): a camera over a plate asks depth as well, another does not
+        key = (backend,) if retargets else (backend, spec, asked)
         if self._still_renderer is None or self._still_key != key:
-            if self._still_renderer is not None:
-                self._still_renderer.close()
+            old, self._still_renderer, self._still_key = self._still_renderer, None, None
+            if old is not None:
+                old.close()
             self._say_fallback(backend, why)
-            self._still_renderer = self.make_renderer(backend, cameras=[spec], channels=list(asked))
-            self._still_key = key
-            if backend != FALLBACK:
-                self._still_renderer.render(self.state)  # the first frame only builds the stage
+            renderer = self.make_renderer(backend, cameras=[spec], channels=list(asked))
+            if getattr(cls, "warms_up", False):
+                try:
+                    renderer.render(self.state)  # the first frame only builds the stage
+                except Exception:
+                    renderer.close()
+                    raise
+            self._still_renderer, self._still_key = renderer, key
+        elif retargets and (
+            self._still_renderer.cameras != [spec] or self._still_renderer.channels[spec.name] != asked
+        ):
+            self._still_renderer.aim([spec], channels=asked)
         self.sync()
-        frame = self._still_renderer.render(self.state)[spec.name]
+        try:
+            frame = self._still_renderer.render(self.state)[spec.name]
+        except Exception:
+            # a renderer that is done (a Blender lost: RendererBlender.closed) is built afresh next time; one that
+            # only failed this frame is kept, rather than started again for every frame that fails the same way
+            if getattr(self._still_renderer, "closed", False):
+                failed, self._still_renderer, self._still_key = self._still_renderer, None, None
+                try:
+                    failed.close()
+                except Exception:  # its close failing too says nothing the render's own error does not
+                    pass
+            raise
         if spec.background and "rgb" in frame:
             frame = dict(frame, rgb=self.over_plate(spec, frame["rgb"], depth=frame.get("depth")))
         return {c: np.asarray(frame[c]) for c in channels if c in frame}

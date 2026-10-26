@@ -78,8 +78,9 @@ class CollectSpec:
         mode: The control mode the policy's actions are in.
         cameras: Which of the scene's cameras to film; empty films every one.
         device: Where the physics runs: ``"cpu"`` or ``"cuda"``.
-        renderer: ``"gl"``, ``"tiled"``, or ``"auto"`` -- ``gl`` for a scene
-            without particles, else ``tiled``.
+        renderer: ``"gl"``, ``"tiled"``, or ``"auto"`` -- ``gl``, and ``tiled``
+            for a heap of more than :data:`AUTO_GL_GRAINS` grains or where ``gl``
+            has no OpenGL context.
         workers: Worker processes; 0 picks from the cores, about one per six.
         gpus: The GPUs workers render on (and step on, with ``device="cuda"``),
             round-robin, as ``CUDA_VISIBLE_DEVICES`` names them. Empty uses every
@@ -164,7 +165,9 @@ def _build(spec: CollectSpec):
         raise ValueError(f"the scene has no camera {missing or 'at all'}; it has {[c.name for c in sim.cameras]}")
     name = spec.renderer
     if name == "auto":
-        name = "tiled" if int(sim.model.particle_count) else "gl"
+        # None for no table at all, which gl then draws from the model's own triangles and particles
+        handles = getattr(getattr(getattr(sim, "scene", None), "handles", None), "deformables", None)
+        name = auto_renderer(sim.model, handles)
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
     except (RuntimeError, ValueError) as exc:  # no context, or a visual MuJoCo will not compile
@@ -173,6 +176,31 @@ def _build(spec: CollectSpec):
         print(f"[collect] gl unavailable ({exc}); rendering with tiled", flush=True)
         name, renderer = "tiled", sim.make_renderer("tiled", cameras=cameras, channels=("rgb",))
     return sim, renderer, name, cameras
+
+
+AUTO_GL_GRAINS = 5000
+"""The most grains ``auto`` gives ``gl``: about 25 ms a camera a frame at its ~5 us a sphere."""
+
+
+def auto_renderer(model: Any, deformables: dict[str, Any] | None) -> str:
+    """``gl`` or ``tiled`` for ``renderer="auto"``, by what each would draw of the model's particles.
+
+    gl draws cloth and ropes as meshes, cheaply, but each grain as a sphere set from Python, and only what the
+    scene's handles say how to draw; tiled draws every particle natively. So gl, unless a heap is past
+    :data:`AUTO_GL_GRAINS` or a particle would be left out of gl's picture.
+    """
+    from robosimstudio.core.render.deformables import deformable_drawables
+
+    drawn = deformable_drawables(model, deformables)
+    grains = sum(len(points.particles) for points in drawn.points)
+    if deformables is None:  # no handle table: gl draws every triangle and every other active particle
+        return "tiled" if grains > AUTO_GL_GRAINS else "gl"
+    names = {part.name for part in (*drawn.meshes, *drawn.points)}
+    shown = np.zeros(int(getattr(model, "particle_count", 0) or 0), dtype=bool)
+    for name, handle in deformables.items():
+        if name in names:
+            shown[np.asarray(getattr(handle, "particles", ()), dtype=np.int64).reshape(-1)] = True
+    return "tiled" if grains > AUTO_GL_GRAINS or not shown.all() else "gl"
 
 
 def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, episode: int) -> dict[str, Any]:
