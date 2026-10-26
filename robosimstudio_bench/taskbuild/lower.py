@@ -315,10 +315,16 @@ def _requirements(staging: Staging) -> TaskRequirements:
 
 
 def _actuation(pairs: tuple[tuple[str, Any], ...]) -> ActuationSpec | None:
-    """``(:arm-actuation (:ke 1600) (:kd 70) (:effort-limit 12))`` as the gains, or ``None`` where unstated."""
+    """``(:arm-actuation (:ke 1600) (:kd 70) (:effort-limit 12) (:joint-damping 0.5))`` as the gains, or ``None``."""
     if not pairs:
         return None
-    names = {"ke": "target_ke", "kd": "target_kd", "armature": "armature", "effort_limit": "effort_limit"}
+    names = {
+        "ke": "target_ke",
+        "kd": "target_kd",
+        "armature": "armature",
+        "effort_limit": "effort_limit",
+        "joint_damping": "joint_damping",
+    }
     return ActuationSpec(**{names[key]: float(value) for key, value in pairs})
 
 

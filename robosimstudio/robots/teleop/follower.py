@@ -111,8 +111,8 @@ YAM_TELEOP_GRIP = ActuationSpec(
     # The hand, matched to the same reference (its two fingers are kp=3000).
     #
     # Stiffening the arm and leaving the hand alone is what a first pass at this
-    # did, and it is worse than doing neither: the MJCF's finger class is
-    # kp=200, so against arm joints at 4000 the grip slot becomes the softest
+    # did, and it is worse than doing neither: the MJCF's finger class was
+    # kp=200 then, so against arm joints at 4000 the grip slot became the softest
     # thing on the robot by a factor of twenty. That matters here more than the
     # ratio suggests, because the grip slot is a *feedback slot* --
     # Gripper.closed_fraction is the seventh entry the leader compares against
@@ -192,9 +192,15 @@ YAM_TELEOP_GRIP = ActuationSpec(
     # fidelity bound, not a stability one -- it measured no change to the ring
     # count at either kd (11 -> 11, 9 -> 9) -- but at kp=3000 a full-stroke
     # error commands 3000 * 0.0475 = 142 N, four times what that rig permits
-    # its own jaws, and nothing else here caps it.
+    # its own jaws, and the asset's own cap on the hand is 100 N.
+    #
+    # ``joint_damping`` is the 0.5 this servo was matched at. The asset's fingers
+    # now carry 230 N*s/m each, the speed limit of its own 100 N clamp; under
+    # this 35 N cap that holds each finger to 76 mm/s, and the leader reads a jaw
+    # that lags its own as contact (the grip motor energized on a free pass).
     target_ke=3000.0,
     target_kd=10.0,
     effort_limit=35.0,
+    joint_damping=0.5,
 )
 """Hand drive gains for a leader-driven YAM. The grip slot is a feedback channel, so its lag is felt too."""

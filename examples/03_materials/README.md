@@ -88,9 +88,9 @@ Source: [`01_rope_memory.py`](01_rope_memory.py)
 Two cables hang from a clamp, one twisting ten times more easily than it bends and one ten times less: drag each hand onto its cable's tip, press **Close**, turn each gizmo's ring a third of a turn about the cable and press **Open**, and the stiff one springs the turn back out while the soft one keeps it.
 
 `twist_ke` splits Newton's rod joint from its bend. The pads alone hold each
-tip, turned about the vertical. Turned 120 degrees, the soft cable takes 0.33
-turns and the stiff 0.16, slipping in the jaws; opened, the stiff reads 0.000 in
-30 steps, the soft 0.107 in 60 (`tests/test_cable_robot`, GPU 2).
+tip, turned about the vertical. Turned 120 degrees, the soft cable takes 0.32
+turns and the stiff 0.32 too, held by the hand's 50 N clamp; opened, the stiff
+reads 0.001 in 30 steps, the soft 0.106 in 60 (`tests/test_cable_robot`, GPU 7).
 
 ```bash
 uv run examples/03_materials/02_twist.py

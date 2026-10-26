@@ -22,7 +22,7 @@ def main():
     box = (0.295, 0.28, 0.08)  # what the sheet lies on [m]: flat on the bench, a pad has nothing to get under
     corner = (-0.05, -0.105, 0.085)  # the sheet's near corner (bench frame), across the middle, on the box
     overhang = 0.035  # how far the near edge runs past the box: the pads close on it from either corner
-    nubs = 3.0  # the grip nubs' friction: the asset's 4.0 holds paper's 0.3 at 1.10, 3.0 at 0.95
+    nubs = 3.0  # a friction cap; the YAM's pads are at a real pad's 1.0, so paper's 0.3 mixes to 0.55 on them
     # Copy paper at 20 VBD iterations: a 5.1 cm bending length held elastic on the drape bench (PAPER's 30: 9.7),
     # and a hinge bent 0.2 rad past its rest keeps the rest, so a fold pressed flat keeps up to 2.94 rad.
     sheet = rss.replace(PAPER, edge_ke=6.0, yield_angle=0.2)
@@ -34,7 +34,7 @@ def main():
     physics = physics.with_backend("*", rss.backend("vbd", **vbd, **layers))
     # The arms collide. A hand's motor pushes its driven finger 10 N at most; the other follows by a joint equality.
     yam = rss.replace(get_embodiment("yam_bimanual"), cross_arm_collisions=True)
-    hands = rss.ActuationSpec(target_ke=1.0e5, target_kd=20.0, effort_limit=10.0, joint_damping=200.0)
+    hands = rss.ActuationSpec(target_ke=1.0e5, target_kd=20.0, effort_limit=10.0, joint_damping=100.0)  # 200 a pair
 
     scene = rss.Scene(cell="bench_0728", physics=physics, name="paper")
     scene.add(rss.robot(yam, gripper=hands))

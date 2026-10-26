@@ -44,9 +44,12 @@ reads as a grasp at all)::
     finger command   3.0 mm    2.0 mm    1.0 mm    0.0 mm
     grip force       1.0 N    13.2 N    28.5 N    44.5 N
 
-First touch at ~3.0 mm on a 4 mm part, then about 20 N per millimetre, and the
-part does not move while the jaws close (0.01 mm). None of that was true of the
-hull, whose faces are not parallel and whose "grip" was mostly a net push.
+First touch at ~3.0 mm on a 4 mm part, then about 20 N per millimetre (the
+polish suite's own finger servo, not the asset's), and the part does not move
+while the jaws close (0.01 mm). None of that was true of the hull, whose faces
+are not parallel and whose "grip" was mostly a net push. The asset's own servo
+is the real driver's clamp, 50 N a blade on anything it closes on
+(``assets/PROVENANCE.md``).
 
 The names are templated. Both YAM arms carry this hand and its joints are
 ``right_joint7`` / ``left_joint7``, so ``{arm}`` is substituted per arm by

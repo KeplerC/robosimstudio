@@ -376,7 +376,9 @@ class TestTheHandHoldsTheKnifeOnACpu(unittest.TestCase):
         yam = get_embodiment("yam_bimanual")
         yam = rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_knife)))
         scene = _tofu_scene(rss, knife_at=(BLADE_X - 0.105, -0.31, 0.04), tofu=False)
-        scene.add(rss.robot(yam, gripper=rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=12.0)))
+        # The example's servo, its damping included.
+        grip = rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=12.0, joint_damping=0.5)
+        scene.add(rss.robot(yam, gripper=grip))
         for name, y in (("rest_a", -0.31 - 0.00625), ("rest_b", -0.31 + 0.00625)):
             scene.add(rss.slab(name=name, half=(0.05, 0.004, 0.012), at=(BLADE_X, y, 0.012)))
         sim = scene.build(control_mode="joint_position")

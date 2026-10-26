@@ -1083,12 +1083,20 @@ class EntityEmbodiment(Entity):
                         builder.joint_limit_lower[dof] = -1.0e6
                         builder.joint_limit_upper[dof] = 1.0e6
                         unlimited_dofs.append(dof)
+                # The linkage, not just the driven joints: a finger carried by an
+                # equality moves with the driven one, so its joint physics is the
+                # driven one's too -- damping, friction and armature alike.
+                if actuation.joint_damping is None and actuation.joint_friction is None and not actuation.armature:
+                    linkage = ()
+                else:
+                    linkage = self._linkage_dofs(builder, dofs)
+                for dof in linkage:
                     if actuation.joint_damping is not None:
                         builder.joint_damping[dof] = float(actuation.joint_damping)
                     if actuation.joint_friction is not None:
                         builder.joint_friction[dof] = float(actuation.joint_friction)
-                if actuation.armature:
-                    self._set_armature(builder, dofs, actuation.armature)
+                    if actuation.armature:
+                        builder.joint_armature[dof] = float(actuation.armature)
                 if actuation.armature_exact is not None:
                     # After ``armature``, so stating a value outright wins over
                     # the field that cannot say zero; the group's own DOFs only.
@@ -1101,35 +1109,44 @@ class EntityEmbodiment(Entity):
             self._unlimit_ctrlrange(builder, unlimited_dofs)
 
     @staticmethod
-    def _set_armature(builder: newton.ModelBuilder, dofs: Sequence[int], armature: float) -> int:
-        """Give ``dofs`` -- and anything geared to them -- this armature.
+    def _linkage_dofs(builder: newton.ModelBuilder, dofs: Sequence[int]) -> list[int]:
+        """``dofs`` and every DOF geared to them, sorted.
 
-        The followers are the point. A geared hand names one driven joint, so a
-        spec's gripper DOFs are that joint alone; leaving the five passive joints
-        weightless is what lets the drive overpower their equality constraints.
-        They are found through the builder's own mimic table rather than by name,
-        so this works for any linkage the importer closed.
+        A geared hand names one driven joint, so a spec's gripper DOFs are that
+        joint alone; the joints its equalities carry are found through the
+        builder's own mimic table rather than by name, so this works for any
+        linkage the importer closed.
 
-        Returns:
-            How many DOFs were written.
+        Either side of a mimic row may be the driven joint: the MJCF equality
+        ``joint1 = poly(joint2)`` lands as ``joint0`` following ``joint1``, and
+        the arena YAM's names its *driven* finger as ``joint1`` -- read one way
+        round, its carried finger was never found. So a row ties both of its
+        joints into the linkage, followed until nothing new joins. A disabled
+        row ties nothing.
         """
-        followers = list(getattr(builder, "constraint_mimic_joint0", ()))
-        leaders = list(getattr(builder, "constraint_mimic_joint1", ()))
+        joint0 = list(getattr(builder, "constraint_mimic_joint0", ()))
+        joint1 = list(getattr(builder, "constraint_mimic_joint1", ()))
+        enabled = list(getattr(builder, "constraint_mimic_enabled", ())) or [True] * len(joint0)
+        pairs = [(a, b) for a, b, on in zip(joint0, joint1, enabled, strict=False) if on]
         starts = builder.joint_qd_start
-        driven = {int(d) for d in dofs}
-        # A joint's DOFs, by its position in joint_qd_start.
-        for follower, leader in zip(followers, leaders, strict=False):
-            if int(starts[int(leader)]) not in driven:
-                continue
-            begin = int(starts[int(follower)])
-            end = int(starts[int(follower) + 1]) if int(follower) + 1 < len(starts) else len(builder.joint_armature)
-            driven.update(range(begin, end))
-        written = 0
-        for dof in sorted(driven):
-            if 0 <= dof < len(builder.joint_armature):
-                builder.joint_armature[dof] = float(armature)
-                written += 1
-        return written
+        count = len(builder.joint_armature)
+
+        def joint_dofs(joint: int) -> set[int]:
+            """A joint's DOFs, by its position in joint_qd_start."""
+            begin = int(starts[joint])
+            end = int(starts[joint + 1]) if joint + 1 < len(starts) else count
+            return set(range(begin, end))
+
+        linkage = {int(d) for d in dofs}
+        grew = True
+        while grew:
+            grew = False
+            for a, b in pairs:
+                ends = joint_dofs(int(a)), joint_dofs(int(b))
+                if (ends[0] & linkage or ends[1] & linkage) and not (ends[0] | ends[1]) <= linkage:
+                    linkage |= ends[0] | ends[1]
+                    grew = True
+        return [dof for dof in sorted(linkage) if 0 <= dof < count]
 
     # -------------------------------------------------------------- indexing
     def _arm_joints(

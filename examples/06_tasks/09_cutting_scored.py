@@ -23,7 +23,7 @@ TASK = """
 (define (problem cut_tofu)
   (:language cut the tofu in two with the knife)
   (:staging (:scene bench_075) (:embodiment yam_knife) (:physics cutting_50hz@v1)
-            (:gripper-actuation (:ke 1500) (:kd 60)))
+            (:gripper-actuation (:ke 1500) (:kd 60) (:joint-damping 0.5)))
   (:fixtures rest_a - knife_rest_a rest_b - knife_rest_b board - cutting_board)
   (:objects knife - kitchen_knife tofu - firm_tofu)
   (:goal (>= (pieces tofu) 2)))

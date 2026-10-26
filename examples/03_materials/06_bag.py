@@ -32,7 +32,8 @@ def main():
     # The right arm's joints [rad]: pointing down, jaws closing along y, the tool centre 100 mm over the
     # bench above the lip (``sim.arm("right").solve_q_full``).
     over_lip = (0.437, 2.222, 1.994, -1.344, 0.0, 0.437)
-    grip = rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=8.0)  # [N] per finger
+    # The page's own servo, its damping too: the YAM's 230 N*s/m a finger, the speed limit at 100 N, crawls at 8 N.
+    grip = rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=8.0, joint_damping=0.5)  # [N] per finger
 
     yam = get_embodiment("yam_bimanual")
     left, right = yam.arms

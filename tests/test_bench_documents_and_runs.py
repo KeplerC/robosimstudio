@@ -188,7 +188,10 @@ class TestStagingSubSections(unittest.TestCase):
         spec.loader.exec_module(module)  # the module body only imports and states TASK
         doc = parse_problem(parse_sexp(module.TASK))
         scored = _actuation(stage(doc.staging).staging.gripper_actuation)
-        self.assertEqual(ActuationSpec(target_ke=1500.0, target_kd=240.0, effort_limit=12.0), scored)
+        # The page's servo in full: its damping too, or the YAM's own 230 N*s/m would set its speed.
+        self.assertEqual(ActuationSpec(target_ke=1500.0, target_kd=240.0, effort_limit=12.0, joint_damping=0.5), scored)
+        damped = parse_staging({"gripper-actuation": [[":ke", 1500], [":kd", 60], [":joint-damping", 0.5]]})
+        self.assertEqual(0.5, _actuation(damped.gripper_actuation).joint_damping)
 
     def test_an_explicit_false_survives_a_profile_that_says_true(self):
         document = parse_staging({"scene-resident": "false"})
