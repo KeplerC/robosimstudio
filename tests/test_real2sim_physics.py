@@ -1273,6 +1273,54 @@ class StudyLines(unittest.TestCase):
         door = {**CLEAN, "elastic_parts": ["stem#1"]}  # one sprung joint (a door) is not a stem
         self.assertIs(_words(physics.verdict(door, runs))["frozen"], False)
 
+    def test_the_robot_line_holds_the_robot_to_the_registered_one(self) -> None:
+        runs = _clean_runs()
+        same = {"name": "yam_bimanual", "registered": True, "file": "", "arm": "", "gripper": ""}
+        self.assertIs(_words(physics.verdict({**CLEAN, "robot_spec": same}, runs))["robot"], True)
+        copied = {**same, "file": "its file is twin/assets/yam/arms.xml, not the registered embodiments/yam/..."}
+        result = physics.verdict({**CLEAN, "robot_spec": copied}, runs)
+        self.assertIs(_words(result)["robot"], False)
+        self.assertFalse(result["passed"])
+        servo = {**same, "gripper": "its gripper servo is the twin's own (gains 2000/40, 25 limit; registered: ...)"}
+        self.assertIn(
+            "gripper servo is the twin's own", physics.verdict({**CLEAN, "robot_spec": servo}, runs)["report"]
+        )
+        inline = {"name": "ur5e_gasket", "registered": False, "file": "assets/ur5e.xml"}
+        self.assertIsNone(_words(physics.verdict({**CLEAN, "robot_spec": inline}, runs))["robot"])
+        self.assertNotIn("robot", _words(physics.verdict(CLEAN, runs)), "no robot facts read, no line")
+
+    def test_drawn_parts_that_do_not_collide_fail_past_a_centimetre(self) -> None:
+        runs = _clean_runs()
+        result = physics.verdict({**CLEAN, "gravity": 9.81, "drawn_only_mm": {"flower_1": 62.0}}, runs)
+        self.assertIs(_words(result)["model"], False)
+        self.assertIn("flower_1: drawn parts that do not collide reach 62 mm outside its colliders", result["report"])
+        self.assertIsNone(
+            _words(physics.verdict({**CLEAN, "gravity": 9.81, "drawn_only_mm": {"cap": 5.0}}, runs))["model"]
+        )
+
+    def test_drawn_only_reach_measures_past_the_colliders(self) -> None:
+        import newton
+
+        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
+        box = int(newton.GeoType.BOX)
+        vis, col = int(newton.ShapeFlags.VISIBLE), int(newton.ShapeFlags.COLLIDE_SHAPES)
+        # a stem collider 1 x 1 x 5 cm; a drawn-only leaf 4 cm long reaching 3 cm past it in x; a drawn-only label inside
+        model = types.SimpleNamespace(
+            shape_flags=arr([col, vis, vis]),
+            shape_type=arr([box, box, box]),
+            shape_scale=arr([[0.005, 0.005, 0.025], [0.02, 0.002, 0.005], [0.004, 0.004, 0.01]]),
+            shape_transform=arr([[0, 0, 0, 0, 0, 0, 1], [0.015, 0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 0, 0, 1]]),
+            shape_body=arr([0, 0, 0]),
+            shape_source=[None, None, None],
+        )
+        flower = types.SimpleNamespace(bodies=[0], body=0, shapes=[0, 1, 2], static=False)
+        sim = types.SimpleNamespace(
+            model=model, scene=types.SimpleNamespace(handles=types.SimpleNamespace(objects={"flower": flower}))
+        )
+        self.assertAlmostEqual(physics.drawn_only_reach(sim)["flower"], 30.0, places=1)
+        flower.shapes = [0, 2]
+        self.assertEqual(physics.drawn_only_reach(sim), {}, "a drawn part inside its collider")
+
     def test_shape_volumes(self) -> None:
         import newton
 
