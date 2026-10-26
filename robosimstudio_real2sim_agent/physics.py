@@ -1779,35 +1779,29 @@ def _entry(run: dict, k: str) -> dict | None:
     return run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
 
 
-def _unread(run: dict, failed: bool = True) -> str:
-    """Why a replay was not read, ``""`` when it was: the solver blew up in it, or :func:`_cut`."""
-    return "not read: the solver blew up in it" if run.get("nonfinite") else _cut(run, failed)
-
-
-def _frozen_evidence(frozen: dict | None) -> dict | None:
-    """The frozen run as evidence of a push: whole, or cut by the page (its moves are running maxima, so a push it
-    recorded stands); ``None`` when there is none, it blew up, or its hold on the robot broke (the robot was not
-    frozen)."""
-    if not frozen or frozen.get("nonfinite") or str(frozen.get("outcome", "")).startswith(FAILED):
-        return None
-    return frozen
+def _unread(run: dict) -> str:
+    """Why a replay was not read, ``""`` when it was: the solver blew up in it, the page cut it (a reset, a save,
+    Stop), or its own machinery broke (``FAILED``). The server reports nothing while any replay is cut or broken; this
+    keeps the verdict safe for a caller that hands it one anyway."""
+    if run.get("nonfinite"):
+        return "not read: the solver blew up in it"
+    out = str(run.get("outcome", ""))
+    return f"not read: {out}" if out.startswith((STOPPED, FAILED)) else ""
 
 
 def _carried(run: dict, written: dict, k: str, sampled: bool = False) -> bool:
     """Whether ``run`` carried thing ``k`` at least a third as far as the written run did: a mug lifted and set back
     near its start is carried too; one a grasp let go of, or never took, is not. A ``sampled`` run (plain, read only
-    at the routine's yields, so its largest move can fall short) also counts where it left the thing."""
+    at the routine's yields, so its largest move can fall short) also counts as carrying a thing it left at least a
+    third of the way from its start toward where the written run left it."""
     a, b = _entry(run, k) or {}, _entry(written, k) or {}
     if a.get("moved_max_mm", 0.0) >= b.get("moved_max_mm", 0.0) / 3:
         return True
-    return sampled and b.get("end_mm", 0.0) > 0.0 and a.get("end_mm", 0.0) >= b.get("end_mm", 0.0) / 3
-
-
-def _cut(run: dict, failed: bool = True) -> str:
-    """Why a replay was not read, ``""`` when it was: the page cut it (a reset, a save, Stop) or, with ``failed``, its
-    own code broke (``FAILED``; ``built`` fails that instead)."""
-    out = str(run.get("outcome", ""))
-    return f"not read: {out}" if out.startswith((STOPPED, FAILED) if failed else STOPPED) else ""
+    if not (sampled and "start" in a and "end" in a and "end" in b):
+        return False
+    # it left the thing a third of the way from its start toward the written end: shoved aside is not carried
+    far = float(np.linalg.norm(np.subtract(a["start"], b["end"])))
+    return far > 0.0 and far - float(np.linalg.norm(np.subtract(a["end"], b["end"]))) >= far / 3
 
 
 def _end_offset(a: dict, b: dict, axis: list[float] | None = None) -> dict[str, float]:
@@ -1900,9 +1894,7 @@ def _model_lines(
         line(True, "model", f"gravity {model['gravity']:g} m/s²; the handled things' densities are ones objects have")
     settle = model.get("settle") or {}
     if settle:
-        proof = (
-            _frozen_evidence(frozen) or {}
-        )  # what a frozen run can prove: a cut one its pushes, a broken one nothing
+        proof = frozen if frozen and not _unread(frozen) else {}  # a frozen run that was not read proves nothing
         risen = {k: v for k, v in settle.items() if v["rise_mm"] > settle_mm}
         pushed_out = {k for k, t in (proof.get("things") or {}).items() if t.get("moved_max_mm", 0.0) > settle_mm}
         resting = {
@@ -2082,6 +2074,8 @@ def _plain_gate(runs: dict, written: dict) -> tuple[dict | None, str]:
         return None, ""
     if written.get("outcome") != "finished":
         return plain, "not read: the written replay did not finish"
+    if plain.get("nonfinite"):
+        return plain, _unread(plain)
     if plain["outcome"] == PLAIN_SLOW:
         return plain, f"not read: {PLAIN_SLOW}"
     if why := _unread(plain):
@@ -2208,7 +2202,6 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     written = runs.get("written") or {}
     names = _moved(written)
     frozen = runs.get("frozen")
-    evidence = _frozen_evidence(frozen)
     _model_lines(model, written, names, line, settle_mm, frozen)
     if written:
         flew = {
@@ -2259,10 +2252,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 + ("something that is not a contact carries it" if long else "say in the report what holds it")
                 + (f"; {unjudged_note}" if unjudged_note else ""),
             )
-    if frozen and evidence is None:  # blew up, or its hold on the robot broke
-        line(None, "frozen", _unread(frozen))
+    if frozen and (why := _unread(frozen)):
+        line(None, "frozen", why)
     elif frozen:
-        cut = _cut(frozen)  # cut by the page: a push it recorded before that stands, nothing else is read
         # a rigid thing has nothing to settle into; a heap, a liquid or a draped cloth can still be relaxing at the
         # reset, so its drift is a note for the report, not a fault
         unread_things_ = set((runs.get("written") or {}).get("contacts_unread") or {})
@@ -2334,17 +2326,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 )
             elif unknown_hold:  # a hook the routine added names no thing: it may be what moves it
                 cause += "; the contact line names a hook the routine added, which names no thing: say if it holds this"
-            if cut and not pushed_far:
-                line(None, "frozen", cut + also + settling)
-            else:
-                line(
-                    False if pushed_far else None,
-                    "frozen",
-                    f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}{settling}{also}"
-                    + (f" (before the replay was cut: {frozen['outcome']})" if cut else ""),
-                )
-        elif cut:
-            line(None, "frozen", cut + also + settling)
+            line(
+                False if pushed_far else None,
+                "frozen",
+                f"{worst} moved {moved:.1f} mm with the robot frozen: {cause}{settling}{also}",
+            )
         elif also:  # only held things moved: the contact line fails them, frozen says so
             line(None, "frozen", f"with the robot frozen nothing free moved more than {moved:.1f} mm{also}{settling}")
         elif drift:
@@ -2387,9 +2373,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     def nm(limits) -> str:
         return "/".join(f"{v:g}" for v in sorted(set(limits), reverse=True))
 
-    every_arm = (bool(per_arm) and all((model.get("arm_torque") or {}).values())) or bool(
-        torque and not model.get("arm_torque")
-    )  # a real torque known for each arm
+    every_arm = bool(per_arm) and all((model.get("arm_torque") or {}).values())  # each arm handle's real torque known
     if len(set(per_arm.values())) > 1:
         caps = "; ".join(f"{k} {nm(v)} Nm" for k, v in per_arm.items())
         robot = f"every friction at most {REAL_MU:g} and each arm's torque at its own ({caps})"
@@ -2408,7 +2392,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             return None, f"not read: with {what} the solver blew up ({k} at step {at})", []
         if written.get("outcome") != "finished":
             return None, "not read: the written replay did not finish, so there is no end to hold this one to", []
-        if why := _cut(run, failed=False):  # the page cut it (a reset, a save, Stop), not the routine
+        if why := _unread(run):  # cut by the page, or its own machinery broke
             return None, why, []
         if run["outcome"] != "finished":
             return False, f"with {what} the routine stopped: {run['outcome']}", []
@@ -2440,8 +2424,6 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             line(True, "built", same)
         elif ok is None:
             line(None, "built", detail)
-        elif built["outcome"].startswith(FAILED):  # the replay machinery broke: nothing was read, and that fails
-            line(False, "built", detail)
         else:  # the same model played again: whatever went otherwise is the scene's spread, not friction or torque
             lost = [m for m in misses if m.kind == "lost"]
             miss = (lost or misses)[0].words if misses else f"it stopped ({built['outcome']})"
@@ -2455,7 +2437,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         ok, detail, misses = held(built, robot)
         seen = (
             _within_spread(misses, built, plain.run, plain.misses, written, axes)
-            if ok is False and plain.run is not None
+            if ok is False and plain.readable
             else ""
         )
         spread = f"{seen} too" if seen else ""

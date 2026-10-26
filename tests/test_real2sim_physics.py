@@ -230,9 +230,10 @@ class Verdict(unittest.TestCase):
         result = physics.verdict(CLEAN, runs)
         self.assertIs(_words(result)["built"], False)
         self.assertIn("crate ended 5 mm from its start where the written run took it 300", result["report"])
-        runs["plain"]["things"]["crate"]["end_mm"] = (
-            290.0  # read only at yields, but it left the crate far off: carried
-        )
+        runs["plain"]["things"]["crate"]["start"] = [0.4, 0.0, 0.9]
+        runs["plain"]["things"]["crate"]["end"] = [0.6, 0.0, 0.9]  # shoved 200 mm aside: no nearer the written end
+        self.assertIn("where the written run took it", physics.verdict(CLEAN, runs)["report"])
+        runs["plain"]["things"]["crate"]["end"] = [0.4, 0.0, 1.15]  # read only at yields, but left near the end
         self.assertNotIn("where the written run took it", physics.verdict(CLEAN, runs)["report"])
 
     def test_built_that_lowered_nothing_beside_a_deformable_is_not_excused(self) -> None:
@@ -257,10 +258,12 @@ class Verdict(unittest.TestCase):
         runs["plain"] = _run(outcome="RoutineError: the tray slipped")
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
 
-    def test_a_broken_built_replay_fails_even_when_it_lowered_nothing(self) -> None:
+    def test_a_broken_built_replay_is_not_read(self) -> None:
         runs = _clean_runs()
         runs["built"] = {**_run(outcome=physics.FAILED + ": RuntimeError: x"), "lowered": {"friction": 0, "torque": 0}}
-        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["built"])
+        self.assertIn("not read: " + physics.FAILED, result["report"])
 
     def test_spread_shows_plain_in_the_measure_built_missed_by(self) -> None:
         runs = _clean_runs()
@@ -346,19 +349,14 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(result)["frozen"], False)
         self.assertIn("names a hold on it (a latch, an equality row, a motor): say if that moves it", result["report"])
 
-    def test_a_frozen_replay_cut_or_broken_is_read_only_for_a_push_it_proved(self) -> None:
+    def test_a_frozen_replay_cut_or_broken_is_not_read(self) -> None:
         runs = _clean_runs()
         for outcome in (physics.STOPPED, physics.FAILED + ": Broken: holding the robot's targets"):
-            runs["frozen"] = _run(outcome=outcome, moved=0.3, end=(0.4, 0.0, 0.9), turn=0.0)
-            result = physics.verdict(CLEAN, runs)
-            self.assertIsNone(_words(result)["frozen"])
-            self.assertIn("not read: " + outcome[:20], result["report"])
-        runs["frozen"] = _run(outcome=physics.STOPPED, moved=40.0, end=(0.4, 0.0, 0.9), turn=0.0)  # pushed, then cut
-        result = physics.verdict(CLEAN, runs)
-        self.assertIs(_words(result)["frozen"], False)
-        self.assertIn("(before the replay was cut", result["report"])
-        runs["frozen"]["outcome"] = physics.FAILED + ": Broken: holding the robot's targets"  # the robot was not frozen
-        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["frozen"])
+            for moved in (0.3, 40.0):  # as the server, which reports nothing while a replay is cut or broken
+                runs["frozen"] = _run(outcome=outcome, moved=moved, end=(0.4, 0.0, 0.9), turn=0.0)
+                result = physics.verdict(CLEAN, runs)
+                self.assertIsNone(_words(result)["frozen"])
+                self.assertIn("not read: " + outcome[:20], result["report"])
 
     def test_a_lost_grip_after_another_miss_is_said(self) -> None:
         runs = _clean_runs()

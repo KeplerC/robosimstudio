@@ -446,8 +446,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--settle-mm",
         type=float,
         default=None,
-        help="how far a thing may move with the robot frozen (default 2); past it is a note up to 2.5 times it, "
-        "and a FAIL beyond",
+        help="how far a thing may move with the robot frozen (default 2): a free rigid thing past it is a note up to "
+        "2.5 times it and a FAIL beyond; one that started more than 1 mm inside something fails settle past it",
     )
     phys.add_argument("--note", default="", help="a line for the log: why this reading")
     phys.add_argument(
