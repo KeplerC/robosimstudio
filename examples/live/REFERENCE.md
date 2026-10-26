@@ -381,10 +381,20 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
 ```
 
 - **frozen** holds every target the robot has (arms, fingers, a torso or a
-  rail) where it started. A rigid thing that moves is pushed out of something
-  it starts inside (a finger, the table) or by something other than the
-  robot; a deformable still settling (a heap, a liquid, a draped cloth) is a
-  NOTE.
+  rail) where it started. A rigid thing that moves more than 5 mm is pushed
+  out of something it starts inside (a finger, the table) or by something
+  other than the robot; one that moves 2 to 5 mm (a key in a tight socket, a
+  bottle loose in a tray) and a deformable still settling (a heap, a liquid,
+  a draped cloth) are NOTEs. A thing tied to the robot or flagged kinematic
+  fails on the `contact` line whatever it moves, and `frozen` names it when it
+  moves past 2 mm (a part on its own joint is read like any other). `settle`
+  reads the start: a thing that starts more than 1 mm inside something and
+  moves past 2 mm with the robot frozen fails there, even where `frozen`
+  calls that move a note. One
+  the `contact` line names for a latch, an equality row or a motor in the
+  written run is read like any other, with that hold named as what may move
+  it. `--settle-mm` sets the 2 mm, and the
+  5 mm moves with it (2.5 times).
 - **open** holds the fingers fully open and moves the arms as written. A
   pinch fails; a task that still happens is carried by a support, a hook or
   two arms squeezing, and the report says which. What happened is read off
@@ -398,8 +408,26 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   passes when the routine finishes and the things end where the written run
   left them (within 50 mm and 30°): a grip that only holds at a friction no
   rubber pad has fails here, even when the routine's own checks miss it.
+  When `built` lowered nothing (the scene was already as built, so it only
+  played the routine again) and nothing in the scene keeps a friction built
+  does not cap (a deformable, or a thing another solver steps), a different
+  end or a routine's stop is a
+  NOTE: the outcome is not repeatable, and the report says so. When it lowered
+  something, a different end is a NOTE only where `plain`, which changes
+  nothing, carried the same thing (at least a third as far as written) and
+  missed it by the same measure (position, shape or turn) past the
+  tolerance, `built` missed it by no more than `plain` did plus one
+  tolerance, and `built` ended no farther from `plain`'s end than `plain`'s
+  is from the written one: the two are samples of the scene's spread, and a
+  slip outside it fails. Where `plain`'s own grasp failed, the FAIL says the
+  grasp is marginal at any friction. A thing it lost on the way or a thing it
+  knocked over that the written run left alone still fails, and so does a
+  routine that stops.
   When the written replay did not finish, there is no end to hold it to, and
   `built`, `heavy` and `open` are NOTEs that say so.
+- A replay the page cuts (a reset, a save, Stop) or whose own machinery
+  breaks gives no report: `./ctl physics` says which replay did not run to a
+  reading, and is run again.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
 - **drop** plays it as written and opens the fingers early in the written
