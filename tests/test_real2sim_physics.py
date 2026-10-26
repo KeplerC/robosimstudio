@@ -374,6 +374,25 @@ class Verdict(unittest.TestCase):
         result = physics.verdict(CLEAN, runs)
         self.assertNotIn("mug was not carried either", result["report"])
 
+    def test_a_slip_twice_as_far_as_plains_spread_is_not_spread(self) -> None:
+        runs = _clean_runs()
+        runs["plain"] = _run(end=(0.4, 0.0, 1.1))  # 100 mm off
+        runs["built"] = _run(end=(0.4, 0.0, 1.01))  # 190 mm off the same way: 90 mm from plain's end
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+
+    def test_a_swinging_part_of_a_tied_thing_is_not_blamed_on_a_latch(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["lockbox#2"] = _thing(8.0)
+        model = {**CLEAN, "ties": ["lockbox by a fixed joint to the robot"], "tie_things": ["lockbox"]}
+        self.assertNotIn("a latch, an equality row, a motor", physics.verdict(model, runs)["report"])
+
+    def test_settle_does_not_read_a_cut_frozen_run(self) -> None:
+        model = {**CLEAN, "settle": {"crate": {"rise_mm": 0.0, "aside_mm": 0.0, "turn_deg": 0.0, "overlap_mm": 3.0}}}
+        runs = _clean_runs()
+        runs["frozen"] = _run(outcome=physics.STOPPED, moved=3.1, end=(0.4, 0.0, 0.9), turn=0.0)
+        result = physics.verdict(model, runs)
+        self.assertNotIn("stays there with the robot frozen", result["report"])
+
     def test_frozen_pass_says_the_largest_move_of_any_rigid_thing(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["key"] = _thing(1.8)

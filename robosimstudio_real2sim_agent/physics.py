@@ -1721,7 +1721,7 @@ def _misses(
         b = _entry(written, k)
         if not a or not b:
             continue
-        if excursion and a.get("moved_max_mm", 0.0) < b.get("moved_max_mm", 0.0) / 3:
+        if excursion and not _carried(run, written, k):
             words = (
                 f"{k} moved {a.get('moved_max_mm', 0.0):.0f} mm where the written run moved it {b['moved_max_mm']:.0f}"
             )
@@ -1766,6 +1766,13 @@ def _entry(run: dict, k: str) -> dict | None:
     return run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
 
 
+def _carried(run: dict, written: dict, k: str) -> bool:
+    """Whether ``run`` carried thing ``k`` at least a third as far as the written run did: a mug lifted and set back
+    near its start is carried too; one a grasp let go of, or never took, is not."""
+    a, b = _entry(run, k) or {}, _entry(written, k) or {}
+    return a.get("moved_max_mm", 0.0) >= b.get("moved_max_mm", 0.0) / 3
+
+
 def _cut(run: dict, failed: bool = True) -> str:
     """Why a replay was not read, ``""`` when it was: the page cut it (a reset, a save, Stop) or, with ``failed``, its
     own code broke (``FAILED``; ``built`` fails that instead)."""
@@ -1798,23 +1805,28 @@ def _within_spread(
     they are more. Plain changed nothing, so it and the written run are two samples of the scene, and ``seen`` is
     plain's own misses. The run's misses are spread when each is an end (not a thing lost on the way or a bystander
     knocked: a grip that let go), and for each thing and each of position, shape and turn the run missed by, plain
-    carried that same thing (at least a third as far as written) and missed it by that same measure too, and the run
-    ended no farther from plain's end than plain's end is from the written one (or within the tolerance of it): a slip
-    the other way from plain's spread is not spread, nor is one where plain's grasp failed."""
+    carried that same thing (:func:`_carried`) and missed it by that same measure too, the run missed it by no more
+    than plain did plus one tolerance, and it ended no farther from plain's end than plain's end is from the written
+    one (or within the tolerance of it): a slip the other way from plain's spread is not spread, nor is one twice as
+    far, nor one where plain's grasp failed."""
     if not misses or any(m.kind != "end" for m in misses):
         return ""
     by = {m.thing: m for m in seen if m.kind == "end"}
     for m in misses:
-        p, w = by.get(m.thing), _entry(written, m.thing)
+        p = by.get(m.thing)
         # plain is a sample of where the thing lands only if it carried it (a grasp that failed there is no spread)
-        if p is None or not w or _entry(plain, m.thing).get("moved_max_mm", 0.0) < w.get("moved_max_mm", 0.0) / 3:
+        if p is None or not _carried(plain, written, m.thing):
             return ""
         tol = {d: m.amount[d] / m.far[d] if m.far[d] else 0.0 for d in m.far}  # the tolerances the miss was read with
         apart = dict(
             zip(tol, _end_offset(_entry(run, m.thing), _entry(plain, m.thing), (axes or {}).get(m.thing)), strict=True)
         )
         for dim, v in m.far.items():
-            if v > 1.0 and (p.far[dim] <= 1.0 or apart[dim] > max(tol[dim], p.amount[dim])):
+            if v > 1.0 and (
+                p.far[dim] <= 1.0
+                or m.amount[dim] > p.amount[dim] + tol[dim]  # about as far as plain missed, not twice
+                or apart[dim] > max(tol[dim], p.amount[dim])
+            ):
                 return ""
     worst = max(misses, key=lambda m: max(m.far.values()))
     dim = max(worst.far, key=worst.far.get)  # the measure the run missed most by, as plain missed it
@@ -2065,6 +2077,12 @@ class _PlainReading(NamedTuple):
     flew: dict[str, int]
     misses: list[_Miss]
 
+    @property
+    def readable(self) -> bool:
+        """Its end can be read as a sample of the scene: it finished as written did and carried nothing without
+        contact."""
+        return self.run is not None and not self.why and not self.flew
+
 
 def _plain_reading(runs: dict, written: dict, names: list[str], axes: dict | None = None) -> _PlainReading:
     """Plain read once for the plain line and for built's spread: the run (``None`` without one), why its end cannot be
@@ -2159,7 +2177,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         )
     written = runs.get("written") or {}
     names = _moved(written)
-    _model_lines(model, written, names, line, settle_mm, runs.get("frozen"))
+    frozen_run = runs.get("frozen")
+    _model_lines(model, written, names, line, settle_mm, None if frozen_run and _cut(frozen_run) else frozen_run)
     if written:
         flew = {
             k: t.get("free_flight_not_falling", 0)
@@ -2252,6 +2271,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # held that way is read like any other here, with that hold named as what may be moving it
         always = _held_things(model, {})[0]
         in_written, unknown_hold = _held_things(model, written)
+        in_written -= always  # the holds only the written run saw: a latch, an equality row, a motor
         named_moves = {k: v for k, v in rigid.items() if k in always}  # a whole thing: a part of it may still swing
         free_moves = {k: v for k, v in rigid.items() if k not in named_moves}
         worst = max(free_moves, key=free_moves.get) if free_moves else ""
@@ -2408,14 +2428,10 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 "built cannot tell a slip from that: say which in the report",
             )
         else:
-            readable = plain.run is not None and not plain.why and not plain.flew
             failed = [  # handled things plain, which changes nothing, did not carry either: a grasp failing at any friction
                 m.thing
                 for m in misses
-                if readable
-                and m.kind in ("lost", "end")
-                and (_entry(plain.run, m.thing) or {}).get("moved_max_mm", 0.0)
-                < (_entry(written, m.thing) or {}).get("moved_max_mm", 0.0) / 3
+                if plain.readable and m.kind in ("lost", "end") and not _carried(plain.run, written, m.thing)
             ]
             if failed:
                 detail += (
