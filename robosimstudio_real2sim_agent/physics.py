@@ -129,6 +129,14 @@ the bar grasp datasets hold a valid grasp's penetration to."""
 CARRIED_MM = 20.0
 """A thing lifted this far off its start [mm] was carried: what ``drop`` releases."""
 
+NEAR_MM = 2.0
+"""Within this gap [mm] a pair the replay's own collision pass reports is touching: Newton reports every pair inside
+the contact margin, which can be centimetres."""
+
+SINK_MM = 5.0
+"""A rigid thing that, with the robot frozen, only sinks into what it rests on (no more than this [mm], straight down) is
+settling into a soft contact, a drift for the report rather than a push."""
+
 _SHAPE_PROPERTIES = tuning.ShapeWriter.flags  # newton.ModelFlags, as the tuning writers name them
 _BODY_INERTIAL = tuning.BodyWriter.flags
 _JOINT_DOF = tuning.JointWriter.flags
@@ -888,6 +896,8 @@ class Replay:
                     self._mixed_friction(probe)
         if self.side is not None and n and contacts:
             a, b, gap = self.side.read()
+            close = gap < NEAR_MM / 1000.0
+            a, b, gap = a[close], b[close], gap[close]
             for x, y in ((a, b), (b, a)):
                 ox = self.owner[x]
                 keep = ox >= 0
@@ -991,6 +1001,7 @@ class Replay:
             t = {
                 "moved_max_mm": round(float(d.max()) * 1000, 1),
                 "end_mm": round(float(d[-1]) * 1000, 1),
+                "start": [round(float(v), 4) for v in P[0, :3]],
                 "end": [round(float(v), 4) for v in P[-1, :3]],
                 "rise_max_mm": round(float((P[:, 2] - P[0, 2]).max()) * 1000, 1),
                 "turn_end_deg": round(_turn_deg(P[0, 3:], P[-1, 3:]), 1),
@@ -1017,10 +1028,11 @@ class Replay:
                 if name in self.free and t["moved_max_mm"] > FLIGHT_MM:
                     stepped = rows[1:]  # row 0 is the start, read without contacts
                     near = np.array([r["near"][i] for r in stepped]) == 0
-                    v = np.array([r["vel"][name] for r in stepped])
+                    span_all = np.maximum(np.diff(np.asarray(self.stamps, dtype=np.float64)), 1.0) * self.dt
+                    pos = np.array([r["pose"][name][:3] for r in rows])
+                    v = np.diff(pos, axis=0) / span_all[: len(pos) - 1, None]  # what the poses did, not what qd says
                     free = near[1:-1] & near[:-2] & near[2:] & (np.linalg.norm(v[1:-1], axis=1) > 0.01)
-                    span = np.maximum(np.diff(np.asarray(self.stamps[1:], dtype=np.float64)), 1.0)[1:]
-                    acc = (v[2:] - v[1:-1]) / (self.dt * span[:, None] if len(span) == len(v) - 2 else self.dt)
+                    acc = (v[2:] - v[1:-1]) / span_all[1 : len(v) - 1, None]
                     g = np.ravel(self.sim.model.gravity.numpy())[:3]
                     off = np.linalg.norm(acc - g, axis=1)
                     t["free_flight_steps"] = int(free.sum())
@@ -1030,8 +1042,18 @@ class Replay:
         carried = [k for k in self.names if out["things"][k]["rise_max_mm"] > CARRIED_MM]
         if carried:
             Z = np.array([[r["pose"][k][2] for k in carried] for r in rows])
-            out["apex_step"] = int(np.argmax((Z - Z[0]).max(axis=1)))
+            rise = (Z - Z[0]).max(axis=1)
+            # early in the carry (where it first reaches 90% of its height), not over where it is set down: a thing
+            # dropped above its own goal lands where it was going anyway
+            out["apex_step"] = int(np.argmax(rise >= 0.9 * rise.max()))
             out["carried"] = carried
+            start = out["apex_step"]
+            out["z_after"] = {k: [round(float(z), 4) for z in Z[start : start + 40, j]] for j, k in enumerate(carried)}
+        if self.mode == "drop" and self.hold_from:
+            out["z_after"] = {
+                k: [round(float(r["pose"][k][2]), 4) for r in rows[self.hold_from : self.hold_from + 40]]
+                for k in self.names
+            }
         soft = {}
         for name in {k for r in rows for k in r["soft"]}:
             S = np.array([r["soft"][name] for r in rows if name in r["soft"]])
@@ -1389,22 +1411,26 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
     if not drop:
         return
     carried = written.get("carried") or []
-    if written.get("outcome") != "finished" or not carried:
-        line(
-            None,
-            "drop",
-            "not read: "
-            + (
-                "the written replay did not finish"
-                if written.get("outcome") != "finished"
-                else "nothing was carried off its support"
-            ),
-        )
+    if written.get("outcome") != "finished":
+        line(None, "drop", "not read: the written replay did not finish")
+        return
+    if not carried:
+        line(True, "drop", "nothing was lifted off its support, so nothing to release")
         return
     if drop.get("held_rows") == 0:
         line(None, "drop", "not read: this hand has no fingers to open")
         return
-    stayed = [k for k in carried if not _ended_elsewhere(drop, written, [k])]
+
+    def fell(k: str) -> bool:
+        """Lower than the written run at the same moment after the release (a carried thing rides along; a dropped one
+        falls at g), or ending somewhere else than the written run left it."""
+        a, b = (drop.get("z_after") or {}).get(k, []), (written.get("z_after") or {}).get(k, [])
+        n = min(len(a), len(b))
+        if n > 10 and min(np.subtract(a[10:n], b[10:n])) < -0.015:
+            return True
+        return bool(_ended_elsewhere(drop, written, [k]))
+
+    stayed = [k for k in carried if not fell(k)]
     if not stayed:
         line(
             True,
@@ -1559,9 +1585,19 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # a rigid thing has nothing to settle into; a heap, a liquid or a draped cloth can still be relaxing at the
         # reset, so its drift is a note for the report, not a fault
         unread_things_ = set((runs.get("written") or {}).get("contacts_unread") or {})
-        elastic = set(model.get("elastic_parts", [])) | {
-            k for k in frozen.get("things", {}) if "#" in k and k.split("#")[0] in unread_things_
+        sunk = {
+            k
+            for k, t in frozen.get("things", {}).items()
+            if "start" in t
+            and 0.0 < t["start"][2] - t["end"][2] <= SINK_MM / 1000.0
+            and float(np.hypot(t["end"][0] - t["start"][0], t["end"][1] - t["start"][1])) < 0.001
+            and t.get("rise_max_mm", 0.0) < 0.5
         }
+        elastic = (
+            set(model.get("elastic_parts", []))
+            | sunk
+            | {k for k in frozen.get("things", {}) if "#" in k and k.split("#")[0] in unread_things_}
+        )
         rigid = {k: t["moved_max_mm"] for k, t in frozen.get("things", {}).items() if k not in elastic}
         soft = {k: t["moved_max_mm"] for k, t in frozen.get("deformables", {}).items()}
         soft |= {k: t["moved_max_mm"] for k, t in frozen.get("things", {}).items() if k in elastic}

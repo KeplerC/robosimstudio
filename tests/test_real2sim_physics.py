@@ -662,10 +662,28 @@ class StudyLines(unittest.TestCase):
         brushed = physics.verdict(model, self._drop_runs(fell=False, robot_steps=40, robot_n=0.4))
         self.assertIs(_words(brushed)["drop"], False)
 
-    def test_drop_is_not_read_when_nothing_was_carried(self) -> None:
+    def test_drop_passes_when_nothing_was_carried(self) -> None:
         runs = self._drop_runs(fell=True)
         runs["written"].pop("carried")
-        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["drop"])
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["drop"], True)
+
+    def test_drop_reads_a_fall_off_the_heights_after_the_release(self) -> None:
+        # dropped right over where the written run set it down: it ends there too, but it fell while the written
+        # run's hand still held it up
+        model = {**CLEAN, "things": {"crate": {"mass_kg": 1.0}}}
+        runs = self._drop_runs(fell=False)
+        runs["written"]["z_after"] = {"crate": [1.2] * 40}
+        runs["drop"]["z_after"] = {"crate": [1.2] * 5 + [1.0] * 35}
+        self.assertIs(_words(physics.verdict(model, runs))["drop"], True)
+
+    def test_frozen_reads_a_small_straight_sink_as_settling(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["crate"].update(
+            moved_max_mm=3.4, start=[0.4, 0.0, 0.9], end=[0.4, 0.0, 0.8966], rise_max_mm=0.0
+        )
+        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["frozen"])
+        runs["frozen"]["things"]["crate"]["end"] = [0.4034, 0.0, 0.9]  # the same 3.4 mm, aside: pushed
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)
 
     def test_plain_fails_a_routine_that_ends_or_carries_differently_unwatched(self) -> None:
         runs = _clean_runs()
