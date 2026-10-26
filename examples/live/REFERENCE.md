@@ -385,8 +385,8 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   out of something it starts inside (a finger, the table) or by something
   other than the robot; one that moves 2 to 5 mm (a key in a tight socket, a
   bottle loose in a tray) and a deformable still settling (a heap, a liquid,
-  a draped cloth) are NOTEs. When the `contact` line names an attachment,
-  anything that moves past 2 mm fails. `--settle-mm` sets the 2 mm, and the
+  a draped cloth) are NOTEs. An attached thing fails on the `contact` line
+  whatever it moves; `frozen` names it. `--settle-mm` sets the 2 mm, and the
   5 mm moves with it (2.5 times).
 - **open** holds the fingers fully open and moves the arms as written. A
   pinch fails; a task that still happens is carried by a support, a hook or
@@ -406,9 +406,10 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   outcome is not repeatable, and the report says so. When it lowered
   something, a different end is a NOTE only where `plain`, which changes
   nothing, ended the same things off by the same measure (position, shape or
-  turn) and at least half as far;
-  a thing it lost on the way, a thing it knocked over that the written run
-  left alone, or a routine that stops, still fails.
+  turn) and at least half as far. A thing it lost on the way or a thing it
+  knocked over that the written run left alone still fails, and so does a
+  routine that stops. A replay the page cut (a reset, a save, Stop) is not
+  read.
   When the written replay did not finish, there is no end to hold it to, and
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin

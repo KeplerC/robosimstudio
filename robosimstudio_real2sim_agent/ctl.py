@@ -447,7 +447,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="how far a thing may move with the robot frozen (default 2); past it is a note up to 2.5 times it, "
-        "a FAIL beyond, and a FAIL at once when the contact line names an attachment",
+        "and a FAIL beyond",
     )
     phys.add_argument("--note", default="", help="a line for the log: why this reading")
     phys.add_argument(
