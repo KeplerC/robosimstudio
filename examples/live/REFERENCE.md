@@ -386,7 +386,8 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   other than the robot; one that moves 2 to 5 mm (a key in a tight socket, a
   bottle loose in a tray) and a deformable still settling (a heap, a liquid,
   a draped cloth) are NOTEs. A thing tied to the robot or flagged kinematic
-  fails on the `contact` line whatever it moves, and `frozen` names it; one
+  fails on the `contact` line whatever it moves, and `frozen` names it when it
+  moves past 2 mm (a part on its own joint is read like any other); one
   the `contact` line names for a latch, an equality row or a motor in the
   written run is read like any other, with that hold named as what may move
   it. `--settle-mm` sets the 2 mm, and the
@@ -405,7 +406,8 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   left them (within 50 mm and 30°): a grip that only holds at a friction no
   rubber pad has fails here, even when the routine's own checks miss it.
   When `built` lowered nothing (the scene was already as built, so it only
-  played the routine again), a different end or a routine's stop is a
+  played the routine again) and no deformable is in the scene (built does not
+  cap a deformable's own friction), a different end or a routine's stop is a
   NOTE: the outcome is not repeatable, and the report says so. A replay
   that fails in its own code still fails. When it lowered
   something, a different end is a NOTE only where `plain`, which changes

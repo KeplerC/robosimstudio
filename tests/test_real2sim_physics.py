@@ -356,6 +356,24 @@ class Verdict(unittest.TestCase):
         self.assertIn("bottle moved 20 mm where the written run moved it 300", result["report"])
         self.assertIn("the grasp is that marginal", result["report"])
 
+    def test_a_part_of_a_tied_thing_that_swings_still_fails(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["box#1"] = _thing(20.0)  # the lid on its own joint
+        model = {**CLEAN, "ties": ["box by a fixed joint to the robot"], "tie_things": ["box"]}
+        result = physics.verdict(model, runs)
+        self.assertIs(_words(result)["frozen"], False)
+        self.assertIn("box#1 moved 20.0 mm with the robot frozen: a part on a joint swung", result["report"])
+
+    def test_a_marginal_grasp_names_a_handled_thing_not_a_bystander(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["mug"] = _thing(6.0, end=(0.2, 0.2, 0.8))
+        runs["plain"] = _run(moved=5.0, end=(0.4, 0.0, 0.9))
+        runs["plain"]["things"]["mug"] = _thing(1.0, end=(0.2, 0.2, 0.8))
+        runs["built"] = _run(end=(0.4, 0.0, 1.05))
+        runs["built"]["things"]["mug"] = _thing(60.0, end=(0.26, 0.2, 0.8))  # knocked
+        result = physics.verdict(CLEAN, runs)
+        self.assertNotIn("mug was not carried either", result["report"])
+
     def test_frozen_pass_says_the_largest_move_of_any_rigid_thing(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["key"] = _thing(1.8)

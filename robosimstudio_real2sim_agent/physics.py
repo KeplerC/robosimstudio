@@ -2252,7 +2252,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # held that way is read like any other here, with that hold named as what may be moving it
         always = _held_things(model, {})[0]
         in_written, unknown_hold = _held_things(model, written)
-        named_moves = {k: v for k, v in rigid.items() if k.split("#")[0] in always}
+        named_moves = {k: v for k, v in rigid.items() if k in always}  # a whole thing: a part of it may still swing
         free_moves = {k: v for k, v in rigid.items() if k not in named_moves}
         worst = max(free_moves, key=free_moves.get) if free_moves else ""
         moved = free_moves.get(worst, 0.0)
@@ -2408,11 +2408,12 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 "built cannot tell a slip from that: say which in the report",
             )
         else:
-            failed = [  # things plain, which changes nothing, did not carry either: a grasp that fails at any friction
+            readable = plain.run is not None and not plain.why and not plain.flew
+            failed = [  # handled things plain, which changes nothing, did not carry either: a grasp failing at any friction
                 m.thing
                 for m in misses
-                if plain.run is not None
-                and plain.run.get("outcome") == "finished"
+                if readable
+                and m.kind in ("lost", "end")
                 and (_entry(plain.run, m.thing) or {}).get("moved_max_mm", 0.0)
                 < (_entry(written, m.thing) or {}).get("moved_max_mm", 0.0) / 3
             ]
