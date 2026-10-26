@@ -318,10 +318,11 @@ class RendererBlender(RendererBase):
         self.executable = find_blender(blender)
         self._proc: subprocess.Popen | None = None
         self._sock: socket.socket | None = None
-        self._tmp = tempfile.mkdtemp(prefix="rss_blender_")
-        self._log = Path(self._tmp) / "blender.log"
-        self._rest = model.particle_q.numpy() if int(getattr(model, "particle_count", 0) or 0) else None
+        self._tmp = ""
         try:
+            self._tmp = tempfile.mkdtemp(prefix="rss_blender_")
+            self._log = Path(self._tmp) / "blender.log"
+            self._rest = model.particle_q.numpy() if int(getattr(model, "particle_count", 0) or 0) else None
             header, blobs, self._bodies, self._drawables = _describe(
                 model,
                 finishes=finishes,
@@ -529,6 +530,8 @@ def _describe(
     rest: np.ndarray | None,
 ) -> tuple[dict, list[Any], list[int], Any]:
     """The ``scene`` message: every visible shape, the deformables and the particles, and the bodies to pose."""
+    import hashlib
+
     from robosimstudio.core.render.deformables import deformable_drawables
     from robosimstudio.core.render.finish import finish_for, texture_path
     from robosimstudio.core.render.visual import model_visual_parts
@@ -541,7 +544,7 @@ def _describe(
     meshes: list[dict] = []
     bodies: set[int] = set()
     textures: dict[str, int] = {}
-    images: dict[int, int] = {}
+    images: dict[str, int] = {}
     for part in model_visual_parts(model):
         mesh = part.mesh
         if len(getattr(mesh, "faces", ())) == 0:
@@ -570,10 +573,14 @@ def _describe(
         if image is not None:
             entry["uv"] = len(blobs)
             blobs.append(np.ascontiguousarray(uv, dtype=np.float32))
-            if id(image) not in images:  # one blob per image, however many shapes share it (an atlas)
-                images[id(image)] = len(blobs)
-                blobs.append(_png(image))
-            entry["texture"] = images[id(image)]
+            # one blob per image, however many shapes share it (an atlas): each part's image is a fresh copy, so
+            # it is known by its pixels
+            pixels = image.convert("RGB")
+            seen = hashlib.sha1(pixels.tobytes() + repr(pixels.size).encode()).hexdigest()
+            if seen not in images:
+                images[seen] = len(blobs)
+                blobs.append(_png(pixels))
+            entry["texture"] = images[seen]
         elif finish.texture:
             try:
                 path = texture_path(finish.texture)

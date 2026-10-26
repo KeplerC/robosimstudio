@@ -23,8 +23,9 @@ principal point.
 (:func:`~robosimstudio.core.render.deformables.deformable_drawables`): a
 sheet, a bag or a soft body's surface as a mesh whose vertices are rewritten
 from ``state.particle_q`` every frame and drawn from both sides, a rope's
-centerline as a tube, a heap's grains and any particle no handle names as
-spheres. The room and the path tracer's materials are ``rtx``'s, as they are
+centerline as a tube, a heap's grains as spheres -- what the handles name and
+nothing else, as the path tracer draws a scene (a renderer built by hand with
+no handle table draws every triangle and every other particle, as ``tiled``). The room and the path tracer's materials are ``rtx``'s, as they are
 for ``tiled``.
 
 Each process holds one EGL display, opened on one GPU the first time a context

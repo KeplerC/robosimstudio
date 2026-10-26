@@ -165,7 +165,8 @@ def _build(spec: CollectSpec):
         raise ValueError(f"the scene has no camera {missing or 'at all'}; it has {[c.name for c in sim.cameras]}")
     name = spec.renderer
     if name == "auto":
-        handles = getattr(getattr(getattr(sim, "scene", None), "handles", None), "deformables", None) or {}
+        # None for no table at all, which gl then draws from the model's own triangles and particles
+        handles = getattr(getattr(getattr(sim, "scene", None), "handles", None), "deformables", None)
         name = auto_renderer(sim.model, handles)
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
@@ -181,7 +182,7 @@ AUTO_GL_GRAINS = 5000
 """The most grains ``auto`` gives ``gl``: about 25 ms a camera a frame at its ~5 us a sphere."""
 
 
-def auto_renderer(model: Any, deformables: dict[str, Any]) -> str:
+def auto_renderer(model: Any, deformables: dict[str, Any] | None) -> str:
     """``gl`` or ``tiled`` for ``renderer="auto"``, by what each would draw of the model's particles.
 
     gl draws cloth and ropes as meshes, cheaply, but each grain as a sphere set from Python, and only what the
@@ -191,12 +192,14 @@ def auto_renderer(model: Any, deformables: dict[str, Any]) -> str:
     from robosimstudio.core.render.deformables import deformable_drawables
 
     drawn = deformable_drawables(model, deformables)
+    grains = sum(len(points.particles) for points in drawn.points)
+    if deformables is None:  # no handle table: gl draws every triangle and every other active particle
+        return "tiled" if grains > AUTO_GL_GRAINS else "gl"
     names = {part.name for part in (*drawn.meshes, *drawn.points)}
     shown = np.zeros(int(getattr(model, "particle_count", 0) or 0), dtype=bool)
     for name, handle in deformables.items():
         if name in names:
             shown[np.asarray(getattr(handle, "particles", ()), dtype=np.int64).reshape(-1)] = True
-    grains = sum(len(points.particles) for points in drawn.points)
     return "tiled" if grains > AUTO_GL_GRAINS or not shown.all() else "gl"
 
 

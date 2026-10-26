@@ -142,6 +142,7 @@ class TestDrawables(unittest.TestCase):
         from robosimstudio.record.collect import AUTO_GL_GRAINS, auto_renderer
 
         self.assertEqual(auto_renderer(_model(0), {}), "gl")
+        self.assertEqual(auto_renderer(_model(3, tri_indices=[[0, 1, 2]]), None), "gl", "no table: gl draws it all")
         self.assertEqual(auto_renderer(_model(3), {"towel": _handle([0, 1, 2], [[0, 1, 2]])}), "gl")
         self.assertEqual(auto_renderer(_model(4), {"towel": _handle([0, 1, 2], [[0, 1, 2]])}), "tiled", "one unnamed")
         self.assertEqual(auto_renderer(_model(3), {"blob": _handle([0, 1, 2])}), "tiled", "a handle with no look")
