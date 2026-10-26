@@ -89,20 +89,26 @@ class Verdict(unittest.TestCase):
             "lockbox#2 moved 6.0 mm with the robot frozen: a part on a joint swung or settled", result["report"]
         )
 
-    def test_an_attached_thing_that_moves_fails_beside_a_bigger_wobble(self) -> None:
+    def test_with_an_attachment_in_the_scene_frozen_keeps_the_settle_bar(self) -> None:
         runs = _clean_runs()
-        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 4.0
         runs["frozen"]["things"]["key"] = _thing(3.0)
         model = {**CLEAN, "ties": ["key by a fixed joint to the robot"]}
         result = physics.verdict(model, runs)
         self.assertIs(_words(result)["frozen"], False)
         self.assertIn("key moved 3.0 mm with the robot frozen: the attachment", result["report"])
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 4.0  # a bigger wobble beside it fails too
+        self.assertIs(_words(physics.verdict(model, runs))["frozen"], False)
+        model = {**CLEAN, "kinematic": [], "ties": []}
+        runs["written"]["robot_equalities_on"] = [3]  # an equality row held a thing: the contact line fails
+        self.assertIs(_words(physics.verdict(model, runs))["frozen"], False)
 
     def test_an_attachment_is_named_whole_not_inside_another_name(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["key"] = _thing(3.0)
         model = {**CLEAN, "ties": ["keyring by a fixed joint to the robot"]}  # the keyring is tied, not the key
-        self.assertIsNone(_words(physics.verdict(model, runs))["frozen"])
+        result = physics.verdict(model, runs)
+        self.assertIs(_words(result)["frozen"], False)  # the strict bar: the scene has an attachment
+        self.assertNotIn("the attachment the contact line names", result["report"])
 
     def test_a_rigid_wobble_still_says_a_deformable_drifting(self) -> None:
         runs = _clean_runs()
@@ -205,6 +211,19 @@ class Verdict(unittest.TestCase):
         runs["plain"] = _run(end=(0.4, 0.0, 1.152))  # 48 mm: within the tolerance, the same end
         runs["plain"]["things"]["bottle"] = _thing(10.0, end=(0.4, 0.1, 0.8))  # the bottle elsewhere
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+
+    def test_spread_compares_like_with_like(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = _run(end=(0.4, 0.0, 0.9))  # dropped 300 mm off, turned as written
+        runs["plain"] = _run(turn=0.0)  # in place, but tipped over: a turn, not a position
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+
+    def test_a_built_replay_the_page_cut_is_not_read(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = {**_run(outcome=physics.STOPPED), "lowered": {"friction": 0, "torque": 0}}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["built"])
+        self.assertIn("not read: " + physics.STOPPED, result["report"])
 
     def test_built_says_what_it_could_check(self) -> None:
         runs = _clean_runs()
@@ -888,11 +907,9 @@ class StudyLines(unittest.TestCase):
         model = {**CLEAN, "settle": {"crate": {"rise_mm": 0.0, "aside_mm": 0.0, "turn_deg": 0.0, "overlap_mm": 3.0}}}
         self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["settle"])
         runs = _clean_runs()
-        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.1  # a wobble: a note on both lines, not a FAIL on one
-        self.assertIsNone(_words(physics.verdict(model, runs))["settle"])
-        self.assertIsNone(_words(physics.verdict(model, runs))["frozen"])
-        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 6.0  # the frozen run pushed it out
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.1  # the frozen run pushed it out: a start inside
         self.assertIs(_words(physics.verdict(model, runs))["settle"], False)
+        self.assertIsNone(_words(physics.verdict(model, runs))["frozen"])  # the move alone is a wobble
 
     def test_a_squeeze_no_real_hand_gives_fails_grip(self) -> None:
         runs = _clean_runs()
