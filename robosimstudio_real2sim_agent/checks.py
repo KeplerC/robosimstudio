@@ -493,14 +493,20 @@ class Recorder:
             entry["writer"] = writer(entry["video"], fps=self.fps)
         self.grid_video = self.run_dir / f"{self.name}.renderers.mp4"
         self.grid = writer(self.grid_video, fps=self.fps)
+        self.grid_entry: dict[str, Any] = {"writer": self.grid, "video": self.grid_video}
         self.grid_labels = [own, *names]
 
-    def _look_also(self, size: tuple[int, int]) -> dict[str, np.ndarray]:
-        """The state the take films now, through each ``--also`` renderer, over the camera's plate when it has one.
+    def _look_also(self, size: tuple[int, int], strict: bool = False) -> dict[str, np.ndarray]:
+        """The state the take films now, through each ``--also`` renderer, over the camera's plate when it has one
+        (one plate pass for them all).
 
-        A renderer that fails (a Blender that died, a contended card) is stopped and its tile goes black for the rest
-        of the take, said in :meth:`finish`; the take itself, and every other renderer, carry on."""
-        out = {}
+        A renderer that fails mid-take (a Blender that died, a contended card) is stopped and its tile goes black for
+        the rest of it, said in :meth:`finish`; the take itself, and every other renderer, carry on. ``strict`` (the
+        probe, before anything is filmed) raises instead: a renderer that cannot draw the first frame is refused."""
+        out: dict[str, np.ndarray] = {}
+        if not self.also:
+            return out
+        passed = self.sim.plate_pass(self.cam) if self.cam.background else None
         for b, entry in self.also.items():
             if "failed" in entry:
                 out[b] = np.zeros((*size, 3), np.uint8)
@@ -508,9 +514,15 @@ class Recorder:
             try:
                 frame = entry["renderer"].render(self.sim.state)[self.cam.name]
                 rgb = stills.to_uint8(np.asarray(frame["rgb"])[..., :3])
-                if self.cam.background:
-                    rgb = stills.to_uint8(self.sim.over_plate(self.cam, rgb, depth=frame.get("depth")))
+                if passed is not None:
+                    rgb = stills.to_uint8(
+                        self.sim.over_plate(self.cam, rgb, depth=frame.get("depth"), plate_pass=passed)
+                    )
             except Exception as exc:
+                if strict:
+                    raise RuntimeError(
+                        f"--also {b}: the first frame would not draw: {type(exc).__name__}: {exc}"
+                    ) from exc
                 entry["failed"] = f"{type(exc).__name__}: {exc}"[:300]
                 print(
                     f"[rss] take {self.name!r}: the {b} renderer stopped ({entry['failed']}); its tile is black from here"
@@ -532,7 +544,7 @@ class Recorder:
         rgb = stills.render_still(sim, self.cam)
         q = _particles(sim) if self.deformable_labels else None  # once a frame, for the ids and the samples both
         seg = name_deformables(sim, self.cam, np.asarray(frame["seg"]).astype(np.int32), self.deformable_labels, q)
-        return rgb, seg, q, self._look_also(rgb.shape[:2])
+        return rgb, seg, q, self._look_also(rgb.shape[:2], strict=self._probed is None and not self.frames)
 
     def probe(self) -> None:
         """Film one frame and encode it once, before anything the take would replace is touched: a camera, a
@@ -545,14 +557,26 @@ class Recorder:
         """Hand one look's pictures to their writers: the take's, each ``--also`` renderer's and the grid's; or, with
         ``encode``, only try that each encodes (the probe)."""
         rgb, extra = look[0], look[3]
-        pairs = [(self.writer, rgb)] + [(self.also[b]["writer"], f) for b, f in extra.items()]
+        (self.writer.try_encode if encode else self.writer.append)(rgb)  # the take's own: its failure is the take's
+        sides = [(self.also[b], f) for b, f in extra.items() if "writer" in self.also[b]]
         if self.grid is not None:
             labels = [self.grid_labels[0]] + [
                 f"{b} (stopped)" if "failed" in self.also[b] else b for b in self.grid_labels[1:]
             ]
-            pairs.append((self.grid, grid_frame([rgb, *extra.values()], labels)))
-        for writer, frame in pairs:
-            (writer.try_encode if encode else writer.append)(frame)
+            sides.append((self.grid_entry, grid_frame([rgb, *extra.values()], labels)))
+        for entry, frame in sides:  # an --also video or the grid that will not encode stops alone, said in finish
+            if "writer" not in entry:
+                continue
+            try:
+                (entry["writer"].try_encode if encode else entry["writer"].append)(frame)
+            except Exception as exc:
+                if encode:
+                    raise
+                entry.setdefault("failed", f"its video stopped: {type(exc).__name__}: {exc}"[:300])
+                try:
+                    entry.pop("writer").close()
+                except Exception:
+                    pass
 
     def start(self, fresh: bool = False) -> None:
         """Take the scene as it stands as the take's beginning: its step count from here, and frame 0 -- the
@@ -624,8 +648,9 @@ class Recorder:
             if self.frames and self.steps != self.last_capture:
                 self.capture()  # the state the script left, which is the "after"
         finally:
-            # the --also videos first, each on its own: one that cannot be written is said, not left looking written
-            for entry in self.also.values():
+            # the --also videos and the grid first, each on its own: one that cannot be written is said, not left
+            # looking written
+            for entry in [*self.also.values(), *([self.grid_entry] if self.grid is not None else [])]:
                 writer = entry.pop("writer", None)
                 try:
                     if writer is not None:
@@ -650,8 +675,9 @@ class Recorder:
         }
         if self.also:
             meta["also"] = {b: str(e["video"]) for b, e in self.also.items() if "failed" not in e}
-            meta["renderers"] = str(self.grid_video)
-            failed = {b: e["failed"] for b, e in self.also.items() if "failed" in e}
+            if "failed" not in self.grid_entry:
+                meta["renderers"] = str(self.grid_video)
+            failed = {b: e["failed"] for b, e in [*self.also.items(), ("grid", self.grid_entry)] if "failed" in e}
             if failed:
                 meta["also_failed"] = failed
         (self.run_dir / f"{self.name}.json").write_text(json.dumps(meta, default=_plain))
@@ -678,10 +704,13 @@ def _label_font(size: int) -> Any:
 
 
 def grid_frame(frames: list[np.ndarray], labels: list[str]) -> np.ndarray:
-    """The frames side by side, two to a row, each labelled with its renderer, at the first frame's size per tile."""
+    """The frames two to a row, each labelled with its renderer; with more than two, at half size each, so the grid
+    is about one frame's pixels and costs a take about one more frame's encoding."""
     from PIL import Image, ImageDraw
 
     h, w = frames[0].shape[:2]
+    if len(frames) > 2:
+        h, w = h // 4 * 2, w // 4 * 2  # half, kept even for the encoder
     cols = 1 if len(frames) == 1 else 2
     rows = (len(frames) + cols - 1) // cols
     sheet = Image.new("RGB", (w * cols, h * rows), (16, 20, 24))
@@ -689,7 +718,7 @@ def grid_frame(frames: list[np.ndarray], labels: list[str]) -> np.ndarray:
     for i, (frame, label) in enumerate(zip(frames, labels, strict=True)):
         tile = Image.fromarray(np.asarray(frame)[..., :3])
         if tile.size != (w, h):
-            tile = tile.resize((w, h))
+            tile = tile.resize((w, h), Image.BILINEAR)
         draw = ImageDraw.Draw(tile)
         box = draw.textbbox((10, 8), label, font=font)
         draw.rectangle((box[0] - 6, box[1] - 4, box[2] + 6, box[3] + 4), fill=(0, 0, 0))

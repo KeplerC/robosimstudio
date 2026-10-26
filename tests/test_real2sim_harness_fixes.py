@@ -1609,12 +1609,15 @@ class GridOfRenderers(unittest.TestCase):
     def test_frames_go_two_to_a_row_each_labelled(self) -> None:
         from robosimstudio_real2sim_agent import checks
 
-        frames = [np.full((40, 60, 3), v, np.uint8) for v in (200, 120, 60)]
+        frames = [np.full((200, 300, 3), v, np.uint8) for v in (200, 120, 60)]
         grid = checks.grid_frame(frames, ["rtx", "gl", "tiled"])
-        self.assertEqual(grid.shape, (80, 120, 3))
-        self.assertEqual(tuple(grid[30, 50]), (200, 200, 200), "the first tile's own pixels past its label")
-        self.assertEqual(tuple(grid[70, 100]), (16, 20, 24), "an empty fourth place")
-        self.assertLess(int(grid[10, 12].max()), 255 + 1)
+        self.assertEqual(grid.shape, (200, 300, 3), "three or more go at half size: about one frame's pixels")
+        self.assertEqual(tuple(grid[80, 140]), (200, 200, 200), "the first tile's own pixels past its label")
+        self.assertEqual(tuple(grid[180, 280]), (16, 20, 24), "an empty fourth place")
+        self.assertLess(int(grid[9, 6].max()), 60, "a dark label box at each tile's top left")
+        self.assertLess(int(grid[9, 156].max()), 60)
+        two = checks.grid_frame(frames[:2], ["rtx", "gl"])
+        self.assertEqual(two.shape, (200, 600, 3), "two side by side at full size")
 
 
 if __name__ == "__main__":

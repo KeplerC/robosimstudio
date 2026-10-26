@@ -419,7 +419,13 @@ class Sim(EnvBase):
             frame = dict(frame, rgb=self.over_plate(spec, frame["rgb"], depth=frame.get("depth")))
         return {c: np.asarray(frame[c]) for c in channels if c in frame}
 
-    def over_plate(self, spec: CameraSpec, rgb: np.ndarray, depth: np.ndarray | None = None) -> np.ndarray:
+    def over_plate(
+        self,
+        spec: CameraSpec,
+        rgb: np.ndarray,
+        depth: np.ndarray | None = None,
+        plate_pass: dict[str, Any] | None = None,
+    ) -> np.ndarray:
         """``rgb`` drawn over the camera's plate wherever something that moves is in view (core/render/plate.py).
 
         The collider tracer draws the same camera twice more: with the moving
@@ -430,25 +436,47 @@ class Sim(EnvBase):
         the moving thing's: the collider of a thin rope is wider than the rope
         drawn, and around it the render shows its own room, not the clip.
 
+        ``plate_pass`` is :meth:`plate_pass`'s, taken once for this state, for a
+        caller compositing several renderers' pictures of one frame (a take's
+        ``--also``); without it the pass is taken here.
+
         A plate that cannot be read (no file at the path, read beside the
         working directory or the asset roots) leaves the picture as rendered,
         and says so once.
         """
+        from robosimstudio.core.render import plate
+
+        passed = plate_pass if plate_pass is not None else self.plate_pass(spec)
+        if passed is None:
+            return rgb
+        seg = passed["seg"]
+        if depth is not None:
+            seg = plate.nearer(
+                seg, depth, passed["static_depth"], passed["moving_depth"], grow=max(2, spec.width // 320)
+            )
+        return plate.composite(rgb, seg, passed["backdrop"], passed["shadow"])
+
+    def plate_pass(self, spec: CameraSpec) -> dict[str, Any] | None:
+        """The collider tracer's pass over the camera's plate for the state as it stands -- the plate, the moving
+        things' segmentation and depth, the static scene's depth, the shadow ratio -- or ``None`` where the camera
+        has no plate it can use (said once, as :meth:`over_plate` says it)."""
         from dataclasses import replace
 
         from robosimstudio.core.render import plate
 
+        if not spec.background:
+            return None
         if spec.parent_body >= 0 or spec.parent_frame:
             self._plate_refused(
                 spec.background, f"camera {spec.name!r} rides on a body, and a plate is one viewpoint's"
             )
-            return rgb
+            return None
         path = self._plate_path(spec.background)
         if path is None:
-            return rgb
+            return None
         key = replace(spec, background="", channels=("rgb", "seg", "depth"))
         if key in self.__dict__.setdefault("_plates_failed", set()):
-            return rgb
+            return None
         cache = self.__dict__.setdefault("_plates", {})
         entry = cache.pop(key, None)
         if entry is None:
@@ -459,7 +487,7 @@ class Sim(EnvBase):
                 print(
                     f"[rss] the plate passes for camera {spec.name!r} failed ({type(exc).__name__}: {exc}); drawing it without its plate"
                 )
-                return rgb
+                return None
             while len(cache) >= 4:  # a twin's plate cameras, at the sizes its stills and viewport ask for
                 cache.pop(next(iter(cache)))[0].close()
         if entry[2] != self._static_poses():  # a reset re-placed a weld, or a person dragged a fixture
@@ -467,26 +495,22 @@ class Sim(EnvBase):
             entry = self._plate_passes(key)
         cache[key] = entry  # last in is the most recently used
         renderer, bare, _ = entry
-        # one plate pass per state: several renderers drawing the same frame (a take's --also) share it
-        stamp = (key, int(self.step_count), int(getattr(self, "reset_count", 0)), self.state.body_q.numpy().tobytes())
-        memo = self.__dict__.get("_plate_frame")
         try:
-            if memo is not None and memo[0] == stamp:
-                backdrop, full = memo[1], memo[2]
-            else:
-                backdrop = plate.load_plate(path, spec.width, spec.height)
-                full = renderer.render(self.state)[key.name]
-                self._plate_frame = (stamp, backdrop, full)
+            backdrop = plate.load_plate(path, spec.width, spec.height)
+            full = renderer.render(self.state)[key.name]
         except Exception as exc:  # a plate being rewritten, a contended card: this frame as rendered, said once
             self._plate_refused(
                 spec.background, f"camera {spec.name!r}'s plate pass failed ({type(exc).__name__}: {exc})"
             )
-            return rgb
+            return None
         seg = full["seg"]
-        shadow = plate.shade(full["rgb"], bare["rgb"], seg, soften=max(2.0, spec.width / 100.0), strength=0.6)
-        if depth is not None:
-            seg = plate.nearer(seg, depth, bare["depth"], full["depth"], grow=max(2, spec.width // 320))
-        return plate.composite(rgb, seg, backdrop, shadow)
+        return {
+            "backdrop": backdrop,
+            "seg": seg,
+            "shadow": plate.shade(full["rgb"], bare["rgb"], seg, soften=max(2.0, spec.width / 100.0), strength=0.6),
+            "static_depth": bare["depth"],
+            "moving_depth": full["depth"],
+        }
 
     def _plate_passes(self, key: CameraSpec):
         """The collider tracer over ``key``, and its one picture of the static scene alone (nothing static moves)."""
