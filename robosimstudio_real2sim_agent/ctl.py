@@ -443,7 +443,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="these replays after `written`, comma-separated (default: frozen,open,built,heavy,drop,plain)",
     )
     phys.add_argument(
-        "--settle-mm", type=float, default=None, help="how far a thing may move with the robot frozen (default 2)"
+        "--settle-mm",
+        type=float,
+        default=None,
+        help="how far a thing may move with the robot frozen before it is a note (default 2); 2.5 times it fails",
     )
     phys.add_argument("--note", default="", help="a line for the log: why this reading")
     phys.add_argument(

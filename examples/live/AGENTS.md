@@ -56,7 +56,9 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
    explain); with the fingers held open the task
    does not happen (or the report says what carries the thing: a support, a
    hook, two arms squeezing); with the robot as built -- every friction at
-   most 1, the real arm's torque -- the routine still finishes.
+   most 1, the real arm's torque -- the routine still finishes (REFERENCE
+   says when a difference is only a note: a scene whose end differs run to
+   run).
 3. **The motion matches.** A `routine` bound in `scene.py` (a Run button on
    the page) does what the clip shows: the same first state, the same last
    state, the same contacts in between.

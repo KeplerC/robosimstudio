@@ -93,10 +93,24 @@ class Verdict(unittest.TestCase):
         runs = _clean_runs()
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 4.0
         runs["frozen"]["things"]["key"] = _thing(3.0)
-        model = {**CLEAN, "ties": ["key: welded to the hand"]}
+        model = {**CLEAN, "ties": ["key by a fixed joint to the robot"]}
         result = physics.verdict(model, runs)
         self.assertIs(_words(result)["frozen"], False)
         self.assertIn("key moved 3.0 mm with the robot frozen: the attachment", result["report"])
+
+    def test_an_attachment_is_named_whole_not_inside_another_name(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["key"] = _thing(3.0)
+        model = {**CLEAN, "ties": ["keyring by a fixed joint to the robot"]}  # the keyring is tied, not the key
+        self.assertIsNone(_words(physics.verdict(model, runs))["frozen"])
+
+    def test_a_rigid_wobble_still_says_a_deformable_drifting(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
+        runs["frozen"]["deformables"] = {"towel": _thing(40.0)}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["frozen"])
+        self.assertIn("towel drifted 40.0 mm", result["report"])
 
     def test_a_hinged_part_that_settles_a_little_is_a_note_that_says_so(self) -> None:
         runs = _clean_runs()
@@ -183,11 +197,20 @@ class Verdict(unittest.TestCase):
         runs["built"]["things"]["crate"]["moved_max_mm"] = 0.0  # never lifted as built: a grip lost, not spread
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
 
+    def test_plain_within_the_tolerance_is_no_spread(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["bottle"] = _thing(10.0, end=(0.1, 0.1, 0.8))
+        runs["built"] = _run(end=(0.4, 0.0, 1.11))  # the crate 90 mm off
+        runs["built"]["things"]["bottle"] = _thing(10.0, end=(0.1, 0.1, 0.8))
+        runs["plain"] = _run(end=(0.4, 0.0, 1.152))  # 48 mm: within the tolerance, the same end
+        runs["plain"]["things"]["bottle"] = _thing(10.0, end=(0.4, 0.1, 0.8))  # the bottle elsewhere
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+
     def test_built_says_what_it_could_check(self) -> None:
         runs = _clean_runs()
         runs["built"] = {**_run(), "lowered": {"friction": 0, "torque": 0}}
         result = physics.verdict({k: v for k, v in CLEAN.items() if k != "real_arm_torque"}, runs)
-        self.assertIn("built changed nothing: no friction here is above 1 (no torque limits known)", result["report"])
+        self.assertIn("no rigid shape's friction here is above 1 (no torque limits known)", result["report"])
         runs["built"] = {**_run(end=(0.4, 0.0, 0.9), turn=0.0), "lowered": None}  # apply() did not finish
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
 
@@ -865,7 +888,10 @@ class StudyLines(unittest.TestCase):
         model = {**CLEAN, "settle": {"crate": {"rise_mm": 0.0, "aside_mm": 0.0, "turn_deg": 0.0, "overlap_mm": 3.0}}}
         self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["settle"])
         runs = _clean_runs()
-        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.1  # the frozen run pushed it out
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.1  # a wobble: a note on both lines, not a FAIL on one
+        self.assertIsNone(_words(physics.verdict(model, runs))["settle"])
+        self.assertIsNone(_words(physics.verdict(model, runs))["frozen"])
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 6.0  # the frozen run pushed it out
         self.assertIs(_words(physics.verdict(model, runs))["settle"], False)
 
     def test_a_squeeze_no_real_hand_gives_fails_grip(self) -> None:

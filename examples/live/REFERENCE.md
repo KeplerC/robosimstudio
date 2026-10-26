@@ -385,7 +385,9 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   out of something it starts inside (a finger, the table) or by something
   other than the robot; one that moves 2 to 5 mm (a key in a tight socket, a
   bottle loose in a tray) and a deformable still settling (a heap, a liquid,
-  a draped cloth) are NOTEs.
+  a draped cloth) are NOTEs. A thing the `contact` line names as attached
+  fails past 2 mm. `--settle-mm` sets the 2 mm, and the 5 mm moves with it
+  (2.5 times).
 - **open** holds the fingers fully open and moves the arms as written. A
   pinch fails; a task that still happens is carried by a support, a hook or
   two arms squeezing, and the report says which. What happened is read off
