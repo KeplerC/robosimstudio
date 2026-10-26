@@ -111,8 +111,8 @@ END_MM, END_DEG = 50.0, 30.0
 PUSHED_MM = 5.0
 """How far a rigid thing may move with the robot frozen and still be a wobble for the report (a key in a tight socket,
 a bottle loose in a tray) rather than a push [mm], at the default :data:`SETTLE_MM`; ``--settle-mm`` scales it with
-itself. A move under the settle bar is none at all. An attached thing is the contact line's FAIL whatever it moves; the
-frozen line only names it (a NOTE). Honest twins moved up to 3.1 mm, and a start inside something or a part driven by a motor
+itself. A move under the settle bar is none at all. A thing tied to the robot or kinematic is the contact line's FAIL
+whatever it moves; the frozen line only names it (a NOTE). Honest twins moved up to 3.1 mm, and a start inside something or a part driven by a motor
 8.6 mm and more."""
 
 # The real arms' joint torque limits [Nm], from their makers' data sheets, by a word in the robot's name or its own
@@ -1791,32 +1791,30 @@ def _end_offset(a: dict, b: dict, axis: list[float] | None = None) -> tuple[floa
     return off, shape, turn
 
 
-def _within_spread(misses: list[_Miss], run: dict, plain: dict, written: dict, axes: dict | None = None) -> str:
+def _within_spread(misses: list[_Miss], run: dict, plain: dict, seen: list[_Miss], axes: dict | None = None) -> str:
     """Plain's evidence, in a few words, that a run's ``misses`` are no more than the scene's own spread; ``""`` when
-    they are more. Plain changed nothing, so it and the written run are two samples of the scene. The misses are spread
-    when each is an end (not a thing lost on the way or a bystander knocked: a grip that let go), and for each thing and
-    each of position, shape and turn the run missed by, plain missed that same thing by that same measure too, and the
-    run ended no farther from plain's end than plain's end is from the written one (or within the tolerance of it): a
-    slip the other way from plain's spread is not spread."""
+    they are more. Plain changed nothing, so it and the written run are two samples of the scene, and ``seen`` is
+    plain's own misses. The run's misses are spread when each is an end (not a thing lost on the way or a bystander
+    knocked: a grip that let go), and for each thing and each of position, shape and turn the run missed by, plain
+    missed that same thing by that same measure too, and the run ended no farther from plain's end than plain's end is
+    from the written one (or within the tolerance of it): a slip the other way from plain's spread is not spread."""
     if not misses or any(m.kind != "end" for m in misses):
         return ""
     tol = {"position": END_MM, "shape": END_MM / 2, "turn": END_DEG}
-    spreads: dict[str, dict[str, float]] = {}
+    by = {m.thing: m for m in seen if m.kind == "end"}
     for m in misses:
-        a = _entry(run, m.thing)
-        p = _entry(plain, m.thing)
-        b = _entry(written, m.thing)
-        if not (a and p and b):
+        p = by.get(m.thing)
+        if p is None:
             return ""
-        apart = dict(zip(tol, _end_offset(a, p, (axes or {}).get(m.thing)), strict=True))  # the run from plain
-        spread = dict(zip(tol, _end_offset(p, b, (axes or {}).get(m.thing)), strict=True))  # plain from written
-        spreads[m.thing] = spread
+        apart = dict(
+            zip(tol, _end_offset(_entry(run, m.thing), _entry(plain, m.thing), (axes or {}).get(m.thing)), strict=True)
+        )
         for dim, v in m.far.items():
-            if v > 1.0 and (spread[dim] <= tol[dim] or apart[dim] > max(tol[dim], spread[dim])):
+            if v > 1.0 and (p.far[dim] <= 1.0 or apart[dim] > max(tol[dim], p.amount[dim])):
                 return ""
     worst = max(misses, key=lambda m: max(m.far.values()))
     dim = max(worst.far, key=worst.far.get)  # the measure the run missed most by, as plain missed it
-    return _miss_words(worst.thing, dim, spreads[worst.thing][dim])
+    return _miss_words(worst.thing, dim, by[worst.thing].amount[dim])
 
 
 def _model_lines(
@@ -2013,9 +2011,9 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
 
 def _held_things(model: dict, run: dict) -> tuple[set[str], bool]:
     """What held things to the robot or moved them in ``run``: a tie or a kinematic flag always, a grasp latch, an
-    equality row or a motor on a thing's joint only if it engaged there; and whether a hold there names no thing (a
-    hook, an equality row whose thing is not known). The model facts carry the names; older ones only the words, in
-    their fixed forms."""
+    equality row or a motor on a thing's joint as ``run`` recorded them (only the written replay records those; pass
+    ``{}`` for the first two alone); and whether a hold there names no thing (a hook, an equality row whose thing is
+    not known). The model facts carry the names; older ones only the words, in their fixed forms."""
     labels = model.get("robot_equalities", {})
     held = set(model.get("tie_things", [f.split(" by a ", 1)[0] for f in model.get("ties", [])]))
     held |= set(model.get("kinematic", [])) | set(run.get("latched", []))
@@ -2245,12 +2243,12 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         soft = {k: t["moved_max_mm"] for k, t in frozen.get("deformables", {}).items()}
         soft |= {k: t["moved_max_mm"] for k, t in frozen.get("things", {}).items() if k in elastic}
         drift = {k: v for k, v in soft.items() if v > settle_mm}
-        # what held things during the frozen replay itself: a tie or a kinematic flag always, a latch, an equality row
-        # or a motor only if it engaged there; such a thing fails on the contact line, and frozen only names it
-        # ... and that the contact line names too (it reads the written run): only then does its FAIL cover the move
-        holding, unknown_hold = _held_things(model, frozen)
-        holding &= _held_things(model, written)[0]
-        named_moves = {k: v for k, v in rigid.items() if k.split("#")[0] in holding}
+        # a tie or a kinematic flag holds a thing in every replay: the contact line fails it, and frozen only names it.
+        # A latch, an equality row or a motor is seen only in the written run (what the contact line reads), so a thing
+        # held that way is read like any other here, with that hold named as what may be moving it
+        always = _held_things(model, {})[0]
+        in_written, unknown_hold = _held_things(model, written)
+        named_moves = {k: v for k, v in rigid.items() if k.split("#")[0] in always}
         free_moves = {k: v for k, v in rigid.items() if k not in named_moves}
         worst = max(free_moves, key=free_moves.get) if free_moves else ""
         moved = free_moves.get(worst, 0.0)
@@ -2277,7 +2275,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 cause = "it starts inside something, or something other than the robot pushes it"
             else:
                 cause = "a few millimetres, but a thing at rest stays put: say in the report what moves it"
-            if unknown_hold:  # a hook, or an equality row whose thing is not known: it may be what moves it
+            if worst.split("#")[0] in in_written:  # a latch, an equality row or a motor on it in the written run
+                cause += (
+                    "; the contact line names a hold on it (a latch, an equality row, a motor): say if that moves it"
+                )
+            elif unknown_hold:  # a hook, or an equality row whose thing is not known: it may be what moves it
                 cause += (
                     "; a hold the contact line names (an equality row, a hook) names no thing: say if it holds this"
                 )
@@ -2295,7 +2297,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 f"with the robot frozen no rigid thing moved, but {k} drifted {drift[k]:.1f} mm: still settling",
             )
         else:
-            line(True, "frozen", f"with the robot frozen nothing moved more than {max([moved, *soft.values()]):.1f} mm")
+            line(
+                True,
+                "frozen",
+                f"with the robot frozen nothing moved more than {max([0.0, *rigid.values(), *soft.values()]):.1f} mm",
+            )
     opened = runs.get("open")
     if opened and opened.get("held_rows") == 0:
         line(None, "open", "not read: this hand has no fingers to hold open")
@@ -2376,14 +2382,14 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             miss = (lost or misses)[0].words if misses else f"it stopped ({built['outcome']})"
             why = (
                 "the grasp is that marginal, or the outcome differs from run to run: say which in the report"
-                if any(m.kind == "lost" for m in misses)
+                if lost
                 else "the outcome differs from run to run, so say so in the report"
             )
             line(None, "built", f"{same}, so it only played the same model again, and {miss}: {why}")
     elif built:
         ok, detail, misses = held(built, robot)
         seen = (
-            _within_spread(misses, built, plain.run, written, axes)
+            _within_spread(misses, built, plain.run, plain.misses, axes)
             if ok is False and plain.run is not None and not plain.why and not plain.flew
             else ""
         )

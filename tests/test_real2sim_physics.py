@@ -261,15 +261,15 @@ class Verdict(unittest.TestCase):
     def test_a_hold_that_names_no_thing_is_pointed_at(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
-        runs["written"]["robot_equalities_on"] = runs["frozen"]["robot_equalities_on"] = [7]  # on in frozen too
+        runs["written"]["robot_equalities_on"] = [7]  # only the written run records an equality row
         result = physics.verdict(CLEAN, runs)
         self.assertIn("(an equality row, a hook) names no thing: say if it holds this", result["report"])
         self.assertIn("crate moved 3.0 mm with the robot frozen: a few millimetres", result["report"])
-        runs["written"]["robot_equalities_on"] = runs["frozen"]["robot_equalities_on"] = [3]
+        runs["written"]["robot_equalities_on"] = [3]
         model = {**CLEAN, "robot_equalities": {"3": "a weld"}, "robot_equality_things": {"3": "crate"}}
-        self.assertIn("crate moved 3.0 mm, held by the attachment", physics.verdict(model, runs)["report"])
-        runs["frozen"]["robot_equalities_on"] = []  # the row held the crate in the written run, not in frozen
-        self.assertIn("crate moved 3.0 mm with the robot frozen: a few", physics.verdict(model, runs)["report"])
+        result = physics.verdict(model, runs)
+        self.assertIn("crate moved 3.0 mm with the robot frozen: a few millimetres", result["report"])
+        self.assertIn("the contact line names a hold on it (a latch, an equality row, a motor)", result["report"])
 
     def test_a_grip_lost_on_the_same_model_says_it_is_marginal(self) -> None:
         runs = _clean_runs()
@@ -291,7 +291,7 @@ class Verdict(unittest.TestCase):
     def test_a_thing_named_like_the_fixed_words_is_not_held(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["1"] = _thing(3.0)
-        runs["written"]["hooks_added"] = runs["frozen"]["hooks_added"] = 1  # "1 substep hook(s) ...": names no thing
+        runs["written"]["hooks_added"] = 1  # "1 substep hook(s) ...": names no thing
         result = physics.verdict(CLEAN, runs)
         self.assertNotIn("held by the attachment", result["report"])
         self.assertIn("names no thing: say if it holds this", result["report"])
@@ -312,15 +312,16 @@ class Verdict(unittest.TestCase):
             self.assertIsNone(_words(result)["open"])
             self.assertIn("not read: " + outcome[:20], result["report"])
 
-    def test_a_hold_only_the_frozen_run_had_does_not_excuse_a_push(self) -> None:
+    def test_a_latched_thing_pushed_in_frozen_still_fails_and_names_the_latch(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 40.0
-        runs["frozen"]["latched"] = ["crate"]  # latched in frozen, never in the written run: the contact line is clean
         result = physics.verdict(CLEAN, runs)
-        self.assertIs(_words(result)["contact"], True)
         self.assertIs(_words(result)["frozen"], False)
-        runs["written"]["latched"] = ["crate"]  # latched in both: the contact line fails it, frozen names it
-        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["frozen"])
+        runs["written"]["latched"] = ["crate"]  # the contact line fails the latch; frozen says it may be what moved it
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["contact"], False)
+        self.assertIs(_words(result)["frozen"], False)
+        self.assertIn("names a hold on it (a latch, an equality row, a motor): say if that moves it", result["report"])
 
     def test_a_frozen_replay_cut_or_broken_is_not_read(self) -> None:
         runs = _clean_runs()
@@ -338,6 +339,12 @@ class Verdict(unittest.TestCase):
         result = physics.verdict(CLEAN, runs)
         self.assertIn("bottle moved 20 mm where the written run moved it 300", result["report"])
         self.assertIn("the grasp is that marginal", result["report"])
+
+    def test_frozen_pass_says_the_largest_move_of_any_rigid_thing(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["key"] = _thing(1.8)
+        model = {**CLEAN, "ties": ["key by a fixed joint to the robot"], "tie_things": ["key"]}
+        self.assertIn("nothing moved more than 1.8 mm", physics.verdict(model, runs)["report"])
 
     def test_a_built_replay_the_page_cut_is_not_read(self) -> None:
         runs = _clean_runs()
