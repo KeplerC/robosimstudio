@@ -253,7 +253,8 @@ class Verdict(unittest.TestCase):
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
         runs["written"]["robot_equalities_on"] = [7]
         result = physics.verdict(CLEAN, runs)
-        self.assertIn("a hold (an equality row, a hook) that may be holding it", result["report"])
+        self.assertIn("a hold (an equality row, a hook) that names no thing: say if it holds this", result["report"])
+        self.assertIn("crate moved 3.0 mm with the robot frozen: a few millimetres", result["report"])
         runs["written"]["robot_equalities_on"] = [3]
         model = {**CLEAN, "robot_equalities": {"3": "crate_weld"}}  # the row's label names the crate
         self.assertIn(
@@ -1098,16 +1099,17 @@ class StudyLines(unittest.TestCase):
         arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
         # a free box first (joint 0, DOFs 0-5), then a three-joint arm on DOFs 6-8 and a finger on DOF 9
         mj = types.SimpleNamespace(
-            actuator_trntype=arr([0, 0, 1, 0]),
+            actuator_trntype=arr([0, 0, 0, 0]),
             actuator_trnid=arr([[6, 0], [7, 0], [8, 0], [9, 0]]),  # Newton stores the DOF, not the joint
             actuator_forcerange=arr([[-28, 28], [-28, 28], [-10, 10], [-100, 100]]),
             actuator_has_forcerange=arr([1, 1, 1, 1]),
-            actuator_gear=arr([[1.0], [1.0], [2.0], [1.0]]),
+            actuator_forcelimited=arr([2, 0, 1, 2]),  # auto, off, on, auto
+            actuator_gear=arr([[1.0], [1.0], [2.0], [1.0]]),  # rebuilt with unit gear: not read
         )
-        m = types.SimpleNamespace(joint_effort_limit=arr([1e6] * 10), mujoco=mj)
-        np.testing.assert_allclose(physics._enforced_effort(m, np.array([6, 7, 8])), [28.0, 28.0, 20.0])
-        no_mj = types.SimpleNamespace(joint_effort_limit=arr([1e6] * 10))
-        np.testing.assert_allclose(physics._enforced_effort(no_mj, np.array([6])), [1e6])
+        m = types.SimpleNamespace(mujoco=mj)
+        got = physics._enforced_effort(m, np.array([6, 7, 8]), np.array([1e6, 1e6, 1e6]))
+        np.testing.assert_allclose(got, [28.0, 1e6, 10.0])  # DOF 7's force limit is off: the solver holds nothing
+        np.testing.assert_allclose(physics._enforced_effort(types.SimpleNamespace(), np.array([6]), [50.0]), [50.0])
 
     def test_an_equality_label_names_the_longest_thing_it_holds_whole(self) -> None:
         things = {"key", "key_2", "white_bottle"}

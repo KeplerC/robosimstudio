@@ -1415,7 +1415,7 @@ class AsBuilt:
             real = np.asarray(caps, dtype=effort.dtype)
             # a joint the solver already holds within TORQUE_SLACK of the real arm's is left alone, so "lowered nothing"
             # is an unchanged replay (an actuator's force range can hold a joint below Newton's own limit)
-            cut = real < _enforced_effort(m, rows) * (1.0 - TORQUE_SLACK)
+            cut = _enforced_effort(m, rows, before) > real * (1.0 + TORQUE_SLACK)
             lowered["torque"] = int(np.count_nonzero(cut))
             if cut.any():
                 self._change("joint_effort_limit", rows[cut], np.minimum(before[cut], real[cut]))
@@ -1448,24 +1448,27 @@ class AsBuilt:
             tuning.notify(self.sim.pipeline, flags)
 
 
-def _enforced_effort(m: Any, dofs: np.ndarray) -> np.ndarray:
-    """Each DOF's torque limit as the solver enforces it: Newton's effort limit, or the force range (times the gear)
-    of a MuJoCo actuator on that joint where that is lower. Newton's own limit is often its 1e6 default, and the robot
-    file's actuator is what holds the arm."""
-    effort = m.joint_effort_limit.numpy()[dofs].astype(np.float64)
+def _enforced_effort(m: Any, dofs: np.ndarray, effort: np.ndarray) -> np.ndarray:
+    """Each DOF's torque limit as the solver enforces it: ``effort`` (Newton's limit on those DOFs, often its 1e6
+    default), or the force range of a force-limited MuJoCo joint actuator on that DOF where that is lower. Newton
+    rebuilds a joint-target actuator with unit gear and keeps its force range, so the gear is not read."""
+    effort = np.asarray(effort, dtype=np.float64).copy()
     mj = getattr(m, "mujoco", None)
     try:
         kind, trn = mj.actuator_trntype.numpy(), mj.actuator_trnid.numpy()
-        span, has, gear = mj.actuator_forcerange.numpy(), mj.actuator_has_forcerange.numpy(), mj.actuator_gear.numpy()
+        span, has = mj.actuator_forcerange.numpy(), mj.actuator_has_forcerange.numpy()
     except AttributeError:
         return effort
+    limited = getattr(mj, "actuator_forcelimited", None)
+    limited = limited.numpy() if limited is not None else np.full(len(kind), 2)
     where = {int(d): i for i, d in enumerate(dofs)}
     for a in range(len(kind)):
-        if int(kind[a]) not in (0, 1) or not int(has[a]):  # a joint (or joint-in-parent) actuator with a force range
+        on = int(limited[a]) == 1 or (int(limited[a]) == 2 and int(has[a]))  # MuJoCo's false, true, auto
+        if int(kind[a]) != 0 or not on:  # a joint actuator whose force limit the solver applies
             continue
         i = where.get(int(trn[a, 0]))  # Newton stores a joint actuator's DOF there, not its joint
         if i is not None:
-            effort[i] = min(effort[i], float(np.max(np.abs(span[a]))) * abs(float(gear[a, 0])))
+            effort[i] = min(effort[i], float(np.max(np.abs(span[a]))))
     return effort
 
 
@@ -1727,7 +1730,7 @@ def _misses(
     """Each way ``run`` did not end where the written run left things, as :class:`_Miss`:
     ``knocked``, a thing the written run left alone moved more than ``mm``; ``lost``, a handled thing carried less than
     a third as far as written (a mug lifted and set back near its start ends there too); ``end``, a handled thing ended
-    more than ``mm`` off, its shape ``mm / 2`` unlike, or turned more than ``deg``. ``how far`` is, for ``end``, each of
+    more than ``mm`` off, its shape ``mm / 2`` unlike, or turned more than ``deg``. ``far`` is, for ``end``, each of
     ``position``, ``shape`` and ``turn`` in tolerances, and empty for the others. One entry a thing."""
     out = []
     for k in {**written.get("things", {}), **written.get("deformables", {})} if bystanders else ():
@@ -2232,7 +2235,12 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         pushed = PUSHED_MM * settle_mm / SETTLE_MM
         base = worst.split("#")[0]
         known = {k.split("#")[0] for k in (*model.get("things", {}), *frozen.get("things", {}))}
-        rows = [_label_thing(f[f.find("(") + 1 : f.find(")")], known) for f in found if f.startswith("equality row")]
+        labels = model.get("robot_equalities", {})
+        rows = [
+            _label_thing(labels.get(str(k), ""), known)
+            for k in (runs.get("written") or {}).get("robot_equalities_on", [])
+            if "suction" not in labels.get(str(k), "")
+        ]
         # an entry names its thing first ("crate by a ...", "lid's ..."); an equality row, by its label
         named = bool(worst) and (any(f.startswith((f"{base} ", f"{base}'s ")) for f in found) or base in rows)
         unnamed = "" in rows or any("substep hook" in f for f in found)
@@ -2240,8 +2248,6 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             pushed_far = moved > pushed
             if named:
                 cause = "the attachment the contact line names"
-            elif unnamed:  # an equality row whose label names no thing, or a hook
-                cause = "the contact line names a hold (an equality row, a hook) that may be holding it: say if it is"
             elif "#" in worst:  # a lid, a rotor, a door: a part on a joint that swings or settles under its weight
                 cause = (
                     "a part on a joint swung or settled, so the mechanism is not at rest at the start"
@@ -2253,6 +2259,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 cause = "it starts inside something, or something other than the robot pushes it"
             else:
                 cause = "a few millimetres, but a thing at rest stays put: say in the report what moves it"
+            if unnamed and not named:  # an equality row whose label names no thing, or a hook: it may be the cause
+                cause += "; the contact line names a hold (an equality row, a hook) that names no thing: say if it holds this"
             if drift:  # a deformable still settling is said too
                 k = max(drift, key=drift.get)
                 cause += f"; and {k} drifted {drift[k]:.1f} mm: still settling"
