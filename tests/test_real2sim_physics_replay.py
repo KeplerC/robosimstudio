@@ -78,6 +78,8 @@ class Replays(unittest.TestCase):
         }
 
     def test_each_replay_holds_what_it_says(self) -> None:
+        from robosimstudio_real2sim_agent import physics
+
         store: dict = {}
         mu0 = float(self.sim.model.shape_material_mu.numpy().max())
         mass0 = float(self.sim.model.body_mass.numpy()[self.sim["cube"].handle.body])
@@ -104,6 +106,26 @@ class Replays(unittest.TestCase):
         self._play("heavy", store)
         self.assertAlmostEqual(_routine.seen[0][1], 2.0 * mass0, places=5)
         self.assertAlmostEqual(float(self.sim.model.body_mass.numpy()[self.sim["cube"].handle.body]), mass0, places=5)
+
+        dropped = self._play(
+            "drop", store
+        )  # nothing was carried, so nothing is released: the fingers stay the routine's
+        self.assertNotIn("apex_step", store["written"])
+        self.assertLess(dropped["jaw"], opened["jaw"])
+
+        before = {k: len(v) for k, v in self.sim.hook_lists().items()}
+        gen = physics.replay(self.sim, _routine(self.sim), "plain", store, steps=STEPS, steps_itself=True)
+        for _ in gen:  # nothing hooked in while it plays
+            self.assertEqual({k: len(v) for k, v in self.sim.hook_lists().items()}, before)
+        self.assertEqual(store["plain"]["outcome"], "finished")
+        self.assertIn("cube", store["plain"]["things"])
+        self.sim.reset()  # the facts are read at the reset the replays start from, as the server reads them
+        facts = physics.model_facts(self.sim)
+        self.assertAlmostEqual(facts["gravity"], 9.81, places=2)
+        # put 10 mm above the bench and put back there by the reset: nothing inside anything, nothing pushed
+        self.assertLess(facts["settle"]["cube"]["overlap_mm"], physics.OVERLAP_MM)
+        self.assertLess(facts["settle"]["cube"]["rise_mm"], physics.SETTLE_MM)
+        self.assertIs(next(c for c in physics.verdict(facts, store)["checks"] if c["name"] == "settle")["ok"], True)
 
     def test_a_replay_the_page_stops_is_stored_stopped_and_the_model_put_back(self) -> None:
         from robosimstudio_real2sim_agent import physics

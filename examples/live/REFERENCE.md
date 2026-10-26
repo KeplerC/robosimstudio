@@ -341,7 +341,7 @@ or `--object`) is a SKIP. The bars are defaults, and `check` blocks nothing.
 
 ### The physics replays
 
-`physics` plays the routine again as written and four ways changed, each from
+`physics` plays the routine again as written and six ways changed, each from
 a reset scene and each as long as the written one, and prints a line per
 finding, PASS and FAIL as `check` says them and NOTE for what the report has
 to explain:
@@ -378,6 +378,26 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
+- **drop** plays it as written and opens the fingers at the top of the
+  written run's carry (the step where a thing it lifted was highest). What
+  the fingers carried falls; a thing that still ends where the written run
+  left it fails, unless the robot's other parts still bear its weight (two
+  hands squeezing, a hook), which is a NOTE. It catches a weld or a pose
+  written every step even while the fingers touch the thing.
+- **plain** plays it with nothing hooked in -- no cap, no hold, nothing on
+  any hook list -- and reads only at the routine's own yields. It fails when
+  the things end somewhere else than the replay left them, or fly with
+  nothing touching them: a routine that does something else when it is
+  replayed.
+- **model** reads the scene's own numbers: gravity off the Earth's by more
+  than 2% fails; a handled thing lighter than expanded polystyrene or heavier
+  than lead (its mass over its colliders' volume), and a collider nothing
+  draws touching a handled thing (an invisible shelf or lip), are NOTEs to
+  explain.
+- **settle** reads how the scene's own settle, before the first step, moved
+  each thing from where it was put: pushed up more than 2 mm, or aside, it was
+  put inside something (the table, a finger) and fails; fallen into place is
+  fine.
 - **contact** reads the model and the written replay. A joint between a thing
   and the robot (either way round), an equality row between them that is on at
   any step of the routine (a suction cup's seal is a NOTE instead), a thing flagged
@@ -389,20 +409,25 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   is the thing's own elasticity (a rod's bending), a hinge or a slide to the
   world or to furniture is a mechanism, and damping alone is not a motor: all
   pass.
-- **flight**, a NOTE when it shows, is a single free body with nothing within
-  the contact margin that does not fall at g: something holds it that is not
-  a contact. It is not read in a scene with a deformable, whose contacts are
-  not in MuJoCo's list.
+- **flight** is a single free body with nothing within the contact margin
+  that does not fall at g: something holds it that is not a contact. Ten
+  steps or more fail; fewer are a NOTE (a contact that comes and goes between
+  reads). It is not read in a scene with a deformable, whose contacts are not
+  in MuJoCo's list.
 - **grip** is the median force each hand's fingers put on what they moved,
   and the friction MuJoCo mixed at those contacts (the larger of the two
   surfaces'): a hand whose own pads carry 2 or 4 grips with that, not with the
   number written for the thing.
-  A thing another solver steps is named instead (`not read for box (stepped
-  by SolverVBD)`), and its free flight is not judged: the default arrangement
-  gives free rigid things a VBD island coupled to the robot, whose finger
-  contacts never reach MuJoCo's list. Put the handled things in the robot's
-  MuJoCo island (`backends=(("*", rss.backend("mujoco", ...)),)`) to have
-  their grip read.
+  The default arrangement gives free rigid things a VBD island coupled to the
+  robot, whose contacts never reach MuJoCo's list: for those things the
+  replay runs a collision pass of its own after every step, so their flight
+  is judged and the fingers touching them is seen (`box (stepped by
+  SolverVBD): touched by hand 2, its force not read`). Put the handled things
+  in the robot's MuJoCo island (`backends=(("*", rss.backend("mujoco",
+  ...)),)`) to have their grip force read. A jointed part of such a thing
+  that sags on that solver's joints at the reset is a NOTE in `frozen`, as is
+  a part whose stiff joint is its elasticity (a stem bending under its own
+  weight).
 
 Every replay starts at the reset with the page held (it is put back as it
 was when `physics` ends): a routine that only works once the page has run a

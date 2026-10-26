@@ -1695,6 +1695,7 @@ class LiveServer:
             steps_itself=not wants_session,
             drive_rows=self.physics_model.get("drive_rows"),
             robot_equalities=self.physics_model.get("robot_equalities"),
+            drop_at=int(self.physics.get("written", {}).get("apex_step") or 0) if mode == "drop" else 0,
         )
         serial = self.start_script(gen, name=f"physics {mode}", drives_page=wants_session)
         return {"ok": True, "playing": f"physics {mode}", "serial": serial}
