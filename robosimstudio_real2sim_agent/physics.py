@@ -195,10 +195,13 @@ def _match_arm(words: str) -> tuple[float, ...] | None:
     return None
 
 
-def real_hand(sim: Any, arm: Any) -> str | None:
+def real_hand(sim: Any, arm: Any, name: str = "") -> str | None:
     """Which real hand an arm's fingers are, by the names its model uses, or ``None``: a Robotiq 2F-85 by its
-    driver/coupler/follower linkage or its name, a Franka hand, a YAM's linear gripper."""
-    labels = " ".join(_robot_joint_labels(sim)).lower() + " " + robot_name(sim).lower()
+    driver/coupler/follower linkage or its name, a Franka hand, a YAM's linear gripper. The arm's own joints (those
+    naming it) decide when there are any, so a pair with two different hands reads each."""
+    every = [str(x).lower() for x in _robot_joint_labels(sim)]
+    own = [x for x in every if name and re.search(rf"(?<![a-z0-9]){re.escape(name.lower())}(?![a-z0-9])", x)]
+    labels = " ".join(own or every) + " " + robot_name(sim).lower()
     hand = str(getattr(getattr(arm, "gripper_spec", None), "name", "") or getattr(arm, "gripper", "") or "").lower()
     words = hand + " " + labels
     if re.search(r"2f.?85|robotiq|driver_joint.*follower|follower.*driver_joint", words):
@@ -419,21 +422,20 @@ class _SideContacts:
     MuJoCo's list never holds. Read-only, after a step, on the state it left; nothing is solved from it. One per model,
     reused by every replay of it (:meth:`of`)."""
 
-    _cache: ClassVar[dict[int, tuple[Any, _SideContacts]]] = {}
-
     @classmethod
     def of(cls, sim: Any) -> _SideContacts:
-        """This model's pass, built once."""
-        key = id(sim.model)
-        hit = cls._cache.get(key)
-        if hit is None or hit[0] is not sim.model:
-            cls._cache.clear()  # one live model at a time on a page; a rebuilt one replaces it
-            hit = cls._cache[key] = (sim.model, cls(sim))
-        hit[1].sim = sim
-        return hit[1]
+        """This sim's pass, built once and kept on the sim itself (a rebuilt scene's sim gets its own)."""
+        side = getattr(sim, "_physics_side_contacts", None)
+        if side is None or side.model is not sim.model:
+            side = cls(sim)
+            try:
+                sim._physics_side_contacts = side
+            except AttributeError:  # a sim that takes no new attribute: built per call
+                pass
+        return side
 
     def __init__(self, sim: Any) -> None:
-        self.sim = sim
+        self.sim, self.model = sim, sim.model
         cap = int(getattr(sim.model, "rigid_contact_max", 0) or 0)
         self.pipe = newton.CollisionPipeline(sim.model, rigid_contact_max=max(cap, 16384), soft_contact_max=0)
         self.overflowed = False
@@ -446,8 +448,8 @@ class _SideContacts:
         c = self.contacts
         count = int(c.rigid_contact_count.numpy()[0])
         n = min(count, len(c.rigid_contact_shape0))
-        self.overflowed = self.overflowed or count > n  # pairs past the buffer are lost: what it says is incomplete
-        a, b = c.rigid_contact_shape0.numpy()[:n], c.rigid_contact_shape1.numpy()[:n]
+        self.overflowed = count > n  # this read lost the pairs past the buffer: what it says is incomplete
+        a, b = c.rigid_contact_shape0[:n].numpy(), c.rigid_contact_shape1[:n].numpy()
         if not n:
             return a, b, np.zeros(0)
         bq = self.sim.state.body_q.numpy() if bq is None else bq
@@ -462,13 +464,13 @@ class _SideContacts:
                 )[:, :3]
             return out
 
-        p0 = world(a, c.rigid_contact_point0.numpy()[:n])
-        p1 = world(b, c.rigid_contact_point1.numpy()[:n])
-        normal = c.rigid_contact_normal.numpy()[:n]
+        p0 = world(a, c.rigid_contact_point0[:n].numpy())
+        p1 = world(b, c.rigid_contact_point1[:n].numpy())
+        normal = c.rigid_contact_normal[:n].numpy()
         gap = (
             np.einsum("ij,ij->i", p1 - p0, normal)
-            - c.rigid_contact_margin0.numpy()[:n]
-            - c.rigid_contact_margin1.numpy()[:n]
+            - c.rigid_contact_margin0[:n].numpy()
+            - c.rigid_contact_margin1[:n].numpy()
         )
         return a, b, gap
 
@@ -509,7 +511,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
             for name, t in th.items()
         },
         "finger_mu": {a: sorted({round(float(v), 3) for v in mu[s]}) for a, s in fing.items()},
-        "hands": [real_hand(sim, arm) for arm in sim.scene.handles.arms.values()],
+        "hands": [real_hand(sim, arm, name) for name, arm in sim.scene.handles.arms.items()],
     }
     kinds = _joint_kinds()
     free, fixed_kind = kinds.get("free", -1), kinds.get("fixed", -2)
@@ -758,6 +760,7 @@ class Replay:
             and len(self.th[name]["bodies"]) == 1
             and self.th[name]["bodies"][0] in free_bodies
         }
+        self.side_overflowed = False
         self.hidden = _hidden_colliders(sim)
         self.hidden_mask = np.zeros(n, dtype=bool)
         self.hidden_mask[list(self.hidden)] = True
@@ -988,6 +991,7 @@ class Replay:
                     self._mixed_friction(probe)
         if self.side is not None and n and contacts:
             a, b, gap = self.side.read(bq)
+            self.side_overflowed = self.side_overflowed or self.side.overflowed
             close = gap < NEAR_MM / 1000.0
             a, b, gap = a[close], b[close], gap[close]
             for x, y in ((a, b), (b, a)):
@@ -995,7 +999,9 @@ class Replay:
                 keep = ox >= 0
                 ys, ox, g = y[keep], ox[keep], gap[keep]
                 other = self.owner[ys] != ox
-                np.add.at(near, ox[other & ~self.unread_mask[ox]], 1)  # a MuJoCo thing touching another island's
+                partner = self.owner[ys]
+                across = other & ~self.unread_mask[ox] & (partner >= 0) & self.unread_mask[np.maximum(partner, 0)]
+                np.add.at(near, ox[across], 1)  # a MuJoCo thing touching a thing another island steps
                 real = self.unread_mask[ox] & other
                 np.add.at(near, ox[real], 1)
                 on_finger = real & (self.finger_of[ys] >= 0)
@@ -1118,13 +1124,14 @@ class Replay:
                 if i in self.hidden_touch:
                     t["hidden_touch"] = sorted(self.hidden_touch[i])
                 if self.mode == "drop" and self.hold_from:
-                    after = rows[self.hold_from + 1 : self.hold_from + 1 + RELEASE_WINDOW]  # the moments after it
+                    skip = max(10, int(0.5 / self.dt))  # the fingers' own time to open is not the robot bearing it
+                    after = rows[self.hold_from + skip : self.hold_from + skip + RELEASE_WINDOW]
                     t["robot_after_release_steps"] = int(sum(1 for r in after if r["robot_touch"][i]))
                     t["robot_after_release_N"] = (
                         round(float(np.median([r["robot"][i] for r in after])), 2) if after else 0.0
                     )
                 read_by_pass = name in self.unread and self.side is not None
-                if read_by_pass and self.side.overflowed:
+                if read_by_pass and self.side_overflowed:
                     t["flight_unread"] = "the replay's collision pass overflowed its buffer"
                 elif name in self.free and t["moved_max_mm"] > FLIGHT_MM:
                     stepped = rows[1:]  # row 0 is the start, read without contacts
@@ -1153,7 +1160,8 @@ class Replay:
             Z = np.array([[r["pose"][k][2] for k in carried] for r in rows])
             good = np.isfinite(Z).all(axis=1)
             Z = Z[: int(np.argmin(good))] if not good.all() else Z  # up to the first row that is not a number
-            rise = (Z - Z[0]).max(axis=1)
+            Z = Z.reshape(-1, len(carried))
+            rise = (Z - Z[0]).max(axis=1) if len(Z) else np.zeros(0)
             # early in the carry (where it first reaches 90% of its height), not over where it is set down: a thing
             # dropped above its own goal lands where it was going anyway
             out["apex_step"] = int(np.argmax(rise >= 0.9 * rise.max())) if len(rise) else 0
@@ -1488,8 +1496,8 @@ def _model_lines(model: dict, written: dict, names: list[str], line: Any, settle
     if g is not None and abs(g - GRAVITY) > 0.02 * GRAVITY:
         bad.append(f"gravity is {g:g} m/s², not {GRAVITY:g}")
     lo, hi = DENSITY
-    for k in names:
-        t = model.get("things", {}).get(k.split("#")[0], {})
+    for k in dict.fromkeys(n.split("#")[0] for n in names):
+        t = model.get("things", {}).get(k, {})
         rho = t.get("density")
         if rho is not None and not lo <= rho <= hi:
             notes.append(
@@ -1716,6 +1724,20 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 f"{k}'s pose stopped being a number at step {at}: the solver blew up (a pose or a speed written into "
                 "a solver that integrates it, or a contact it cannot hold)",
             )
+        else:
+            blew = {
+                mode: min(run["nonfinite"].items(), key=lambda kv: kv[1])
+                for mode, run in runs.items()
+                if mode != "written" and run.get("nonfinite")
+            }
+            if blew:
+                line(
+                    None,
+                    "finite",
+                    "the solver blew up in "
+                    + "; ".join(f"{mode} ({k} at step {at})" for mode, (k, at) in blew.items())
+                    + ": that replay's reading stops there",
+                )
         line(
             written["outcome"] == "finished",
             "written",
@@ -1723,6 +1745,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             if written["outcome"] == "finished"
             else f"stopped: {written['outcome']}",
         )
+        unjudged = {k: t["flight_unread"] for k, t in written["things"].items() if t.get("flight_unread")}
+        if unjudged and not flew:
+            line(None, "flight", "not judged for " + "; ".join(f"{k} ({why})" for k, why in unjudged.items()))
         if flew:
             longest = {k: t.get("free_flight_longest", 0) for k, t in written["things"].items()}
             long = max(longest.values(), default=0) >= FLIGHT_STEPS
@@ -1811,6 +1836,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
 
     def held(run: dict, what: str) -> tuple[bool | None, str]:
         """Finished, and the things ended where the written run left them: a grip that slipped fails here."""
+        if run.get("nonfinite"):
+            k, at = min(run["nonfinite"].items(), key=lambda kv: kv[1])
+            return None, f"not read: with {what} the solver blew up ({k} at step {at})"
         if written.get("outcome") != "finished":
             return None, "not read: the written replay did not finish, so there is no end to hold this one to"
         if run["outcome"] != "finished":
@@ -1846,13 +1874,14 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         hands = model.get("hands") or []
         crushed = []
         for k in names:
-            for i, (_p50, p95) in enumerate(written["things"].get(k, {}).get("hand_force_p50_p95_N", [])):
+            for i, (p50, _p95) in enumerate(written["things"].get(k, {}).get("hand_force_p50_p95_N", [])):
                 real = HAND_FORCE.get(hands[i]) if i < len(hands) and hands[i] else None
-                # the log adds both fingers' contact forces (and the friction that bears the weight): two jaws' worth
-                if real and p95 > HAND_FORCE_MARGIN * 2.0 * real[1]:
+                # the log adds both fingers' contact forces (and the friction that bears the weight): two jaws' worth;
+                # the median while touching, not the p95, which an impact spike sets as often as a squeeze does
+                if real and p50 > HAND_FORCE_MARGIN * 2.0 * real[1]:
                     crushed.append(
-                        f"{k} {p95:g} N by hand {i + 1}'s two fingers, {p95 / (2.0 * real[1]):.1f}x the most {real[0]} "
-                        f"squeezes ({real[1]:g} N a jaw)"
+                        f"{k} {p50:g} N (median) by hand {i + 1}'s two fingers, {p50 / (2.0 * real[1]):.1f}x the most "
+                        f"{real[0]} squeezes ({real[1]:g} N a jaw)"
                     )
         if grip:
             detail = "the fingers pressed " + "; ".join(grip)

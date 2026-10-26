@@ -757,7 +757,10 @@ class StudyLines(unittest.TestCase):
         runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[900.0, 950.0], [0.0, 0.0]]
         result = physics.verdict({**CLEAN, "hands": ["robotiq_2f85", "robotiq_2f85"]}, runs)
         self.assertIs(_words(result)["grip"], False)
-        self.assertIn("2.0x the most a Robotiq 2F-85 squeezes (235 N a jaw)", result["report"])
+        self.assertIn("1.9x the most a Robotiq 2F-85 squeezes (235 N a jaw)", result["report"])
+        # an impact spike sets the p95, not the median while touching (crate-pr: 23 N median, 200 N p95)
+        runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[23.0, 200.0], [0.0, 0.0]]
+        self.assertIsNot(_words(physics.verdict({**CLEAN, "hands": ["yam", "yam"]}, runs))["grip"], False)
         # a YAM squeezing its real 50 N a jaw reads about 100 N over its two fingers: a real squeeze
         runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[98.0, 104.0], [0.0, 0.0]]
         self.assertIsNot(_words(physics.verdict({**CLEAN, "hands": ["yam", "yam"]}, runs))["grip"], False)
@@ -791,6 +794,21 @@ class StudyLines(unittest.TestCase):
         model = {**CLEAN, "settle": {"crate": {"rise_mm": 3.0, "aside_mm": 0.0, "turn_deg": 0.0}}}
         self.assertIs(_words(physics.verdict(model, _clean_runs()))["settle"], False)
         self.assertIs(_words(physics.verdict(model, _clean_runs(), settle_mm=5.0))["settle"], True)
+
+    def test_a_blow_up_outside_the_written_run_is_named_and_not_read(self) -> None:
+        runs = _clean_runs()
+        runs["heavy"]["nonfinite"] = {"crate": 400}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["finite"])
+        self.assertIsNone(_words(result)["heavy"])
+        self.assertIn("the solver blew up in heavy (crate at step 400)", result["report"])
+
+    def test_a_flight_not_judged_says_so(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"]["flight_unread"] = "the replay's collision pass overflowed its buffer"
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["flight"])
+        self.assertIn("not judged for crate", result["report"])
 
     def test_shape_volumes(self) -> None:
         import newton
