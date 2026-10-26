@@ -152,18 +152,31 @@ class Verdict(unittest.TestCase):
     def test_a_thing_another_solver_steps_is_named_not_cleared(self) -> None:
         runs = _clean_runs()
         runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[0.0, 0.0], [0.0, 0.0]]
-        runs["written"]["contacts_unread"] = {"crate": "SolverVBD"}
+        runs["written"]["contacts_unread"] = {"crate": "stepped by SolverVBD"}
         result = physics.verdict(CLEAN, runs)
         self.assertIsNone(_words(result)["grip"])  # a note to explain, not a pass on a grip nobody read
         self.assertIn("no finger force read; not read for crate (stepped by SolverVBD)", result["report"])
+        self.assertIn("its contacts are not in MuJoCo's list", result["report"])
         self.assertNotIn("no finger force on a rigid thing", result["report"])
 
     def test_an_unread_thing_that_did_not_move_is_not_named(self) -> None:
         runs = _clean_runs()
-        runs["written"]["contacts_unread"] = {"bystander": "SolverVBD"}
+        runs["written"]["contacts_unread"] = {"bystander": "stepped by SolverVBD"}
+        runs["written"]["things"]["bystander"] = _thing(4.0)
         result = physics.verdict(CLEAN, runs)
         self.assertIs(_words(result)["grip"], True)
         self.assertNotIn("bystander", result["report"])
+
+    def test_an_unread_thing_nudged_past_the_flight_floor_or_by_a_part_is_named(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["contacts_unread"] = {"bin": "stepped by SolverVBD", "box": "stepped by SolverVBD"}
+        runs["written"]["things"]["bin"] = _thing(12.0, hand=((0.0, 0.0), (0.0, 0.0)))  # under the 20 mm "moved" floor
+        runs["written"]["things"]["box"] = _thing(0.0, hand=((0.0, 0.0), (0.0, 0.0)))
+        runs["written"]["things"]["box#1"] = _thing(60.0, hand=((0.0, 0.0), (0.0, 0.0)))  # its lid swung
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["grip"])
+        self.assertIn("bin (stepped by SolverVBD)", result["report"])
+        self.assertIn("box (stepped by SolverVBD)", result["report"])
 
     def test_open_is_not_read_when_the_written_run_moved_nothing(self) -> None:
         runs = _clean_runs()
@@ -556,10 +569,6 @@ class CommandLine(unittest.TestCase):
                 self.assertEqual(ctl.main(["physics", "--only", "sideways"]), 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class UnreadThings(unittest.TestCase):
     """Which things' contacts MuJoCo's list cannot show: those another island steps, or all with no probe."""
 
@@ -579,13 +588,22 @@ class UnreadThings(unittest.TestCase):
         )
 
     def test_a_thing_in_another_island_is_unread(self) -> None:
-        self.assertEqual(physics.unread_things(self._sim(), ["box", "lid"]), {"box": "object"})
+        self.assertEqual(physics.unread_things(self._sim(), ["box", "lid"]), {"box": "stepped by object"})
 
     def test_a_single_island_scene_reads_everything(self) -> None:
         self.assertEqual(physics.unread_things(self._sim(coupled=False), ["box", "lid"]), {})
 
     def test_no_probe_reads_nothing(self) -> None:
-        self.assertEqual(physics.unread_things(self._sim(probe=False), ["box"]), {"box": "no contact probe"})
+        self.assertEqual(
+            physics.unread_things(self._sim(probe=False), ["box"]), {"box": "the scene has no MuJoCo contact list"}
+        )
 
-    def test_a_name_no_island_owns_is_left_to_its_owner(self) -> None:
-        self.assertEqual(physics.unread_things(self._sim(), ["lid#1"]), {})
+    def test_a_thing_whose_solver_cannot_be_placed_is_unread_not_read(self) -> None:
+        self.assertEqual(physics.unread_things(self._sim(), ["ghost"]), {"ghost": "its solver could not be placed"})
+        sim = self._sim()
+        sim.pipeline.program.solver_for = mock.Mock(side_effect=AttributeError("no solver accessor"))
+        self.assertEqual(physics.unread_things(sim, ["box"]), {"box": "its solver could not be placed"})
+
+
+if __name__ == "__main__":
+    unittest.main()

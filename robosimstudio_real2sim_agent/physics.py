@@ -35,12 +35,12 @@ the contact force: contacts are read after the last substep, and one that
 comes and goes inside a step reads as none, while the step's velocity change
 still carries it.
 
-**Contacts are MuJoCo's.** A scene that leaves the default arrangement hands
-its free rigid things to a VBD island coupled to the robot, and there the
-fingers' contacts with them are resolved by VBD and never reach MuJoCo's list:
-a box carried in the hand reads as touching nothing. Such a thing is named
-as unread -- its grip is not reported and its free flight not judged -- rather
-than accused of flying.
+**Contacts are MuJoCo's.** In the default arrangement free rigid things go
+to a VBD island coupled to the robot, and there the fingers' contacts with
+them are resolved by VBD and never reach MuJoCo's list: a box carried in the
+hand reads as touching nothing. Such a thing is named as unread -- its grip
+is not reported and its free flight not judged -- rather than accused of
+flying.
 """
 
 from __future__ import annotations
@@ -217,15 +217,16 @@ def fingers(sim: Any) -> dict[str, np.ndarray]:
 
 
 def unread_things(sim: Any, names: list[str]) -> dict[str, str]:
-    """The things whose contacts the contact probe cannot see, each with the solver that steps it.
+    """The things whose contacts the contact probe cannot see, each with why.
 
-    The probe reads MuJoCo's contact list. In a coupled scene a thing another island owns (the VBD a default
+    The probe reads MuJoCo's contact list. In a coupled scene a thing another island owns (the VBD the default
     arrangement gives free rigid bodies) has its contacts resolved there, so it reads as touching nothing; with no
-    probe at all, nothing is read.
+    probe at all, nothing is read. A thing whose island cannot be placed is counted unread too: a wrong "read"
+    is what turns into a false accusation of free flight.
     """
     probe = getattr(sim, "contacts", None)
     if probe is None:
-        return dict.fromkeys(names, "no contact probe")
+        return dict.fromkeys(names, "the scene has no MuJoCo contact list")
     program = getattr(getattr(sim, "pipeline", None), "program", None)
     if program is None or not program.coupled:
         return {}
@@ -233,10 +234,11 @@ def unread_things(sim: Any, names: list[str]) -> dict[str, str]:
     for name in names:
         try:
             solver = program.solver_for(name)
-        except KeyError:  # not an entity of its own (a part of something else): read with its owner
+        except (KeyError, AttributeError):  # no island owns the name, or a coupler with no per-island lookup
+            out[name] = "its solver could not be placed"
             continue
         if solver is not probe.solver:
-            out[name] = type(solver).__name__
+            out[name] = f"stepped by {type(solver).__name__}"
     return out
 
 
@@ -1189,7 +1191,10 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 if p50:
                     grip.append(f"{k} {p50:g} N (p95 {p95:g}) by hand {i + 1}")
         mu = written.get("finger_mu")
-        unread = {k: v for k, v in (written.get("contacts_unread") or {}).items() if k in names}
+        # named when it, or a part of it (``box#1``), moved past the 5 mm the flight test would have read it at
+        unread_of = written.get("contacts_unread") or {}
+        stirred = [k for k, t in written.get("things", {}).items() if t.get("moved_max_mm", 0.0) > 5.0]
+        unread = {k.split("#")[0]: unread_of[k.split("#")[0]] for k in stirred if k.split("#")[0] in unread_of}
         if grip:
             detail = "the fingers pressed " + "; ".join(grip)
         elif unread:
@@ -1199,8 +1204,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         if unread:
             detail += (
                 "; not read for "
-                + ", ".join(f"{k} (stepped by {v})" for k, v in unread.items())
-                + ": its contacts are another solver's, so its grip and its free flight are not judged"
+                + ", ".join(f"{k} ({v})" for k, v in unread.items())
+                + ": its contacts are not in MuJoCo's list, so its grip and its free flight are not judged"
             )
         if mu:
             detail += f"; the solver used friction {mu[0]:g} to {mu[1]:g} at the finger contacts"
