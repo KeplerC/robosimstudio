@@ -1620,7 +1620,13 @@ class LiveServer:
         return reply
 
     def cmd_physics(
-        self, op: str = "replay", mode: str = "written", name: str = "", settle_mm: float | None = None, note: str = ""
+        self,
+        op: str = "replay",
+        mode: str = "written",
+        name: str = "",
+        settle_mm: float | None = None,
+        note: str = "",
+        plain_cut: bool = False,
     ) -> dict:
         """One physics replay of a routine (``op="replay"``), or the verdict on the ones played (``op="report"``).
 
@@ -1635,6 +1641,9 @@ class LiveServer:
                     "ok": False,
                     "error": "no physics replays of this scene: `./ctl physics` plays them (a save since starts them over)",
                 }
+            plain = self.physics.get("plain")
+            if plain_cut and plain and plain.get("outcome") == physics.STOPPED:  # the ctl cut it on its wall clock
+                plain["outcome"] = physics.PLAIN_SLOW  # plain marks one past its steps itself (PLAIN_LONG)
             unread = [mode for mode, run in self.physics.items() if not _read_replay(run)]
             if unread:
                 return {
@@ -1679,6 +1688,9 @@ class LiveServer:
                 "error": f"the written replay did not run to a reading ({_why(self.physics['written'])}): nothing to "
                 "read the others against",
             }
+        if mode == "drop" and not self.physics["written"].get("carried"):  # nothing lifted: nothing to release
+            self.physics["drop"] = {"outcome": "finished", "steps": 0, "things": {}, "skipped": True}
+            return {"ok": True, "skipped": "nothing was lifted off its support"}
         started = self._start_routine(name, fn)
         if isinstance(started, dict):
             return started  # the replays before stay as they were
@@ -1695,6 +1707,7 @@ class LiveServer:
             steps_itself=not wants_session,
             drive_rows=self.physics_model.get("drive_rows"),
             robot_equalities=self.physics_model.get("robot_equalities"),
+            drop_at=int(self.physics.get("written", {}).get("apex_step") or 0) if mode == "drop" else 0,
         )
         serial = self.start_script(gen, name=f"physics {mode}", drives_page=wants_session)
         return {"ok": True, "playing": f"physics {mode}", "serial": serial}
