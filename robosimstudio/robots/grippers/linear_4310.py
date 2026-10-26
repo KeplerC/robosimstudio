@@ -105,7 +105,7 @@ GRIP_LOCAL_EXT = np.array([0.0, 0.0, -1.0])
 GRIP_CLOSE_MEASURED = np.array([0.0053, -1.0, 0.0]) / np.linalg.norm(np.array([0.0053, -1.0, 0.0]))
 """Gripper-local blade-closing axis, fitted from the pad centres."""
 
-CLAMP = ActuationSpec(target_ke=150000.0, target_kd=150.0, joint_damping=230.0)
+CLAMP = ActuationSpec(target_ke=150000.0, target_kd=150.0, effort_limit=50.0, joint_damping=230.0)
 """The real linear_4310's servo: 50 N a blade on a blocked part, i2rt's ``limit_gripper_force``.
 
 Each blade has its own actuator, so each carries the per-jaw cap, 50 N, in the asset; the

@@ -153,8 +153,8 @@ class Staging:
     on, both close at about the same speed, and both hold the tab at 5.8 N. So
     ``examples/06_tasks/08_tape_scored`` states 12 N, to drive the fingers the
     way the material page it scores does. A stated finger servo replaces the
-    hand's own clamp whole (``GripperSpec.actuation``), its damping and ceiling
-    included. ``(:joint-damping x)`` and ``(:joint-friction x)`` set the joints'
+    hand's own clamp (``GripperSpec.actuation``) whole, its damping and joint
+    ceiling included; the asset's actuator cap stays. ``(:joint-damping x)`` and ``(:joint-friction x)`` set the joints'
     damping and friction loss as well, over the whole finger linkage."""
     terminate_on_success: bool | None = None
     """``(:terminate-on-success false)``: whether success ends the episode. Unstated is true."""

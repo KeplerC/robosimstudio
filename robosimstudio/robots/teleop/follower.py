@@ -111,9 +111,12 @@ YAM_TELEOP_GRIP = ActuationSpec(
     # The hand, matched to the same reference (its two fingers are kp=3000).
     #
     # Stiffening the arm and leaving the hand alone is what a first pass at this
-    # did, and it is worse than doing neither: the MJCF's finger class is
-    # kp=200, so against arm joints at 4000 the grip slot becomes the softest
-    # thing on the robot by a factor of twenty. That matters here more than the
+    # did, and it was worse than doing neither: the hand's servo was then the
+    # MJCF's kp=200, so against arm joints at 4000 the grip slot became the
+    # softest thing on the robot by a factor of twenty. (Left alone now, the
+    # hand is yam_linear_arena.CLAMP, the real driver's stiff 50 N-a-jaw clamp
+    # with its closing-speed damping -- a different jaw from the reference's,
+    # which is what this matches.) That matters here more than the
     # ratio suggests, because the grip slot is a *feedback slot* --
     # Gripper.closed_fraction is the seventh entry the leader compares against
     # its own hand -- and it is compared under the same 0.04 floor as the arm

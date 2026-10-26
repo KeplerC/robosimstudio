@@ -116,14 +116,17 @@ class TestTheYamHandsGripLikeTheRealOnes(unittest.TestCase):
             {("right_joint7", "right_joint8", "0 1 0 0 0"), ("left_joint7", "left_joint8", "0 1 0 0 0")}, pairs
         )
 
-    def test_each_hand_servo_reaches_its_cap_within_a_millimetre(self) -> None:
+    def test_each_hand_servo_states_its_assets_cap_and_reaches_it_within_a_millimetre(self) -> None:
         from robosimstudio.robots.grippers.linear_4310 import LINEAR_4310
         from robosimstudio.robots.grippers.yam_linear_arena import YAM_LINEAR_ARENA
 
-        # The caps are the assets' (above): 100 N on the arena hand's one actuator, 50 N a blade on i2rt's.
-        for hand, cap in ((YAM_LINEAR_ARENA, 100.0), (LINEAR_4310, 50.0)):
+        arena = next(d for d in self._tree(self.ARENA[0]).iter("default") if d.get("class") == "finger")
+        i2rt = next(a for a in self._tree(self.I2RT).find("actuator") if a.get("joint", "").endswith("joint7"))
+        for hand, servo in ((YAM_LINEAR_ARENA, arena.find("position")), (LINEAR_4310, i2rt)):
             with self.subTest(hand=hand.name):
+                cap = float(servo.get("forcerange").split()[1])
                 clamp = hand.actuation
+                self.assertEqual(cap, clamp.effort_limit, "the asset's cap, restated for any solver")
                 self.assertGreaterEqual(clamp.target_ke * 0.001, cap, "the cap within a millimetre of contact")
                 self.assertEqual(230.0, clamp.joint_damping, "the closing-speed limit")
 

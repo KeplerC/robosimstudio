@@ -74,14 +74,16 @@ Not the actuator's ``ctrlrange``, which says 0.0495 and which this spec used to
 carry: the joint stops at 0.0475, so a full-open command was 2 mm into the stop.
 """
 
-CLAMP = ActuationSpec(target_ke=300000.0, target_kd=300.0, joint_damping=230.0)
+CLAMP = ActuationSpec(target_ke=300000.0, target_kd=300.0, effort_limit=100.0, joint_damping=230.0)
 """The real YAM's gripper servo: i2rt's driver clamps a blocked jaw at 50 N, whatever it closed on.
 
 i2rt runs the arm with ``limit_gripper_force=50.0`` (``i2rt/robots/get_robot.py``), and its
 ``GripperForceLimiter`` (``i2rt/robots/utils.py``) sees a blocked jaw and holds the motor at the
 torque that makes 50 N of grip whatever the width. Here: a position servo stiff enough to reach
-its cap 0.33 mm past contact. The cap is the asset's, the driver's limit on its one actuator:
-100 N on the driven finger, which the finger equality splits onto the two jaws -- 50 N each. The
+its cap 0.33 mm past contact. The cap is the driver's limit on the one actuator, in the asset
+and restated here so it holds on a solver that reads the joint's limit rather than the MJCF
+actuator's: 100 N on the driven finger, which the finger equality splits onto the two jaws --
+50 N each. The
 asset's own gains are the arena's kp 200 N/m spring, which squeezed 0.3 N a jaw on a 6 mm box
 and 2.5 N on 50 mm.
 
