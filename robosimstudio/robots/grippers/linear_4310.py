@@ -110,7 +110,7 @@ CLAMP = ActuationSpec(target_ke=150000.0, target_kd=150.0, effort_limit=50.0, jo
 
 Each blade has its own actuator, so each carries the per-jaw cap, 50 N, in the asset; the
 composed file's ``joint7 == joint8`` equality ties them as the one motor does. Here, a servo stiff
-enough to reach that cap a millimetre past contact, and 230 N*s/m on each blade as the closing
+enough to reach that cap a third of a millimetre past contact, and 230 N*s/m on each blade as the closing
 speed, 0.22 m/s at the cap: the DM4310's 30 rad/s bound, as on ``yam_linear_arena``'s ``CLAMP``,
 which has the sources. The asset's own gains are the reference sims' kp 600, which squeezed
 0.9 N a blade on a 1 mm box and 9.5 N on 30 mm. On the hand, so a stated finger servo replaces it.

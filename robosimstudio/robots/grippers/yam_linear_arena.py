@@ -94,7 +94,8 @@ DM4310 at the 30 rad/s i2rt's motor table gives it, through ``linear_4310.yml``'
 pads -- crossed 56 mm through each other, and through a 1-2 mm plate.
 
 Here, on the hand, so a page or task that states its own finger servo replaces it, damping
-included, and gets the asset's own joint physics back (under the same 100 N cap). Measured in
+included, and gets the asset's own joint physics back (under the asset's 100 N actuator cap on
+MuJoCo, the solver that reads it). Measured in
 ``assets/PROVENANCE.md``.
 """
 
