@@ -347,7 +347,12 @@ class RendererGL(RendererBase):
             if len(getattr(mesh, "faces", ())) == 0:
                 continue
             if part.body >= 0 and part.body not in bodies:
-                bodies[part.body] = spec.worldbody.add_body(name=f"body{part.body}", mocap=True)
+                body = spec.worldbody.add_body(name=f"body{part.body}", mocap=True)
+                # a stated inertia, so MuJoCo infers none from the meshes: a flat one (a photo on a slab) has
+                # A + B = C to the rounding, and MuJoCo refuses A + B < C for a body that only carries pictures
+                body.explicitinertial = True
+                body.mass, body.inertia = 1.0, [1.0, 1.0, 1.0]
+                bodies[part.body] = body
             parent = bodies[part.body] if part.body >= 0 else spec.worldbody
             rgba, image, uv = _rgba(mesh)
             asset = spec.add_mesh(
