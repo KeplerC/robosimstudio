@@ -580,7 +580,7 @@ class CommandLine(unittest.TestCase):
 
         def wait(sock, started, quiet, skip, limit):
             mode = asked[-1][2]
-            return {"ok": mode != "plain", "error": "still playing"}
+            return {"ok": mode != "plain", "timed_out": mode == "plain", "error": "still playing"}
 
         with (
             mock.patch.object(ctl, "request", side_effect=page),
@@ -656,6 +656,8 @@ class StudyLines(unittest.TestCase):
 
     def test_a_thing_the_settle_pushed_up_was_put_inside_something(self) -> None:
         model = {**CLEAN, "settle": {"crate": {"rise_mm": 12.6, "aside_mm": 0.0, "turn_deg": 0.0}}}
+        self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["settle"])  # higher: pushed out, or re-posed
+        model["settle"]["crate"]["overlap_mm"] = 12.6
         self.assertIs(_words(physics.verdict(model, _clean_runs()))["settle"], False)
         model["settle"] = {"crate": {"rise_mm": -4.0, "aside_mm": 0.1, "turn_deg": 0.0}}  # it fell into place
         self.assertIs(_words(physics.verdict(model, _clean_runs()))["settle"], True)
@@ -827,7 +829,7 @@ class StudyLines(unittest.TestCase):
 
     def test_settle_honours_the_bar_it_is_given(self) -> None:
         model = {**CLEAN, "settle": {"crate": {"rise_mm": 3.0, "aside_mm": 0.0, "turn_deg": 0.0}}}
-        self.assertIs(_words(physics.verdict(model, _clean_runs()))["settle"], False)
+        self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["settle"])
         self.assertIs(_words(physics.verdict(model, _clean_runs(), settle_mm=5.0))["settle"], True)
 
     def test_a_blow_up_outside_the_written_run_is_named_and_not_read(self) -> None:
@@ -849,6 +851,17 @@ class StudyLines(unittest.TestCase):
         runs = self._drop_runs(fell=False)
         runs["drop"]["release_rows"] = 12
         self.assertIsNone(_words(physics.verdict({**CLEAN, "things": {"crate": {"mass_kg": 1.0}}}, runs))["drop"])
+
+    def test_density_is_bounded_both_ways_against_overlapping_colliders(self) -> None:
+        # two overlapping colliders halve a summed density: light only if the largest alone is light too
+        model = {
+            **CLEAN,
+            "gravity": 9.81,
+            "things": {"crate": {"mass_kg": 0.05, "volume_l": 2.0, "density": 25.0, "density_max": 50.0}},
+        }
+        self.assertIs(_words(physics.verdict(model, _clean_runs()))["model"], True)
+        model["things"]["crate"]["density_max"] = 26.0
+        self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["model"])
 
     def test_shape_volumes(self) -> None:
         import newton

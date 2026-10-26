@@ -398,9 +398,10 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   explain.
 - **settle** reads how the scene's own settle, before the first step, moved
   each thing from where it was put, and how deep each sits in something at
-  the reset: more than 1 mm inside something (the table, a finger), or pushed
-  up more than 2 mm, fails; pushed aside without rising is a NOTE (it slid out
-  of something, or it is round and rolled); fallen into place is fine.
+  the reset: deeper than a soft contact sinks (5 mm), or more than 1 mm deep
+  and pushed out by the frozen run, fails; a shallower rest that stays, a thing
+  that starts higher than it was put, or one pushed aside without rising, is a
+  NOTE (say which); fallen into place is fine.
 - **contact** reads the model and the written replay. A joint between a thing
   and the robot (either way round), an equality row between them that is on at
   any step of the routine (a suction cup's seal is a NOTE instead), a thing flagged
@@ -421,6 +422,10 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   and the friction MuJoCo mixed at those contacts (the larger of the two
   surfaces'): a hand whose own pads carry 2 or 4 grips with that, not with the
   number written for the thing.
+  It fails when the fingers' median force while touching is more than 1.25
+  times what the real hand squeezes with both its jaws (a Robotiq 2F-85's
+  235 N a jaw, a Franka hand's 140 N, a YAM's 50 N): a squeeze no real hand
+  gives is the arm pressing, not the hand holding.
   The default arrangement gives free rigid things a VBD island coupled to the
   robot, whose contacts never reach MuJoCo's list: for those things the
   replay runs a collision pass of its own after every step, so their flight

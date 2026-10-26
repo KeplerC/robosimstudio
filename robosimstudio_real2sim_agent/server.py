@@ -1688,6 +1688,9 @@ class LiveServer:
                 "error": f"the written replay did not run to a reading ({_why(self.physics['written'])}): nothing to "
                 "read the others against",
             }
+        if mode == "drop" and not self.physics["written"].get("carried"):  # nothing lifted: nothing to release
+            self.physics["drop"] = {"outcome": "finished", "steps": 0, "things": {}, "skipped": True}
+            return {"ok": True, "skipped": "nothing was lifted off its support"}
         started = self._start_routine(name, fn)
         if isinstance(started, dict):
             return started  # the replays before stay as they were

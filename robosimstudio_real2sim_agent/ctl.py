@@ -566,7 +566,11 @@ def poll(sock: Path, done: Callable[[dict], Any], doing: Callable[[dict], str], 
             return status
         now = time.monotonic()
         if now - start > limit:
-            return {"ok": False, "error": f"still {doing(status)} after {limit:.0f} s; the page carries on"}
+            return {
+                "ok": False,
+                "timed_out": True,
+                "error": f"still {doing(status)} after {limit:.0f} s; the page carries on",
+            }
         if now - said >= SAY_EVERY:
             _say(f"waiting: {doing(status)} ({now - start:.0f} s)")
             said = now
@@ -855,6 +859,9 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                 started = ask({"cmd": "physics", "op": "replay", "mode": mode, "name": args.name}, TIMEOUTS["physics"])
                 if not started.get("ok"):
                     return show(started, args.json)
+                if started.get("skipped"):
+                    _say(f"physics: {mode} skipped: {started['skipped']}")
+                    continue
                 _say(f"physics: {mode} ...")  # on stderr, as every wait's progress is: --json stays one document
                 t0 = time.monotonic()
                 # plain has no cap of its own (nothing hooked in): it gets a few written runs' time, and a plain that
@@ -867,7 +874,7 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                     # still playing past --wait-limit, or failed: a reset stops it, and its own cleanup puts the
                     # robot back (the friction, the torque, the masses); then say what happened
                     ask({"cmd": "reset"}, TIMEOUTS["reset"])
-                    if mode == "plain" and "still" in str(ended.get("error", "")):  # past its time, not failed
+                    if mode == "plain" and ended.get("timed_out"):  # past its time, not failed
                         _say(f"physics: plain still going after {limit:.0f} s, read as not ending unwatched")
                         plain_cut = True
                         continue

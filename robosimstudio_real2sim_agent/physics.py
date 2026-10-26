@@ -199,12 +199,26 @@ def _match_arm(words: str) -> tuple[float, ...] | None:
     return None
 
 
+def _hand_kind(words: str) -> str | None:
+    if re.search(r"2f.?85|robotiq|driver_joint|follower_joint", words):
+        return "robotiq_2f85"
+    if re.search(r"panda|franka|fr3", words):
+        return "panda_hand"
+    if re.search(r"(?<![a-z0-9])yam", words):
+        return "yam"
+    return None
+
+
 def real_hand(sim: Any, arm: Any, name: str = "") -> str | None:
     """Which real hand an arm's fingers are, by the names its model uses, or ``None``: a Robotiq 2F-85 by its
     driver/coupler/follower linkage or its name, a Franka hand, a YAM's linear gripper. The arm's own joints (those
     naming it) decide when there are any, so a pair with two different hands reads each."""
     every = [str(x).lower() for x in _robot_joint_labels(sim)]
     own = [x for x in every if name and re.search(rf"(?<![a-z0-9]){re.escape(name.lower())}(?![a-z0-9])", x)]
+    if not own:  # no joint names this arm: the robot's names decide only when they name a single kind of hand
+        kinds = {_hand_kind(x) for x in every} - {None}
+        if len(kinds) > 1:
+            return None
     labels = " ".join(own or every) + " " + robot_name(sim).lower()
     hand = str(getattr(getattr(arm, "gripper_spec", None), "name", "") or getattr(arm, "gripper", "") or "").lower()
     words = hand + " " + labels
@@ -361,17 +375,25 @@ def _hidden_colliders(sim: Any) -> dict[int, str]:
 
 
 def _shape_volume(m: Any, s: int, tables: tuple | None = None) -> float:
-    """A collision shape's volume [m³]: Newton's own mass of it at a density of 1. ``tables`` is ``(shape_type,
-    shape_scale, shape_source)`` already on the host, for a caller asking about many."""
-    types_, scales, sources = tables or (m.shape_type.numpy(), m.shape_scale.numpy(), getattr(m, "shape_source", None))
+    """A collision shape's volume [m³]: Newton's own mass of it at a density of 1, a hollow shell's by its wall.
+    ``tables`` is ``(shape_type, shape_scale, shape_source, shape_is_solid, shape_thickness)`` already on the host, for a
+    caller asking about many."""
+    if tables is None:
+        solid, thick = getattr(m, "shape_is_solid", None), getattr(m, "shape_thickness", None)
+        tables = (
+            m.shape_type.numpy(),
+            m.shape_scale.numpy(),
+            getattr(m, "shape_source", None),
+            solid.numpy() if hasattr(solid, "numpy") else solid,
+            thick.numpy() if hasattr(thick, "numpy") else thick,
+        )
+    types_, scales, sources, solid, thick = tables
     src = (sources or [None] * (s + 1))[s]
-    solid = getattr(m, "shape_is_solid", None)
-    thick = getattr(m, "shape_thickness", None)
     kw = {}
     if solid is not None:
-        kw["is_solid"] = bool(np.asarray(solid.numpy() if hasattr(solid, "numpy") else solid)[s])
+        kw["is_solid"] = bool(np.asarray(solid)[s])
     if thick is not None:
-        kw["thickness"] = float(np.asarray(thick.numpy() if hasattr(thick, "numpy") else thick)[s])
+        kw["thickness"] = float(np.asarray(thick)[s])
     try:
         mass, _com, _inertia = newton.geometry.compute_inertia_shape(
             int(types_[s]), wp.vec3(*(float(v) for v in scales[s][:3])), src, density=1.0, **kw
@@ -381,12 +403,11 @@ def _shape_volume(m: Any, s: int, tables: tuple | None = None) -> float:
         return 0.0
 
 
-def _round_axis(m: Any, shapes: list[int]) -> list[float] | None:
+def _round_axis(m: Any, shapes: list[int], tables: tuple | None = None) -> list[float] | None:
     """The body-frame axis a thing is round about -- every collider a cylinder, capsule or cone along one line, or a
     sphere centred on it -- or ``None``. A bottle spun about its own axis ends the same."""
     g = newton.GeoType
-    kind, xf = m.shape_type.numpy(), m.shape_transform.numpy()
-    flags = m.shape_flags.numpy()
+    kind, xf, flags = tables or (m.shape_type.numpy(), m.shape_transform.numpy(), m.shape_flags.numpy())
     collide = int(newton.ShapeFlags.COLLIDE_SHAPES)
     axis, point, spheres = None, None, []
     for shape in shapes:
@@ -602,11 +623,22 @@ def model_facts(sim: Any) -> dict[str, Any]:
     )
     collide = int(newton.ShapeFlags.COLLIDE_SHAPES)
     flags = m.shape_flags.numpy()
-    tables = (m.shape_type.numpy(), m.shape_scale.numpy(), getattr(m, "shape_source", None))
+    solid, thick = getattr(m, "shape_is_solid", None), getattr(m, "shape_thickness", None)
+    tables = (
+        m.shape_type.numpy(),
+        m.shape_scale.numpy(),
+        getattr(m, "shape_source", None),
+        solid.numpy() if hasattr(solid, "numpy") else solid,
+        thick.numpy() if hasattr(thick, "numpy") else thick,
+    )
     for name, t in th.items():
-        vol = sum(_shape_volume(m, int(x), tables) for x in t["shapes"] if int(flags[int(x)]) & collide)
+        vols = [_shape_volume(m, int(x), tables) for x in t["shapes"] if int(flags[int(x)]) & collide]
+        vol, big = sum(vols), max(vols, default=0.0)
+        mass_kg = out["things"][name]["mass_kg"]
         out["things"][name]["volume_l"] = round(vol * 1000.0, 4)
-        out["things"][name]["density"] = round(out["things"][name]["mass_kg"] / vol, 1) if vol > 0 else None
+        out["things"][name]["density"] = round(mass_kg / vol, 1) if vol > 0 else None
+        # overlapping colliders count twice in the sum: the largest alone bounds the density from above
+        out["things"][name]["density_max"] = round(mass_kg / big, 1) if big > 0 else None
     # where the scene's settle (before the first step) moved each thing from where it was put: pushed up or aside, it
     # was put inside something; fallen, it was put in the air. Read off the state the replays start from
     authored, now = m.body_q.numpy(), sim.state.body_q.numpy()
@@ -646,9 +678,10 @@ def model_facts(sim: Any) -> dict[str, Any]:
         Exception
     ) as exc:  # a model no collision pass can be built over: the settle's own reading stands, and says so
         out["settle_error"] = f"the start overlap could not be read ({type(exc).__name__}: {exc})"[:300]
+    axis_tables = (m.shape_type.numpy(), m.shape_transform.numpy(), m.shape_flags.numpy())
     for name, t in th.items():
         if len(t["bodies"]) == 1:
-            axis = _round_axis(m, list(t["shapes"]))
+            axis = _round_axis(m, list(t["shapes"]), axis_tables)
             if axis is not None:
                 out["things"][name]["round_axis"] = axis
     return out
@@ -787,11 +820,12 @@ class Replay:
             for name in self.names
             if len(self.th[name]["bodies"]) == 1 and self.th[name]["bodies"][0] in free_bodies
         }
+        read_here = mode in ("written", "drop", "plain")  # the replays whose rows the pass reads
         self.free = {
             name
             for name in self.names
             if not soft_scene
-            and (name not in self.unread or self.side is not None)
+            and (name not in self.unread or (self.side is not None and read_here))
             and len(self.th[name]["bodies"]) == 1
             and self.th[name]["bodies"][0] in free_bodies
         }
@@ -1026,9 +1060,16 @@ class Replay:
                 if self.steps % 10 == 0:
                     self._mixed_friction(probe)
         if self.side is not None and n and contacts and self.mode in ("written", "drop", "plain"):
-            a, b, gap = self.side.read(bq)
-            self.side_overflowed += int(self.side.overflowed)
-            overflow = bool(self.side.overflowed)
+            try:
+                a, b, gap = self.side.read(bq)
+            except Exception as exc:  # flight goes unjudged for what only this pass reads; the row stands
+                self.side_error = f"the replay's collision pass failed ({type(exc).__name__}: {exc})"[:200]
+                self.side = None
+                a = b = np.zeros(0, dtype=np.int32)
+                gap = np.zeros(0)
+            else:
+                self.side_overflowed += int(self.side.overflowed)
+                overflow = bool(self.side.overflowed)
             close = gap < NEAR_MM / 1000.0
             a, b, gap = a[close], b[close], gap[close]
             for x, y in ((a, b), (b, a)):
@@ -1167,7 +1208,7 @@ class Replay:
                     t["robot_after_release_N"] = (
                         round(float(np.median([r["robot"][i] for r in after])), 2) if after else 0.0
                     )
-                if name in self.unread and self.side is None and self.side_error:
+                if name in self.unread and self.side_error:
                     t["flight_unread"] = self.side_error
                 elif name in self.unread and self.side is not None and self.side_overflowed > 0.1 * len(rows):
                     t["flight_unread"] = (
@@ -1203,7 +1244,8 @@ class Replay:
                         )
                     )
             out["things"][name] = t
-        # the top of the carry: the step where a thing lifted off its start was highest, what drop releases at
+        # the carry: where each lifted body first reached 90% of its own height with the fingers on it; drop
+        # releases at the earliest
         lifted = [k for k in self.names if k in self.single_free and out["things"][k]["rise_max_mm"] > CARRIED_MM]
         tops = {}  # thing -> the step it first reached 90% of its own height, with the fingers on it
         for k in lifted:
@@ -1604,11 +1646,14 @@ def _model_lines(
     lo, hi = DENSITY
     for k in dict.fromkeys(n.split("#")[0] for n in names):
         t = model.get("things", {}).get(k, {})
-        rho = t.get("density")
-        if rho is not None and not lo <= rho <= hi:
+        rho, rho_max = t.get("density"), t.get("density_max", t.get("density"))
+        light = rho_max is not None and rho_max < lo  # light even by its largest collider alone
+        heavy = rho is not None and rho > hi  # heavy even over every collider's volume
+        if light or heavy:
+            rho = rho_max if light else rho
             notes.append(
                 f"{k} weighs {t['mass_kg'] * 1000:g} g in {t['volume_l']:g} l ({rho:g} kg/m³, "
-                + ("lighter than expanded polystyrene" if rho < lo else "heavier than lead")
+                + ("lighter than expanded polystyrene" if light else "heavier than lead")
                 + "): say what it is"
             )
     touched = {h for t in written.get("things", {}).values() for h in t.get("hidden_touch", [])}
@@ -1622,7 +1667,7 @@ def _model_lines(
         line(True, "model", f"gravity {model['gravity']:g} m/s²; the handled things' densities are ones objects have")
     settle = model.get("settle") or {}
     if settle:
-        pushed = {k: v for k, v in settle.items() if v["rise_mm"] > settle_mm}
+        risen = {k: v for k, v in settle.items() if v["rise_mm"] > settle_mm}
         pushed_out = {
             k for k, t in ((frozen or {}).get("things") or {}).items() if t.get("moved_max_mm", 0.0) > settle_mm
         }
@@ -1640,14 +1685,14 @@ def _model_lines(
                 "settle",
                 f"{k} starts {inside[k]['overlap_mm']:.1f} mm inside {inside[k].get('inside', 'something')}",
             )
-        elif pushed:
-            k = max(pushed, key=lambda n: max(pushed[n]["rise_mm"], pushed[n]["aside_mm"]))
-            v = pushed[k]
+        elif risen:  # with nothing inside anything now: pushed out by the warm-up, or put there by the reset
+            k = max(risen, key=lambda n: risen[n]["rise_mm"])
+            v = risen[k]
             line(
-                False,
+                None,
                 "settle",
-                f"the scene's settle pushed {k} {v['rise_mm']:.1f} mm up and {v['aside_mm']:.1f} mm aside before the "
-                "first step: it was put inside something",
+                f"{k} starts {v['rise_mm']:.1f} mm higher than it was put: pushed out of something before the first "
+                "step, or put back higher by the reset: say which",
             )
         elif resting:
             k = max(resting, key=lambda n: resting[n]["overlap_mm"])
