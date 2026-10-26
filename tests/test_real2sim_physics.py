@@ -905,7 +905,10 @@ class StudyLines(unittest.TestCase):
         runs = _clean_runs()
         runs["frozen"]["things"]["stem"] = _thing(3.0)
         self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)
-        self.assertIsNone(_words(physics.verdict({**CLEAN, "elastic_parts": ["stem#3"]}, runs))["frozen"])
+        stem = {**CLEAN, "elastic_parts": ["stem#1", "stem#2", "stem#3"]}  # a chain of bending joints
+        self.assertIsNone(_words(physics.verdict(stem, runs))["frozen"])
+        door = {**CLEAN, "elastic_parts": ["stem#1"]}  # one sprung joint (a door) is not a stem
+        self.assertIs(_words(physics.verdict(door, runs))["frozen"], False)
 
     def test_shape_volumes(self) -> None:
         import newton

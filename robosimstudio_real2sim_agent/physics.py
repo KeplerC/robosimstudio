@@ -43,11 +43,12 @@ after every step on the state the step left (read-only: nothing is solved
 from it), so their free flight is judged and the fingers touching them is
 seen; only the force is not read there.
 
-**Two replays the routine cannot tell from a play.** ``drop`` holds the
+**Two more replays.** ``drop`` holds the
 fingers open from early in the written run's carry (where a thing it lifted first reached 90% of its height): what the fingers were
 carrying falls, and what still rides along with nothing touching it is
-carried by something that is not a contact. ``plain`` plays the routine with
-nothing hooked in at all and reads at the routine's own yields: a thing that
+carried by something that is not a contact. ``plain``, the one a routine
+cannot tell from a play by its hooks (its stepping is capped by a wrapper on
+the sim's own run and step), plays the routine with nothing hooked in and reads at the routine's own yields: a thing that
 flies untouched there is carried another way when nobody is watching (a
 different end is only a note: the sim is not deterministic).
 
@@ -147,6 +148,10 @@ the YAM's 50 N, the clamp i2rt's driver holds a blocked gripper at. A finger for
 
 HAND_FORCE_MARGIN = 1.25
 """How far past the real hand's most the fingers may press before grip fails (a contact spike is not a squeeze)."""
+
+REACH_MM = 5.0
+"""The most the two shapes' contact margins widen "touching" [mm]: a solver acts on them that far apart, but a box
+hovering a centimetre off a finger is not held by it."""
 
 RELEASE_WINDOW = 25
 """Steps after drop's release that say what holds a thing: the robot must touch it in most of them to be bearing it."""
@@ -1100,7 +1105,8 @@ class Replay:
             else:
                 self.side_overflowed += int(self.side.overflowed)
                 overflow = bool(self.side.overflowed)
-            close = gap < np.maximum(NEAR_MM / 1000.0, self.side.reach if len(self.side.reach) == len(gap) else 0.0)
+            reach = self.side.reach if self.side is not None and len(self.side.reach) == len(gap) else 0.0
+            close = gap < np.maximum(NEAR_MM / 1000.0, np.minimum(reach, REACH_MM / 1000.0))
             a, b, gap = a[close], b[close], gap[close]
             for x, y in ((a, b), (b, a)):
                 ox = self.owner[x]
@@ -1415,6 +1421,11 @@ class AsBuilt:
             tuning.notify(self.sim.pipeline, flags)
 
 
+def cap_limit(steps: int) -> int:
+    """How many steps a replay other than ``written`` may run: the written run's and a little past it."""
+    return steps + max(25, int(OVERRUN * steps))
+
+
 def replay(
     sim: Any,
     routine: Iterator,
@@ -1446,7 +1457,7 @@ def replay(
         yield from _plain(sim, routine, store, steps)
         return
     capped = mode != "written"
-    limit = steps + max(25, int(OVERRUN * steps))
+    limit = cap_limit(steps)
     long = f"still going when the written replay had long ended ({steps} steps)"
 
     def stop() -> None:
@@ -1536,7 +1547,7 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
     runs to its end.
     """
     start = int(getattr(sim, "step_count", 0) or 0)
-    limit = steps + max(25, int(OVERRUN * steps)) if steps else 0
+    limit = cap_limit(steps) if steps else 0
     outcome = "finished"
     reader = None
 
@@ -2044,7 +2055,10 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             and float(np.hypot(t["end"][0] - t["start"][0], t["end"][1] - t["start"][1])) < 0.001
             and t.get("rise_max_mm", 0.0) < 0.5
         }
-        bendy = {k.split("#")[0] for k in model.get("elastic_parts", [])}  # a stem's base drifts as the stem settles
+        chains: dict[str, int] = {}
+        for k in model.get("elastic_parts", []):
+            chains[k.split("#")[0]] = chains.get(k.split("#")[0], 0) + 1
+        bendy = {k for k, n in chains.items() if n >= 3}  # a stem (a chain of bending joints) drifts with its base
         elastic = (
             {
                 k
