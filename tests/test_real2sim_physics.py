@@ -221,6 +221,22 @@ class Verdict(unittest.TestCase):
         runs["built"] = _run(end=(0.4, 0.0, 1.29))  # 90 mm the same way: 30 mm from plain's end
         self.assertIsNone(_words(physics.verdict(CLEAN, runs))["built"])
 
+    def test_a_plain_run_whose_grasp_failed_is_no_spread(self) -> None:
+        runs = _clean_runs()
+        runs["plain"] = _run(moved=5.0, end=(0.4, 0.0, 0.9))  # never carried: it stayed where it started
+        runs["built"] = _run(end=(0.4, 0.0, 1.05))  # carried, and slipped 150 mm short
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["built"], False)
+        self.assertIn("crate was not carried either: the grasp is marginal at any friction", result["report"])
+
+    def test_built_that_lowered_nothing_beside_a_deformable_is_not_excused(self) -> None:
+        runs = _clean_runs()
+        for r in ("written", "built"):
+            runs[r]["deformables"] = {"towel": _thing(0.0)}
+        runs["built"] = {**runs["built"], **_run(end=(0.4, 0.0, 0.9)), "lowered": {"friction": 0, "torque": 0}}
+        runs["built"]["deformables"] = {"towel": _thing(0.0)}
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)  # a soft contact's friction is not capped
+
     def test_spread_compares_like_with_like(self) -> None:
         runs = _clean_runs()
         runs["built"] = _run(end=(0.4, 0.0, 0.9))  # dropped 300 mm off, turned as written

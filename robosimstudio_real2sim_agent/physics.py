@@ -1791,21 +1791,25 @@ def _end_offset(a: dict, b: dict, axis: list[float] | None = None) -> tuple[floa
     return off, shape, turn
 
 
-def _within_spread(misses: list[_Miss], run: dict, plain: dict, seen: list[_Miss], axes: dict | None = None) -> str:
+def _within_spread(
+    misses: list[_Miss], run: dict, plain: dict, seen: list[_Miss], written: dict, axes: dict | None = None
+) -> str:
     """Plain's evidence, in a few words, that a run's ``misses`` are no more than the scene's own spread; ``""`` when
     they are more. Plain changed nothing, so it and the written run are two samples of the scene, and ``seen`` is
     plain's own misses. The run's misses are spread when each is an end (not a thing lost on the way or a bystander
     knocked: a grip that let go), and for each thing and each of position, shape and turn the run missed by, plain
-    missed that same thing by that same measure too, and the run ended no farther from plain's end than plain's end is
-    from the written one (or within the tolerance of it): a slip the other way from plain's spread is not spread."""
+    carried that same thing (at least a third as far as written) and missed it by that same measure too, and the run
+    ended no farther from plain's end than plain's end is from the written one (or within the tolerance of it): a slip
+    the other way from plain's spread is not spread, nor is one where plain's grasp failed."""
     if not misses or any(m.kind != "end" for m in misses):
         return ""
-    tol = {"position": END_MM, "shape": END_MM / 2, "turn": END_DEG}
     by = {m.thing: m for m in seen if m.kind == "end"}
     for m in misses:
-        p = by.get(m.thing)
-        if p is None:
+        p, w = by.get(m.thing), _entry(written, m.thing)
+        # plain is a sample of where the thing lands only if it carried it (a grasp that failed there is no spread)
+        if p is None or not w or _entry(plain, m.thing).get("moved_max_mm", 0.0) < w.get("moved_max_mm", 0.0) / 3:
             return ""
+        tol = {d: m.amount[d] / m.far[d] if m.far[d] else 0.0 for d in m.far}  # the tolerances the miss was read with
         apart = dict(
             zip(tol, _end_offset(_entry(run, m.thing), _entry(plain, m.thing), (axes or {}).get(m.thing)), strict=True)
         )
@@ -1926,8 +1930,8 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
     if drop.get("nonfinite"):
         line(None, "drop", "not read: the solver blew up in it")
         return
-    if _cut(drop):
-        line(None, "drop", f"not read: {drop['outcome']}")
+    if why := _cut(drop):
+        line(None, "drop", why)
         return
     if drop.get("release_rows", 0) < int(drop.get("release_skip", 10)) + RELEASE_WINDOW // 2:
         line(None, "drop", "not read: the carry's top comes too near the end of the run to watch a fall")
@@ -2208,8 +2212,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     frozen = runs.get("frozen")
     if frozen and frozen.get("nonfinite"):
         line(None, "frozen", "not read: the solver blew up in it")
-    elif frozen and _cut(frozen):
-        line(None, "frozen", _cut(frozen))
+    elif frozen and (why := _cut(frozen)):
+        line(None, "frozen", why)
     elif frozen:
         # a rigid thing has nothing to settle into; a heap, a liquid or a draped cloth can still be relaxing at the
         # reset, so its drift is a note for the report, not a fault
@@ -2307,8 +2311,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         line(None, "open", "not read: this hand has no fingers to hold open")
     elif opened and opened.get("nonfinite"):
         line(None, "open", "not read: the solver blew up in it")
-    elif opened and _cut(opened):
-        line(None, "open", _cut(opened))
+    elif opened and (why := _cut(opened)):
+        line(None, "open", why)
     elif opened and (written.get("outcome") != "finished" or not names):
         line(
             None,
@@ -2350,8 +2354,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             return None, f"not read: with {what} the solver blew up ({k} at step {at})", []
         if written.get("outcome") != "finished":
             return None, "not read: the written replay did not finish, so there is no end to hold this one to", []
-        if _cut(run, failed=False):  # the page cut it (a reset, a save, Stop), not the routine
-            return None, _cut(run, failed=False), []
+        if why := _cut(run, failed=False):  # the page cut it (a reset, a save, Stop), not the routine
+            return None, why, []
         if run["outcome"] != "finished":
             return False, f"with {what} the routine stopped: {run['outcome']}", []
         misses = _misses(run, written, names, round_axes=axes)
@@ -2362,7 +2366,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     plain = _plain_reading(runs, written, names, axes)
     built = runs.get("built")
     lowered = (built or {}).get("lowered")
-    if built and lowered is not None and not any(lowered.values()):
+    if built and lowered is not None and not any(lowered.values()) and not written.get("deformables"):
+        # (a deformable's own contact friction is not one built caps, so with one in the scene built reads as below)
         # nothing was above the real robot, so built only played the written run again: a different end, or a stop,
         # there is the scene's own spread from run to run, not a grip that needs more than the real hand
         ok, detail, misses = held(built, robot)
@@ -2389,8 +2394,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     elif built:
         ok, detail, misses = held(built, robot)
         seen = (
-            _within_spread(misses, built, plain.run, plain.misses, axes)
-            if ok is False and plain.run is not None and not plain.why and not plain.flew
+            _within_spread(misses, built, plain.run, plain.misses, written, axes)
+            if ok is False and plain.run is not None
             else ""
         )
         spread = f"{seen} too" if seen else ""
@@ -2403,6 +2408,19 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 "built cannot tell a slip from that: say which in the report",
             )
         else:
+            failed = [  # things plain, which changes nothing, did not carry either: a grasp that fails at any friction
+                m.thing
+                for m in misses
+                if plain.run is not None
+                and plain.run.get("outcome") == "finished"
+                and (_entry(plain.run, m.thing) or {}).get("moved_max_mm", 0.0)
+                < (_entry(written, m.thing) or {}).get("moved_max_mm", 0.0) / 3
+            ]
+            if failed:
+                detail += (
+                    f"; played with nothing changed, {failed[0]} was not carried either: the grasp is marginal at any "
+                    "friction, so say so in the report"
+                )
             line(ok, "built", detail)
     heavy = runs.get("heavy")
     if heavy:

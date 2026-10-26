@@ -350,10 +350,14 @@ class Replays(unittest.TestCase):
         mu = m.shape_material_mu.numpy()
         mild = int(np.flatnonzero(mu <= 1.0)[0])
         grippy = mu > 1.0
+        effort = m.joint_effort_limit.numpy().copy()
         built = physics.AsBuilt(self.sim, heavier=2.0)
         built.apply()
         self.assertEqual(built.lowered["friction"], int(grippy.sum()))  # what the built line reads as changed
-        self.assertEqual(built.lowered["torque"], 12)  # Newton's own limit is its 1e6 default on both arms
+        rows = [d for arm in self.sim.scene.handles.arms.values() for d in arm.arm_dofs]
+        real = [c for arm in self.sim.scene.handles.arms.values() for c in physics.real_arm_torque(self.sim, arm)]
+        above = int(np.count_nonzero(np.asarray(real) < effort[np.asarray(rows)]))
+        self.assertEqual(built.lowered["torque"], above)  # each arm joint whose own limit is above the real arm's
         moved = m.shape_material_mu.numpy()
         moved[mild] = 0.3  # the slider, mid-replay
         m.shape_material_mu.assign(moved)
