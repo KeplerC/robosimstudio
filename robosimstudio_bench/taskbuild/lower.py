@@ -324,7 +324,13 @@ def _actuation(pairs: tuple[tuple[str, Any], ...]) -> ActuationSpec | None:
         "armature": "armature",
         "effort_limit": "effort_limit",
         "joint_damping": "joint_damping",
+        "joint_friction": "joint_friction",
     }
+    stated = {key for key, _ in pairs}
+    if not {"ke", "kd"} <= stated:
+        raise ValueError(
+            f"a servo clause states its gains, (:ke ..) and (:kd ..), with anything else it says; got {sorted(stated)}"
+        )
     return ActuationSpec(**{names[key]: float(value) for key, value in pairs})
 
 

@@ -192,6 +192,10 @@ class TestStagingSubSections(unittest.TestCase):
         self.assertEqual(ActuationSpec(target_ke=1500.0, target_kd=240.0, effort_limit=12.0, joint_damping=0.5), scored)
         damped = parse_staging({"gripper-actuation": [[":ke", 1500], [":kd", 60], [":joint-damping", 0.5]]})
         self.assertEqual(0.5, _actuation(damped.gripper_actuation).joint_damping)
+        rubbed = parse_staging({"gripper-actuation": [[":ke", 1500], [":kd", 60], [":joint-friction", 0.1]]})
+        self.assertEqual(0.1, _actuation(rubbed.gripper_actuation).joint_friction)
+        with self.assertRaisesRegex(ValueError, "states its gains"):
+            _actuation(parse_staging({"gripper-actuation": [":joint-damping", 0.5]}).gripper_actuation)
 
     def test_an_explicit_false_survives_a_profile_that_says_true(self):
         document = parse_staging({"scene-resident": "false"})

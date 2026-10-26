@@ -475,7 +475,9 @@ def _cross_arm_collisions(binding: Binding, embodiment_spec: EmbodimentSpec) -> 
     """
     if binding.cross_arm_collisions is not None:
         return bool(binding.cross_arm_collisions)
-    return bool(embodiment_spec.cross_arm_collisions) and not binding.scene_resident
+    # Resident as EntityEmbodiment.resident has it: placed so, or with no asset of its own to import.
+    resident = binding.scene_resident or embodiment_spec.asset is None
+    return bool(embodiment_spec.cross_arm_collisions) and not resident
 
 
 def _mount(request: SceneRequest, binding: Binding, scene: CellSpec | None, spec: EmbodimentSpec) -> Xform:

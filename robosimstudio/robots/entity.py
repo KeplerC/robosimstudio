@@ -21,6 +21,7 @@ Everything here is a check the port learned to make the hard way:
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from typing import Any
 
@@ -1048,7 +1049,7 @@ class EntityEmbodiment(Entity):
             # bodies, which is the failure rekey_custom_attributes exists for.
             set_body_attribute(builder, "mujoco:gravcomp", 1.0, self.body_indices(builder))
         unlimited_dofs: list[int] = []
-        geared = self._geared_dofs(builder)
+        geared: dict[int, tuple[int, ...]] | None = None  # built on first need: most actuations state no linkage term
         for arm in self.spec.arms:
             index = self._index_arm_builder(builder, arm)
             hand = self.hands.get(arm.name)
@@ -1087,10 +1088,27 @@ class EntityEmbodiment(Entity):
                 # The linkage, not just the driven joints: a finger carried by an
                 # equality moves with the driven one, so its joint physics is the
                 # driven one's too -- damping, friction and armature alike.
+                capped = what == "gripper" and actuation.joint_damping is None and actuation.effort_for(0) > 0
                 if actuation.joint_damping is None and actuation.joint_friction is None and not actuation.armature:
                     linkage = ()
                 else:
+                    geared = self._geared_dofs(builder) if geared is None else geared
                     linkage = sorted({tied for dof in dofs for tied in geared.get(int(dof), (int(dof),))})
+                if capped and dofs:
+                    # A servo stated over a hand keeps the hand's own finger damping unless it says
+                    # otherwise. On a hand whose damping is its speed limit at its own clamp, a lower
+                    # cap crawls: say so, rather than let a grasp time out without a word.
+                    geared = self._geared_dofs(builder) if geared is None else geared
+                    pair = sorted({tied for dof in dofs for tied in geared.get(int(dof), (int(dof),))})
+                    damping = sum(float(builder.joint_damping[d]) for d in pair)
+                    speed = actuation.effort_for(0) / damping if damping > 0 else float("inf")
+                    if speed < 0.05:
+                        warnings.warn(
+                            f"{self.spec.name} {arm.name}: the stated finger servo keeps the hand's own "
+                            f"{damping:g} N*s/m of joint damping, so at its {actuation.effort_for(0):g} N cap a "
+                            f"finger closes at {1e3 * speed:.0f} mm/s; state ActuationSpec.joint_damping to set it",
+                            stacklevel=2,
+                        )
                 for dof in linkage:
                     if actuation.joint_damping is not None:
                         builder.joint_damping[dof] = float(actuation.joint_damping)

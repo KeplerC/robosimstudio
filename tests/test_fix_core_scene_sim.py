@@ -52,6 +52,7 @@ class TestABindingKeepsTheCell(unittest.TestCase):
         from robosimstudio.robots.registry import get_embodiment
         from robosimstudio.scene.compiler import _cross_arm_collisions
         from robosimstudio.specs import Binding
+        from robosimstudio.specs import replace as rss_replace
 
         yam = get_embodiment("yam_bimanual")
         self.assertTrue(yam.cross_arm_collisions, "the YAM's arms collide")
@@ -59,6 +60,7 @@ class TestABindingKeepsTheCell(unittest.TestCase):
         self.assertFalse(_cross_arm_collisions(Binding(cross_arm_collisions=False), yam))
         # A resident robot's pairs were filtered by the scene's import: the default stays off there...
         self.assertFalse(_cross_arm_collisions(Binding(scene_resident=True), yam))
+        self.assertFalse(_cross_arm_collisions(Binding(), rss_replace(yam, asset=None)), "no asset of its own")
         # ...and asking for it outright still reaches the build, which refuses it.
         self.assertTrue(_cross_arm_collisions(Binding(scene_resident=True, cross_arm_collisions=True), yam))
 

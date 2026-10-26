@@ -340,7 +340,11 @@ def parse_staging(section: dict[str, Any]) -> Staging:
         elif key in _FLAGS:
             out[key] = _flag(value)
         elif key in _GAINS:
-            out[key] = _pairs(_clauses(value), what=raw, keys=("ke", "kd", "armature", "effort_limit", "joint_damping"))
+            out[key] = _pairs(
+                _clauses(value),
+                what=raw,
+                keys=("ke", "kd", "armature", "effort_limit", "joint_damping", "joint_friction"),
+            )
         elif key == "episodes":
             out["episodes"] = _episodes(_clauses(value))
         else:
