@@ -168,7 +168,6 @@ def nearer(
     moving_depth: np.ndarray | None = None,
     grow: int = 2,
     slack: float = 0.0015,
-    room: float = 0.1,
 ) -> np.ndarray:
     """``seg`` with its moving pixels kept only where the render drew the moving thing itself.
 
@@ -182,12 +181,13 @@ def nearer(
     Inside the colliders' moving region a pixel stays moving otherwise, unless,
     given the colliders' own ``moving_depth``, the render drew something
     farther than every moving collider around it (``grow`` pixels) by more than
-    ``room`` metres and a tenth of the range: the render's own room behind a
-    rope in the air. A surface of the moving things themselves is never that
-    far: the face behind a protruding key, a seam's recess, the box behind a
-    gripper whose collider bulges past its drawn mesh. (Holding each pixel to
-    the *nearest* moving collider around it instead read those as room, and
-    left the plate's wall as a pale outline round every protruding part.)
+    2 cm and 2 % of the range: the render's own room behind a rope in the air.
+    A surface of the moving things themselves lies within that of the farthest
+    collider round it: the face behind a protruding key, a shallow seam's
+    recess, the box behind a gripper whose collider bulges past its drawn mesh.
+    (Holding each pixel to the *nearest* moving collider around it instead read
+    those as room, and left the plate's wall as a pale outline round every
+    protruding part.)
 
     In the ``grow``-pixel band outside the colliders, a pixel the render drew
     nearer than the static scene, and no farther than the nearest moving
@@ -212,7 +212,7 @@ def nearer(
         farthest = np.nan_to_num(own, nan=0.0)
         if grow > 0:
             farthest = maximum_filter(farthest, size=size)
-        keep &= ~((farthest > 0) & (d > farthest + np.maximum(room, 0.1 * farthest)))
+        keep &= ~((farthest > 0) & (d > farthest + 0.02 + 0.02 * d))
         nearest = np.nan_to_num(own, nan=np.inf)
         if grow > 0:
             nearest = minimum_filter(nearest, size=size)

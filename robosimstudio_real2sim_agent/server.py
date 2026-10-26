@@ -1665,6 +1665,8 @@ class LiveServer:
 
     def cmd_play(self, name: str = "", record: str = "", every: int = 4, camera: str = "", also: str = "") -> dict:
         """Play a routine the scene file binds, the way its button does."""
+        if also and not record:
+            return {"ok": False, "error": "--also draws a take with other renderers: give it --record TAKE"}
         named = self._routine_named(name)
         if isinstance(named, dict):
             return named

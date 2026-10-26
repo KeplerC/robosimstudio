@@ -27,6 +27,7 @@ it and the picture it left, so before and after an edit are two lines apart.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import time
@@ -494,37 +495,64 @@ class Recorder:
         self.grid = writer(self.grid_video, fps=self.fps)
         self.grid_labels = [own, *names]
 
-    def _look_also(self) -> dict[str, np.ndarray]:
-        """The state the take films now, through each ``--also`` renderer, over the camera's plate when it has one."""
+    def _look_also(self, size: tuple[int, int]) -> dict[str, np.ndarray]:
+        """The state the take films now, through each ``--also`` renderer, over the camera's plate when it has one.
+
+        A renderer that fails (a Blender that died, a contended card) is stopped and its tile goes black for the rest
+        of the take, said in :meth:`finish`; the take itself, and every other renderer, carry on."""
         out = {}
         for b, entry in self.also.items():
-            frame = entry["renderer"].render(self.sim.state)[self.cam.name]
-            rgb = stills.to_uint8(np.asarray(frame["rgb"])[..., :3])
-            if self.cam.background:
-                rgb = stills.to_uint8(self.sim.over_plate(self.cam, rgb, depth=frame.get("depth")))
+            if "failed" in entry:
+                out[b] = np.zeros((*size, 3), np.uint8)
+                continue
+            try:
+                frame = entry["renderer"].render(self.sim.state)[self.cam.name]
+                rgb = stills.to_uint8(np.asarray(frame["rgb"])[..., :3])
+                if self.cam.background:
+                    rgb = stills.to_uint8(self.sim.over_plate(self.cam, rgb, depth=frame.get("depth")))
+            except Exception as exc:
+                entry["failed"] = f"{type(exc).__name__}: {exc}"[:300]
+                print(
+                    f"[rss] take {self.name!r}: the {b} renderer stopped ({entry['failed']}); its tile is black from here"
+                )
+                try:
+                    entry.pop("renderer").close()
+                except Exception:
+                    pass
+                rgb = np.zeros((*size, 3), np.uint8)
             out[b] = rgb
         return out
 
-    def _look(self) -> tuple[np.ndarray, np.ndarray, Any]:
-        """The scene as the take films it now: the picture, the named ids, and the particles read for both."""
+    def _look(self) -> tuple[np.ndarray, np.ndarray, Any, dict[str, np.ndarray]]:
+        """The scene as the take films it now: the picture, the named ids, the particles read for both, and the same
+        state through each ``--also`` renderer."""
         sim = self.sim
         sim.sync()
         frame = self.renderer.render(sim.state)[self.cam.name]
         rgb = stills.render_still(sim, self.cam)
         q = _particles(sim) if self.deformable_labels else None  # once a frame, for the ids and the samples both
         seg = name_deformables(sim, self.cam, np.asarray(frame["seg"]).astype(np.int32), self.deformable_labels, q)
-        return rgb, seg, q, self._look_also()
+        return rgb, seg, q, self._look_also(rgb.shape[:2])
 
     def probe(self) -> None:
         """Film one frame and encode it once, before anything the take would replace is touched: a camera, a
         renderer, an id lookup or a video encoder that fails, fails here. The frame is kept for :meth:`start`."""
         look = self._look()
-        self.writer.try_encode(look[0])
-        for b, rgb in look[3].items():
-            self.also[b]["writer"].try_encode(rgb)
-        if self.grid is not None:
-            self.grid.try_encode(grid_frame([look[0], *look[3].values()], self.grid_labels))
+        self._write(look, encode=True)
         self._probed = (int(self.sim.step_count), reset_mark(self.sim), look)
+
+    def _write(self, look: tuple, encode: bool = False) -> None:
+        """Hand one look's pictures to their writers: the take's, each ``--also`` renderer's and the grid's; or, with
+        ``encode``, only try that each encodes (the probe)."""
+        rgb, extra = look[0], look[3]
+        pairs = [(self.writer, rgb)] + [(self.also[b]["writer"], f) for b, f in extra.items()]
+        if self.grid is not None:
+            labels = [self.grid_labels[0]] + [
+                f"{b} (stopped)" if "failed" in self.also[b] else b for b in self.grid_labels[1:]
+            ]
+            pairs.append((self.grid, grid_frame([rgb, *extra.values()], labels)))
+        for writer, frame in pairs:
+            (writer.try_encode if encode else writer.append)(frame)
 
     def start(self, fresh: bool = False) -> None:
         """Take the scene as it stands as the take's beginning: its step count from here, and frame 0 -- the
@@ -561,12 +589,9 @@ class Recorder:
         """Film the scene as it stands, or as ``look`` (:meth:`_look`'s) already filmed it."""
         sim = self.sim
         self._advance()
-        rgb, seg, q, extra = look if look is not None else self._look()
-        self.writer.append(rgb)
-        for b, frame in extra.items():
-            self.also[b]["writer"].append(frame)
-        if self.grid is not None:
-            self.grid.append(grid_frame([rgb, *extra.values()], self.grid_labels))
+        look = look if look is not None else self._look()
+        _rgb, seg, q, _extra = look
+        self._write(look)
         self.segs.append(seg[::SEG_SCALE, ::SEG_SCALE].astype(np.uint8 if len(self.names) < 255 else np.int32))
         try:
             body_q = np.asarray(sim.state.body_q.numpy(), dtype=np.float64)
@@ -599,6 +624,14 @@ class Recorder:
             if self.frames and self.steps != self.last_capture:
                 self.capture()  # the state the script left, which is the "after"
         finally:
+            # the --also videos first, each on its own: one that cannot be written is said, not left looking written
+            for entry in self.also.values():
+                writer = entry.pop("writer", None)
+                try:
+                    if writer is not None:
+                        writer.close()
+                except Exception as exc:
+                    entry.setdefault("failed", f"its video could not be written: {type(exc).__name__}: {exc}"[:300])
             # closed whatever happened above: the writer is an ffmpeg process
             self.close()
         meta = {
@@ -616,8 +649,11 @@ class Recorder:
             "frames": self.frames,
         }
         if self.also:
-            meta["also"] = {b: str(e["video"]) for b, e in self.also.items()}
+            meta["also"] = {b: str(e["video"]) for b, e in self.also.items() if "failed" not in e}
             meta["renderers"] = str(self.grid_video)
+            failed = {b: e["failed"] for b, e in self.also.items() if "failed" in e}
+            if failed:
+                meta["also_failed"] = failed
         (self.run_dir / f"{self.name}.json").write_text(json.dumps(meta, default=_plain))
         if self.segs:
             np.savez_compressed(self.run_dir / f"{self.name}_seg.npz", seg=np.stack(self.segs))
@@ -627,24 +663,33 @@ class Recorder:
             "frames": len(self.frames),
             "seconds": self.frames[-1]["t"] if self.frames else 0.0,
             "wall_seconds": meta["wall_seconds"],
-            **({"also": meta["also"], "renderers": meta["renderers"]} if self.also else {}),
+            **({k: meta[k] for k in ("also", "renderers", "also_failed") if k in meta}),
         }
+
+
+@functools.lru_cache(maxsize=4)
+def _label_font(size: int) -> Any:
+    from PIL import ImageFont
+
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # an older Pillow: its one bitmap size
+        return ImageFont.load_default()
 
 
 def grid_frame(frames: list[np.ndarray], labels: list[str]) -> np.ndarray:
     """The frames side by side, two to a row, each labelled with its renderer, at the first frame's size per tile."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 
     h, w = frames[0].shape[:2]
     cols = 1 if len(frames) == 1 else 2
     rows = (len(frames) + cols - 1) // cols
     sheet = Image.new("RGB", (w * cols, h * rows), (16, 20, 24))
-    try:
-        font = ImageFont.load_default(size=max(14, h // 22))
-    except TypeError:  # an older Pillow: its one bitmap size
-        font = ImageFont.load_default()
+    font = _label_font(max(14, h // 22))
     for i, (frame, label) in enumerate(zip(frames, labels, strict=True)):
-        tile = Image.fromarray(np.asarray(frame)[..., :3]).resize((w, h))
+        tile = Image.fromarray(np.asarray(frame)[..., :3])
+        if tile.size != (w, h):
+            tile = tile.resize((w, h))
         draw = ImageDraw.Draw(tile)
         box = draw.textbbox((10, 8), label, font=font)
         draw.rectangle((box[0] - 6, box[1] - 4, box[2] + 6, box[3] + 4), fill=(0, 0, 0))

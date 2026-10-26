@@ -467,9 +467,16 @@ class Sim(EnvBase):
             entry = self._plate_passes(key)
         cache[key] = entry  # last in is the most recently used
         renderer, bare, _ = entry
+        # one plate pass per state: several renderers drawing the same frame (a take's --also) share it
+        stamp = (key, int(self.step_count), int(getattr(self, "reset_count", 0)), self.state.body_q.numpy().tobytes())
+        memo = self.__dict__.get("_plate_frame")
         try:
-            backdrop = plate.load_plate(path, spec.width, spec.height)
-            full = renderer.render(self.state)[key.name]
+            if memo is not None and memo[0] == stamp:
+                backdrop, full = memo[1], memo[2]
+            else:
+                backdrop = plate.load_plate(path, spec.width, spec.height)
+                full = renderer.render(self.state)[key.name]
+                self._plate_frame = (stamp, backdrop, full)
         except Exception as exc:  # a plate being rewritten, a contended card: this frame as rendered, said once
             self._plate_refused(
                 spec.background, f"camera {spec.name!r}'s plate pass failed ({type(exc).__name__}: {exc})"

@@ -538,6 +538,8 @@ def build_request(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     elif args.cmd == "log":
         req["last"] = args.last
     elif args.cmd == "play":
+        if args.also and not args.record:
+            parser.error("play --also draws a take with other renderers: give it --record TAKE")
         req.update(name=args.name, record=args.record, every=args.every, camera=args.camera, also=args.also)
     elif args.cmd == "show":
         if not args.path and not args.clear:

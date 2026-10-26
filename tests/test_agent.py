@@ -372,6 +372,8 @@ class TestTheCommandLine(unittest.TestCase):
             parser.parse_args(["play", "tidy", "--record", "t1", "--also", "gl,blender"]), parser
         )
         self.assertEqual(req["also"], "gl,blender")
+        with self.assertRaises(SystemExit):
+            ctl.build_request(parser.parse_args(["play", "tidy", "--also", "gl"]), parser)  # nothing filmed to draw
         req, _ = ctl.build_request(parser.parse_args(["show", "p.png", "--label", "pair"]), parser)
         self.assertTrue(Path(req["path"]).is_absolute() and req["label"] == "pair" and not req["clear"])
         self.assertEqual(ctl.build_request(parser.parse_args(["show", "--clear"]), parser)[0]["clear"], True)

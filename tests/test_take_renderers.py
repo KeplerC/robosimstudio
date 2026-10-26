@@ -61,6 +61,38 @@ class AlsoRenderers(unittest.TestCase):
                 self.assertEqual(first.shape[1], 2 * int(rec.cam.width), "the two renderers side by side")
                 self.assertTrue(np.isfinite(first).all())
 
+    def test_a_renderer_that_dies_mid_take_leaves_the_take_and_a_black_tile(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio_real2sim_agent import checks
+
+        scene = rss.Scene(cell="bench_075", name="take_renderers_dies")
+        scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.2)))
+        with mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_RENDERER": "gl"}), redirect_stdout(io.StringIO()):
+            sim = scene.build()
+            with tempfile.TemporaryDirectory() as tmp:
+                server = types.SimpleNamespace(sim=sim, scene=scene, run_dir=tmp)
+                rec = checks.Recorder(server, "dies", every=2, also="tiled")
+                rec.probe()
+                rec.start()
+                real = rec.also["tiled"]["renderer"]
+                calls = {"n": 0}
+
+                def flaky(state):
+                    calls["n"] += 1
+                    if calls["n"] > 2:
+                        raise RuntimeError("the card went away")
+                    return real.render(state)
+
+                rec.also["tiled"]["renderer"] = types.SimpleNamespace(render=flaky, close=real.close)
+                for _ in range(10):
+                    sim.run(1)
+                    rec.maybe()
+                out = rec.finish()
+                self.assertIn("tiled", out["also_failed"])
+                self.assertNotIn("tiled", out.get("also", {}), "a renderer that stopped is not offered as a video")
+                n = len(json.loads((Path(tmp) / "dies.json").read_text())["frames"])
+                self.assertEqual((_frames(Path(out["video"])), _frames(Path(out["renderers"]))), (n, n))
+
     def test_an_unknown_renderer_is_refused_before_filming(self) -> None:
         import robosimstudio as rss
         from robosimstudio_real2sim_agent import checks

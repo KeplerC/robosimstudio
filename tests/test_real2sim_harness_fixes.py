@@ -1605,10 +1605,6 @@ class HeldUpByARoutine(unittest.TestCase):
             self.assertGreaterEqual(ctl.TIMEOUTS[cmd], ctl.TIMEOUTS["reload"], f"{cmd} waits out a long step")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GridOfRenderers(unittest.TestCase):
     def test_frames_go_two_to_a_row_each_labelled(self) -> None:
         from robosimstudio_real2sim_agent import checks
@@ -1619,3 +1615,7 @@ class GridOfRenderers(unittest.TestCase):
         self.assertEqual(tuple(grid[30, 50]), (200, 200, 200), "the first tile's own pixels past its label")
         self.assertEqual(tuple(grid[70, 100]), (16, 20, 24), "an empty fourth place")
         self.assertLess(int(grid[10, 12].max()), 255 + 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
