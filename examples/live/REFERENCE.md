@@ -406,8 +406,10 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   NOTE: the outcome is not repeatable, and the report says so. A replay
   that fails in its own code still fails. When it lowered
   something, a different end is a NOTE only where `plain`, which changes
-  nothing, ended the same things off by the same measure (position, shape or
-  turn) and at least half as far. A thing it lost on the way or a thing it
+  nothing, missed the same thing by the same measure (position, shape or
+  turn) past the tolerance, and `built` ended no farther from `plain`'s end
+  than `plain`'s is from the written one: the two are samples of the scene's
+  spread, and a slip outside it fails. A thing it lost on the way or a thing it
   knocked over that the written run left alone still fails, and so does a
   routine that stops. A replay the page cut (a reset, a save, Stop) is not
   read.

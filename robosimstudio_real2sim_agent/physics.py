@@ -1711,13 +1711,13 @@ def _misses(
     ``position``, ``shape`` and ``turn`` in tolerances, and empty for the others. One entry a thing."""
     out = []
     for k in {**written.get("things", {}), **written.get("deformables", {})} if bystanders else ():
-        a = run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
+        a = _entry(run, k)
         if k not in names and a and a.get("moved_max_mm", 0.0) > mm:  # left alone as written, knocked away here
             moved = a["moved_max_mm"]
             out.append(_Miss(k, "knocked", {}, {}, f"{k}, which the written run left alone, was moved {moved:.0f} mm"))
     for k in names:
-        a = run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
-        b = written.get("things", {}).get(k) or written.get("deformables", {}).get(k)
+        a = _entry(run, k)
+        b = _entry(written, k)
         if not a or not b:
             continue
         if excursion and a.get("moved_max_mm", 0.0) < b.get("moved_max_mm", 0.0) / 3:
@@ -1760,6 +1760,18 @@ def _ended_elsewhere(
     return misses[0].words if misses else ""
 
 
+def _entry(run: dict, k: str) -> dict | None:
+    """A run's record of thing ``k``, rigid or deformable."""
+    return run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
+
+
+def _cut(run: dict, failed: bool = True) -> str:
+    """Why a replay was not read, ``""`` when it was: the page cut it (a reset, a save, Stop) or, with ``failed``, its
+    own code broke (``FAILED``; ``built`` fails that instead)."""
+    out = str(run.get("outcome", ""))
+    return f"not read: {out}" if out.startswith((STOPPED, FAILED) if failed else STOPPED) else ""
+
+
 def _end_offset(a: dict, b: dict, axis: list[float] | None = None) -> tuple[float, float, float]:
     """How far one run's end of a thing is from another's: position [mm], shape (a deformable's particles) [mm] and
     turn [deg]; a thing round about ``axis`` counts only a tilt of that axis, and a ball (``[0, 0, 0]``) no turn."""
@@ -1788,23 +1800,22 @@ def _within_spread(misses: list[_Miss], run: dict, plain: dict, written: dict, a
     if not misses or any(m.kind != "end" for m in misses):
         return ""
     tol = {"position": END_MM, "shape": END_MM / 2, "turn": END_DEG}
+    spreads: dict[str, dict[str, float]] = {}
     for m in misses:
-        a = run.get("things", {}).get(m.thing) or run.get("deformables", {}).get(m.thing)
-        p = plain.get("things", {}).get(m.thing) or plain.get("deformables", {}).get(m.thing)
-        b = written.get("things", {}).get(m.thing) or written.get("deformables", {}).get(m.thing)
+        a = _entry(run, m.thing)
+        p = _entry(plain, m.thing)
+        b = _entry(written, m.thing)
         if not (a and p and b):
             return ""
         apart = dict(zip(tol, _end_offset(a, p, (axes or {}).get(m.thing)), strict=True))  # the run from plain
         spread = dict(zip(tol, _end_offset(p, b, (axes or {}).get(m.thing)), strict=True))  # plain from written
+        spreads[m.thing] = spread
         for dim, v in m.far.items():
             if v > 1.0 and (spread[dim] <= tol[dim] or apart[dim] > max(tol[dim], spread[dim])):
                 return ""
     worst = max(misses, key=lambda m: max(m.far.values()))
     dim = max(worst.far, key=worst.far.get)  # the measure the run missed most by, as plain missed it
-    p = plain.get("things", {}).get(worst.thing) or plain.get("deformables", {}).get(worst.thing)
-    b = written.get("things", {}).get(worst.thing) or written.get("deformables", {}).get(worst.thing)
-    off = dict(zip(tol, _end_offset(p, b, (axes or {}).get(worst.thing)), strict=True))
-    return _miss_words(worst.thing, dim, off[dim])
+    return _miss_words(worst.thing, dim, spreads[worst.thing][dim])
 
 
 def _model_lines(
@@ -1916,7 +1927,7 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
     if drop.get("nonfinite"):
         line(None, "drop", "not read: the solver blew up in it")
         return
-    if str(drop.get("outcome", "")).startswith((STOPPED, FAILED)):
+    if _cut(drop):
         line(None, "drop", f"not read: {drop['outcome']}")
         return
     if drop.get("release_rows", 0) < int(drop.get("release_skip", 10)) + RELEASE_WINDOW // 2:
@@ -2009,7 +2020,7 @@ def _plain_gate(runs: dict, written: dict) -> tuple[dict | None, str]:
         return plain, "not read: the written replay did not finish"
     if plain.get("nonfinite"):
         return plain, "not read: the solver blew up in it"
-    if plain["outcome"] == PLAIN_SLOW or plain["outcome"].startswith((STOPPED, FAILED)):
+    if plain["outcome"] == PLAIN_SLOW or _cut(plain):
         return plain, f"not read: {plain['outcome']}"
     if plain["outcome"] != "finished":  # a routine flaky run to run stops too: a note, not proof of anything
         return plain, (
@@ -2224,6 +2235,18 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             holding |= set(model.get("drive_things", [f.split("'s ", 1)[0] for f in model.get("drives", [])]))
         rows_on = [k for k in frozen.get("robot_equalities_on", []) if "suction" not in labels.get(str(k), "")]
         holding |= {model.get("robot_equality_things", {}).get(str(k), "") for k in rows_on} - {""}
+        # ... and that the contact line names too (it reads the written run): only then does its FAIL cover the move
+        w = runs.get("written") or {}
+        named = set(model.get("tie_things", [f.split(" by a ", 1)[0] for f in model.get("ties", [])]))
+        named |= set(model.get("kinematic", [])) | set(w.get("latched", []))
+        if driven:
+            named |= set(model.get("drive_things", [f.split("'s ", 1)[0] for f in model.get("drives", [])]))
+        named |= {
+            model.get("robot_equality_things", {}).get(str(k), "")
+            for k in w.get("robot_equalities_on", [])
+            if "suction" not in labels.get(str(k), "")
+        }
+        holding &= named
         unknown_hold = bool(frozen.get("hooks_added", 0)) or any(
             not model.get("robot_equality_things", {}).get(str(k)) for k in rows_on
         )
@@ -2282,6 +2305,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         line(None, "open", "not read: this hand has no fingers to hold open")
     elif opened and opened.get("nonfinite"):
         line(None, "open", "not read: the solver blew up in it")
+    elif opened and _cut(opened):
+        line(None, "open", _cut(opened))
     elif opened and (written.get("outcome") != "finished" or not names):
         line(
             None,
@@ -2323,8 +2348,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             return None, f"not read: with {what} the solver blew up ({k} at step {at})", []
         if written.get("outcome") != "finished":
             return None, "not read: the written replay did not finish, so there is no end to hold this one to", []
-        if run["outcome"].startswith(STOPPED):  # the page cut it (a reset, a save, Stop), not the routine
-            return None, f"not read: {run['outcome']}", []
+        if _cut(run, failed=False):  # the page cut it (a reset, a save, Stop), not the routine
+            return None, _cut(run, failed=False), []
         if run["outcome"] != "finished":
             return False, f"with {what} the routine stopped: {run['outcome']}", []
         misses = _misses(run, written, names, round_axes=axes)
@@ -2340,7 +2365,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # there is the scene's own spread from run to run, not a grip that needs more than the real hand
         ok, detail, misses = held(built, robot)
         same = f"built changed nothing: no rigid shape's friction here is above {REAL_MU:g}" + (
-            " and the arm's torque is already the real arm's"
+            " and no arm's torque is above the real arm's"
             if (per_arm and all(model.get("arm_torque", {}).values())) or (torque and not model.get("arm_torque"))
             else " (no torque limits known for every arm)"
         )
