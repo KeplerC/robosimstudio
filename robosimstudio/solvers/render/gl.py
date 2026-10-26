@@ -63,6 +63,10 @@ _VISION_TO_GL = np.diag([1.0, -1.0, -1.0])
 _DRAW_DISTANCE = 1000.0
 """How far colour is drawn [m]: the tiled tracer's ``max_distance``, so the two agree on a horizon."""
 
+MAX_SPHERES = 50_000
+"""The most grains drawn as spheres a camera: each is one MuJoCo geom set from Python, about 5 us, so a heap of
+more draws every k-th grain, each k^(1/3) times larger, and says so once."""
+
 _KEY_DIFFUSE = 0.6
 """A light's diffuse level per unit of intensity: the key's at ``key_intensity`` 1."""
 
@@ -78,12 +82,14 @@ def _quat_wxyz(rotation: np.ndarray) -> np.ndarray:
     return quat
 
 
-PLATFORMS = ("egl", "osmesa", "cgl", "glfw")
-"""The OpenGL platforms MuJoCo opens a context on: EGL and OSMesa on Linux, CGL (headless) and GLFW on a Mac."""
+PLATFORMS = {"darwin": ("cgl", "glfw")}
+"""The OpenGL platforms this opens a context on, by ``sys.platform``: CGL (headless) and GLFW on a Mac, which has
+no EGL; EGL and OSMesa everywhere else -- where a ``glfw`` named for MuJoCo's viewer is not taken, since a GLFW
+window needs a display a headless server does not have."""
 
 
 def _platform() -> str:
-    """The OpenGL platform, decided once for the process: one of :data:`PLATFORMS`.
+    """The OpenGL platform, decided once for the process: one of :data:`PLATFORMS`' for this OS.
 
     PyOpenGL binds one platform the first time it is imported, and importing
     ``mujoco.egl`` sets ``PYOPENGL_PLATFORM=egl`` before it can fail -- after
@@ -92,11 +98,12 @@ def _platform() -> str:
     ``PYOPENGL_PLATFORM`` or ``MUJOCO_GL`` already names, else CGL on a Mac
     (which has no EGL) and EGL elsewhere -- MuJoCo's own defaults.
     """
+    here = PLATFORMS.get(sys.platform, ("egl", "osmesa"))
     for variable in ("PYOPENGL_PLATFORM", "MUJOCO_GL"):
         named = os.environ.get(variable, "").strip().lower()
-        if named in PLATFORMS:
+        if named in here:
             return named
-    return "cgl" if sys.platform == "darwin" else "egl"
+    return here[0]
 
 
 def _egl_devices() -> list[tuple[bool, int | None]]:
@@ -424,12 +431,20 @@ class RendererGL(RendererBase):
         self._context = _context(width, height, egl_device, int(device.ordinal) if device.is_cuda else 0)
         self._gl = mujoco.MjrContext(self.mj_model, mujoco.mjtFontScale.mjFONTSCALE_150)
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, self._gl)
-        self._scene = mujoco.MjvScene(self.mj_model, maxgeom=self.mj_model.ngeom + self._points + 16)
+        drawn = min(self._points, MAX_SPHERES + len(self._drawables.points))  # a stride's rounding, per batch
+        self._scene = mujoco.MjvScene(self.mj_model, maxgeom=self.mj_model.ngeom + drawn + 64)
         self._particle_q: np.ndarray | None = None
         self._point_frame: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
         """This frame's spheres, per batch: centres, sizes and colour (see :meth:`_add_points`)."""
         self._point_range = (0, 0)
         """Where in the drawn scene :meth:`_add_points` put its spheres, for the segmentation lookup."""
+        self._told_full = False
+        if self._points > MAX_SPHERES:
+            print(
+                f"[gl] {self._points} grains: drawing every {-(-self._points // MAX_SPHERES)}th, larger, "
+                f"to stay under {MAX_SPHERES} spheres a camera",
+                flush=True,
+            )
         self._option = mujoco.MjvOption()
         self._camera = mujoco.MjvCamera()
         self._camera.type = mujoco.mjtCamera.mjCAMERA_FIXED
@@ -479,6 +494,11 @@ class RendererGL(RendererBase):
         init, sphere, eye = mujoco.mjv_initGeom, mujoco.mjtGeom.mjGEOM_SPHERE, np.eye(3).ravel()
         for centres, sizes, rgba in self._point_frame:
             room = min(len(centres), int(scene.maxgeom) - int(scene.ngeom))
+            if room < len(centres) and not self._told_full:
+                self._told_full = True
+                print(
+                    f"[gl] the scene holds {scene.maxgeom} geoms: {len(centres) - room} grains are left out", flush=True
+                )
             for k in range(room):
                 n = scene.ngeom
                 geom = scene.geoms[n]
@@ -531,11 +551,13 @@ class RendererGL(RendererBase):
             if self._particle_q is not None and self._deforming:
                 self._deform(self._particle_q)
             if self._particle_q is not None:
+                # every k-th grain past MAX_SPHERES, each 3rd-root-of-k larger, so a heap keeps its volume
+                stride = max(1, -(-self._points // MAX_SPHERES))
                 for batch in self._drawables.points:  # gathered once a frame, drawn once a camera
-                    sizes = np.zeros((len(batch.radii), 3))
-                    sizes[:, 0] = batch.radii
+                    sizes = np.zeros((len(batch.radii[::stride]), 3))
+                    sizes[:, 0] = batch.radii[::stride] * stride ** (1.0 / 3.0)
                     rgba = np.array([*batch.color, 1.0], dtype=np.float32)
-                    self._point_frame.append((batch.positions(self._particle_q), sizes, rgba))
+                    self._point_frame.append((batch.positions(self._particle_q)[::stride], sizes, rgba))
         extent = float(self.mj_model.stat.extent)
         near = float(self.mj_model.vis.map.znear) * extent
         far = float(self.mj_model.vis.map.zfar) * extent

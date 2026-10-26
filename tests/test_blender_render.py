@@ -129,6 +129,11 @@ class TestItDrawsWhatTiledDraws(unittest.TestCase):
             self.assertIs(self.sim._still_renderer, renderer, "re-aimed, not started again")
             self.assertEqual(renderer.cameras, [top])
             self.assertFalse(np.allclose(first, second))
+            # a camera over a plate asks depth beside rgb and another does not: still the one Blender
+            picture = self.sim.render(side, channels=("rgb",))
+            self.assertIs(self.sim._still_renderer, renderer)
+            self.assertEqual(sorted(picture), ["rgb"])
+            self.assertEqual(renderer.channels, {"side": ("rgb",)})
 
     def test_a_picture_follows_the_state(self) -> None:
         cam = _camera("side", eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))

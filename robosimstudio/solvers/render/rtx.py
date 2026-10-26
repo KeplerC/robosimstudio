@@ -1192,6 +1192,8 @@ class RendererRTX(RendererBase):
 
     name = "rtx"
     supported_channels = ("rgb", "depth")
+    warms_up = True
+    first_note = "the first path-traced picture in a process compiles the renderer's shaders, which can take minutes -- later ones take seconds"
     devices = ("cuda",)  # OVRTX path traces on RT cores; there is no CPU path
 
     wants: tuple[str, ...] = (

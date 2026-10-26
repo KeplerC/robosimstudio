@@ -616,6 +616,7 @@ class TestUp(unittest.TestCase):
         argv = ["--run-dir", str(self.tmp), "up", "--scene", str(scene)]
         self.assertEqual(ctl.main([*argv, "--renderer", "auto"]), 0, "the machine's pick is what it draws with")
         self.assertEqual(ctl.main([*argv, "--renderer", "gl"]), 1, "another renderer is not silently ignored")
+        self.assertEqual(ctl.main([*argv, "--renderer", "blendr"]), 2, "a misspelling is said before the page is")
 
     def test_up_refuses_a_missing_scene_file(self) -> None:
         rc = ctl.main(["--run-dir", str(self.tmp), "up", "--scene", str(self.tmp / "absent.py")])

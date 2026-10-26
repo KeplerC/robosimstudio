@@ -910,6 +910,10 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
 
 
 def cmd_up(args: argparse.Namespace, sock: Path) -> int:
+    asked = str(getattr(args, "renderer", "") or "").strip()
+    if asked and asked not in RENDERERS and "." not in asked:  # before a running page is asked anything
+        print(f"ctl: no renderer {asked!r}; choose {', '.join(RENDERERS)}, or a dotted path", file=sys.stderr)
+        return 2
     scene = Path(args.scene)
     if not scene.is_file():
         print(
@@ -953,10 +957,6 @@ def cmd_up(args: argparse.Namespace, sock: Path) -> int:
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)  # before anything is written into it
     log_path = Path(args.log) if args.log else run_dir / "serve.log"
-    asked = str(getattr(args, "renderer", "") or "").strip()
-    if asked and asked not in RENDERERS and "." not in asked:
-        print(f"ctl: no renderer {asked!r}; choose {', '.join(RENDERERS)}, or a dotted path", file=sys.stderr)
-        return 2
     proc = spawn_server(serve_argv(args, sock), log_path, asked)
     (run_dir / "serve.pid").write_text(f"{proc.pid}\n")
     (run_dir / "serve.log.path").write_text(f"{proc.pid} {log_path.resolve()}\n")  # for a page with no /proc

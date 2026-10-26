@@ -191,6 +191,7 @@ class RendererBlender(RendererBase):
     name = "blender"
     supported_channels = ("rgb", "depth")
     retargets = True  # every frame sends its cameras: a new viewpoint costs no new Blender
+    first_note = "the first Blender picture starts Blender and hands it the scene, which takes seconds"
     devices = ("cpu", "cuda")  # Blender is its own process and renders wherever it can, whatever device the model is on
     wants: tuple[str, ...] = (
         "finishes",
@@ -260,24 +261,25 @@ class RendererBlender(RendererBase):
         self._tmp = tempfile.mkdtemp(prefix="rss_blender_")
         self._log = Path(self._tmp) / "blender.log"
         self._rest = model.particle_q.numpy() if int(getattr(model, "particle_count", 0) or 0) else None
-        header, blobs, self._bodies, self._drawables = _describe(
-            model,
-            finishes=finishes,
-            deformables=deformables,
-            deformable_colors=deformable_colors,
-            deformable_finishes=deformable_finishes,
-        )
-        header.update(
-            op="scene",
-            engine=engine,
-            device=(device or os.environ.get(DEVICE_ENV, "") or "auto").strip(),
-            samples=int(samples if samples is not None else QUALITY_SAMPLES[quality]),
-            denoise=bool(denoise),
-            threads=int(threads),
-            lights=_lights(environment, light_direction, key_intensity, fill_lights, shadows, cell, surface_z),
-            world=_world(environment, ambient, background),
-        )
         try:
+            header, blobs, self._bodies, self._drawables = _describe(
+                model,
+                finishes=finishes,
+                deformables=deformables,
+                deformable_colors=deformable_colors,
+                deformable_finishes=deformable_finishes,
+                rest=self._rest,
+            )
+            header.update(
+                op="scene",
+                engine=engine,
+                device=(device or os.environ.get(DEVICE_ENV, "") or "auto").strip(),
+                samples=int(samples if samples is not None else QUALITY_SAMPLES[quality]),
+                denoise=bool(denoise),
+                threads=int(threads),
+                lights=_lights(environment, light_direction, key_intensity, fill_lights, shadows, cell, surface_z),
+                world=_world(environment, ambient, background),
+            )
             self._start()
             reply, _ = self._ask(header, blobs)
         except BaseException:
@@ -367,14 +369,14 @@ class RendererBlender(RendererBase):
         if self._drawables:
             for part in self._drawables.meshes:
                 header["deformables"].append(len(blobs))
-                blobs.append(np.ascontiguousarray(part.vertices(particle_q)[0], dtype=np.float32))
+                blobs.append(np.ascontiguousarray(part.positions(particle_q), dtype=np.float32))
             for batch in self._drawables.points:
                 header["points"].append(len(blobs))
                 blobs.append(np.ascontiguousarray(batch.positions(particle_q), dtype=np.float32))
             for surface in self._drawables.surfaces:
                 verts, tris = surface.mesh(particle_q)
                 header["surfaces"].append([len(blobs), len(blobs) + 1])
-                blobs += [verts, tris]
+                blobs += [np.ascontiguousarray(verts), np.ascontiguousarray(tris)]
         header["cameras"] = []
         for cam in self.cameras:
             k = cam.intrinsics
@@ -441,6 +443,7 @@ def _describe(
     deformables: Mapping[str, Any] | None,
     deformable_colors: Mapping[str, Sequence[float]] | None,
     deformable_finishes: Mapping[str, Any] | None,
+    rest: np.ndarray | None = None,
 ) -> tuple[dict, list[Any], list[int], Any]:
     """The ``scene`` message: every visible shape, the deformables and the particles, and the bodies to pose."""
     from robosimstudio.core.render.deformables import deformable_drawables
@@ -500,7 +503,8 @@ def _describe(
         meshes.append(entry)
 
     drawables = deformable_drawables(model, deformables, deformable_colors, surfaces=True)
-    rest = model.particle_q.numpy() if drawables else None
+    if drawables and rest is None:
+        rest = model.particle_q.numpy()
     deformable_list, point_list = [], []
     for i, part in enumerate(drawables.meshes):
         finish = (deformable_finishes or {}).get(part.name) or finish_for(part.color)
@@ -514,7 +518,7 @@ def _describe(
         }
         blobs.append(np.ascontiguousarray(part.triangles, dtype=np.int32))
         entry["verts"] = len(blobs)
-        blobs.append(np.ascontiguousarray(part.vertices(rest)[0], dtype=np.float32))
+        blobs.append(np.ascontiguousarray(part.positions(rest), dtype=np.float32))
         deformable_list.append(entry)
     for i, batch in enumerate(drawables.points):
         finish = (deformable_finishes or {}).get(batch.name) or finish_for(batch.color)

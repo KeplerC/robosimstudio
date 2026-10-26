@@ -63,7 +63,10 @@ def send(sock: socket.socket, header: dict, blobs: list | tuple = ()) -> None:
     head = json.dumps({**header, "nblobs": len(blobs)}).encode("utf-8")
     parts = [_LEN.pack(len(head)), head]
     for blob in blobs:
-        data = memoryview(blob).cast("B") if not isinstance(blob, bytes | bytearray) else blob
+        data = blob
+        if not isinstance(blob, bytes | bytearray):
+            view = memoryview(blob)
+            data = view.cast("B") if view.c_contiguous else view.tobytes()  # a strided view is copied, not refused
         parts += [_LEN.pack(len(data)), data]
     for part in parts:
         sock.sendall(part)
@@ -238,6 +241,7 @@ class World:
                 data.shape = "RECTANGLE"
                 data.size, data.size_y = (float(v) for v in spec["size"])
             obj = bpy.data.objects.new(f"light{i}", data)
+            obj.visible_camera = False  # a light, not a thing: the panel is not in the picture, nor in the depth
             self.scene.collection.objects.link(obj)
             # a light shines down its local -z: turn that onto the direction it travels
             direction = Vector(spec.get("direction", (0.0, 0.0, -1.0))).normalized()

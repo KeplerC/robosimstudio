@@ -373,8 +373,6 @@ class Sim(EnvBase):
             frame = sim.render()
             imageio.imwrite("still.png", frame["rgb"])
         """
-        from robosimstudio.solvers.render import PUBLIC
-
         spec = self._camera_for(camera)
         backend, why = self.platform.renderer_for("")
         from robosimstudio.solvers.render import supported_channels
@@ -383,18 +381,23 @@ class Sim(EnvBase):
         if spec.background and "rgb" in asked and "depth" not in asked and "depth" in supported_channels(backend):
             asked += ("depth",)  # the plate goes wherever the render's own depth is the static scene's
         # a backend that takes its cameras every frame keeps one renderer across viewpoints (RendererBase.aim)
-        retargets = bool(getattr(_backend_class(backend), "retargets", False))
-        key = (backend, asked) if retargets else (backend, spec, asked)
+        cls = _backend_class(backend)
+        retargets = bool(getattr(cls, "retargets", False))
+        # a backend that takes its cameras and channels every frame keeps one renderer across viewpoints
+        # (RendererBase.aim): a camera over a plate asks depth as well, another does not
+        key = (backend,) if retargets else (backend, spec, asked)
         if self._still_renderer is None or self._still_key != key:
             if self._still_renderer is not None:
                 self._still_renderer.close()
             self._say_fallback(backend, why)
             self._still_renderer = self.make_renderer(backend, cameras=[spec], channels=list(asked))
             self._still_key = key
-            if backend == PUBLIC:
-                self._still_renderer.render(self.state)  # the path tracer's first frame only builds the stage
-        elif retargets and self._still_renderer.cameras != [spec]:
-            self._still_renderer.aim([spec])
+            if getattr(cls, "warms_up", False):
+                self._still_renderer.render(self.state)  # the first frame only builds the stage
+        elif retargets and (
+            self._still_renderer.cameras != [spec] or self._still_renderer.channels[spec.name] != asked
+        ):
+            self._still_renderer.aim([spec], channels=asked)
         self.sync()
         frame = self._still_renderer.render(self.state)[spec.name]
         if spec.background and "rgb" in frame:

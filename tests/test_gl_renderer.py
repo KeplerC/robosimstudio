@@ -69,8 +69,16 @@ class TestWhichOpenGL(unittest.TestCase):
             mock.patch.object(gl.sys, "platform", "darwin"),
         ):
             self.assertEqual(gl._platform(), "glfw")
-        with mock.patch.dict(os.environ, {**clear, "MUJOCO_GL": "osmesa"}):
+        with (
+            mock.patch.dict(os.environ, {**clear, "MUJOCO_GL": "osmesa"}),
+            mock.patch.object(gl.sys, "platform", "linux"),
+        ):
             self.assertEqual(gl._platform(), "osmesa")
+        with (
+            mock.patch.dict(os.environ, {**clear, "MUJOCO_GL": "glfw"}),
+            mock.patch.object(gl.sys, "platform", "linux"),
+        ):
+            self.assertEqual(gl._platform(), "egl", "a headless server exporting glfw for MuJoCo's viewer keeps EGL")
 
 
 class TestColours(unittest.TestCase):

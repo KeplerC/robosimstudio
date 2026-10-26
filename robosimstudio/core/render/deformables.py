@@ -77,6 +77,11 @@ class DeformableMesh:
         n = len(self.particles)
         return n * self.sides + 2 if self.tube_radius > 0.0 else n
 
+    def positions(self, particle_q: np.ndarray) -> np.ndarray:
+        """This frame's vertices alone, ``float64 [vertex_count, 3]``, for a renderer that makes its own normals."""
+        q = np.asarray(particle_q, dtype=np.float64)[self.particles]
+        return tube_points(q, self.tube_radius, self.sides)[0] if self.tube_radius > 0.0 else q
+
     def vertices(self, particle_q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """This frame's ``(vertices, normals)``, ``float64 [vertex_count, 3]`` each, in world metres."""
         q = np.asarray(particle_q, dtype=np.float64)[self.particles]

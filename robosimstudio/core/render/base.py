@@ -105,15 +105,32 @@ class RendererBase:
         self._channel_override = tuple(channels) if channels is not None else None
         self._take_cameras(cameras)
 
-    def aim(self, cameras: Sequence[CameraSpec]) -> None:
-        """Render these cameras from the next frame on, with the channels this renderer was built for.
+    first_note: str = ""
+    """What the first picture in a process costs with this backend, when that is worth saying while it is drawn
+    (the path tracer compiles its shaders, Blender starts); a page's ``status`` shows it."""
+
+    warms_up: bool = False
+    """Whether a new renderer's first frame only builds its stage and is drawn again before it is kept."""
+
+    def aim(self, cameras: Sequence[CameraSpec], channels: Sequence[str] | None = None) -> None:
+        """Render these cameras from the next frame on.
+
+        Args:
+            cameras: The cameras.
+            channels: Restrict every camera to these; ``None`` keeps the restriction the renderer was built with.
 
         Raises:
             NotImplementedError: If the backend builds its cameras in (:attr:`retargets` is false).
         """
         if not self.retargets:
             raise NotImplementedError(f"renderer {self.name!r} builds its cameras in; build another for these")
-        self._take_cameras(cameras)
+        kept = getattr(self, "_channel_override", None)
+        self._channel_override = tuple(channels) if channels is not None else kept
+        try:
+            self._take_cameras(cameras)
+        except ValueError:
+            self._channel_override = kept
+            raise
 
     def _take_cameras(self, cameras: Sequence[CameraSpec]) -> None:
         if not cameras:

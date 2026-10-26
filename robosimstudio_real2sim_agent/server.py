@@ -138,13 +138,20 @@ READS_THE_SCENE = ("snapshot", "compare", "check", "eval", "play", "physics", "r
 not build, a bare scene standing in, a save not built yet), and they are refused while no scene is in."""
 MISSING_STAMPS = object()
 """The stamps not given: the status takes them itself."""
-FIRST_RENDER = {
-    "rtx": "; the first path-traced picture in a process compiles the renderer's shaders, "
-    "which can take minutes -- later ones take seconds",
-    "blender": "; the first Blender picture in a process starts Blender and hands it the scene, "
-    "which takes seconds -- a frame then takes about a second on a GPU, several on a CPU",
-}
-"""What the first picture in a process costs, by renderer, said in ``status`` while it is drawn."""
+
+
+def first_render_note(renderer: str) -> str:
+    """What the first picture in a process costs with this renderer, for ``status`` while it is drawn
+    (``RendererBase.first_note``); ``""`` when it costs nothing worth saying, or the name cannot be resolved."""
+    if not renderer:
+        return ""
+    try:
+        from robosimstudio.solvers.render import backend_class
+
+        note = str(getattr(backend_class(renderer), "first_note", "") or "")
+    except Exception:  # a dotted path that does not import: the render itself will say so
+        return ""
+    return f"; {note}" if note else ""
 
 
 def _read_replay(run: dict) -> bool:
@@ -1176,7 +1183,7 @@ class LiveServer:
             or (name in ("play", "eval") and bool(request.get("record")))
         )
         if what and renders and not self.rendered:
-            what += FIRST_RENDER.get(self.renderer()[0], "")
+            what += first_render_note(self.renderer()[0])
         try:
             with self._busy(what) if what else nullcontext():
                 reply = handler(**{k: v for k, v in request.items() if k != "cmd"})
