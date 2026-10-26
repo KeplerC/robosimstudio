@@ -277,10 +277,11 @@ class Verdict(unittest.TestCase):
     def test_a_hold_that_names_no_thing_is_pointed_at(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
-        runs["written"]["robot_equalities_on"] = [7]  # only the written run records an equality row
+        runs["written"]["hooks_added"] = 1  # only a hook names no thing
         result = physics.verdict(CLEAN, runs)
-        self.assertIn("(an equality row, a hook) names no thing: say if it holds this", result["report"])
+        self.assertIn("substep hook (a dragger or a pin), which names no thing: say if it holds this", result["report"])
         self.assertIn("crate moved 3.0 mm with the robot frozen: a few millimetres", result["report"])
+        runs["written"]["hooks_added"] = 0
         runs["written"]["robot_equalities_on"] = [3]
         model = {**CLEAN, "robot_equalities": {"3": "a weld"}, "robot_equality_things": {"3": "crate"}}
         result = physics.verdict(model, runs)
@@ -341,15 +342,17 @@ class Verdict(unittest.TestCase):
 
     def test_a_frozen_replay_cut_or_broken_is_read_only_for_a_push_it_proved(self) -> None:
         runs = _clean_runs()
-        for outcome in (physics.STOPPED, physics.FAILED + ": RuntimeError: x"):
+        for outcome in (physics.STOPPED, physics.FAILED + ": Broken: holding the robot's targets"):
             runs["frozen"] = _run(outcome=outcome, moved=0.3, end=(0.4, 0.0, 0.9), turn=0.0)
             result = physics.verdict(CLEAN, runs)
             self.assertIsNone(_words(result)["frozen"])
             self.assertIn("not read: " + outcome[:20], result["report"])
-            runs["frozen"] = _run(outcome=outcome, moved=40.0, end=(0.4, 0.0, 0.9), turn=0.0)  # pushed before the cut
-            result = physics.verdict(CLEAN, runs)
-            self.assertIs(_words(result)["frozen"], False)
-            self.assertIn("(before the replay was cut", result["report"])
+        runs["frozen"] = _run(outcome=physics.STOPPED, moved=40.0, end=(0.4, 0.0, 0.9), turn=0.0)  # pushed, then cut
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["frozen"], False)
+        self.assertIn("(before the replay was cut", result["report"])
+        runs["frozen"]["outcome"] = physics.FAILED + ": Broken: holding the robot's targets"  # the robot was not frozen
+        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["frozen"])
 
     def test_a_lost_grip_after_another_miss_is_said(self) -> None:
         runs = _clean_runs()
@@ -396,6 +399,18 @@ class Verdict(unittest.TestCase):
         runs["frozen"] = _run(outcome=physics.STOPPED, moved=3.1, end=(0.4, 0.0, 0.9), turn=0.0)
         result = physics.verdict(model, runs)
         self.assertNotIn("stays there with the robot frozen", result["report"])
+
+    def test_built_beside_another_solver_is_not_excused_for_lowering_nothing(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["contacts_unread"] = {"crate": "stepped by SuperDex"}
+        runs["built"] = {**_run(end=(0.4, 0.0, 0.9)), "lowered": {"friction": 0, "torque": 0}}
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+
+    def test_settle_says_why_a_cut_frozen_run_tells_it_nothing(self) -> None:
+        model = {**CLEAN, "settle": {"crate": {"rise_mm": 0.0, "aside_mm": 0.0, "turn_deg": 0.0, "overlap_mm": 2.0}}}
+        runs = _clean_runs()
+        runs["frozen"] = _run(outcome=physics.STOPPED, moved=0.5, end=(0.4, 0.0, 0.9), turn=0.0)
+        self.assertIn("the frozen replay was not read whole", physics.verdict(model, runs)["report"])
 
     def test_frozen_pass_says_the_largest_move_of_any_rigid_thing(self) -> None:
         runs = _clean_runs()

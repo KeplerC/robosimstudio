@@ -1859,6 +1859,7 @@ def _model_lines(
     settle_mm: float = SETTLE_MM,
     frozen: dict | None = None,
     frozen_whole: bool = True,
+    frozen_played: bool | None = None,
 ) -> None:
     """The ``model`` line (gravity, densities, invisible props) and the ``settle`` line (how the scene's own settle,
     before the first step, moved each thing from where it was put)."""
@@ -1924,6 +1925,8 @@ def _model_lines(
                 + (
                     " and stays there with the robot frozen: a contact that soft, say why"
                     if frozen is not None and frozen_whole
+                    else ": the frozen replay was not read whole, so whether it is pushed out is not known"
+                    if (frozen is not None if frozen_played is None else frozen_played)
                     else ": play frozen to see whether it is pushed out"
                 ),
             )
@@ -2049,16 +2052,16 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
 def _held_things(model: dict, run: dict) -> tuple[set[str], bool]:
     """What held things to the robot or moved them in ``run``: a tie or a kinematic flag always, a grasp latch, an
     equality row or a motor on a thing's joint as ``run`` recorded them (only the written replay records those; pass
-    ``{}`` for the first two alone); and whether a hold there names no thing (a hook, an equality row whose thing is
-    not known), from the names the model facts carry."""
+    ``{}`` for the first two alone); and whether a substep hook, which names no thing, was added there. From the names
+    the model facts carry."""
     labels = model.get("robot_equalities", {})
     held = set(model.get("tie_things", []))
     held |= set(model.get("kinematic", [])) | set(run.get("latched", []))
     if run.get("thing_targets_moved", 0.0) > 1e-6:
         held |= set(model.get("drive_things", []))
     rows = [k for k in run.get("robot_equalities_on", []) if "suction" not in labels.get(str(k), "")]
-    things = [model.get("robot_equality_things", {}).get(str(k), "") for k in rows]
-    return held | (set(things) - {""}), bool(run.get("hooks_added", 0)) or "" in things
+    held |= {model.get("robot_equality_things", {}).get(str(k), "") for k in rows} - {""}
+    return held, bool(run.get("hooks_added", 0))
 
 
 def _plain_gate(runs: dict, written: dict) -> tuple[dict | None, str]:
@@ -2110,14 +2113,10 @@ def _plain_reading(runs: dict, written: dict, names: list[str], axes: dict | Non
     read (:func:`_plain_gate`), what it carried without contact (:func:`_flew`), and its misses (handled things only,
     none when it flew)."""
     plain, why = _plain_gate(runs, written)
-    readable = plain is not None and not why
-    flew = _flew(plain) if readable else {}
-    seen = (
-        _misses(plain, written, names, round_axes=axes, bystanders=False, excursion=False)
-        if readable and not flew
-        else []
-    )
-    return _PlainReading(plain, why, flew, seen)
+    reading = _PlainReading(plain, why, _flew(plain) if plain is not None and not why else {}, [])
+    if not reading.readable:
+        return reading
+    return reading._replace(misses=_misses(plain, written, names, round_axes=axes, bystanders=False, excursion=False))
 
 
 def _plain_line(plain: _PlainReading, line: Any) -> None:
@@ -2198,17 +2197,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         )
     written = runs.get("written") or {}
     names = _moved(written)
-    frozen_run = runs.get("frozen")
-    whole = bool(frozen_run) and not _unread(frozen_run)
-    _model_lines(
-        model,
-        written,
-        names,
-        line,
-        settle_mm,
-        None if frozen_run and frozen_run.get("nonfinite") else frozen_run,
-        whole,
-    )
+    frozen = runs.get("frozen")
+    # a frozen run the page cut still proves a push it recorded (its moves are running maxima); one that blew up, or
+    # whose hold on the robot broke (the robot was not frozen), proves nothing
+    evidence = frozen if frozen and not frozen.get("nonfinite") and not frozen["outcome"].startswith(FAILED) else None
+    _model_lines(model, written, names, line, settle_mm, evidence, bool(frozen) and not _unread(frozen), bool(frozen))
     if written:
         flew = {
             k: t.get("free_flight_not_falling", 0)
@@ -2258,11 +2251,10 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 + ("something that is not a contact carries it" if long else "say in the report what holds it")
                 + (f"; {unjudged_note}" if unjudged_note else ""),
             )
-    frozen = runs.get("frozen")
-    if frozen and frozen.get("nonfinite"):
-        line(None, "frozen", "not read: the solver blew up in it")
+    if frozen and evidence is None:  # blew up, or its hold on the robot broke
+        line(None, "frozen", _unread(frozen))
     elif frozen:
-        cut = _cut(frozen)  # cut by the page or broken: a push it recorded before that stands, nothing else is read
+        cut = _cut(frozen)  # cut by the page: a push it recorded before that stands, nothing else is read
         # a rigid thing has nothing to settle into; a heap, a liquid or a draped cloth can still be relaxing at the
         # reset, so its drift is a note for the report, not a fault
         unread_things_ = set((runs.get("written") or {}).get("contacts_unread") or {})
@@ -2332,12 +2324,10 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 cause += (
                     "; the contact line names a hold on it (a latch, an equality row, a motor): say if that moves it"
                 )
-            elif unknown_hold:  # a hook, or an equality row whose thing is not known: it may be what moves it
-                cause += (
-                    "; a hold the contact line names (an equality row, a hook) names no thing: say if it holds this"
-                )
+            elif unknown_hold:  # a hook the routine added names no thing: it may be what moves it
+                cause += "; the contact line names a substep hook (a dragger or a pin), which names no thing: say if it holds this"
             if cut and not pushed_far:
-                line(None, "frozen", cut)
+                line(None, "frozen", cut + also + settling)
             else:
                 line(
                     False if pushed_far else None,
@@ -2346,7 +2336,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                     + (f" (before the replay was cut: {frozen['outcome']})" if cut else ""),
                 )
         elif cut:
-            line(None, "frozen", cut)
+            line(None, "frozen", cut + also + settling)
         elif also:  # only held things moved: the contact line fails them, frozen says so
             line(None, "frozen", f"with the robot frozen nothing free moved more than {moved:.1f} mm{also}{settling}")
         elif drift:
@@ -2422,8 +2412,14 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     plain = _plain_reading(runs, written, names, axes)
     built = runs.get("built")
     lowered = (built or {}).get("lowered")
-    if built and lowered is not None and not any(lowered.values()) and not written.get("deformables"):
-        # (a deformable's own contact friction is not one built caps, so with one in the scene built reads as below)
+    if (
+        built
+        and lowered is not None
+        and not any(lowered.values())
+        and not written.get("deformables")
+        and not written.get("contacts_unread")
+    ):
+        # (a deformable's own contact friction, or a co-sim island's, is not one built caps: with either, read below)
         # nothing was above the real robot, so built only played the written run again: a different end, or a stop,
         # there is the scene's own spread from run to run, not a grip that needs more than the real hand
         ok, detail, misses = held(built, robot)
