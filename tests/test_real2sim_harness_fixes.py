@@ -1531,8 +1531,11 @@ class TakeProbe(unittest.TestCase):
         rec = checks.Recorder.__new__(checks.Recorder)
         rec.sim = types.SimpleNamespace(step_count=7, reset_count=0)
         rec._probed = None
+        rec.also, rec.grid = {}, None  # no --also renderers
+        rec.run_dir, rec.name = Path(tempfile.mkdtemp(prefix="take-probe-")), "take"
+        rec.also_dir = rec.run_dir / "take.renderers"
         rec.looks, rec.encoded, rec.captured = [], [], []
-        rec._look = lambda: (rec.looks.append(1), (np.zeros((540, 960, 3), np.uint8), "seg", None))[1]
+        rec._look = lambda strict=False: (rec.looks.append(1), (np.zeros((540, 960, 3), np.uint8), "seg", None, {}))[1]
         rec.writer = types.SimpleNamespace(try_encode=lambda frame: rec.encoded.append(frame.shape))
         rec.capture = lambda look=None: rec.captured.append(look)
         return rec
@@ -1602,6 +1605,21 @@ class HeldUpByARoutine(unittest.TestCase):
         self.assertIn("serve.pid", reply["error"], "the way out of a step that never ends")
         for cmd in ("quit", "reset", "pause", "resume"):
             self.assertGreaterEqual(ctl.TIMEOUTS[cmd], ctl.TIMEOUTS["reload"], f"{cmd} waits out a long step")
+
+
+class GridOfRenderers(unittest.TestCase):
+    def test_frames_go_two_to_a_row_each_labelled(self) -> None:
+        from robosimstudio_real2sim_agent import checks
+
+        frames = [np.full((200, 300, 3), v, np.uint8) for v in (200, 120, 60)]
+        grid = checks.grid_frame(frames, ["rtx", "gl", "tiled"])
+        self.assertEqual(grid.shape, (200, 300, 3), "three or more go at half size: about one frame's pixels")
+        self.assertEqual(tuple(grid[80, 140]), (200, 200, 200), "the first tile's own pixels past its label")
+        self.assertEqual(tuple(grid[180, 280]), (16, 20, 24), "an empty fourth place")
+        self.assertLess(int(grid[9, 6].max()), 60, "a dark label box at each tile's top left")
+        self.assertLess(int(grid[9, 156].max()), 60)
+        two = checks.grid_frame(frames[:2], ["rtx", "gl"])
+        self.assertEqual(two.shape, (200, 600, 3), "two side by side at full size")
 
 
 if __name__ == "__main__":
