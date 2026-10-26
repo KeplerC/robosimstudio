@@ -74,13 +74,13 @@ SMALL_BATCH = 1000
 def sphere_strides(sizes: Sequence[int], budget: int = MAX_SPHERES) -> list[int]:
     """Per batch of grains, draw every k-th: 1 for all when they fit the budget; else the small batches whole
     and the large ones one stride, enough to bring them under what the small ones leave -- or, when the small
-    ones alone are past it, every batch one stride. Each batch's ``ceil(n / k)`` then sums to the budget plus at
+    ones take more than half of it (a heap would otherwise shrink to a few huge spheres), every batch one stride. Each batch's ``ceil(n / k)`` then sums to the budget plus at
     most one a batch, which is what the scene is sized for."""
     total = sum(sizes)
     if total <= budget:
         return [1] * len(sizes)
     small = sum(n for n in sizes if n < SMALL_BATCH)
-    if small >= budget:  # many small bodies past the budget by themselves: every batch one stride
+    if small > budget // 2:  # small bodies filling the budget by themselves: every batch one stride, alike
         return [-(-total // budget)] * len(sizes)
     stride = -(-(total - small) // (budget - small))
     return [1 if n < SMALL_BATCH else stride for n in sizes]
@@ -608,7 +608,7 @@ class RendererGL(RendererBase):
                 self._deform(self._particle_q)
             if self._particle_q is not None:
                 for particles, sizes, rgba in self._point_batches:  # gathered once a frame, drawn once a camera
-                    self._point_frame.append((np.asarray(self._particle_q, dtype=np.float64)[particles], sizes, rgba))
+                    self._point_frame.append((np.asarray(self._particle_q[particles], dtype=np.float64), sizes, rgba))
         extent = float(self.mj_model.stat.extent)
         near = float(self.mj_model.vis.map.znear) * extent
         far = float(self.mj_model.vis.map.zfar) * extent

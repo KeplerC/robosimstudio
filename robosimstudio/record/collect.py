@@ -165,13 +165,13 @@ def _build(spec: CollectSpec):
         raise ValueError(f"the scene has no camera {missing or 'at all'}; it has {[c.name for c in sim.cameras]}")
     name = spec.renderer
     if name == "auto":
-        from robosimstudio.core.render.deformables import deformable_drawables
+        from robosimstudio.core.render.particles import draws_points
 
         # gl draws cloth and ropes as meshes, cheaply, but each grain as a sphere set from Python (a few us a
         # grain a camera): a heap of more than AUTO_GL_GRAINS goes to tiled, which draws particles natively
-        handles = getattr(getattr(sim, "scene", None), "handles", None)
-        drawn = deformable_drawables(sim.model, getattr(handles, "deformables", None))
-        name = "tiled" if sum(len(p.particles) for p in drawn.points) > AUTO_GL_GRAINS else "gl"
+        handles = getattr(getattr(getattr(sim, "scene", None), "handles", None), "deformables", None) or {}
+        grains = sum(len(getattr(h, "particles", ())) for h in handles.values() if draws_points(h))
+        name = "tiled" if grains > AUTO_GL_GRAINS else "gl"
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
     except (RuntimeError, ValueError) as exc:  # no context, or a visual MuJoCo will not compile

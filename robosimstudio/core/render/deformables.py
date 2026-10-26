@@ -83,12 +83,12 @@ class DeformableMesh:
 
     def positions(self, particle_q: np.ndarray) -> np.ndarray:
         """This frame's vertices alone, ``float64 [vertex_count, 3]``, for a renderer that makes its own normals."""
-        q = np.asarray(particle_q, dtype=np.float64)[self.particles]
+        q = np.asarray(np.asarray(particle_q)[self.particles], dtype=np.float64)  # the rows drawn, then cast
         return tube_points(q, self.tube_radius, self.sides)[0] if self.tube_radius > 0.0 else q
 
     def vertices(self, particle_q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """This frame's ``(vertices, normals)``, ``float64 [vertex_count, 3]`` each, in world metres."""
-        q = np.asarray(particle_q, dtype=np.float64)[self.particles]
+        q = np.asarray(np.asarray(particle_q)[self.particles], dtype=np.float64)  # the rows drawn, then cast
         if self.tube_radius > 0.0:
             return tube_points(q, self.tube_radius, self.sides)
         return q, vertex_normals(q, self.triangles)
@@ -112,7 +112,7 @@ class ParticlePoints:
 
     def positions(self, particle_q: np.ndarray) -> np.ndarray:
         """This frame's sphere centres, ``float64 [n, 3]``."""
-        return np.asarray(particle_q, dtype=np.float64)[self.particles]
+        return np.asarray(np.asarray(particle_q)[self.particles], dtype=np.float64)
 
 
 @dataclass
@@ -202,8 +202,8 @@ def deformable_drawables(
         elif draws_points(handle):
             radii = np.full(len(particles), float(handle.point_radius))
             out.points.append(ParticlePoints(name, particles, radii, color))
-        else:  # a handle that says nothing about its look: its particles, as the tiled tracer draws them
-            out.points.append(ParticlePoints(name, particles, _particle_radii(model, particles), color))
+        # a handle that says nothing about its look (no triangles, tube or point radius) is not drawn, as the path
+        # tracer does not draw it
     if deformables is not None:
         return out  # a scene's handle table: its deformables and nothing else, as the path tracer draws them
     covered = np.zeros(count, dtype=bool)

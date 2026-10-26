@@ -191,7 +191,7 @@ def _greeting(sock: socket.socket, deadline: float, most: int = 4096) -> str:
         if n > most:
             return ""
         hello = json.loads(read(n).decode("utf-8"))
-    except (OSError, ConnectionError, ValueError):
+    except Exception:  # anything that is not a greeting -- a timeout, a hang-up, garbage, JSON nested past recursion
         return ""
     return str(hello.get("token", "")) if isinstance(hello, dict) else ""
 
@@ -367,22 +367,20 @@ class RendererBlender(RendererBase):
             server.settimeout(0.5)
             deadline = time.monotonic() + self.timeout
             while self._sock is None:
+                # checked every pass, not only when nothing connects: a stream of other connections cannot hold it
+                if self._proc.poll() is not None:
+                    raise RuntimeError(f"Blender exited {self._proc.returncode} before it connected; {self._tail()}")
+                if time.monotonic() > deadline:
+                    raise RuntimeError(f"Blender did not connect within {self.timeout:.0f} s; {self._tail()}")
                 try:
                     candidate, _ = server.accept()
-                    said = _greeting(candidate, time.monotonic() + 5.0)
-                    if secrets.compare_digest(said, token):
-                        self._sock = candidate
-                    else:
-                        candidate.close()
                 except TimeoutError:
-                    if self._proc.poll() is not None:
-                        raise RuntimeError(
-                            f"Blender exited {self._proc.returncode} before it connected; {self._tail()}"
-                        ) from None
-                    if time.monotonic() > deadline:
-                        raise RuntimeError(
-                            f"Blender did not connect within {self.timeout:.0f} s; {self._tail()}"
-                        ) from None
+                    continue
+                said = _greeting(candidate, min(deadline, time.monotonic() + 5.0))
+                if secrets.compare_digest(said, token):
+                    self._sock = candidate
+                else:
+                    candidate.close()
         finally:
             server.close()
         self._sock.settimeout(self.timeout)
@@ -573,44 +571,28 @@ def _describe(
 
     drawables = deformable_drawables(model, deformables, deformable_colors, surfaces=True)
     deformable_list, point_list = [], []
-    for i, part in enumerate(drawables.meshes):
-        finish = (deformable_finishes or {}).get(part.name) or finish_for(part.color)
-        entry = {
-            "name": f"deformable{i}",
-            "color": [*_linear(part.color), 1.0],
+
+    def look(name: str, kind: str, color) -> dict[str, Any]:
+        """A deformable's material entry: its finish, else the palette's for its colour."""
+        finish = (deformable_finishes or {}).get(name) or finish_for(color)
+        return {
+            "name": kind,
+            "color": [*_linear(color), 1.0],
             "roughness": float(finish.roughness),
             "metallic": float(finish.metallic),
             "opacity": float(finish.opacity),
-            "faces": len(blobs),
         }
+
+    for i, part in enumerate(drawables.meshes):
+        entry = {**look(part.name, f"deformable{i}", part.color), "faces": len(blobs)}
         blobs.append(np.ascontiguousarray(part.triangles, dtype=np.int32))
         entry["verts"] = len(blobs)
         blobs.append(np.ascontiguousarray(part.positions(rest), dtype=np.float32))
         deformable_list.append(entry)
     for i, batch in enumerate(drawables.points):
-        finish = (deformable_finishes or {}).get(batch.name) or finish_for(batch.color)
-        point_list.append(
-            {
-                "name": f"points{i}",
-                "color": [*_linear(batch.color), 1.0],
-                "roughness": float(finish.roughness),
-                "metallic": float(finish.metallic),
-                "radii": len(blobs),
-            }
-        )
+        point_list.append({**look(batch.name, f"points{i}", batch.color), "radii": len(blobs)})
         blobs.append(np.ascontiguousarray(batch.radii, dtype=np.float32))
-    surface_list = []
-    for i, surface in enumerate(drawables.surfaces):
-        finish = (deformable_finishes or {}).get(surface.name) or finish_for(surface.color)
-        surface_list.append(
-            {
-                "name": f"surface{i}",
-                "color": [*_linear(surface.color), 1.0],
-                "roughness": float(finish.roughness),
-                "metallic": float(finish.metallic),
-                "opacity": float(finish.opacity),
-            }
-        )
+    surface_list = [look(surface.name, f"surface{i}", surface.color) for i, surface in enumerate(drawables.surfaces)]
     header = {"meshes": meshes, "deformables": deformable_list, "points": point_list, "surfaces": surface_list}
     return header, blobs, sorted(bodies), drawables
 
