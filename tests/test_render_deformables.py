@@ -131,6 +131,13 @@ class TestDrawables(unittest.TestCase):
         (points,) = deformable_drawables(model).points
         self.assertEqual(points.particles.tolist(), [0, 2])
 
+    def test_triangles_in_global_numbering_are_said_and_not_drawn(self) -> None:
+        from robosimstudio.core.render.deformables import deformable_drawables
+
+        with self.assertWarnsRegex(UserWarning, "'towel'.*not drawn"):
+            drawn = deformable_drawables(_model(20), {"towel": _handle([10, 11, 12], [[10, 11, 12]])})
+        self.assertFalse(drawn)
+
     def test_a_model_without_particles_has_nothing_to_draw(self) -> None:
         from robosimstudio.core.render.deformables import deformable_drawables
 

@@ -42,6 +42,7 @@ import struct
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 
 _LEN = struct.Struct("<Q")
 TOKEN_ENV = "ROBOSIMSTUDIO_BLENDER_TOKEN"
@@ -138,7 +139,7 @@ class World:
             settings.media_type = "MULTI_LAYER_IMAGE"
         settings.file_format = "OPEN_EXR_MULTILAYER"
         scene.render.image_settings.color_depth = "32"
-        scene.render.image_settings.exr_codec = "ZIP"
+        scene.render.image_settings.exr_codec = "NONE"  # read straight back and deleted: no use compressing it
         scene.render.use_compositing = False
         scene.render.use_sequencer = False
         scene.render.use_persistent_data = True  # Cycles keeps the scene between renders and updates what moved
@@ -399,20 +400,35 @@ class World:
         for mesh, (verts, faces) in zip(self.surfaces, header.get("surfaces", []), strict=True):
             self._fill(mesh, np.frombuffer(blobs[verts], dtype=np.float32), np.frombuffer(blobs[faces], dtype=np.int32))
             mesh.polygons.foreach_set("use_smooth", np.ones(len(mesh.polygons), dtype=bool))
-        out, replies = [], []
-        for cam in header["cameras"]:
-            t = time.time()
-            rgb, depth = self._render(cam)
-            replies.append(
-                {"name": cam["name"], "seconds": round(time.time() - t, 3), "rgb": -1, "depth": -1, **self.timing}
-            )
-            for key, array in (("rgb", rgb), ("depth", depth)):
-                if array is not None:
-                    replies[-1][key] = len(out)
-                    out.append(array.tobytes())
+        # every camera's picture, then every camera's depth under one switch to the depth materials: a switch
+        # makes Cycles sync the scene's shaders again, so it is made once a frame, not once a camera
+        cameras = header["cameras"]
+        replies = [{"name": cam["name"], "rgb": -1, "depth": -1} for cam in cameras]
+        out: list = []
+        for cam, reply in zip(cameras, replies, strict=True):
+            if "rgb" in cam.get("channels", ("rgb", "depth")):
+                t = time.time()
+                w, h = self._aim(cam)
+                reply["rgb"], reply["rgb_seconds"] = len(out), None
+                out.append(self._srgb(self._still(w, h)).tobytes())
+                reply["rgb_seconds"] = round(time.time() - t, 3)
+        deep = [
+            (cam, reply)
+            for cam, reply in zip(cameras, replies, strict=True)
+            if "depth" in cam.get("channels", ("rgb", "depth"))
+        ]
+        if deep:
+            with self._depth_mode():
+                for cam, reply in deep:
+                    t = time.time()
+                    w, h = self._aim(cam)
+                    reply["depth"] = len(out)
+                    out.append(self._depth(w, h, float(cam["far"])).tobytes())
+                    reply["depth_seconds"] = round(time.time() - t, 3)
         return {"ok": True, "cameras": replies}, out
 
-    def _render(self, cam: dict):
+    def _aim(self, cam: dict) -> tuple[int, int]:
+        """The camera as ``cam`` states it -- size, intrinsics, pose -- for the next render; its ``(w, h)``."""
         from mathutils import Matrix
 
         scene, data = self.scene, self.camera.data
@@ -430,17 +446,7 @@ class World:
         data.clip_start, data.clip_end = float(cam["near"]), max(DRAW_DISTANCE, float(cam["far"]))
         pose = Matrix([cam["pose"][4 * r : 4 * r + 4] for r in range(4)])
         self.camera.matrix_world = pose @ Matrix(VISION_TO_BLENDER)
-        channels = cam.get("channels", ("rgb", "depth"))
-        rgb = depth = None
-        t = time.time()
-        if "rgb" in channels:
-            rgb = self._srgb(self._still(w, h))
-        self.timing = {"rgb_seconds": round(time.time() - t, 3)}
-        t = time.time()
-        if "depth" in channels:
-            depth = self._depth(w, h, float(cam["far"]))
-        self.timing["depth_seconds"] = round(time.time() - t, 3)
-        return rgb, depth
+        return w, h
 
     def _still(self, w: int, h: int):
         """Render the scene as it stands and read the Combined pass back, linear, ``float32 [h, w, 3]``."""
@@ -455,14 +461,15 @@ class World:
         srgb = np.where(linear <= 0.0031308, 12.92 * linear, 1.055 * np.power(linear, 1.0 / 2.4) - 0.055)
         return np.clip(srgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
 
-    def _depth(self, w: int, h: int, far: float):
-        """Distance to the image plane per pixel: a second render, every surface emitting its own view depth.
+    @contextmanager
+    def _depth_mode(self):
+        """The scene as the depth renders want it, and back after: every surface emitting its own view depth.
 
         Blender 5 writes a multilayer EXR with the Combined pass alone, whatever passes are on, so the depth
         is drawn as a colour: each surface emits Camera Data's View Z Depth (metres along the view axis), one
         sample at each pixel's centre, no denoising, under a black world, so a miss reads 0.
         """
-        bpy, np, scene = self.bpy, self.np, self.scene
+        bpy, scene = self.bpy, self.scene
         if getattr(self, "_depth_mat", None) is None:
             mat = bpy.data.materials.new("rss_depth")
             mat.use_nodes = True
@@ -492,11 +499,16 @@ class World:
         scene.render.filter_size = 0.01
         layer.material_override, scene.world = self._depth_mat, self._black
         try:
-            z = self._still(w, h)[..., 0]
+            yield
         finally:
             layer.material_override, scene.world = None, world
             for target, key, value in kept:
                 setattr(target, key, value)
+
+    def _depth(self, w: int, h: int, far: float):
+        """Distance to the image plane per pixel, 0 for a miss or past ``far``: a render under :meth:`_depth_mode`."""
+        np = self.np
+        z = self._still(w, h)[..., 0]
         return np.where((z > 0.0) & (z <= far) & np.isfinite(z), z, 0.0).astype(np.float32)
 
     def _read_exr(self, path: str, w: int, h: int):

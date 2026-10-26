@@ -171,7 +171,10 @@ def _build(spec: CollectSpec):
         # grain a camera): a heap of more than AUTO_GL_GRAINS goes to tiled, which draws particles natively
         handles = getattr(getattr(getattr(sim, "scene", None), "handles", None), "deformables", None) or {}
         grains = sum(len(getattr(h, "particles", ())) for h in handles.values() if draws_points(h))
-        name = "tiled" if grains > AUTO_GL_GRAINS else "gl"
+        # gl draws what the handles name, and tiled every particle: a particle no handle names goes to tiled
+        named = {int(i) for h in handles.values() for i in np.asarray(getattr(h, "particles", ())).reshape(-1)}
+        unnamed = int(sim.model.particle_count) > len(named)
+        name = "tiled" if grains > AUTO_GL_GRAINS or unnamed else "gl"
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
     except (RuntimeError, ValueError) as exc:  # no context, or a visual MuJoCo will not compile

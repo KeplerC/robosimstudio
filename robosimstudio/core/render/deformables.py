@@ -83,15 +83,19 @@ class DeformableMesh:
 
     def positions(self, particle_q: np.ndarray) -> np.ndarray:
         """This frame's vertices alone, ``float64 [vertex_count, 3]``, for a renderer that makes its own normals."""
-        q = np.asarray(np.asarray(particle_q)[self.particles], dtype=np.float64)  # the rows drawn, then cast
+        q = self._rows(particle_q)
         return tube_points(q, self.tube_radius, self.sides)[0] if self.tube_radius > 0.0 else q
 
     def vertices(self, particle_q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """This frame's ``(vertices, normals)``, ``float64 [vertex_count, 3]`` each, in world metres."""
-        q = np.asarray(np.asarray(particle_q)[self.particles], dtype=np.float64)  # the rows drawn, then cast
         if self.tube_radius > 0.0:
-            return tube_points(q, self.tube_radius, self.sides)
+            return tube_points(self._rows(particle_q), self.tube_radius, self.sides)
+        q = self._rows(particle_q)
         return q, vertex_normals(q, self.triangles)
+
+    def _rows(self, particle_q: np.ndarray) -> np.ndarray:
+        """This mesh's particles' positions: the rows gathered, then cast."""
+        return np.asarray(np.asarray(particle_q)[self.particles], dtype=np.float64)
 
 
 @dataclass
@@ -191,7 +195,16 @@ def deformable_drawables(
         color = tuple(float(v) for v in colors.get(name, DEFORMABLE))[:3]
         triangles = np.asarray(getattr(handle, "triangles", ()), dtype=np.int64).reshape(-1, 3)
         tube = float(getattr(handle, "tube_radius", 0.0) or 0.0)
-        if len(triangles) and triangles.min() >= 0 and triangles.max() < len(particles):
+        if len(triangles) and (triangles.min() < 0 or triangles.max() >= len(particles)):
+            import warnings
+
+            warnings.warn(
+                f"deformable {name!r}: its triangles index past its {len(particles)} particles (global indices "
+                "where local ones belong?); it is not drawn",
+                stacklevel=2,
+            )
+            continue
+        if len(triangles):
             # only the particles a triangle uses: a soft body's inner nodes are not on its surface
             used, local = np.unique(triangles, return_inverse=True)
             out.meshes.append(DeformableMesh(name, particles[used], local.reshape(-1, 3).astype(np.int32), color))

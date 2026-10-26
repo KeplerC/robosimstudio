@@ -377,7 +377,7 @@ class RendererBlender(RendererBase):
                 except TimeoutError:
                     continue
                 said = _greeting(candidate, min(deadline, time.monotonic() + 5.0))
-                if secrets.compare_digest(said, token):
+                if secrets.compare_digest(said.encode("utf-8", "replace"), token.encode()):  # bytes: any text
                     self._sock = candidate
                 else:
                     candidate.close()
