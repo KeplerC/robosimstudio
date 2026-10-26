@@ -1731,9 +1731,9 @@ def _misses(
             )
             out.append(_Miss(k, "lost", {}, {}, words, {}))
             continue
-        off, shape, turn = _end_offset(a, b, (round_axes or {}).get(k))
-        far = {"position": off / mm, "shape": shape / (mm / 2), "turn": turn / deg}
-        amount = {"position": off, "shape": shape, "turn": turn}
+        amount = _end_offset(a, b, (round_axes or {}).get(k))
+        tol = {"position": mm, "shape": mm / 2, "turn": deg}
+        far = {d: amount[d] / tol[d] for d in tol}
         first = next((d for d in ("position", "shape", "turn") if far[d] > 1.0), None)
         if first:
             out.append(
@@ -1743,7 +1743,7 @@ def _misses(
                     far,
                     amount,
                     _miss_words(k, first, amount[first]),
-                    {"position": mm, "shape": mm / 2, "turn": deg},
+                    tol,
                 )
             )
     return out
@@ -1784,11 +1784,23 @@ def _unread(run: dict, failed: bool = True) -> str:
     return "not read: the solver blew up in it" if run.get("nonfinite") else _cut(run, failed)
 
 
-def _carried(run: dict, written: dict, k: str) -> bool:
+def _frozen_evidence(frozen: dict | None) -> dict | None:
+    """The frozen run as evidence of a push: whole, or cut by the page (its moves are running maxima, so a push it
+    recorded stands); ``None`` when there is none, it blew up, or its hold on the robot broke (the robot was not
+    frozen)."""
+    if not frozen or frozen.get("nonfinite") or str(frozen.get("outcome", "")).startswith(FAILED):
+        return None
+    return frozen
+
+
+def _carried(run: dict, written: dict, k: str, sampled: bool = False) -> bool:
     """Whether ``run`` carried thing ``k`` at least a third as far as the written run did: a mug lifted and set back
-    near its start is carried too; one a grasp let go of, or never took, is not."""
+    near its start is carried too; one a grasp let go of, or never took, is not. A ``sampled`` run (plain, read only
+    at the routine's yields, so its largest move can fall short) also counts where it left the thing."""
     a, b = _entry(run, k) or {}, _entry(written, k) or {}
-    return a.get("moved_max_mm", 0.0) >= b.get("moved_max_mm", 0.0) / 3
+    if a.get("moved_max_mm", 0.0) >= b.get("moved_max_mm", 0.0) / 3:
+        return True
+    return sampled and b.get("end_mm", 0.0) > 0.0 and a.get("end_mm", 0.0) >= b.get("end_mm", 0.0) / 3
 
 
 def _cut(run: dict, failed: bool = True) -> str:
@@ -1798,9 +1810,10 @@ def _cut(run: dict, failed: bool = True) -> str:
     return f"not read: {out}" if out.startswith((STOPPED, FAILED) if failed else STOPPED) else ""
 
 
-def _end_offset(a: dict, b: dict, axis: list[float] | None = None) -> tuple[float, float, float]:
-    """How far one run's end of a thing is from another's: position [mm], shape (a deformable's particles) [mm] and
-    turn [deg]; a thing round about ``axis`` counts only a tilt of that axis, and a ball (``[0, 0, 0]``) no turn."""
+def _end_offset(a: dict, b: dict, axis: list[float] | None = None) -> dict[str, float]:
+    """How far one run's end of a thing is from another's, by measure: ``position`` [mm], ``shape`` (a deformable's
+    particles) [mm] and ``turn`` [deg]; a thing round about ``axis`` counts only a tilt of that axis, and a ball
+    (``[0, 0, 0]``) no turn."""
     off = float(np.linalg.norm(np.subtract(a["end"], b["end"])) * 1000)
     shape = abs(a.get("particle_end_mm", 0.0) - b.get("particle_end_mm", 0.0))
     if axis is not None and not any(axis):  # a ball: no turn of it is a different end
@@ -1813,7 +1826,7 @@ def _end_offset(a: dict, b: dict, axis: list[float] | None = None) -> tuple[floa
         turn = _turn_deg(np.asarray(a["end_quat"]), np.asarray(b["end_quat"]))
     else:
         turn = abs(a.get("turn_end_deg", 0.0) - b.get("turn_end_deg", 0.0))
-    return off, shape, turn
+    return {"position": off, "shape": shape, "turn": turn}
 
 
 def _within_spread(
@@ -1833,12 +1846,10 @@ def _within_spread(
     for m in misses:
         p = by.get(m.thing)
         # plain is a sample of where the thing lands only if it carried it (a grasp that failed there is no spread)
-        if p is None or not _carried(plain, written, m.thing):
+        if p is None or not _carried(plain, written, m.thing, sampled=True):
             return ""
         tol = m.tol
-        apart = dict(
-            zip(tol, _end_offset(_entry(run, m.thing), _entry(plain, m.thing), (axes or {}).get(m.thing)), strict=True)
-        )
+        apart = _end_offset(_entry(run, m.thing), _entry(plain, m.thing), (axes or {}).get(m.thing))
         for dim, v in m.far.items():
             if v > 1.0 and (
                 p.far[dim] <= 1.0
@@ -1858,8 +1869,6 @@ def _model_lines(
     line: Any,
     settle_mm: float = SETTLE_MM,
     frozen: dict | None = None,
-    frozen_whole: bool = True,
-    frozen_played: bool | None = None,
 ) -> None:
     """The ``model`` line (gravity, densities, invisible props) and the ``settle`` line (how the scene's own settle,
     before the first step, moved each thing from where it was put)."""
@@ -1891,10 +1900,11 @@ def _model_lines(
         line(True, "model", f"gravity {model['gravity']:g} m/s²; the handled things' densities are ones objects have")
     settle = model.get("settle") or {}
     if settle:
+        proof = (
+            _frozen_evidence(frozen) or {}
+        )  # what a frozen run can prove: a cut one its pushes, a broken one nothing
         risen = {k: v for k, v in settle.items() if v["rise_mm"] > settle_mm}
-        pushed_out = {
-            k for k, t in ((frozen or {}).get("things") or {}).items() if t.get("moved_max_mm", 0.0) > settle_mm
-        }
+        pushed_out = {k for k, t in (proof.get("things") or {}).items() if t.get("moved_max_mm", 0.0) > settle_mm}
         resting = {
             k: v for k, v in settle.items() if OVERLAP_MM < v.get("overlap_mm", 0.0) <= SINK_MM and k not in pushed_out
         }
@@ -1923,11 +1933,11 @@ def _model_lines(
                 "settle",
                 f"{k} rests {resting[k]['overlap_mm']:.1f} mm into {resting[k].get('inside', 'its support')}"
                 + (
-                    " and stays there with the robot frozen: a contact that soft, say why"
-                    if frozen is not None and frozen_whole
+                    ": play frozen to see whether it is pushed out"
+                    if frozen is None
+                    else " and stays there with the robot frozen: a contact that soft, say why"
+                    if not _unread(frozen)
                     else ": the frozen replay was not read whole, so whether it is pushed out is not known"
-                    if (frozen is not None if frozen_played is None else frozen_played)
-                    else ": play frozen to see whether it is pushed out"
                 ),
             )
         elif rolled:
@@ -2061,7 +2071,7 @@ def _held_things(model: dict, run: dict) -> tuple[set[str], bool]:
         held |= set(model.get("drive_things", []))
     rows = [k for k in run.get("robot_equalities_on", []) if "suction" not in labels.get(str(k), "")]
     held |= {model.get("robot_equality_things", {}).get(str(k), "") for k in rows} - {""}
-    return held, bool(run.get("hooks_added", 0))
+    return held, bool(run.get("hooks_added", 0) or run.get("step_hooks_added", 0))
 
 
 def _plain_gate(runs: dict, written: dict) -> tuple[dict | None, str]:
@@ -2198,10 +2208,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     written = runs.get("written") or {}
     names = _moved(written)
     frozen = runs.get("frozen")
-    # a frozen run the page cut still proves a push it recorded (its moves are running maxima); one that blew up, or
-    # whose hold on the robot broke (the robot was not frozen), proves nothing
-    evidence = frozen if frozen and not frozen.get("nonfinite") and not frozen["outcome"].startswith(FAILED) else None
-    _model_lines(model, written, names, line, settle_mm, evidence, bool(frozen) and not _unread(frozen), bool(frozen))
+    evidence = _frozen_evidence(frozen)
+    _model_lines(model, written, names, line, settle_mm, frozen)
     if written:
         flew = {
             k: t.get("free_flight_not_falling", 0)
@@ -2325,7 +2333,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                     "; the contact line names a hold on it (a latch, an equality row, a motor): say if that moves it"
                 )
             elif unknown_hold:  # a hook the routine added names no thing: it may be what moves it
-                cause += "; the contact line names a substep hook (a dragger or a pin), which names no thing: say if it holds this"
+                cause += "; the contact line names a hook the routine added, which names no thing: say if it holds this"
             if cut and not pushed_far:
                 line(None, "frozen", cut + also + settling)
             else:
@@ -2424,7 +2432,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         # there is the scene's own spread from run to run, not a grip that needs more than the real hand
         ok, detail, misses = held(built, robot)
         same = f"built changed nothing: no rigid shape's friction here is above {REAL_MU:g}" + (
-            " and no arm's torque is above the real arm's" if every_arm else " (no torque limits known for every arm)"
+            " and no arm joint the data sheet covers is above the real arm's"
+            if every_arm
+            else " (no torque limits known for every arm)"
         )
         if ok:
             line(True, "built", same)
@@ -2461,13 +2471,16 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             failed = [  # handled things plain, which changes nothing, did not carry either: a grasp failing at any friction
                 m.thing
                 for m in misses
-                if plain.readable and m.kind in ("lost", "end") and not _carried(plain.run, written, m.thing)
+                if plain.readable
+                and m.kind in ("lost", "end")
+                and not _carried(plain.run, written, m.thing, sampled=True)
             ]
             if failed:
                 w, p = (_entry(r, failed[0]) or {} for r in (written, plain.run))
                 detail += (
-                    f"; played with nothing changed, the grasp carried {failed[0]} only {p.get('moved_max_mm', 0.0):.0f}"
-                    f" of {w.get('moved_max_mm', 0.0):.0f} mm: it is marginal at any friction, so say so in the report"
+                    f"; played with nothing changed, {failed[0]} ended {p.get('end_mm', 0.0):.0f} mm from its start "
+                    f"where the written run took it {w.get('end_mm', 0.0):.0f}: the grasp is marginal at any friction, "
+                    "so say so in the report"
                 )
             line(ok, "built", detail)
     heavy = runs.get("heavy")

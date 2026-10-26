@@ -223,11 +223,17 @@ class Verdict(unittest.TestCase):
 
     def test_a_plain_run_whose_grasp_failed_is_no_spread(self) -> None:
         runs = _clean_runs()
+        runs["written"]["things"]["crate"]["end_mm"] = 300.0
         runs["plain"] = _run(moved=5.0, end=(0.4, 0.0, 0.9))  # never carried: it stayed where it started
+        runs["plain"]["things"]["crate"]["end_mm"] = 5.0
         runs["built"] = _run(end=(0.4, 0.0, 1.05))  # carried, and slipped 150 mm short
         result = physics.verdict(CLEAN, runs)
         self.assertIs(_words(result)["built"], False)
-        self.assertIn("the grasp carried crate only 5 of 300 mm: it is marginal at any friction", result["report"])
+        self.assertIn("crate ended 5 mm from its start where the written run took it 300", result["report"])
+        runs["plain"]["things"]["crate"]["end_mm"] = (
+            290.0  # read only at yields, but it left the crate far off: carried
+        )
+        self.assertNotIn("where the written run took it", physics.verdict(CLEAN, runs)["report"])
 
     def test_built_that_lowered_nothing_beside_a_deformable_is_not_excused(self) -> None:
         runs = _clean_runs()
@@ -279,7 +285,7 @@ class Verdict(unittest.TestCase):
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
         runs["written"]["hooks_added"] = 1  # only a hook names no thing
         result = physics.verdict(CLEAN, runs)
-        self.assertIn("substep hook (a dragger or a pin), which names no thing: say if it holds this", result["report"])
+        self.assertIn("a hook the routine added, which names no thing: say if it holds this", result["report"])
         self.assertIn("crate moved 3.0 mm with the robot frozen: a few millimetres", result["report"])
         runs["written"]["hooks_added"] = 0
         runs["written"]["robot_equalities_on"] = [3]

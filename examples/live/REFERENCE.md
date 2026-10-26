@@ -390,8 +390,7 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   moves past 2 mm (a part on its own joint is read like any other). `settle`
   reads the start: a thing that starts more than 1 mm inside something and
   moves past 2 mm with the robot frozen fails there, even where `frozen`
-  calls that move a note. A frozen run the page cut still proves a push it
-  recorded; one whose hold on the robot broke proves nothing. One
+  calls that move a note. One
   the `contact` line names for a latch, an equality row or a motor in the
   written run is read like any other, with that hold named as what may move
   it. `--settle-mm` sets the 2 mm, and the
@@ -413,8 +412,7 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   played the routine again) and nothing in the scene keeps a friction built
   does not cap (a deformable, or a thing another solver steps), a different
   end or a routine's stop is a
-  NOTE: the outcome is not repeatable, and the report says so. A replay
-  that fails in its own code still fails. When it lowered
+  NOTE: the outcome is not repeatable, and the report says so. When it lowered
   something, a different end is a NOTE only where `plain`, which changes
   nothing, carried the same thing (at least a third as far as written) and
   missed it by the same measure (position, shape or turn) past the
@@ -424,10 +422,12 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   slip outside it fails. Where `plain`'s own grasp failed, the FAIL says the
   grasp is marginal at any friction. A thing it lost on the way or a thing it
   knocked over that the written run left alone still fails, and so does a
-  routine that stops. A replay the page cut (a reset, a save, Stop) is not
-  read.
+  routine that stops.
   When the written replay did not finish, there is no end to hold it to, and
   `built`, `heavy` and `open` are NOTEs that say so.
+- A replay the page cuts (a reset, a save, Stop) or whose own machinery
+  breaks gives no report: `./ctl physics` says which replay did not run to a
+  reading, and is run again.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
 - **drop** plays it as written and opens the fingers early in the written
