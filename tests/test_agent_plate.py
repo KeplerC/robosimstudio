@@ -129,7 +129,7 @@ class TestComposite(unittest.TestCase):
         own = np.where(seg < 0, 0.5, 0.0).astype(np.float32)
         depth = np.full((9, 9), 3.0, np.float32)  # the render's own room, three metres off
         depth[4, 2:7] = 0.502  # the rope's tube
-        out = plate.nearer(seg, depth, static_depth, plate.collider_bounds(seg, own, grow=1), grow=1)
+        out = plate.nearer(seg, depth, static_depth, bounds=plate.collider_bounds(seg, own, grow=1), grow=1)
         moving = (out == plate.LABEL_MOVING) | (out < 0)
         self.assertEqual(np.argwhere(moving)[:, 0].tolist(), [4] * 5, "the room behind the spheres is the plate's")
 
@@ -140,7 +140,9 @@ class TestComposite(unittest.TestCase):
         own[4:8, 5:7] = 0.95  # the key's collider
         depth = own.copy()
         depth[10, :] = 1.03  # the seam: the render looks into it, past the colliders' face
-        out = plate.nearer(seg, depth, np.zeros((12, 12), np.float32), plate.collider_bounds(seg, own, grow=4), grow=4)
+        out = plate.nearer(
+            seg, depth, np.zeros((12, 12), np.float32), bounds=plate.collider_bounds(seg, own, grow=4), grow=4
+        )
         self.assertTrue(
             ((out == plate.LABEL_MOVING) | (out < 0)).all(), "the face round the key and the seam are drawn"
         )
@@ -152,7 +154,9 @@ class TestComposite(unittest.TestCase):
         own[2:7, 2:7] = 0.7
         depth = own.copy()
         depth[2, 2:7] = 1.0  # the drawn gripper stops a pixel short: the render shows the box there
-        out = plate.nearer(seg, depth, np.zeros((9, 9), np.float32), plate.collider_bounds(seg, own, grow=2), grow=2)
+        out = plate.nearer(
+            seg, depth, np.zeros((9, 9), np.float32), bounds=plate.collider_bounds(seg, own, grow=2), grow=2
+        )
         self.assertTrue(((out == plate.LABEL_MOVING) | (out < 0)).all(), "the box behind the bulge is the render's")
 
     def test_a_plate_takes_any_size_asked(self) -> None:

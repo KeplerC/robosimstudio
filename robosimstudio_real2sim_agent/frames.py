@@ -123,9 +123,7 @@ def contact_sheet(
     """The clip every ``every`` seconds, tiled, each tile stamped with its time. Returns the file and the tile count."""
     import tempfile
 
-    from PIL import Image, ImageDraw
-
-    from robosimstudio.record.recorder import label_font
+    from PIL import Image, ImageDraw, ImageFont
 
     meta = probe(clip)
     last = meta["duration"] - 1.0 / (meta["fps"] or 30.0)
@@ -141,7 +139,10 @@ def contact_sheet(
     rows = (len(tiles) + columns - 1) // columns
     sheet = Image.new("RGB", (columns * tw, rows * th), (0, 0, 0))
     draw = ImageDraw.Draw(sheet)
-    font = label_font(max(12, tw // 16))
+    try:
+        font = ImageFont.load_default(size=max(12, tw // 16))
+    except TypeError:  # an older Pillow: one size only
+        font = ImageFont.load_default()
     for i, (t, tile) in enumerate(zip(times, tiles, strict=False)):
         x, y = (i % columns) * tw, (i // columns) * th
         sheet.paste(tile, (x, y))

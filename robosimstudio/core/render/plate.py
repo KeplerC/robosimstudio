@@ -189,6 +189,7 @@ def nearer(
     seg: np.ndarray,
     depth: np.ndarray,
     static_depth: np.ndarray,
+    *,
     bounds: tuple[np.ndarray, np.ndarray] | None = None,
     grow: int = 2,
     slack: float = 0.0015,

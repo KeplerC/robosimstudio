@@ -458,9 +458,10 @@ class Sim(EnvBase):
         seg = passed["seg"]
         if depth is not None:
             grow = max(2, spec.width // 320)
-            if "bounds" not in passed:  # once a pass, for every renderer composited on it
-                passed["bounds"] = plate.collider_bounds(seg, passed["moving_depth"], grow=grow)
-            seg = plate.nearer(seg, depth, passed["static_depth"], bounds=passed["bounds"], grow=grow)
+            key = ("bounds", grow)  # once a pass and window, for every renderer composited on it
+            if key not in passed:
+                passed[key] = plate.collider_bounds(seg, passed["moving_depth"], grow=grow)
+            seg = plate.nearer(seg, depth, passed["static_depth"], bounds=passed[key], grow=grow)
         return plate.composite(rgb, seg, passed["backdrop"], passed["shadow"])
 
     def plate_pass(self, spec: CameraSpec) -> dict[str, Any]:

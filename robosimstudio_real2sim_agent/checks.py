@@ -521,12 +521,12 @@ class Recorder:
         out: dict[str, np.ndarray] = {}
         black = np.zeros((*size, 3), np.uint8)
         for b, entry in self.also.items():
-            if "failed" in entry:
+            if not self._drawing(entry):
                 out[b] = black
                 continue
             try:
                 frame = entry["renderer"].render(self.sim.state)[self.cam.name]
-                rgb = stills.to_uint8(np.asarray(frame["rgb"])[..., :3])
+                rgb = _sized(stills.to_uint8(np.asarray(frame["rgb"])[..., :3]), size)
                 entry["running"] = 0
             except Exception as exc:
                 if strict:
@@ -551,9 +551,10 @@ class Recorder:
             else:
                 if passed:
                     try:  # the renderer drew: a composite that fails leaves its picture raw, not the renderer stopped
-                        rgb = stills.to_uint8(
-                            self.sim.over_plate(self.cam, rgb, depth=frame.get("depth"), plate_pass=passed)
-                        )
+                        depth = frame.get("depth")
+                        if depth is not None and np.shape(depth)[:2] != size:
+                            depth = None  # a depth of another size cannot trim this composite: the collider mask alone
+                        rgb = stills.to_uint8(self.sim.over_plate(self.cam, rgb, depth=depth, plate_pass=passed))
                     except Exception as exc:
                         if "raw" not in entry:
                             entry["raw"] = f"{type(exc).__name__}: {exc}"[:300]
@@ -561,13 +562,19 @@ class Recorder:
             out[b] = rgb
         return out
 
+    def _drawing(self, entry: dict) -> bool:
+        """Whether an ``--also`` renderer is still drawn: it has not stopped, and its video or the grid still takes
+        its frames."""
+        grid = self.grid is not None and "writer" in self.grid
+        return "failed" not in entry and ("writer" in entry or grid)
+
     def _look(self, strict: bool = False) -> tuple[np.ndarray, np.ndarray, Any, dict[str, np.ndarray]]:
         """The scene as the take films it now: the picture, the named ids, the particles read for both, and the same
         state through each ``--also`` renderer still drawing, composited on the one plate pass."""
         sim = self.sim
         sim.sync()
         frame = self.renderer.render(sim.state)[self.cam.name]
-        shared = bool(self.cam.background) and any("failed" not in e for e in self.also.values())
+        shared = bool(self.cam.background) and any(self._drawing(e) for e in self.also.values())
         passed = sim.plate_pass(self.cam) if shared else None
         rgb = stills.to_uint8(sim.render(self.cam, plate_pass=passed)["rgb"][..., :3])
         q = _particles(sim) if self.deformable_labels else None  # once a frame, for the ids and the samples both
@@ -716,7 +723,13 @@ class Recorder:
             "frames": self.frames,
         }
         if self.also and self.grid is not None:
-            meta["also"] = {b: str(e["video"]) for b, e in self.also.items() if not {"failed", "video_failed"} & set(e)}
+            # a renderer that stopped closed its video where it stopped: offered, shorter, said in also_failed; a
+            # video whose encoder failed may be unreadable and is not
+            meta["also"] = {
+                b: str(e["video"])
+                for b, e in self.also.items()
+                if "video_failed" not in e and Path(e["video"]).is_file()
+            }
             if "video_failed" not in self.grid:
                 meta["renderers"] = str(self.grid["video"])
             failed = {
@@ -771,6 +784,17 @@ def grid_frame(frames: list[np.ndarray], labels: list[str]) -> np.ndarray:
 
 ALSO_MISSES = 3
 """Frames running an ``--also`` renderer may fail before it is stopped for the rest of the take."""
+
+
+def _sized(rgb: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """``rgb`` at ``size`` (rows, columns): an ``--also`` renderer that draws another size is scaled to the take's,
+    so its video, its black frames and the grid all agree."""
+    if rgb.shape[:2] == tuple(size):
+        return rgb
+    from PIL import Image
+
+    return np.asarray(Image.fromarray(rgb).resize((int(size[1]), int(size[0])), Image.BILINEAR))
+
 
 ALSO_KEYS = ("also", "renderers", "also_failed", "also_missed", "also_unplated", "also_skipped")
 """What a take's ``TAKE.json`` says of its ``--also`` renderers, handed on in its summary too."""

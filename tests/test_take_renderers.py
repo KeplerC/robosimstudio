@@ -89,9 +89,9 @@ class AlsoRenderers(unittest.TestCase):
                     rec.maybe()
                 out = rec.finish()
                 self.assertIn("tiled", out["also_failed"])
-                self.assertNotIn("tiled", out.get("also", {}), "a renderer that stopped is not offered as a video")
                 n = len(json.loads((Path(tmp) / "dies.json").read_text())["frames"])
                 self.assertEqual((_frames(Path(out["video"])), _frames(Path(out["renderers"]))), (n, n))
+                self.assertLess(_frames(Path(out["also"]["tiled"])), n, "its video, ended where it stopped")
 
     def test_over_a_plate_each_renderer_is_composited_on_one_pass(self) -> None:
         from PIL import Image
