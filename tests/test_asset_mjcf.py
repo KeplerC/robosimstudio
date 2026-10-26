@@ -85,6 +85,7 @@ class TestTheYamHandsGripLikeTheRealOnes(unittest.TestCase):
 
     ARENA = ("embodiments/yam/yam_bimanual_arms.xml", "embodiments/yam_i2rt_arena/yam_i2rt_arena_narrow_arms.xml")
     I2RT = "embodiments/yam_i2rt/yam_i2rt_arms.xml"
+    I2RT_BAKED = "embodiments/yam_i2rt/yam_i2rt_bimanual.xml"
 
     @staticmethod
     def _tree(path: str):
@@ -106,15 +107,16 @@ class TestTheYamHandsGripLikeTheRealOnes(unittest.TestCase):
                 self.assertEqual("-100 100", servo.get("forcerange"), "50 N a jaw: the equality halves it")
 
     def test_the_i2rt_hand_has_its_blades_tied_and_capped_at_50_n(self) -> None:
-        root = self._tree(self.I2RT)
-        servos = [a for a in root.find("actuator") if re.search(r"joint[78]$", a.get("joint", ""))]
-        self.assertEqual(4, len(servos))
-        self.assertTrue(all(a.get("forcerange") == "-50 50" for a in servos))
-        ties = root.find("equality").findall("joint")
-        pairs = {(t.get("joint1"), t.get("joint2"), t.get("polycoef")) for t in ties}
-        self.assertEqual(
-            {("right_joint7", "right_joint8", "0 1 0 0 0"), ("left_joint7", "left_joint8", "0 1 0 0 0")}, pairs
-        )
+        for path in (self.I2RT, self.I2RT_BAKED):
+            with self.subTest(path=path):
+                root = self._tree(path)
+                servos = [a for a in root.find("actuator") if re.search(r"joint[78]$", a.get("joint", ""))]
+                self.assertEqual(4, len(servos))
+                self.assertTrue(all(a.get("forcerange") == "-50 50" for a in servos))
+                ties = root.find("equality").findall("joint")
+                pairs = {(t.get("joint1"), t.get("joint2"), t.get("polycoef")) for t in ties}
+                expected = {("right_joint7", "right_joint8", "0 1 0 0 0"), ("left_joint7", "left_joint8", "0 1 0 0 0")}
+                self.assertEqual(expected, pairs)
 
     def test_each_hand_servo_states_its_assets_cap_and_reaches_it_within_a_millimetre(self) -> None:
         from robosimstudio.robots.grippers.linear_4310 import LINEAR_4310

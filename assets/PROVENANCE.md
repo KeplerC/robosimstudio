@@ -250,7 +250,7 @@ licensed; `LICENSE` copied beside the meshes.
 * Two prefixed copies merged into one worldbody at bases
   `(0.2525, ∓0.31, 0.75)` (right = active), per-side contact excludes kept.
 
-**Edited in the checked-in `yam_i2rt_arms.xml` on 2026-10-26** (the generator
+**Edited in the checked-in `yam_i2rt_arms.xml` and `yam_i2rt_bimanual.xml` on 2026-10-26** (the generator
 does not make these: a file regenerated from it drops them): the finger
 actuators' `forcerange` and the joints' `actuatorfrcrange` are -50..50, from
 +-80, the driver's 50 N a blade (each blade has its own actuator; sources under
