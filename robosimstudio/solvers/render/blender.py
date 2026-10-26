@@ -191,7 +191,8 @@ class RendererBlender(RendererBase):
     name = "blender"
     supported_channels = ("rgb", "depth")
     retargets = True  # every frame sends its cameras: a new viewpoint costs no new Blender
-    first_note = "the first Blender picture starts Blender and hands it the scene, which takes seconds"
+    first_note = "the first Blender picture of a scene starts Blender and hands it the scene, which takes seconds"
+    first_note_each_scene = True
     devices = ("cpu", "cuda")  # Blender is its own process and renders wherever it can, whatever device the model is on
     wants: tuple[str, ...] = (
         "finishes",

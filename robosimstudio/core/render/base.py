@@ -109,6 +109,10 @@ class RendererBase:
     """What the first picture in a process costs with this backend, when that is worth saying while it is drawn
     (the path tracer compiles its shaders, Blender starts); a page's ``status`` shows it."""
 
+    first_note_each_scene: bool = False
+    """Whether :attr:`first_note`'s cost comes again with every scene built in the process (a Blender per
+    scene), rather than once a process (shaders compiled once)."""
+
     warms_up: bool = False
     """Whether a new renderer's first frame only builds its stage and is drawn again before it is kept."""
 

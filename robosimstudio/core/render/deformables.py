@@ -47,8 +47,9 @@ def vertex_normals(points: np.ndarray, triangles: np.ndarray) -> np.ndarray:
     n = np.zeros_like(p)
     if len(t):
         face = np.cross(p[t[:, 1]] - p[t[:, 0]], p[t[:, 2]] - p[t[:, 0]])
-        for k in range(3):
-            np.add.at(n, t[:, k], face)
+        corners = t.reshape(-1)
+        for axis in range(3):  # a scatter-add by bincount: np.add.at is an order of magnitude slower
+            n[:, axis] = np.bincount(corners, weights=np.repeat(face[:, axis], 3), minlength=len(p))[: len(p)]
     return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1.0e-12)
 
 

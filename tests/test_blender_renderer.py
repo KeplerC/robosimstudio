@@ -124,9 +124,10 @@ class TestTheCamera(unittest.TestCase):
 
         sx, sy = camera_settings(640, 360, 500.0, 500.0, 319.5 + 64.0, 179.5 + 32.0)["shift"]
         self.assertAlmostEqual(sx, -64.0 / 640.0)
-        self.assertAlmostEqual(sy, 32.0 / 640.0, msg="in units of the larger side")
-        sx, _ = camera_settings(360, 640, 500.0, 500.0, 179.5 + 64.0, 319.5)["shift"]
-        self.assertAlmostEqual(sx, -64.0 / 640.0, msg="a portrait frame's larger side is its height")
+        self.assertAlmostEqual(sy, 32.0 / 640.0, msg="in widths, both ways")
+        sx, sy = camera_settings(360, 640, 500.0, 500.0, 179.5 + 64.0, 319.5 + 32.0)["shift"]
+        self.assertAlmostEqual(sx, -64.0 / 360.0, msg="a horizontally fitted sensor measures a portrait in widths too")
+        self.assertAlmostEqual(sy, 32.0 / 360.0)
 
     def test_unequal_focal_lengths_are_a_pixel_aspect(self) -> None:
         from robosimstudio.solvers.render.blender_worker import camera_settings
@@ -268,6 +269,18 @@ def backend_retargets(name: str) -> bool:
     from robosimstudio.solvers.render import backend_class
 
     return bool(backend_class(name).retargets)
+
+
+class TestTheFirstPictureNote(unittest.TestCase):
+    def test_the_path_tracer_says_it_once_a_process_and_blender_once_a_scene(self) -> None:
+        from robosimstudio_real2sim_agent.server import first_render_note
+
+        self.assertIn("shaders", first_render_note("rtx", True, True))
+        self.assertEqual(first_render_note("rtx", False, True), "", "compiled once a process")
+        self.assertIn("starts Blender", first_render_note("blender", False, True), "started once a scene")
+        self.assertEqual(first_render_note("blender", False, False), "")
+        self.assertEqual(first_render_note("tiled", True, True), "")
+        self.assertEqual(first_render_note("no.such.Renderer", True, True), "")
 
 
 class TestTheRegistry(unittest.TestCase):

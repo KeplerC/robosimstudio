@@ -100,12 +100,13 @@ def camera_settings(w: int, h: int, fx: float, fy: float, cx: float, cy: float, 
     """A pinhole ``K`` as a Blender camera on a horizontally fitted sensor: lens, shift and pixel aspect.
 
     Square pixels unless ``fx != fy``: the vertical focal length is ``fx * aspect_x / aspect_y``, so the
-    aspect takes their ratio, the larger side 1. The principal point is a lens shift in units of the frame's
-    larger side (in x-pixels); ``K`` puts pixel centres on integers and Blender on half-integers, hence the
-    half pixel, and Blender's ``shift_y`` runs up while an image's rows run down.
+    aspect takes their ratio, the larger side 1. The principal point is a lens shift, which a horizontally
+    fitted sensor measures in widths -- both ways, a portrait frame included; ``K`` puts pixel centres on
+    integers and Blender on half-integers, hence the half pixel, and Blender's ``shift_y`` runs up while an
+    image's rows run down.
     """
     aspect = (1.0, fx / fy) if fx >= fy else (fy / fx, 1.0)
-    span = max(w * aspect[0], h * aspect[1]) / aspect[0]
+    span = float(w)
     return {
         "lens": fx * sensor_width / w,
         "shift": (((w - 1) / 2.0 - cx) / span, (cy - (h - 1) / 2.0) * (fx / fy) / span),

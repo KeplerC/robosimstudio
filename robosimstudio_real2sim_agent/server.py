@@ -140,18 +140,22 @@ MISSING_STAMPS = object()
 """The stamps not given: the status takes them itself."""
 
 
-def first_render_note(renderer: str) -> str:
-    """What the first picture in a process costs with this renderer, for ``status`` while it is drawn
-    (``RendererBase.first_note``); ``""`` when it costs nothing worth saying, or the name cannot be resolved."""
-    if not renderer:
+def first_render_note(renderer: str, first_in_process: bool, first_in_scene: bool) -> str:
+    """What the first picture costs with this renderer, for ``status`` while it is drawn
+    (``RendererBase.first_note``): once a process, or once a scene for a renderer whose cost comes again with
+    each (``first_note_each_scene``); ``""`` when nothing is worth saying, or the name cannot be resolved."""
+    if not renderer or not first_in_scene:
         return ""
     try:
         from robosimstudio.solvers.render import backend_class
 
-        note = str(getattr(backend_class(renderer), "first_note", "") or "")
+        cls = backend_class(renderer)
     except Exception:  # a dotted path that does not import: the render itself will say so
         return ""
-    return f"; {note}" if note else ""
+    note = str(getattr(cls, "first_note", "") or "")
+    if not note or not (first_in_process or getattr(cls, "first_note_each_scene", False)):
+        return ""
+    return f"; {note}"
 
 
 def _read_replay(run: dict) -> bool:
@@ -258,6 +262,8 @@ class LiveServer:
         """The one ``status`` queued for the main thread, which every caller meanwhile waits on."""
         self.rendered = False
         """Whether a still has been rendered in this process; the first one compiles the path tracer."""
+        self.rendered_scene = -1
+        """The scene generation the last picture was drawn of: a Blender is started once a scene."""
         from robosimstudio.solvers.render import ENV as RENDERER_ENV
 
         self.renderer_asked = os.environ.get(RENDERER_ENV, "").strip()
@@ -1182,8 +1188,9 @@ class LiveServer:
             or (name == "compare" and not request.get("take"))
             or (name in ("play", "eval") and bool(request.get("record")))
         )
-        if what and renders and not self.rendered:
-            what += first_render_note(self.renderer()[0])
+        if what and renders:
+            scene_first = getattr(self, "rendered_scene", -1) != getattr(self, "generation", 0)
+            what += first_render_note(self.renderer()[0], not self.rendered, scene_first)
         try:
             with self._busy(what) if what else nullcontext():
                 reply = handler(**{k: v for k, v in request.items() if k != "cmd"})
@@ -1191,6 +1198,7 @@ class LiveServer:
             reply = {"ok": False, "error": traceback.format_exc()[-3000:]}
         if renders and reply.get("ok"):
             self.rendered = True
+            self.rendered_scene = getattr(self, "generation", 0)
             reply.setdefault("renderer", self.renderer()[0])
         if name in READS_THE_SCENE and self._pending_save():
             reply["pending"] = "a save is not built yet: this is the scene before it -- `./ctl status --wait` first"

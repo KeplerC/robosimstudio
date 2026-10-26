@@ -358,21 +358,24 @@ class RendererGL(RendererBase):
                 contype=0, conaffinity=0, rgba=rgba, material=material,
                 pos=part.local[:3, 3].tolist(), quat=_quat_wxyz(part.local[:3, :3]).tolist(),
             )  # fmt: skip
-        # Each deformable mesh twice over, the second copy wound and lit the other way, so a cloth seen from
-        # behind is drawn; its vertices are rewritten every frame (_deform), its topology never changes.
+        # An open sheet twice over, the second copy wound and lit the other way, so a cloth seen from behind
+        # is drawn (a rope's tube is closed and drawn once); its vertices are rewritten every frame (_deform),
+        # its topology never changes.
         self._drawables = deformable_drawables(model, deformables, deformable_colors)
         particle_q = model.particle_q.numpy() if self._drawables.meshes else None
         for index, part in enumerate(self._drawables.meshes):
             verts, normals = part.vertices(particle_q)
             faces = np.asarray(part.triangles, dtype=np.int32)
-            both = np.concatenate([faces, faces[:, ::-1] + len(verts)])
+            if part.tube_radius <= 0.0:
+                faces = np.concatenate([faces, faces[:, ::-1] + len(verts)])
+                verts, normals = np.concatenate([verts, verts]), np.concatenate([normals, -normals])
             asset = spec.add_mesh(
                 name=f"deformable{index}",
-                uservert=np.concatenate([verts, verts]).ravel().tolist(),
-                userface=both.ravel().tolist(),
-                usernormal=np.concatenate([normals, -normals]).ravel().tolist(),
+                uservert=verts.ravel().tolist(),
+                userface=faces.ravel().tolist(),
+                usernormal=normals.ravel().tolist(),
             )
-            asset.userfacenormal = both.ravel().tolist()
+            asset.userfacenormal = faces.ravel().tolist()
             asset.inertia = mujoco.mjtMeshInertia.mjMESH_INERTIA_SHELL
             spec.worldbody.add_geom(
                 name=f"deformable{index}", type=mujoco.mjtGeom.mjGEOM_MESH, meshname=f"deformable{index}",
@@ -477,10 +480,12 @@ class RendererGL(RendererBase):
             rotation, origin = d.geom_xmat[geom].reshape(3, 3), d.geom_xpos[geom]
             local = (verts - origin) @ rotation
             turned = normals @ rotation
+            if part.tube_radius <= 0.0:  # a sheet's back copy
+                local, turned = np.concatenate([local, local]), np.concatenate([turned, -turned])
             n = len(local)
             start, nstart = int(m.mesh_vertadr[mesh]), int(m.mesh_normaladr[mesh])
-            m.mesh_vert[start : start + 2 * n] = np.concatenate([local, local])
-            m.mesh_normal[nstart : nstart + 2 * n] = np.concatenate([turned, -turned])
+            m.mesh_vert[start : start + n] = local
+            m.mesh_normal[nstart : nstart + n] = turned
             mujoco.mjr_uploadMesh(m, self._gl, mesh)
 
     def _add_points(self) -> None:

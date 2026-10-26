@@ -380,7 +380,6 @@ class Sim(EnvBase):
         asked = tuple(channels)
         if spec.background and "rgb" in asked and "depth" not in asked and "depth" in supported_channels(backend):
             asked += ("depth",)  # the plate goes wherever the render's own depth is the static scene's
-        # a backend that takes its cameras every frame keeps one renderer across viewpoints (RendererBase.aim)
         cls = _backend_class(backend)
         retargets = bool(getattr(cls, "retargets", False))
         # a backend that takes its cameras and channels every frame keeps one renderer across viewpoints
@@ -399,7 +398,12 @@ class Sim(EnvBase):
         ):
             self._still_renderer.aim([spec], channels=asked)
         self.sync()
-        frame = self._still_renderer.render(self.state)[spec.name]
+        try:
+            frame = self._still_renderer.render(self.state)[spec.name]
+        except Exception:  # a renderer that failed (a dead Blender, a lost context) is built afresh next time
+            self._still_renderer.close()
+            self._still_renderer = self._still_key = None
+            raise
         if spec.background and "rgb" in frame:
             frame = dict(frame, rgb=self.over_plate(spec, frame["rgb"], depth=frame.get("depth")))
         return {c: np.asarray(frame[c]) for c in channels if c in frame}

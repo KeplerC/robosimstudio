@@ -21,7 +21,7 @@ TIER = "medium"
 def _camera(name="c", *, dx=0.0, dy=0.0, fy_ratio=1.0, **kwargs):
     import robosimstudio as rss
 
-    w, h, f = 320, 180, 210.0
+    w, h, f = (180, 320, 210.0) if name == "portrait" else (320, 180, 210.0)
     return rss.CameraSpec(
         name=name, width=w, height=h, fx=f, fy=fy_ratio * f, cx=w / 2 - 0.5 + dx, cy=h / 2 - 0.5 + dy, **kwargs
     )
@@ -66,11 +66,12 @@ class TestItDrawsWhatTiledDraws(unittest.TestCase):
         cameras = [
             _camera("side", eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8)),
             _camera("offset", dx=40.0, dy=-20.0, fy_ratio=1.05, eye=(0.2, -0.6, 1.3), look_at=(0.0, -0.1, 0.78)),
+            _camera("portrait", dx=30.0, dy=40.0, fy_ratio=0.95, eye=(0.45, -0.75, 1.2), look_at=(0.6, 0.0, 0.8)),
         ]
         tiled, blender = self._both(cameras)
         for cam in cameras:
             a, b = tiled[cam.name], blender[cam.name]
-            self.assertEqual(b["rgb"].shape, (180, 320, 3))
+            self.assertEqual(b["rgb"].shape, (cam.height, cam.width, 3))
             self.assertEqual(b["rgb"].dtype, np.uint8)
             # the tiled tracer's depth runs past the camera's far; every other backend's is a miss there
             hit_a, hit_b = (a["depth"] > 0) & (a["depth"] <= cam.far), b["depth"] > 0
