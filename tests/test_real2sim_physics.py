@@ -227,7 +227,7 @@ class Verdict(unittest.TestCase):
         runs["built"] = _run(end=(0.4, 0.0, 1.05))  # carried, and slipped 150 mm short
         result = physics.verdict(CLEAN, runs)
         self.assertIs(_words(result)["built"], False)
-        self.assertIn("crate was not carried either: the grasp is marginal at any friction", result["report"])
+        self.assertIn("the grasp carried crate only 5 of 300 mm: it is marginal at any friction", result["report"])
 
     def test_built_that_lowered_nothing_beside_a_deformable_is_not_excused(self) -> None:
         runs = _clean_runs()
@@ -339,13 +339,17 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(result)["frozen"], False)
         self.assertIn("names a hold on it (a latch, an equality row, a motor): say if that moves it", result["report"])
 
-    def test_a_frozen_replay_cut_or_broken_is_not_read(self) -> None:
+    def test_a_frozen_replay_cut_or_broken_is_read_only_for_a_push_it_proved(self) -> None:
         runs = _clean_runs()
         for outcome in (physics.STOPPED, physics.FAILED + ": RuntimeError: x"):
             runs["frozen"] = _run(outcome=outcome, moved=0.3, end=(0.4, 0.0, 0.9), turn=0.0)
             result = physics.verdict(CLEAN, runs)
             self.assertIsNone(_words(result)["frozen"])
             self.assertIn("not read: " + outcome[:20], result["report"])
+            runs["frozen"] = _run(outcome=outcome, moved=40.0, end=(0.4, 0.0, 0.9), turn=0.0)  # pushed before the cut
+            result = physics.verdict(CLEAN, runs)
+            self.assertIs(_words(result)["frozen"], False)
+            self.assertIn("(before the replay was cut", result["report"])
 
     def test_a_lost_grip_after_another_miss_is_said(self) -> None:
         runs = _clean_runs()
