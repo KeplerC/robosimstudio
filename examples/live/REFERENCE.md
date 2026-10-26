@@ -399,11 +399,13 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   passes when the routine finishes and the things end where the written run
   left them (within 50 mm and 30°): a grip that only holds at a friction no
   rubber pad has fails here, even when the routine's own checks miss it.
-  A different end is a NOTE when `built` lowered nothing (the scene was
-  already as built, so it only played the routine again) or when `plain`,
-  which changes nothing, ended elsewhere too: the scene's end then differs
-  run to run, and the report says so. A routine that stops as built still
-  fails.
+  When `built` lowered nothing (the scene was already as built, so it only
+  played the routine again), a different end or a stop is a NOTE: the
+  outcome is not repeatable, and the report says so. When it lowered
+  something, a different end is a NOTE only where `plain`, which changes
+  nothing, ended the same things about as far off (at least half as far);
+  a thing it lost on the way, a thing it knocked over that the written run
+  left alone, or a routine that stops, still fails.
   When the written replay did not finish, there is no end to hold it to, and
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin

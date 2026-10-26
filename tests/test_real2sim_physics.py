@@ -89,6 +89,22 @@ class Verdict(unittest.TestCase):
             "lockbox#2 moved 6.0 mm with the robot frozen: a part on a joint swung or settled", result["report"]
         )
 
+    def test_an_attached_thing_that_moves_fails_beside_a_bigger_wobble(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 4.0
+        runs["frozen"]["things"]["key"] = _thing(3.0)
+        model = {**CLEAN, "ties": ["key: welded to the hand"]}
+        result = physics.verdict(model, runs)
+        self.assertIs(_words(result)["frozen"], False)
+        self.assertIn("key moved 3.0 mm with the robot frozen: the attachment", result["report"])
+
+    def test_a_hinged_part_that_settles_a_little_is_a_note_that_says_so(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["lockbox#2"] = _thing(3.0)
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["frozen"])
+        self.assertIn("a part on a joint swung or settled a few millimetres", result["report"])
+
     def test_a_few_millimetres_with_the_robot_frozen_is_a_note(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.1  # a bottle loose in a tray, a key in a tight socket
@@ -150,6 +166,29 @@ class Verdict(unittest.TestCase):
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
         runs["built"] = _run(outcome="RuntimeError: the tray slipped")  # a stop is not spread
         runs["plain"] = _run(end=(0.6, 0.1, 0.9), turn=0.0)
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+
+    def test_spread_excuses_only_the_same_thing_about_as_far(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = _run(end=(0.4, 0.0, 0.9), turn=0.0)  # 300 mm off
+        runs["plain"] = _run(end=(0.4, 0.0, 1.145))  # the crate 55 mm off: spread, but a sixth of built's miss
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+        for r in ("written", "built"):
+            runs[r]["things"]["bottle"] = _thing(10.0, end=(0.1, 0.1, 0.8))
+        runs["plain"] = _run()
+        runs["plain"]["things"]["bottle"] = _thing(10.0, end=(0.3, 0.1, 0.8))  # plain's spread is on the bottle
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+        runs["plain"]["things"]["crate"] = _thing(300.0, end=(0.6, 0.1, 0.9))
+        self.assertIsNone(_words(physics.verdict(CLEAN, runs))["built"])  # now the crate lands elsewhere in plain too
+        runs["built"]["things"]["crate"]["moved_max_mm"] = 0.0  # never lifted as built: a grip lost, not spread
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+
+    def test_built_says_what_it_could_check(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = {**_run(), "lowered": {"friction": 0, "torque": 0}}
+        result = physics.verdict({k: v for k, v in CLEAN.items() if k != "real_arm_torque"}, runs)
+        self.assertIn("built changed nothing: no friction here is above 1 (no torque limits known)", result["report"])
+        runs["built"] = {**_run(end=(0.4, 0.0, 0.9), turn=0.0), "lowered": None}  # apply() did not finish
         self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
 
     def test_built_is_not_read_when_the_written_run_failed(self) -> None:

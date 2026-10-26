@@ -52,7 +52,8 @@ itself; Claude Code through `CLAUDE.md`. Every command and reading is in
    purchase, enlarge a real feature of the thing and report it). Deformable
    things are simulated as the material they are and behave like the clip
    (how they bend, sag and slide). `./ctl physics` says whether it holds:
-   with the robot frozen nothing moves; with the fingers held open the task
+   with the robot frozen nothing moves (a few millimetres is a note to
+   explain); with the fingers held open the task
    does not happen (or the report says what carries the thing: a support, a
    hook, two arms squeezing); with the robot as built -- every friction at
    most 1, the real arm's torque -- the routine still finishes.
