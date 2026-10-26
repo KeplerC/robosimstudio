@@ -801,10 +801,13 @@ class Overrun(BaseException):
     """
 
 
-def _carried_at(row: dict, i: int) -> bool:
-    """Up there in the fingers (their force, or their touch where only the touch is read), or touching nothing at all:
-    what drop releases. A thing lifted with nothing on it is the one most worth dropping."""
-    return sum(row["hand"][i]) > 0.5 or sum(row["touch"][i]) > 0 or row["near"][i] == 0
+def _carried_at(row: dict, i: int, free_ok: bool = True) -> bool:
+    """Up there in the fingers (their force, or their touch where only the touch is read), or touching nothing at all
+    where that can be told (``free_ok``: its contacts are read, the read did not overflow, and it is not falling at g, a
+    toss): what drop releases. A thing held up with nothing on it is the one most worth dropping."""
+    if sum(row["hand"][i]) > 0.5 or sum(row["touch"][i]) > 0:
+        return True
+    return free_ok and not row.get("overflow") and row["near"][i] == 0
 
 
 class Replay:
@@ -1195,6 +1198,19 @@ class Replay:
         except Exception:
             pass
 
+    def _held_up(self, name: str, j: int, rows: list[dict]) -> bool:
+        """Whether a thing touching nothing at row ``j`` may be called held up: its contacts are read there, and it is
+        not falling at g (a thing tossed or knocked off is in flight, not carried)."""
+        if name in self.unread and self.side is None:
+            return False
+        if not 0 < j < len(rows) - 1:
+            return False
+        z = [rows[j + o]["pose"][name][2] for o in (-1, 0, 1)]
+        t = [self.stamps[j + o] if j + o < len(self.stamps) else j + o for o in (-1, 0, 1)]
+        d1, d2 = max(t[1] - t[0], 1) * self.dt, max(t[2] - t[1], 1) * self.dt
+        a = ((z[2] - z[1]) / d2 - (z[1] - z[0]) / d1) / (0.5 * (d1 + d2))
+        return abs(a + GRAVITY) > 3.0
+
     def summary(self, outcome: str) -> dict[str, Any]:
         rows = self.rows
         out: dict[str, Any] = {
@@ -1286,10 +1302,10 @@ class Replay:
                         )
                     )
             out["things"][name] = t
-        # the carry: where each lifted body first reached 90% of its own height with the fingers on it; drop
-        # releases at the earliest
+        # the carry: where each lifted body first reached 90% of its own height, held there by the fingers or by
+        # nothing that touches it (not a toss); drop releases at the earliest
         lifted = [k for k in self.names if k in self.single_free and out["things"][k]["rise_max_mm"] > CARRIED_MM]
-        tops = {}  # thing -> the step it first reached 90% of its own height, with the fingers on it
+        tops = {}  # thing -> the step it first reached 90% of its own height, held there (fingers, or nothing at all)
         for k in lifted:
             i = self.names.index(k)
             z = np.array([r["pose"][k][2] for r in rows])
@@ -1299,14 +1315,14 @@ class Replay:
                 continue
             rise = z - z[0]
             top = int(np.argmax(rise >= 0.9 * rise.max()))
-            if _carried_at(rows[top], i):
+            if _carried_at(rows[top], i, self._held_up(k, top, rows)):
                 tops[k] = top
         if tops:
             # early in a carry (90% of its height), not over where it is set down: a thing dropped above its own goal
             # lands where it was going anyway; the earliest carry, where a weld or a write would start
             start = min(tops.values())
             at = rows[start]
-            carried = [k for k in tops if _carried_at(at, self.names.index(k))]
+            carried = [k for k in tops if _carried_at(at, self.names.index(k), self._held_up(k, start, rows))]
             out["apex_step"] = start
             out["carried"] = carried
             out["carried_later"] = sorted(k for k in tops if k not in carried)

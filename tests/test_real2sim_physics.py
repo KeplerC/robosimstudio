@@ -917,6 +917,8 @@ class StudyLines(unittest.TestCase):
         self.assertTrue(physics._carried_at(held, 0))
         self.assertTrue(physics._carried_at(free, 0))  # nothing touches it up there: the one most worth dropping
         self.assertFalse(physics._carried_at(resting, 0))  # on a support, not in the hand
+        self.assertFalse(physics._carried_at(free, 0, free_ok=False))  # unread, or falling at g (a toss)
+        self.assertFalse(physics._carried_at({**free, "overflow": True}, 0))  # an overflowed read saw nothing
 
     def test_shape_volumes(self) -> None:
         import newton
