@@ -268,6 +268,16 @@ class TestItDrawsWhatTiledDraws(unittest.TestCase):
             gl.close()
         np.testing.assert_allclose(diffuse / diffuse[0], [1.0, 0.25, 0.125], rtol=1e-6)
 
+    def test_a_picture_body_takes_no_inertia_from_its_meshes(self) -> None:
+        """A flat mesh (a photo on a slab) has A + B = C to the rounding, which MuJoCo refuses when it infers."""
+        cam = _camera(eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))
+        gl = self.sim.make_renderer("gl", cameras=[cam], channels=("rgb",))
+        try:
+            ids = [gl.mj_model.body(f"body{b}").id for b in gl._bodies]
+            np.testing.assert_allclose(gl.mj_model.body_inertia[ids], 1.0)
+        finally:
+            gl.close()
+
     def test_a_kept_frame_survives_the_next_render(self) -> None:
         cam = _camera(eye=(0.45, -0.75, 1.2), look_at=(0.0, 0.0, 0.8))
         gl = self.sim.make_renderer("gl", cameras=[cam], channels=("rgb",))
