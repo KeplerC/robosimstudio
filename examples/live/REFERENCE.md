@@ -165,7 +165,7 @@ scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves befor
 | `check [--camera N] [--key ...] [--object NAME ...]` | The gate: builds, finite state, camera at the clip's aspect, every named thing present, penetration and drift at rest under their bars. |
 | `log [--last N]` | Every compare, check, take and `snapshot --note` so far: what it left (PASS/FAIL, the picture: a snapshot's pair when it made one) and the `scene.py` it measured. |
 | `play [NAME] [--record TAKE --camera N --every K] [--wait [--wait-limit S]]` | Play a routine the scene file binds, as its button on the page does; `--record` films a frame every `K` control steps (4). `--wait` returns when it ends and its take is written, printing the page's log as it goes, exits 1 with the traceback if it failed, and gives up after `--wait-limit` seconds (3600). |
-| `physics [NAME] [--only frozen,open,...] [--settle-mm MM] [--note TEXT]` | Replay a routine five ways, each from a reset scene, and say whether its physics is real (*The physics replays*): as written, with the robot frozen, with the fingers held open, with the robot as built, and with the handled things twice as heavy. Writes `run/physics.json` and a log line; takes as many times the routine's length as it plays replays. |
+| `physics [NAME] [--only frozen,open,...] [--settle-mm MM] [--note TEXT]` | Replay a routine seven ways (written, frozen, open, built, heavy, drop, plain), each from a reset scene, and say whether its physics is real (*The physics replays*): as written, with the robot frozen, with the fingers held open, with the robot as built, with the handled things twice as heavy, with the fingers opened early in the carry (`drop`), and played with nothing hooked in (`plain`). Writes `run/physics.json` and a log line; takes as many times the routine's length as it plays replays. |
 | `show PATH [--label TEXT]`, `show --clear` | A picture on the page's board for the person watching. |
 | `run N [--no-wait] [--wait-limit S]` | Step N (at least 1) control steps, then hold, waiting until they are taken however slowly the scene steps (`--wait-limit`, 3600 s). Refused while a routine plays. A run cut short is an error saying how, at what step: paused, a routine started, a reset (also `check`'s), or a loop pass that failed end it held; a save that rebuilt the scene, `resume` or another run end it and leave the page to that. `status`'s `last_run` says how the last one ended. |
 | `pause`, `resume` | Pause or resume stepping. |
@@ -365,7 +365,7 @@ or `--object`) is a SKIP. The bars are defaults, and `check` blocks nothing.
 
 ### The physics replays
 
-`physics` plays the routine again as written and four ways changed, each from
+`physics` plays the routine again as written and six ways changed, each from
 a reset scene and each as long as the written one, and prints a line per
 finding, PASS and FAIL as `check` says them and NOTE for what the report has
 to explain:
@@ -402,6 +402,31 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
+- **drop** plays it as written and opens the fingers early in the written
+  run's carry (where a thing it lifted first reached 90% of its height). What
+  the fingers carried falls; a thing that still ends where the written run
+  left it fails, unless the robot's other parts still bear its weight (two
+  hands squeezing, a hook), which is a NOTE. It catches a weld or a pose
+  written every step even while the fingers touch the thing.
+- **plain** plays it with nothing hooked in -- no cap, no hold, nothing on
+  any hook list -- and reads only at the routine's own yields (and once when
+  it returns), cut a little past the written run's length. It fails when a
+  thing flies with nothing touching it: a routine that carries it another way
+  when it is not replayed. A different end, or a routine that does not finish,
+  is a NOTE: the sim is not deterministic, and a loose thing lands elsewhere
+  run to run. A routine that never yields while it steps is read only at its
+  start and end.
+- **model** reads the scene's own numbers: gravity off the Earth's by more
+  than 2% fails; a handled thing lighter than expanded polystyrene or heavier
+  than lead (its mass over its colliders' volume), and a collider nothing
+  draws touching a handled thing (an invisible shelf or lip), are NOTEs to
+  explain.
+- **settle** reads how the scene's own settle, before the first step, moved
+  each thing from where it was put, and how deep each sits in something at
+  the reset: deeper than a soft contact sinks (5 mm), or more than 1 mm deep
+  and pushed out by the frozen run, fails; a shallower rest that stays, a thing
+  that starts higher than it was put, or one pushed aside without rising, is a
+  NOTE (say which); fallen into place is fine.
 - **contact** reads the model and the written replay. A joint between a thing
   and the robot (either way round), an equality row between them that is on at
   any step of the routine (a suction cup's seal is a NOTE instead), a thing flagged
@@ -413,14 +438,29 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   is the thing's own elasticity (a rod's bending), a hinge or a slide to the
   world or to furniture is a mechanism, and damping alone is not a motor: all
   pass.
-- **flight**, a NOTE when it shows, is a single free body with nothing within
-  the contact margin that does not fall at g: something holds it that is not
-  a contact. It is not read in a scene with a deformable, whose contacts are
-  not in MuJoCo's list.
+- **flight** is a single free body with nothing within the contact margin
+  that does not fall at g: something holds it that is not a contact. Ten
+  steps or more in a row fail; fewer are a NOTE (a contact that comes and goes between
+  reads). It is not read in a scene with a deformable, whose contacts are not
+  in MuJoCo's list.
 - **grip** is the median force each hand's fingers put on what they moved,
   and the friction MuJoCo mixed at those contacts (the larger of the two
   surfaces'): a hand whose own pads carry 2 or 4 grips with that, not with the
   number written for the thing.
+  It fails when the fingers' median force while touching is more than 1.25
+  times what the real hand squeezes with both its jaws (a Robotiq 2F-85's
+  235 N a jaw, a Franka hand's 140 N, a YAM's 50 N): a squeeze no real hand
+  gives is the arm pressing, not the hand holding.
+  The default arrangement gives free rigid things a VBD island coupled to the
+  robot, whose contacts never reach MuJoCo's list: for those things the
+  replay runs a collision pass of its own after every step, so their flight
+  is judged and the fingers touching them is seen (`box (stepped by
+  SolverVBD): touched by hand 2, its force not read`). Put the handled things
+  in the robot's MuJoCo island (`backends=(("*", rss.backend("mujoco",
+  ...)),)`) to have their grip force read. A jointed part of such a thing
+  that sags on that solver's joints at the reset is a NOTE in `frozen`, as is
+  a part whose stiff joint is its elasticity (a stem bending under its own
+  weight).
 
 Every replay starts at the reset with the page held (it is put back as it
 was when `physics` ends): a routine that only works once the page has run a

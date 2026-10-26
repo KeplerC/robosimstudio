@@ -440,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=lambda text: [m.strip() for m in text.split(",") if m.strip()],
         default=[],
         metavar="A,B",
-        help="these replays after `written`, comma-separated (default: frozen,open,built,heavy)",
+        help="these replays after `written`, comma-separated (default: frozen,open,built,heavy,drop,plain)",
     )
     phys.add_argument(
         "--settle-mm", type=float, default=None, help="how far a thing may move with the robot frozen (default 2)"
@@ -578,7 +578,11 @@ def poll(sock: Path, done: Callable[[dict], Any], doing: Callable[[dict], str], 
             return status
         now = time.monotonic()
         if now - start > limit:
-            return {"ok": False, "error": f"still {doing(status)} after {limit:.0f} s; the page carries on"}
+            return {
+                "ok": False,
+                "timed_out": True,
+                "error": f"still {doing(status)} after {limit:.0f} s; the page carries on",
+            }
         if now - said >= SAY_EVERY:
             _say(f"waiting: {doing(status)} ({now - start:.0f} s)")
             said = now
@@ -876,6 +880,7 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
         if first.get("run_under_way"):  # pausing would end it, and resuming after would leave the page running free
             return show({"ok": False, "error": "a `run N` is under way: let it end, or `pause` it"}, args.json)
         was_paused = bool(first.get("paused"))
+        written_s, plain_cut = 0.0, False
         ask({"cmd": "pause"}, TIMEOUTS["pause"])
         try:
             for mode in ["written", *later]:
@@ -885,18 +890,41 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                 started = ask({"cmd": "physics", "op": "replay", "mode": mode, "name": args.name}, TIMEOUTS["physics"])
                 if not started.get("ok"):
                     return show(started, args.json)
+                if started.get("skipped"):
+                    _say(f"physics: {mode} skipped: {started['skipped']}")
+                    continue
                 _say(f"physics: {mode} ...")  # on stderr, as every wait's progress is: --json stays one document
-                ended = wait_for_script(sock, started, quiet, 0, args.wait_limit)
+                t0 = time.monotonic()
+                # plain has no cap of its own (nothing hooked in): it gets a few written runs' time, and a plain that
+                # is still going then is read as not ending unwatched rather than waited on for an hour
+                limit = args.wait_limit if mode != "plain" else min(args.wait_limit, max(300.0, 5.0 * written_s))
+                ended = wait_for_script(sock, started, quiet, 0, limit)
+                if mode == "written":
+                    written_s = time.monotonic() - t0
                 if not ended.get("ok"):
                     # still playing past --wait-limit, or failed: a reset stops it, and its own cleanup puts the
                     # robot back (the friction, the torque, the masses); then say what happened
+                    if mode == "plain" and ended.get("timed_out"):  # past its time, not failed
+                        _say(f"physics: plain still going after {limit:.0f} s, read as not ending unwatched")
+                        plain_cut = True
+                        free = reset()  # and wait for it to land, so the next replay is not stopped by it
+                        if not free.get("ok"):
+                            return show(free, args.json)
+                        continue
                     ask({"cmd": "reset"}, TIMEOUTS["reset"])
                     return show(ended, args.json)
             done = reset()
             if not done.get("ok"):
                 return show(done, args.json)
             reply = ask(
-                {"cmd": "physics", "op": "report", "settle_mm": args.settle_mm, "note": args.note}, TIMEOUTS["physics"]
+                {
+                    "cmd": "physics",
+                    "op": "report",
+                    "settle_mm": args.settle_mm,
+                    "note": args.note,
+                    "plain_cut": plain_cut,
+                },
+                TIMEOUTS["physics"],
             )
         except BaseException:
             # interrupted mid-replay: a reset stops it, and its own cleanup takes the hold and the changed friction,
