@@ -102,10 +102,6 @@ SUN_PER_KEY = 2.6
 AMBIENT_STRENGTH = 0.25
 """The world's strength per unit of mean ``ambient``, for the tiled tracer's rig."""
 
-_PANEL = {"size": (1.4, 0.9), "height": 1.7, "color": (1.0, 0.97, 0.92)}
-"""``rtx._add_lab_lights``'s panel, which this draws the ``lab`` room with."""
-_DOME_COLOR = (0.94, 0.95, 0.97)
-
 
 def find_blender(blender: str = "") -> str:
     """The Blender to run: ``blender`` if given, else :data:`ENV`, else ``blender`` on the ``PATH``, else the Mac app.
@@ -165,6 +161,16 @@ def gpu_env(device: Any) -> dict[str, str]:
     if not ids:
         return {"CUDA_VISIBLE_DEVICES": ""}
     return {"CUDA_VISIBLE_DEVICES": ids[ordinal] if ordinal < len(ids) else ids[0]}
+
+
+def _worker_env(executable: str, extra: dict[str, str]) -> dict[str, str]:
+    """The worker's environment: this process's, less what points a Python at this package's 3.12 packages --
+    Blender ignores those, but an interpreter with ``bpy`` (3.13) would import a 3.12 NumPy and die."""
+    env = {**os.environ, **extra}
+    if Path(executable).name.lower().startswith("python"):
+        for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+            env.pop(name, None)
+    return env
 
 
 def _greeting(sock: socket.socket, deadline: float, most: int = 4096) -> str:
@@ -361,7 +367,7 @@ class RendererBlender(RendererBase):
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     cwd=self._tmp,
-                    env={**os.environ, TOKEN_ENV: token, **gpu_env(self.model.device)},
+                    env=_worker_env(self.executable, {TOKEN_ENV: token, **gpu_env(self.model.device)}),
                 )
             # in short waits, so a Blender that exits at once (a missing library, a flag it rejects) is said at once
             server.settimeout(0.5)
@@ -492,10 +498,23 @@ class RendererBlender(RendererBase):
             shutil.rmtree(tmp, ignore_errors=True)
             self._tmp = ""
 
+    @property
+    def closed(self) -> bool:
+        """Whether this renderer is done: closed, or its Blender lost (a broken connection closes it)."""
+        return self._sock is None
+
     def __del__(self) -> None:
+        """A renderer dropped unclosed: its Blender killed at once, not asked to quit -- a finaliser must not wait."""
         try:
-            self.close()
-        except Exception:  # at interpreter exit the modules close() uses may already be gone
+            sock, proc = getattr(self, "_sock", None), getattr(self, "_proc", None)
+            self._sock = self._proc = None
+            if sock is not None:
+                sock.close()
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+            if getattr(self, "_tmp", ""):
+                shutil.rmtree(self._tmp, ignore_errors=True)
+        except Exception:  # at interpreter exit the modules this uses may already be gone
             pass
 
 
@@ -531,11 +550,13 @@ def _describe(
         # a finish is keyed by the colour as the model states it: trimesh's copy is rounded to bytes
         stated = tuple(float(v) for v in shape_colors[part.shape][:3]) if 0 <= part.shape < len(shape_colors) else None
         finish = finishes.get(part.shape) or finish_for(stated or tuple(rgba[:3]))
+        # the colour as the model states it where trimesh's is that colour rounded to bytes (an untextured part)
+        base = stated if stated is not None and image is None else tuple(rgba[:3])
         entry: dict[str, Any] = {
             "name": f"shape{part.shape}",
             "body": int(part.body),
             "local": np.asarray(part.local, dtype=np.float64).ravel().tolist(),
-            "color": [*_linear(rgba[:3]), float(rgba[3])],
+            "color": [*_linear(base), float(rgba[3])],
             "roughness": float(finish.roughness),
             "metallic": float(finish.metallic),
             "opacity": float(finish.opacity),
@@ -608,16 +629,18 @@ def _lights(
 ) -> list[dict]:
     """The lights: the ``lab`` panel, or the sun rig (see the module docstring)."""
     if environment == "lab":
+        from robosimstudio.solvers.render.rtx import LAB_PANEL_COLOR, LAB_PANEL_HEIGHT, LAB_PANEL_SIZE
+
         center = (
             tuple(float(v) for v in getattr(cell, "center", (0.0, 0.0, 0.0))[:2]) if cell is not None else (0.0, 0.0)
         )
         return [
             {
                 "type": "area",
-                "size": list(_PANEL["size"]),
-                "position": [center[0], center[1], float(surface_z) + _PANEL["height"]],
+                "size": list(LAB_PANEL_SIZE),
+                "position": [center[0], center[1], float(surface_z) + LAB_PANEL_HEIGHT],
                 "direction": [0.0, 0.0, -1.0],
-                "color": list(_PANEL["color"]),
+                "color": list(LAB_PANEL_COLOR),
                 "energy": LAB_PANEL_WATTS * float(key_intensity),
                 "shadow": True,
             }
@@ -646,11 +669,14 @@ def _world(environment: str, ambient: float | Sequence[float], background: Seque
     """The world: the ``lab`` dome, or the ambient term; and what a camera sees where it hits nothing."""
     level = float(np.mean(ambient))
     if environment == "lab":
-        world: dict[str, Any] = {"color": list(_DOME_COLOR), "strength": LAB_DOME_STRENGTH * level}
-    else:
-        tint = np.asarray(ambient, dtype=np.float64).reshape(-1)
-        tint = tint / max(level, 1e-9) if tint.size == 3 else np.ones(3)
-        world = {"color": np.clip(tint, 0.0, None).tolist(), "strength": AMBIENT_STRENGTH * level}
+        from robosimstudio.solvers.render.rtx import LAB_DOME_COLOR
+
+        # the path tracer's untextured dome lights the scene and is not in a camera's ray: a miss is black there,
+        # whatever background the look states (rtx takes none)
+        return {"color": list(LAB_DOME_COLOR), "strength": LAB_DOME_STRENGTH * level, "background": [0.0, 0.0, 0.0]}
+    tint = np.asarray(ambient, dtype=np.float64).reshape(-1)
+    tint = tint / max(level, 1e-9) if tint.size == 3 else np.ones(3)
+    world: dict[str, Any] = {"color": np.clip(tint, 0.0, None).tolist(), "strength": AMBIENT_STRENGTH * level}
     if background is not None:
         world["background"] = _linear(background)
     return world

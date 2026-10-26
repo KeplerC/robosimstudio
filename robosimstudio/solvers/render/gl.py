@@ -542,8 +542,8 @@ class RendererGL(RendererBase):
     def _add_points(self) -> None:
         """Every particle drawn as a sphere, appended to the scene after MuJoCo's own geoms.
 
-        One ``mjv_initGeom`` a particle, from the positions :meth:`render` gathered once for the frame: about a
-        microsecond each, so a heap of a hundred thousand grains costs a tenth of a second a camera.
+        One ``mjv_initGeom`` a particle, from the positions :meth:`render` gathered once for the frame: about
+        5 us each, so :data:`MAX_SPHERES` of them cost a quarter of a second a camera.
         """
         mujoco, scene = self._mujoco, self._scene
         self._point_range = (int(scene.ngeom), int(scene.ngeom))

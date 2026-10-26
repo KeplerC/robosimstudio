@@ -405,12 +405,15 @@ class Sim(EnvBase):
         self.sync()
         try:
             frame = self._still_renderer.render(self.state)[spec.name]
-        except Exception:  # a renderer that failed (a dead Blender, a lost context) is built afresh next time
-            failed, self._still_renderer, self._still_key = self._still_renderer, None, None
-            try:
-                failed.close()
-            except Exception:  # its close failing too says nothing the render's own error does not
-                pass
+        except Exception:
+            # a renderer that is done (a Blender lost: RendererBlender.closed) is built afresh next time; one that
+            # only failed this frame is kept, rather than started again for every frame that fails the same way
+            if getattr(self._still_renderer, "closed", False):
+                failed, self._still_renderer, self._still_key = self._still_renderer, None, None
+                try:
+                    failed.close()
+                except Exception:  # its close failing too says nothing the render's own error does not
+                    pass
             raise
         if spec.background and "rgb" in frame:
             frame = dict(frame, rgb=self.over_plate(spec, frame["rgb"], depth=frame.get("depth")))

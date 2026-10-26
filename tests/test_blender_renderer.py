@@ -96,6 +96,18 @@ class TestWhichGpu(unittest.TestCase):
                 self.assertEqual(gpu_env("cpu"), {"CUDA_VISIBLE_DEVICES": "4"}, "a CPU scene: the first it sees")
 
 
+class TestTheWorkersEnvironment(unittest.TestCase):
+    def test_a_python_with_bpy_is_not_pointed_at_this_packages_312_packages(self) -> None:
+        from robosimstudio.solvers.render.blender import _worker_env
+
+        with mock.patch.dict(os.environ, {"PYTHONPATH": "/wt", "VIRTUAL_ENV": "/venv312"}):
+            env = _worker_env("/opt/venv313/bin/python3.13", {"X": "1"})
+            self.assertNotIn("PYTHONPATH", env)
+            self.assertNotIn("VIRTUAL_ENV", env)
+            self.assertEqual(env["X"], "1")
+            self.assertEqual(_worker_env("/opt/blender/blender", {})["PYTHONPATH"], "/wt", "Blender ignores it")
+
+
 class TestTheWire(unittest.TestCase):
     def test_a_header_and_its_blobs_arrive_whole(self) -> None:
         from robosimstudio.solvers.render.blender_worker import receive, send
@@ -179,9 +191,9 @@ class TestWhatIsSent(unittest.TestCase):
         self.assertEqual(panel["type"], "area")
         self.assertEqual(panel["position"], [0.6, 0.0, 0.75 + 1.7])
         self.assertAlmostEqual(panel["energy"], 2.0 * B.LAB_PANEL_WATTS)
-        world = B._world("lab", (1.0, 1.2, 1.4), None)
+        world = B._world("lab", (1.0, 1.2, 1.4), (0.5, 0.5, 0.5))
         self.assertAlmostEqual(world["strength"], 1.2 * B.LAB_DOME_STRENGTH)
-        self.assertNotIn("background", world)
+        self.assertEqual(world["background"], [0.0, 0.0, 0.0], "the dome is not in a camera's ray, as under rtx")
 
     def test_elsewhere_it_is_the_tiled_tracers_rig(self) -> None:
         from robosimstudio.solvers.render import blender as B

@@ -165,16 +165,8 @@ def _build(spec: CollectSpec):
         raise ValueError(f"the scene has no camera {missing or 'at all'}; it has {[c.name for c in sim.cameras]}")
     name = spec.renderer
     if name == "auto":
-        from robosimstudio.core.render.particles import draws_points
-
-        # gl draws cloth and ropes as meshes, cheaply, but each grain as a sphere set from Python (a few us a
-        # grain a camera): a heap of more than AUTO_GL_GRAINS goes to tiled, which draws particles natively
         handles = getattr(getattr(getattr(sim, "scene", None), "handles", None), "deformables", None) or {}
-        grains = sum(len(getattr(h, "particles", ())) for h in handles.values() if draws_points(h))
-        # gl draws what the handles name, and tiled every particle: a particle no handle names goes to tiled
-        named = {int(i) for h in handles.values() for i in np.asarray(getattr(h, "particles", ())).reshape(-1)}
-        unnamed = int(sim.model.particle_count) > len(named)
-        name = "tiled" if grains > AUTO_GL_GRAINS or unnamed else "gl"
+        name = auto_renderer(sim.model, handles)
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
     except (RuntimeError, ValueError) as exc:  # no context, or a visual MuJoCo will not compile
@@ -187,6 +179,25 @@ def _build(spec: CollectSpec):
 
 AUTO_GL_GRAINS = 5000
 """The most grains ``auto`` gives ``gl``: about 25 ms a camera a frame at its ~5 us a sphere."""
+
+
+def auto_renderer(model: Any, deformables: dict[str, Any]) -> str:
+    """``gl`` or ``tiled`` for ``renderer="auto"``, by what each would draw of the model's particles.
+
+    gl draws cloth and ropes as meshes, cheaply, but each grain as a sphere set from Python, and only what the
+    scene's handles say how to draw; tiled draws every particle natively. So gl, unless a heap is past
+    :data:`AUTO_GL_GRAINS` or a particle would be left out of gl's picture.
+    """
+    from robosimstudio.core.render.deformables import deformable_drawables
+
+    drawn = deformable_drawables(model, deformables)
+    names = {part.name for part in (*drawn.meshes, *drawn.points)}
+    shown = np.zeros(int(getattr(model, "particle_count", 0) or 0), dtype=bool)
+    for name, handle in deformables.items():
+        if name in names:
+            shown[np.asarray(getattr(handle, "particles", ()), dtype=np.int64).reshape(-1)] = True
+    grains = sum(len(points.particles) for points in drawn.points)
+    return "tiled" if grains > AUTO_GL_GRAINS or not shown.all() else "gl"
 
 
 def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, episode: int) -> dict[str, Any]:

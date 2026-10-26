@@ -827,7 +827,9 @@ def _differs_from_running(args: argparse.Namespace, status: dict) -> str:
     # the renderer it was started under, or the one it draws with, or "auto" for a page drawing what the machine
     # would pick (left to it, or named the same)
     pick = asked == "auto" and (started in ("", "auto") or (drawing and drawing == machine))
-    if asked and asked not in (started, drawing) and not pick:
+    # a page that has not said what it draws (its first build under way, or an older server) is not refused on it
+    unknown = not drawing and started in ("", "auto")
+    if asked and asked not in (started, drawing) and not pick and not unknown:
         running = drawing or started or "the machine's pick"
         return f"a page is already up drawing with {running}; `quit` it and run `up --renderer {asked}` again"
     return ""

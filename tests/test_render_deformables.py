@@ -138,6 +138,16 @@ class TestDrawables(unittest.TestCase):
             drawn = deformable_drawables(_model(20), {"towel": _handle([10, 11, 12], [[10, 11, 12]])})
         self.assertFalse(drawn)
 
+    def test_a_dataset_run_gives_gl_only_what_it_draws_whole_and_cheaply(self) -> None:
+        from robosimstudio.record.collect import AUTO_GL_GRAINS, auto_renderer
+
+        self.assertEqual(auto_renderer(_model(0), {}), "gl")
+        self.assertEqual(auto_renderer(_model(3), {"towel": _handle([0, 1, 2], [[0, 1, 2]])}), "gl")
+        self.assertEqual(auto_renderer(_model(4), {"towel": _handle([0, 1, 2], [[0, 1, 2]])}), "tiled", "one unnamed")
+        self.assertEqual(auto_renderer(_model(3), {"blob": _handle([0, 1, 2])}), "tiled", "a handle with no look")
+        heap = AUTO_GL_GRAINS + 1
+        self.assertEqual(auto_renderer(_model(heap), {"rice": _handle(range(heap), point_radius=0.001)}), "tiled")
+
     def test_a_model_without_particles_has_nothing_to_draw(self) -> None:
         from robosimstudio.core.render.deformables import deformable_drawables
 

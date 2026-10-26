@@ -913,6 +913,15 @@ palette decoded and the tone map off (see :data:`PALETTE_IS_DISPLAY`) the bench
 top read 90 against tiled's 72; at three quarters it reads within a few counts.
 Before either fix it read 192."""
 
+LAB_PANEL_SIZE = (1.4, 0.9)
+"""The ``lab`` panel's width and height [m]; Blender draws the same panel."""
+LAB_PANEL_HEIGHT = 1.7
+"""How far over the work surface the ``lab`` panel hangs [m]."""
+LAB_PANEL_COLOR = (1.0, 0.97, 0.92)
+"""The ``lab`` panel's colour, a little warm."""
+LAB_DOME_COLOR = (0.94, 0.95, 0.97)
+"""The ``lab`` dome's colour, near neutral."""
+
 LAB_DOME_PER_AMBIENT = 675.0 * _LIGHT_SCALE
 """Dome-light intensity per unit of mean :attr:`RenderSpec.ambient`.
 
@@ -980,7 +989,7 @@ def _add_lab_lights(
     dome_xf = UsdGeom.Xform.Define(stage, "/root/_LabDome")
     dome_xf.ClearXformOpOrder()
     dome = UsdLux.DomeLight.Define(stage, "/root/_LabDome/light")
-    dome.GetColorAttr().Set(Gf.Vec3f(0.94, 0.95, 0.97))
+    dome.GetColorAttr().Set(Gf.Vec3f(*LAB_DOME_COLOR))
     if environment_map:
         dome.GetTextureFileAttr().Set(_environment_map_path(environment_map))
         dome.GetTextureFormatAttr().Set(UsdLux.Tokens.latlong)
@@ -995,11 +1004,11 @@ def _add_lab_lights(
     cx, cy = (float(v) for v in center[:2])
     panel_xf = UsdGeom.Xform.Define(stage, "/root/_LabPanel")
     panel_xf.ClearXformOpOrder()
-    panel_xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, float(surface_z) + 1.7))
+    panel_xf.AddTranslateOp().Set(Gf.Vec3d(cx, cy, float(surface_z) + LAB_PANEL_HEIGHT))
     panel = UsdLux.RectLight.Define(stage, "/root/_LabPanel/light")
-    panel.GetWidthAttr().Set(1.4)
-    panel.GetHeightAttr().Set(0.9)
-    panel.GetColorAttr().Set(Gf.Vec3f(1.0, 0.97, 0.92))
+    panel.GetWidthAttr().Set(LAB_PANEL_SIZE[0])
+    panel.GetHeightAttr().Set(LAB_PANEL_SIZE[1])
+    panel.GetColorAttr().Set(Gf.Vec3f(*LAB_PANEL_COLOR))
     panel.GetIntensityAttr().Set(float(LAB_PANEL_PER_KEY * key))
 
 
