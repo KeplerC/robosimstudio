@@ -381,10 +381,11 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
 ```
 
 - **frozen** holds every target the robot has (arms, fingers, a torso or a
-  rail) where it started. A rigid thing that moves is pushed out of something
-  it starts inside (a finger, the table) or by something other than the
-  robot; a deformable still settling (a heap, a liquid, a draped cloth) is a
-  NOTE.
+  rail) where it started. A rigid thing that moves more than 5 mm is pushed
+  out of something it starts inside (a finger, the table) or by something
+  other than the robot; one that moves 2 to 5 mm (a key in a tight socket, a
+  bottle loose in a tray) and a deformable still settling (a heap, a liquid,
+  a draped cloth) are NOTEs.
 - **open** holds the fingers fully open and moves the arms as written. A
   pinch fails; a task that still happens is carried by a support, a hook or
   two arms squeezing, and the report says which. What happened is read off
@@ -398,6 +399,11 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   passes when the routine finishes and the things end where the written run
   left them (within 50 mm and 30°): a grip that only holds at a friction no
   rubber pad has fails here, even when the routine's own checks miss it.
+  A different end is a NOTE when `built` lowered nothing (the scene was
+  already as built, so it only played the routine again) or when `plain`,
+  which changes nothing, ended elsewhere too: the scene's end then differs
+  run to run, and the report says so. A routine that stops as built still
+  fails.
   When the written replay did not finish, there is no end to hold it to, and
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
