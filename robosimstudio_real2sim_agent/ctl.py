@@ -873,11 +873,14 @@ def cmd_physics(args: argparse.Namespace, sock: Path) -> int:
                 if not ended.get("ok"):
                     # still playing past --wait-limit, or failed: a reset stops it, and its own cleanup puts the
                     # robot back (the friction, the torque, the masses); then say what happened
-                    ask({"cmd": "reset"}, TIMEOUTS["reset"])
                     if mode == "plain" and ended.get("timed_out"):  # past its time, not failed
                         _say(f"physics: plain still going after {limit:.0f} s, read as not ending unwatched")
                         plain_cut = True
+                        free = reset()  # and wait for it to land, so the next replay is not stopped by it
+                        if not free.get("ok"):
+                            return show(free, args.json)
                         continue
+                    ask({"cmd": "reset"}, TIMEOUTS["reset"])
                     return show(ended, args.json)
             done = reset()
             if not done.get("ok"):

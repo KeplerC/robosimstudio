@@ -91,11 +91,11 @@ STOPPED = "stopped before it ended (a reset, a save or Stop)"
 """The outcome of a replay the page stopped: not a reading, so ``./ctl physics`` plays it again."""
 
 PLAIN_LONG = "still going, played with nothing watching, when the written replay had long ended"
+"""plain's cut: a reading (the routine does not end unwatched as it does replayed), not a replay to play again."""
 
 PLAIN_SLOW = "cut on the page's clock while still within the written run's steps"
 """plain stopped by ``./ctl physics``'s wall clock before it had taken more steps than the written run: a slow page (a
 busy GPU), not a routine that does not end -- read as not read."""
-"""plain's cut: a reading (the routine does not end unwatched as it does replayed), not a replay to play again."""
 
 FAILED = "the replay itself failed"
 """The start of the outcome of a replay that failed in its own code (not the routine's): not a reading either."""
@@ -452,6 +452,7 @@ def _contact_gap(
     margin1: wp.array(dtype=float),
     shape_margin: wp.array(dtype=float),
     gap: wp.array(dtype=float),
+    reach: wp.array(dtype=float),
 ):
     """A contact's separation along its normal between the two surfaces [m], negative when they overlap: the thickness
     Newton reports (a capsule's radius plus the shape's contact margin) less the margin, which is padding, not
@@ -468,6 +469,7 @@ def _contact_gap(
     s0 = shape0[i]
     s1 = shape1[i]
     gap[i] = wp.dot(p1 - p0, normal[i]) - (margin0[i] - shape_margin[s0]) - (margin1[i] - shape_margin[s1])
+    reach[i] = shape_margin[s0] + shape_margin[s1]  # how far apart the solver still acts on them
 
 
 class _SideContacts:
@@ -492,7 +494,8 @@ class _SideContacts:
         cap = int(getattr(sim.model, "rigid_contact_max", 0) or 0)
         self.pipe = newton.CollisionPipeline(sim.model, rigid_contact_max=max(cap, 16384), soft_contact_max=0)
         self.overflowed = False
-        self._gap = None
+        self._gap = self._reach = None
+        self.reach = np.zeros(0)
         shape_margin = getattr(sim.model, "shape_margin", None)
         self.margin = (
             shape_margin
@@ -510,9 +513,11 @@ class _SideContacts:
         self.overflowed = count >= len(c.rigid_contact_shape0)  # full: Newton stops writing at the cap, pairs lost
         a, b = c.rigid_contact_shape0[:n].numpy(), c.rigid_contact_shape1[:n].numpy()
         if not n:
+            self.reach = np.zeros(0)
             return a, b, np.zeros(0)
         if self._gap is None or len(self._gap) < n:
             self._gap = wp.zeros(max(n, 1024), dtype=float, device=self.model.device)
+            self._reach = wp.zeros(max(n, 1024), dtype=float, device=self.model.device)
         wp.launch(
             _contact_gap,
             dim=n,
@@ -528,9 +533,10 @@ class _SideContacts:
                 c.rigid_contact_margin1,
                 self.margin,
             ],
-            outputs=[self._gap],
+            outputs=[self._gap, self._reach],
             device=self.model.device,
         )
+        self.reach = self._reach[:n].numpy().astype(np.float64)
         return a, b, self._gap[:n].numpy().astype(np.float64)
 
 
@@ -671,8 +677,8 @@ def model_facts(sim: Any) -> dict[str, Any]:
     # where it was written (so an overlap is still there), a twin's own entity may keep where the warm-up left it (so
     # the settle above says it). The robot's fingers count: a hand that starts inside the thing is the same fault
     try:
-        # kept on the sim when a replay will read with it (something is unread), else built for this one read
-        side = _SideContacts.of(sim)
+        # kept on the sim where a replay reads with it (something is unread), else built for this one read
+        side = _SideContacts.of(sim) if unread_things(sim, list(th)) else _SideContacts(sim)
         a, b, gap = side.read()
         if side.overflowed:
             out["settle_error"] = (
@@ -808,6 +814,7 @@ class Replay:
         hold_from: int = 0,
     ) -> None:
         self.sim, self.mode, self.hold_from = sim, mode, int(hold_from)
+        self.skip = max(10, int(0.5 * float(sim.request.physics.control_hz)))  # the fingers' own time to open
         self.lay, self.th, self.fing = layout(sim), things(sim), fingers(sim)
         self.dt = 1.0 / float(sim.request.physics.control_hz)
         n = int(sim.model.shape_count)
@@ -837,7 +844,7 @@ class Replay:
             for name in self.names
             if len(self.th[name]["bodies"]) == 1 and self.th[name]["bodies"][0] in free_bodies
         }
-        read_here = mode in ("written", "drop", "plain")  # the replays whose rows the pass reads
+        read_here = mode in ("written", "plain")  # the replays whose every row the pass reads
         self.free = {
             name
             for name in self.names
@@ -1079,7 +1086,10 @@ class Replay:
                         self.hidden_touch.setdefault(int(i), set()).add(self.hidden[int(sh)])
                 if self.steps % 10 == 0:
                     self._mixed_friction(probe)
-        if self.side is not None and n and contacts and self.mode in ("written", "drop", "plain"):
+        in_window = self.mode != "drop" or (
+            self.hold_from and self.hold_from + self.skip <= self.steps <= self.hold_from + self.skip + RELEASE_WINDOW
+        )
+        if self.side is not None and n and contacts and self.mode in ("written", "drop", "plain") and in_window:
             try:
                 a, b, gap = self.side.read()
             except Exception as exc:  # flight goes unjudged for what only this pass reads; the row stands
@@ -1090,7 +1100,7 @@ class Replay:
             else:
                 self.side_overflowed += int(self.side.overflowed)
                 overflow = bool(self.side.overflowed)
-            close = gap < NEAR_MM / 1000.0
+            close = gap < np.maximum(NEAR_MM / 1000.0, self.side.reach if len(self.side.reach) == len(gap) else 0.0)
             a, b, gap = a[close], b[close], gap[close]
             for x, y in ((a, b), (b, a)):
                 ox = self.owner[x]
@@ -1192,7 +1202,7 @@ class Replay:
         }
         if not rows:
             return out
-        skip = max(10, int(0.5 / self.dt))  # the fingers' own time to open, for drop's reading
+        skip = self.skip  # the fingers' own time to open, for drop's reading
         for name in self.names + [p for p, _ in self.parts]:
             P = np.array([r["pose"][name] for r in rows])
             bad = ~np.isfinite(P).all(axis=1)
@@ -1512,6 +1522,9 @@ def replay(
         store[mode] = tap.summary(outcome) if tap is not None else {"outcome": outcome, "steps": 0, "things": {}}
 
 
+_ABSENT = object()
+
+
 def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator[None]:
     """The routine played with nothing hooked in -- no cap, no hold, no hook on any list -- and read only at its own
     yields (and once more when it returns): where the things are, what touches them.
@@ -1537,7 +1550,7 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
         except Exception:
             reader.error = reader.error or traceback.format_exc()[-800:]
 
-    wrapped: list[str] = []
+    wrapped: dict[str, Any] = {}  # attribute -> what the sim's own __dict__ held there before (or _ABSENT)
     grace = max(25, int(OVERRUN * steps))
     cut_at = [0]  # the step plain was first cut at: the routine's own cleanup then has `grace` steps
 
@@ -1557,9 +1570,10 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
             if fn is None:
                 continue
             try:
+                before = vars(sim).get(attr, _ABSENT)
                 setattr(sim, attr, cap(fn))
-                wrapped.append(attr)
-            except AttributeError:  # a sim that takes no attribute: cut at yields only
+                wrapped[attr] = before
+            except (AttributeError, TypeError):  # a sim that takes no attribute: cut at yields only
                 pass
     try:
         try:
@@ -1603,9 +1617,12 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
     except Exception as exc:
         outcome = f"{type(exc).__name__}: {str(exc)[:300]}" if reader is not None else f"{FAILED}: {exc}"[:300]
     finally:
-        for attr in wrapped:
+        for attr, before in wrapped.items():
             try:
-                delattr(sim, attr)
+                if before is _ABSENT:
+                    delattr(sim, attr)
+                else:
+                    setattr(sim, attr, before)
             except AttributeError:
                 pass
         store["plain"] = (
@@ -1780,6 +1797,9 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
         return
     if drop.get("nonfinite"):
         line(None, "drop", "not read: the solver blew up in it")
+        return
+    if str(drop.get("outcome", "")).startswith((STOPPED, FAILED)):
+        line(None, "drop", f"not read: {drop['outcome']}")
         return
     if drop.get("release_rows", 0) < int(drop.get("release_skip", 10)) + RELEASE_WINDOW // 2:
         line(None, "drop", "not read: the carry's top comes too near the end of the run to watch a fall")
