@@ -416,6 +416,34 @@ class Verdict(unittest.TestCase):
         runs["frozen"] = _run(outcome=physics.STOPPED, moved=0.5, end=(0.4, 0.0, 0.9), turn=0.0)
         self.assertIn("the frozen replay was not read whole", physics.verdict(model, runs)["report"])
 
+    def test_a_replay_whose_log_failed_is_not_read(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"] = {**_run(moved=0.0), "log_error": "RuntimeError: x", "things": {}}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["frozen"])
+        self.assertIn("not read: its log failed: RuntimeError: x", result["report"])
+
+    def test_a_written_replay_cut_short_is_not_read(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["outcome"] = physics.STOPPED
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["written"])
+        self.assertIn("not read: " + physics.STOPPED, result["report"])
+
+    def test_plain_carried_a_deformable_it_left_far_from_its_start(self) -> None:
+        written = {"deformables": {"gasket": {"moved_max_mm": 536.0, "end_mm": 477.0, "end": [0.0, 0.2, 0.3]}}}
+        left = {"deformables": {"gasket": {"moved_max_mm": 138.0, "end_mm": 400.0, "end": [0.0, 0.2, 0.3]}}}
+        stayed = {"deformables": {"gasket": {"moved_max_mm": 138.0, "end_mm": 17.0, "end": [0.0, 0.0, 0.0]}}}
+        self.assertTrue(physics._carried(left, written, "gasket", sampled=True))
+        self.assertFalse(physics._carried(stayed, written, "gasket", sampled=True))
+        self.assertFalse(physics._carried(left, written, "gasket"))  # read every step: its largest move decides
+
+    def test_a_part_of_a_tied_thing_says_what_holds_the_thing(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["box#1"] = _thing(6.0)
+        model = {**CLEAN, "ties": ["box by a fixed joint to the robot"], "tie_things": ["box"]}
+        self.assertIn("the thing it is part of is held", physics.verdict(model, runs)["report"])
+
     def test_frozen_pass_says_the_largest_move_of_any_rigid_thing(self) -> None:
         runs = _clean_runs()
         runs["frozen"]["things"]["key"] = _thing(1.8)

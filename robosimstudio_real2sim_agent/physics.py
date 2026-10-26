@@ -1779,14 +1779,23 @@ def _entry(run: dict, k: str) -> dict | None:
     return run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
 
 
+def cut_short(run: dict) -> str:
+    """Why a replay did not run to a reading, ``""`` when it did: the page cut it (a reset, a save, Stop), its own
+    machinery broke (``FAILED``), or its log failed (rows are missing, and it would read as nothing having moved). The
+    server reports nothing while any replay is cut short, and says this."""
+    if run.get("log_error"):
+        return f"its log failed: {str(run['log_error']).strip().splitlines()[-1]}"
+    out = str(run.get("outcome", ""))
+    return out if out.startswith((STOPPED, FAILED)) else ""
+
+
 def _unread(run: dict) -> str:
-    """Why a replay was not read, ``""`` when it was: the solver blew up in it, the page cut it (a reset, a save,
-    Stop), or its own machinery broke (``FAILED``). The server reports nothing while any replay is cut or broken; this
-    keeps the verdict safe for a caller that hands it one anyway."""
+    """Why a replay was not read, ``""`` when it was: the solver blew up in it, or it was :func:`cut_short` (which a
+    caller of :func:`verdict` other than the server may still hand in)."""
     if run.get("nonfinite"):
         return "not read: the solver blew up in it"
-    out = str(run.get("outcome", ""))
-    return f"not read: {out}" if out.startswith((STOPPED, FAILED)) else ""
+    why = cut_short(run)
+    return f"not read: {why}" if why else ""
 
 
 def _carried(run: dict, written: dict, k: str, sampled: bool = False) -> bool:
@@ -1797,7 +1806,9 @@ def _carried(run: dict, written: dict, k: str, sampled: bool = False) -> bool:
     a, b = _entry(run, k) or {}, _entry(written, k) or {}
     if a.get("moved_max_mm", 0.0) >= b.get("moved_max_mm", 0.0) / 3:
         return True
-    if not (sampled and "start" in a and "end" in a and "end" in b):
+    if sampled and "start" not in a:  # a deformable records no start: how far from it plain left it, against written
+        return b.get("end_mm", 0.0) > 0.0 and a.get("end_mm", 0.0) >= b.get("end_mm", 0.0) / 3
+    if not (sampled and "end" in a and "end" in b):
         return False
     # it left the thing a third of the way from its start toward the written end: shoved aside is not carried
     far = float(np.linalg.norm(np.subtract(a["start"], b["end"])))
@@ -2232,10 +2243,12 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                     + ": that replay's reading stops there",
                 )
         line(
-            written["outcome"] == "finished",
+            None if cut_short(written) else written["outcome"] == "finished",
             "written",
             f"finished; moved {', '.join(names) or 'nothing'}"
             if written["outcome"] == "finished"
+            else f"not read: {cut_short(written)}"
+            if cut_short(written)
             else f"stopped: {written['outcome']}",
         )
         unjudged = {k: t["flight_unread"] for k, t in written["things"].items() if t.get("flight_unread")}
@@ -2320,7 +2333,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 cause = "it starts inside something, or something other than the robot pushes it"
             else:
                 cause = "a few millimetres, but a thing at rest stays put: say in the report what moves it"
-            if worst.split("#")[0] in in_written:  # a latch, an equality row or a motor on it in the written run
+            if "#" in worst and worst.split("#")[0] in always:  # a part of a thing tied to the robot or kinematic
+                cause += "; the thing it is part of is held (the contact line names it): say if that moves this part"
+            elif worst.split("#")[0] in in_written:  # a latch, an equality row or a motor on it in the written run
                 cause += (
                     "; the contact line names a hold on it (a latch, an equality row, a motor): say if that moves it"
                 )

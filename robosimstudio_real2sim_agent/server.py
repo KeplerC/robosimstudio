@@ -159,17 +159,13 @@ def first_render_note(renderer: str, first_in_process: bool, first_in_scene: boo
 
 
 def _read_replay(run: dict) -> bool:
-    """Whether a physics replay ran to a reading: not stopped by the page, not failed in its own code, and logged
-    (a replay whose log failed has rows missing, and would read as nothing having moved)."""
-    outcome = str(run.get("outcome", ""))
-    return outcome != physics.STOPPED and not outcome.startswith(physics.FAILED) and not run.get("log_error")
+    """Whether a physics replay ran to a reading (:func:`physics.cut_short`, the verdict's own rule)."""
+    return not physics.cut_short(run)
 
 
 def _why(run: dict) -> str:
     """Why a replay is not a reading: its log's error when that is it, else how it ended."""
-    if run.get("log_error"):
-        return f"its log failed: {str(run['log_error']).strip().splitlines()[-1]}"
-    return str(run.get("outcome", ""))
+    return physics.cut_short(run) or str(run.get("outcome", ""))
 
 
 class LiveServer:
