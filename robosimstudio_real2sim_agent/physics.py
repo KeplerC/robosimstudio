@@ -344,6 +344,36 @@ def _shape_volume(m: Any, s: int) -> float:
     return 0.0
 
 
+def _round_axis(m: Any, shapes: list[int]) -> list[float] | None:
+    """The body-frame axis a thing is round about -- every collider a cylinder, capsule or cone along one line, or a
+    sphere centred on it -- or ``None``. A bottle spun about its own axis ends the same."""
+    g = newton.GeoType
+    kind, xf = m.shape_type.numpy(), m.shape_transform.numpy()
+    flags = m.shape_flags.numpy()
+    collide = int(newton.ShapeFlags.COLLIDE_SHAPES)
+    axis, point, spheres = None, None, []
+    for shape in shapes:
+        x = int(shape)
+        if not int(flags[x]) & collide:
+            continue
+        k, p, q = int(kind[x]), np.asarray(xf[x, :3], dtype=np.float64), xf[x, 3:]
+        if k == int(g.SPHERE):
+            spheres.append(p)
+            continue
+        if k not in (int(g.CYLINDER), int(g.CAPSULE), int(g.CONE)):
+            return None
+        a = compose_many(np.array([[0, 0, 0, *q]]), np.array([[0, 0, 1.0, 0, 0, 0, 1.0]]))[0, :3]
+        if axis is None:
+            axis, point = a / np.linalg.norm(a), p
+        elif abs(abs(float(np.dot(a, axis))) - 1.0) > 1e-3 or np.linalg.norm(np.cross(p - point, axis)) > 1e-3:
+            return None
+    if axis is None:
+        return None
+    if any(np.linalg.norm(np.cross(c - point, axis)) > 1e-3 for c in spheres):
+        return None
+    return [round(float(v), 6) for v in axis]
+
+
 class _SideContacts:
     """A collision pass of the replay's own over the whole model: the contacts a thing in another island has, which
     MuJoCo's list never holds. Read-only, after a step, on the state it left; nothing is solved from it."""
@@ -526,6 +556,11 @@ def model_facts(sim: Any) -> dict[str, Any]:
     except Exception:  # a model no collision pass can be built over: the settle's own reading stands
         pass
     out["hidden"] = sorted(set(_hidden_colliders(sim).values()))
+    for name, t in th.items():
+        if len(t["bodies"]) == 1:
+            axis = _round_axis(m, list(t["shapes"]))
+            if axis is not None:
+                out["things"][name]["round_axis"] = axis
     return out
 
 
@@ -997,6 +1032,10 @@ class Replay:
             return out
         for name in self.names + [p for p, _ in self.parts]:
             P = np.array([r["pose"][name] for r in rows])
+            bad = ~np.isfinite(P).all(axis=1)
+            if bad.any():  # a solver that blew up reads as nothing moving: say where it stopped being a number
+                out.setdefault("nonfinite", {})[name] = int(np.argmax(bad))
+                P = P[: int(np.argmax(bad))] if np.argmax(bad) > 0 else np.nan_to_num(P[:1])
             d = np.linalg.norm(P[:, :3] - P[0, :3], axis=1)
             t = {
                 "moved_max_mm": round(float(d.max()) * 1000, 1),
@@ -1311,7 +1350,9 @@ def _moved(run: dict, floor: float = 20.0) -> list[str]:
     return hit + [k for k, t in run.get("deformables", {}).items() if t["moved_max_mm"] > floor]
 
 
-def _ended_elsewhere(run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0) -> str:
+def _ended_elsewhere(
+    run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0, round_axes: dict | None = None
+) -> str:
     """What did not end where the written run left it, said in a few words; ``""`` when everything did.
 
     Each thing has to end within ``mm`` and ``deg`` of its written end, and to have moved on the way at least a
@@ -1335,7 +1376,12 @@ def _ended_elsewhere(run: dict, written: dict, names: list[str], mm: float = 50.
             return f"{k} ended {off:.0f} mm from where the written run left it"
         if abs(a.get("particle_end_mm", 0.0) - b.get("particle_end_mm", 0.0)) > mm / 2:
             return f"{k}'s shape ended unlike the written run's"
-        if "end_quat" in a and "end_quat" in b:  # the turn between the two ends, not between the sizes of two turns
+        axis = (round_axes or {}).get(k)
+        if axis is not None and "end_quat" in a and "end_quat" in b:  # round about it: only a tilt of the axis counts
+            ua = compose_many(np.array([[0, 0, 0, *a["end_quat"]]]), np.array([[*axis, 0, 0, 0, 1.0]]))[0, :3]
+            ub = compose_many(np.array([[0, 0, 0, *b["end_quat"]]]), np.array([[*axis, 0, 0, 0, 1.0]]))[0, :3]
+            turn = math.degrees(math.acos(max(-1.0, min(1.0, float(np.dot(ua, ub))))))
+        elif "end_quat" in a and "end_quat" in b:  # the turn between the two ends, not between the sizes of two turns
             turn = _turn_deg(np.asarray(a["end_quat"]), np.asarray(b["end_quat"]))
         else:
             turn = abs(a.get("turn_end_deg", 0.0) - b.get("turn_end_deg", 0.0))
@@ -1428,7 +1474,8 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
         n = min(len(a), len(b))
         if n > 10 and min(np.subtract(a[10:n], b[10:n])) < -0.015:
             return True
-        return bool(_ended_elsewhere(drop, written, [k]))
+        axes = {n: t["round_axis"] for n, t in model.get("things", {}).items() if t.get("round_axis")}
+        return bool(_ended_elsewhere(drop, written, [k], round_axes=axes))
 
     stayed = [k for k in carried if not fell(k)]
     if not stayed:
@@ -1514,6 +1561,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     def line(ok: bool | None, name: str, detail: str) -> None:
         lines.append({"ok": ok, "name": name, "detail": detail})
 
+    axes = {k: t["round_axis"] for k, t in model.get("things", {}).items() if t.get("round_axis")}
     driven = (runs.get("written") or {}).get("thing_targets_moved", 0.0) > 1e-6
     found = model.get("ties", []) + (model.get("drives", []) if driven else [])
     found += [f"{k} is kinematic" for k in model.get("kinematic", [])]
@@ -1565,6 +1613,14 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             for k, t in written["things"].items()
             if t.get("free_flight_not_falling")
         }
+        if written.get("nonfinite"):
+            k, at = min(written["nonfinite"].items(), key=lambda kv: kv[1])
+            line(
+                False,
+                "finite",
+                f"{k}'s pose stopped being a number at step {at}: the solver blew up (a pose or a speed written into "
+                "a solver that integrates it, or a contact it cannot hold)",
+            )
         line(
             written["outcome"] == "finished",
             "written",
@@ -1632,7 +1688,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             + ("did not finish" if written.get("outcome") != "finished" else "moved nothing"),
         )
     elif opened:
-        did = opened["outcome"] == "finished" and not _ended_elsewhere(opened, written, names)
+        did = opened["outcome"] == "finished" and not _ended_elsewhere(opened, written, names, round_axes=axes)
         line(
             None if did else True,
             "open",
@@ -1663,7 +1719,7 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             return None, "not read: the written replay did not finish, so there is no end to hold this one to"
         if run["outcome"] != "finished":
             return False, f"with {what} the routine stopped: {run['outcome']}"
-        elsewhere = _ended_elsewhere(run, written, names)
+        elsewhere = _ended_elsewhere(run, written, names, round_axes=axes)
         if elsewhere:
             return False, f"with {what} the routine finished, but {elsewhere}"
         return True, f"finished with {what}, the things ending where the written run left them"

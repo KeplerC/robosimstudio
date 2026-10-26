@@ -706,6 +706,24 @@ class StudyLines(unittest.TestCase):
         runs["written"]["contacts_unread"] = {"stem": "stepped by SolverVBD"}
         self.assertIsNone(_words(physics.verdict(CLEAN, runs))["frozen"])
 
+    def test_a_round_things_spin_about_its_axis_is_not_a_different_end(self) -> None:
+        runs = _clean_runs()
+        spun = [0.0, 0.0, float(np.sin(np.radians(69))), float(np.cos(np.radians(69)))]  # 138 degrees about z
+        runs["written"]["things"]["crate"]["end_quat"] = [0.0, 0.0, 0.0, 1.0]
+        runs["built"]["things"]["crate"].update(turn_end_deg=138.0, end_quat=spun)
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["built"], False)
+        model = {**CLEAN, "things": {"crate": {"round_axis": [0.0, 0.0, 1.0]}}}
+        self.assertIs(_words(physics.verdict(model, runs))["built"], True)
+        model["things"]["crate"]["round_axis"] = [1.0, 0.0, 0.0]  # round about x: a turn about z tilts that axis
+        self.assertIs(_words(physics.verdict(model, runs))["built"], False)
+
+    def test_a_pose_that_stops_being_a_number_fails(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["nonfinite"] = {"crate": 212}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["finite"], False)
+        self.assertIn("stopped being a number at step 212", result["report"])
+
     def test_shape_volumes(self) -> None:
         import newton
 
