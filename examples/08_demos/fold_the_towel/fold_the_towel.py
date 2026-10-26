@@ -33,9 +33,10 @@ UP = np.array([0.0, 0.0, 1.0])
 DOWN = (0.0, 1.0, 0.0, 0.0)
 """The tool pointing down with the jaws closing along y, across the far edge (xyzw)."""
 PINCH_X = -0.08
-"""Where along the far edge the left hand takes it [m]. At the middle (-0.05) the corner
-nearer the robot folds back on itself and the fold scores 0.82; at -0.07, 0.85. At -0.09 it
-scores 0.87-0.90 but that corner can overshoot the near edge by 19 mm, a span of 0.61."""
+"""Where along the far edge the left hand takes it [m]. Measured on the arena hand, with the arms
+passing through each other: at the middle (-0.05) the corner nearer the robot folds back on
+itself and the fold scores 0.82; at -0.07, 0.85. At -0.09 it scores 0.87-0.90 but that corner
+can overshoot the near edge by 19 mm, a span of 0.61."""
 EDGE_IN = 0.006
 """Tool centre in from the far edge [m]: the outer pad lands on bare bench, the inner on the towel."""
 ON_BENCH = 0.0155
@@ -54,7 +55,7 @@ squeezing, pinched 31-37. The real clamp is not held open by the bench, and pinc
 APEX = 0.06
 """How high the carry arcs over the place [m]: the suite's low, page-turn arc."""
 CARRY = 5.0
-"""Seconds over the arc. At 4 s the fold scored 0.85-0.89, at 5 s 0.87-0.92."""
+"""Seconds over the arc. On the arena hand, at 4 s the fold scored 0.85-0.89, at 5 s 0.87-0.92."""
 SLACK = 0.0125
 """How far short of its mirror the edge is laid [m]: 2.5 thicknesses, the suite's, because a
 5 mm slab's crease loop takes up cloth."""
@@ -69,8 +70,8 @@ the carrying forearm's way, and with the arms colliding they meet for about 2 s 
 fold scored 0.84; here it moves 6 mm and the fold scores 0.854-0.858 (five runs)."""
 PRESS_UNTIL = 0.9
 """The fraction of the carry the press stays down for. Left down through the landing the flap
-lands on the fingers; lifted at 0.4-0.6 the near half drifts 13-14 mm. Over three runs each,
-lifted at 0.8 the fold scored 0.844-0.878, and at 0.9, 0.851-0.885."""
+lands on the fingers; lifted at 0.4-0.6 the near half drifts 13-14 mm. Over three runs each on
+the arena hand, lifted at 0.8 the fold scored 0.844-0.878, and at 0.9, 0.851-0.885."""
 
 
 def together(*moves):

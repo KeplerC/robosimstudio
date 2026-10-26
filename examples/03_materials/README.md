@@ -146,9 +146,10 @@ Source: [`04_band.py`](04_band.py)
 
 Bring each hand in along the edge of the A4 sheet that runs past the box, from its own corner, with **Grip amount** 0.79, and press **Close**: the fingers stall on the sheet at the grip's 10 N cap. Carry the edge up and over, each hand turning with the flap to 88 degrees and no further, and press **Open** 100 mm over the far half: the flap falls onto it. Then, at **Grip amount** 0.6, run the side of each hand's lower finger along its half of the fold, the sheet pushing it up its slide against the same 10 N cap: the sheet stays folded in half.
 
-In 6 drives (`probe.py`) the arms, which collide, kept 79.3 mm apart and 9.0 mm on their own sides, each hand
-turned 88.0 degrees holding the edge, and no finger pushed over 15 N at any step (9.8 N holding, 5.6 after **Open**,
-13.5 pressing). The edges ended 4.7 to 4.9 mm apart and the fold kept 2.92 to 2.93 rad, unchanged 3 s after the hands.
+On the YAM's pads, at friction 1 (paper's 0.3 mixes to 0.55 on them), the arms, which collide, kept 79.5 mm
+apart and reached 12 mm across the middle at most, each hand turned 88.0 degrees holding the edge, and no finger pushed
+over 15 N at any step (8.7 N holding, 4.8 after **Open**, 12.4 pressing). The edges ended 0.3 to 2.3 mm apart and the
+fold kept 2.89 rad, unchanged 3 s after the hands (`tests/test_fold_paper_robot`).
 
 ```bash
 uv run examples/03_materials/05_paper.py

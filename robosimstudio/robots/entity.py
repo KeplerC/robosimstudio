@@ -1048,6 +1048,7 @@ class EntityEmbodiment(Entity):
             # bodies, which is the failure rekey_custom_attributes exists for.
             set_body_attribute(builder, "mujoco:gravcomp", 1.0, self.body_indices(builder))
         unlimited_dofs: list[int] = []
+        geared = self._geared_dofs(builder)
         for arm in self.spec.arms:
             index = self._index_arm_builder(builder, arm)
             hand = self.hands.get(arm.name)
@@ -1089,7 +1090,7 @@ class EntityEmbodiment(Entity):
                 if actuation.joint_damping is None and actuation.joint_friction is None and not actuation.armature:
                     linkage = ()
                 else:
-                    linkage = self._linkage_dofs(builder, dofs)
+                    linkage = sorted({tied for dof in dofs for tied in geared.get(int(dof), (int(dof),))})
                 for dof in linkage:
                     if actuation.joint_damping is not None:
                         builder.joint_damping[dof] = float(actuation.joint_damping)
@@ -1109,44 +1110,44 @@ class EntityEmbodiment(Entity):
             self._unlimit_ctrlrange(builder, unlimited_dofs)
 
     @staticmethod
-    def _linkage_dofs(builder: newton.ModelBuilder, dofs: Sequence[int]) -> list[int]:
-        """``dofs`` and every DOF geared to them, sorted.
+    def _geared_dofs(builder: newton.ModelBuilder) -> dict[int, tuple[int, ...]]:
+        """Each DOF an enabled mimic row ties to another, mapped to every DOF of its linkage.
 
         A geared hand names one driven joint, so a spec's gripper DOFs are that
         joint alone; the joints its equalities carry are found through the
         builder's own mimic table rather than by name, so this works for any
-        linkage the importer closed.
+        linkage the importer closed. A DOF no row ties is not in the map.
 
         Either side of a mimic row may be the driven joint: the MJCF equality
         ``joint1 = poly(joint2)`` lands as ``joint0`` following ``joint1``, and
         the arena YAM's names its *driven* finger as ``joint1`` -- read one way
-        round, its carried finger was never found. So a row ties both of its
-        joints into the linkage, followed until nothing new joins. A disabled
-        row ties nothing.
+        round, its carried finger was never found. So a row joins its two
+        joints into one linkage, linkages that share a joint merge, and a
+        disabled row joins nothing. Built once per robot, a union-find over the
+        rows.
         """
         joint0 = list(getattr(builder, "constraint_mimic_joint0", ()))
         joint1 = list(getattr(builder, "constraint_mimic_joint1", ()))
         enabled = list(getattr(builder, "constraint_mimic_enabled", ())) or [True] * len(joint0)
-        pairs = [(a, b) for a, b, on in zip(joint0, joint1, enabled, strict=False) if on]
+        parent: dict[int, int] = {}
+
+        def root(joint: int) -> int:
+            parent.setdefault(joint, joint)
+            while parent[joint] != joint:
+                parent[joint] = parent[parent[joint]]
+                joint = parent[joint]
+            return joint
+
+        for a, b, on in zip(joint0, joint1, enabled, strict=False):
+            if on:
+                parent[root(int(a))] = root(int(b))
         starts = builder.joint_qd_start
         count = len(builder.joint_armature)
-
-        def joint_dofs(joint: int) -> set[int]:
-            """A joint's DOFs, by its position in joint_qd_start."""
-            begin = int(starts[joint])
+        linkages: dict[int, list[int]] = {}
+        for joint in list(parent):
             end = int(starts[joint + 1]) if joint + 1 < len(starts) else count
-            return set(range(begin, end))
-
-        linkage = {int(d) for d in dofs}
-        grew = True
-        while grew:
-            grew = False
-            for a, b in pairs:
-                ends = joint_dofs(int(a)), joint_dofs(int(b))
-                if (ends[0] & linkage or ends[1] & linkage) and not (ends[0] | ends[1]) <= linkage:
-                    linkage |= ends[0] | ends[1]
-                    grew = True
-        return [dof for dof in sorted(linkage) if 0 <= dof < count]
+            linkages.setdefault(root(joint), []).extend(range(int(starts[joint]), end))
+        return {dof: tuple(sorted(members)) for members in linkages.values() for dof in members}
 
     # -------------------------------------------------------------- indexing
     def _arm_joints(
