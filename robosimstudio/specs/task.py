@@ -196,7 +196,7 @@ class Binding:
     gripper: str = ""
     mount: Xform | None = None
     mount_point: str = ""
-    arm_mounts: tuple[tuple[str, Xform], ...] = ()
+    arm_mounts: tuple[tuple[str, tuple[float, ...]], ...] = ()
     work_arm: str = ""
     support_arm: str = ""
     arm_actuation: ActuationSpec | None = None

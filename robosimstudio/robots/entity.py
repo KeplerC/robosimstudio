@@ -66,6 +66,24 @@ def _wp_xform(values) -> wp.transform:
     return wp.transform(wp.vec3(v[0], v[1], v[2]), wp.normalize(wp.quat(v[3], v[4], v[5], v[6])))
 
 
+def _arm_base(arm: ArmSpec, arm_j: Sequence[int], joint_parent, joint_types, body_labels) -> int:
+    """The body ``arm`` stands on: the one its spec names, else the one its first moving joint hangs on.
+
+    "First" in the tree, which an importer numbers depth first -- so the lowest
+    index, whatever order ``joint_names`` lists them in -- and "moving" because a
+    prefix scan of an uncollapsed import also sweeps up welds, which are not the
+    arm's. One rule, read by :meth:`EntityEmbodiment.bind` for the handle's
+    ``base_body`` and by :meth:`EntityEmbodiment._place_arms` for the body
+    ``arms_at`` places, so the two are always the same body. -1 is the world,
+    or no moving joint at all.
+    """
+    if arm.base_body_name:
+        return label_index(body_labels, arm.base_body_name)
+    fixed = int(newton.JointType.FIXED)
+    moving = [int(j) for j in arm_j if int(joint_types[j]) != fixed]
+    return int(joint_parent[min(moving)]) if moving else -1
+
+
 def _equality_ends(builder: newton.ModelBuilder) -> list[tuple[int, int]]:
     """Every equality constraint's two bodies, both ways round; -1 is the world.
 
@@ -819,34 +837,23 @@ class EntityEmbodiment(Entity):
         types = builder.joint_type
         hung_on = {int(builder.joint_child[j]): j for j in joints}
         claimed: dict[str, list[int]] = {}
-        first: dict[str, int] = {}
         for arm in self.spec.arms:
             # The arm joints alone: a hand with a file of its own is welded on
             # after this, so its fingers cannot be looked up yet -- and they
             # hang under the wrist, so the arm joints already say whose root
-            # an arm stands on.
-            #
-            # Moving joints only. Uncollapsed, a prefix scan also matches the
-            # welds the collapse is about to fold away -- a mount between the
-            # root and the first joint, say -- and the base is the body the
-            # first *moving* joint hangs on, which is the joint the finalized
-            # model's handle reads its base from.
-            arm_j, finger_j = self._arm_joints(labels, arm, joint_types=types, fingers=False)
-            moving = [j for j in (*arm_j, *finger_j) if j >= joint_start and int(types[j]) != fixed]
-            claimed[arm.name] = moving
-            arm_j = [j for j in arm_j if j in moving]
-            if arm_j:
-                first[arm.name] = min(arm_j)
+            # an arm stands on. Moving joints only: uncollapsed, a prefix scan
+            # also matches the welds the collapse is about to fold away.
+            arm_j, _ = self._arm_joints(labels, arm, joint_types=types, fingers=False)
+            claimed[arm.name] = [j for j in arm_j if j >= joint_start and int(types[j]) != fixed]
+        ends = _equality_ends(builder)
         for arm in self.spec.arms:
             want = self.arm_mounts.get(arm.name)
             if want is None:
                 continue
-            if arm.name not in first:
+            if not claimed[arm.name]:
                 raise RuntimeError(f"{self.spec.name} arm {arm.name!r} matched no joints; there is no arm to place")
-            if arm.base_body_name:
-                base = label_index(builder.body_label, arm.base_body_name)
-            else:
-                base = int(builder.joint_parent[first[arm.name]])
+            # The same rule the finalized model's handle reads its base_body by.
+            base = _arm_base(arm, claimed[arm.name], builder.joint_parent, types, builder.body_label)
             if base < 0:
                 raise ValueError(
                     f"{self.spec.name} arm {arm.name!r}: its first joint hangs on the world, so it has no base body "
@@ -885,7 +892,7 @@ class EntityEmbodiment(Entity):
                     f" with arm(s) {shared}, so placing it would move them too. arms_at places an arm whose root "
                     "carries no other arm; move arms that share one together with at=."
                 )
-            for end, other in _equality_ends(builder):
+            for end, other in ends:
                 if end in carried and other not in carried:
                     raise ValueError(
                         f"{self.spec.name} arm {arm.name!r}: an equality constraint ties "
@@ -1439,6 +1446,7 @@ class EntityEmbodiment(Entity):
         qd_start = model.joint_qd_start.numpy()
         joint_parent = model.joint_parent.numpy()
         joint_child = model.joint_child.numpy()
+        joint_types = model.joint_type.numpy().tolist()
         shape_body = model.shape_body.numpy()
         upper = model.joint_limit_upper.numpy()
         # Every joint, not this robot's range: a free-jointed object's parent is
@@ -1447,7 +1455,7 @@ class EntityEmbodiment(Entity):
         all_joints = range(model.joint_count)
 
         for arm in self.spec.arms:
-            arm_j, finger_j = self._arm_joints(joint_labels, arm, joint_types=model.joint_type.numpy().tolist())
+            arm_j, finger_j = self._arm_joints(joint_labels, arm, joint_types=joint_types)
             if not arm_j:
                 raise RuntimeError(f"{self.spec.name} arm {arm.name!r} matched no joints after finalize")
             index = ArmIndex(arm.name)
@@ -1471,9 +1479,7 @@ class EntityEmbodiment(Entity):
                 index.ee_body = self._hand_body(body_labels, arm, tcp_body)
             else:
                 index.ee_body = label_index(body_labels, tcp_body) if tcp_body else int(joint_child[arm_j[-1]])
-            index.base_body = (
-                label_index(body_labels, arm.base_body_name) if arm.base_body_name else int(joint_parent[arm_j[0]])
-            )
+            index.base_body = _arm_base(arm, arm_j, joint_parent, joint_types, body_labels)
             sides = hand.finger_bodies if hand else ()
             index.finger_bodies = tuple(tuple(label_index(body_labels, n) for n in side) for side in sides)
             # Finger travel from the model's own limits, so a retuned gripper is

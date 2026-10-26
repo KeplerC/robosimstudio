@@ -63,6 +63,8 @@ class TestTheArgument(unittest.TestCase):
 
         with self.assertRaisesRegex(TypeError, "maps an arm's name"):
             rss.robot("yam_bimanual", arms_at=[LEFT])
+        with self.assertRaisesRegex(TypeError, "maps an arm's name"):
+            rss.robot("yam_bimanual", arms_at=LEFT)  # spelled like at= by mistake
 
 
 class TestTheBinding(unittest.TestCase):
@@ -249,7 +251,9 @@ class TestThePlacement(unittest.TestCase):
         )
         spec = EmbodimentSpec(name="two", asset=AssetSpec(path=str(path)), arms=arms, collapse_fixed_joints=collapse)
         builder = newton.ModelBuilder()
-        EntityEmbodiment(spec, pose=mount, arm_mounts=mounts).build_into(builder, None)
+        entity = EntityEmbodiment(spec, pose=mount, arm_mounts=mounts)
+        entity.build_into(builder, None)
+        self._entities = [entity]
         return builder
 
     @staticmethod
@@ -310,6 +314,21 @@ class TestThePlacement(unittest.TestCase):
     def test_a_name_the_spec_does_not_have_is_refused_by_the_entity_too(self) -> None:
         with self.assertRaisesRegex(ValueError, r"places arm\(s\) \['c'\], and its arms are \['a', 'b'\]"):
             self._build(APART, collapse=False, mounts={"c": WANT})
+
+    def test_the_handle_reads_the_body_arms_at_placed(self) -> None:
+        """One rule for both: the finalized model's base_body is the body the placement moved."""
+        import warp as wp
+
+        from robosimstudio.robots.entity import EntityEmbodiment
+
+        for xml, kwargs in ((MOUNTED, {"prefix": True}), (APART, {"reverse": True})):
+            with self.subTest(**kwargs):
+                builder = self._build(xml, collapse=False, mounts={"a": WANT}, **kwargs)
+                entity = next(e for e in self._entities if e.spec.name == "two")
+                model = builder.finalize(device=wp.get_device("cpu"))
+                EntityEmbodiment.bind(entity, model)
+                state = model.state()
+                np.testing.assert_allclose(state.body_q.numpy()[entity.arms["a"].base_body], WANT, atol=1e-6)
 
     def test_an_arm_sharing_its_root_is_refused(self) -> None:
         with self.assertRaisesRegex(ValueError, r"arm 'a' stands on .*torso.* with arm\(s\) \['b'\]"):

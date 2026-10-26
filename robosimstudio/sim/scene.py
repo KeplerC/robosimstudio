@@ -210,9 +210,9 @@ def _arms_at(
     if not arms_at:
         return ()
     items = arms_at.items() if isinstance(arms_at, Mapping) else arms_at
-    pairs: list[tuple[str, Xform]] = []
+    pairs: list[tuple[str, tuple[float, ...]]] = []
     for item in items:
-        if isinstance(item, str) or len(item) != 2 or not isinstance(item[0], str) or not item[0]:
+        if not isinstance(item, (tuple, list)) or len(item) != 2 or not isinstance(item[0], str) or not item[0]:
             raise TypeError(f"rss.robot: arms_at= maps an arm's name to its base's pose, and got {item!r}")
         name, pose = item
         if pose is None:
