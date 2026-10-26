@@ -345,7 +345,8 @@ class RendererBlender(RendererBase):
                         hello, _ = receive(candidate)
                     except (OSError, ConnectionError, ValueError):
                         hello = {}
-                    if secrets.compare_digest(str(hello.get("token", "")), token):
+                    said = hello.get("token", "") if isinstance(hello, dict) else ""
+                    if secrets.compare_digest(str(said), token):
                         self._sock = candidate
                     else:
                         candidate.close()

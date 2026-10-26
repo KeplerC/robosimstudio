@@ -184,12 +184,9 @@ def deformable_drawables(
     if not count:
         return out
     colors = dict(colors or {})
-    covered = np.zeros(count, dtype=bool)
     for name, handle in (deformables or {}).items():
         particles = np.asarray(getattr(handle, "particles", ()), dtype=np.int64).reshape(-1)
-        inside = particles[(particles >= 0) & (particles < count)]
-        covered[inside] = True  # a handle's particles are its own to draw, or nobody's
-        if not len(particles) or len(inside) != len(particles):
+        if not len(particles) or particles.min() < 0 or particles.max() >= count:
             continue  # a handle into another model's particles: nothing of it is drawn rather than the wrong ones
         color = tuple(float(v) for v in colors.get(name, DEFORMABLE))[:3]
         triangles = np.asarray(getattr(handle, "triangles", ()), dtype=np.int64).reshape(-1, 3)
@@ -209,6 +206,7 @@ def deformable_drawables(
             out.points.append(ParticlePoints(name, particles, _particle_radii(model, particles), color))
     if deformables is not None:
         return out  # a scene's handle table: its deformables and nothing else, as the path tracer draws them
+    covered = np.zeros(count, dtype=bool)
     # no handle table (a renderer built by hand over a bare model): the model's triangles as one mesh, as the
     # tiled tracer draws them, and the active particles no triangle uses as spheres
     tri = getattr(model, "tri_indices", None)

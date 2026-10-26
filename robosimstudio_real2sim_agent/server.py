@@ -264,6 +264,8 @@ class LiveServer:
         """Whether a still has been rendered in this process; the first one compiles the path tracer."""
         self.rendered_scene = -1
         """The scene generation the last picture was drawn of: a Blender is started once a scene."""
+        self.renderer_drawing = self.renderer_machine = ""
+        """What draws the pictures, and what the machine would pick: worked out by :meth:`renderer`."""
         from robosimstudio.solvers.render import ENV as RENDERER_ENV
 
         self.renderer_asked = os.environ.get(RENDERER_ENV, "").strip()
@@ -867,7 +869,13 @@ class LiveServer:
             moved = checks.motion_line(motion)
             checks.log_append(
                 self.run_dir,
-                {"cmd": "record", "scene": self.scene_id, "note": moved, "renderer": self.renderer()[0], **summary},
+                {
+                    "cmd": "record",
+                    "scene": self.scene_id,
+                    "note": moved,
+                    "renderer": getattr(self, "renderer_drawing", ""),
+                    **summary,
+                },
             )
             print(
                 f"[live] take {summary['take']!r} written ({why}): {summary['frames']} frames, {summary['seconds']:.1f} s",
@@ -1112,7 +1120,9 @@ class LiveServer:
             "share_url": self.share_url,
             "pid": os.getpid(),
             "renderer_asked": getattr(self, "renderer_asked", ""),
-            "renderer_drawing": getattr(self, "renderer_drawing", ""),  # worked out on the main thread
+            # worked out on the main thread (renderer()), never here
+            "renderer_drawing": getattr(self, "renderer_drawing", ""),
+            "renderer_machine": getattr(self, "renderer_machine", ""),
             "file": str(self.path),
             "run_dir": str(self.run_dir),
             "pending_save": self._pending_save(stamps),
@@ -1144,6 +1154,12 @@ class LiveServer:
                 found = platform.renderer_for("")
             except Exception as exc:  # a bad name, or a dotted path whose module will not import
                 found = ("", f"{type(exc).__name__}: {exc}")
+            try:
+                from robosimstudio.solvers.render import machine_renderer
+
+                self.renderer_machine = machine_renderer(platform.device)[0]
+            except Exception:
+                self.renderer_machine = ""
         self.renderer_drawing = found[0]
         return found
 
@@ -1195,9 +1211,11 @@ class LiveServer:
             or (name == "compare" and not request.get("take"))
             or (name in ("play", "eval") and bool(request.get("record")))
         )
+        if renders:
+            self.renderer()  # once a request: the note, the reply and the log line name the same renderer
         if what and renders:
             scene_first = getattr(self, "rendered_scene", -1) != getattr(self, "generation", 0)
-            what += first_render_note(self.renderer()[0], not self.rendered, scene_first)
+            what += first_render_note(getattr(self, "renderer_drawing", ""), not self.rendered, scene_first)
         try:
             with self._busy(what) if what else nullcontext():
                 reply = handler(**{k: v for k, v in request.items() if k != "cmd"})
@@ -1206,7 +1224,7 @@ class LiveServer:
         if renders and reply.get("ok"):
             self.rendered = True
             self.rendered_scene = getattr(self, "generation", 0)
-            reply.setdefault("renderer", self.renderer()[0])
+            reply.setdefault("renderer", getattr(self, "renderer_drawing", ""))
         if name in READS_THE_SCENE and self._pending_save():
             reply["pending"] = "a save is not built yet: this is the scene before it -- `./ctl status --wait` first"
         if self.build_error and name in READS_THE_SCENE:
@@ -1397,7 +1415,7 @@ class LiveServer:
                     "scene": self.scene_id,
                     "note": note,
                     "png": reply.get("beside") or str(path),  # the pair, when there is one: what was judged
-                    "renderer": self.renderer()[0] if not browser else "browser",
+                    "renderer": getattr(self, "renderer_drawing", "") if not browser else "browser",
                 },
             )
         return reply
@@ -1544,7 +1562,7 @@ class LiveServer:
                 "note": note,
                 "ref": Path(ref).name,
                 "look": pictures["look"],
-                "renderer": self.renderer()[0],
+                "renderer": getattr(self, "renderer_drawing", ""),
             },
         )
         return {

@@ -90,6 +90,9 @@ class TestGrainBudget(unittest.TestCase):
         strides = sphere_strides([100_000, 60_000, 30], budget=50_000)
         self.assertEqual(strides[2], 1)
         self.assertLessEqual(100_000 // strides[0] + 60_000 // strides[1] + 30, 50_000)
+        many = [900] * 80  # small bodies past the budget by themselves: thinned all alike
+        strides = sphere_strides(many, budget=50_000)
+        self.assertLessEqual(sum(-(-n // k) for n, k in zip(many, strides, strict=True)), 50_000 + len(many))
 
 
 class TestColours(unittest.TestCase):

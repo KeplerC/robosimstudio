@@ -79,8 +79,8 @@ class CollectSpec:
         cameras: Which of the scene's cameras to film; empty films every one.
         device: Where the physics runs: ``"cpu"`` or ``"cuda"``.
         renderer: ``"gl"``, ``"tiled"``, or ``"auto"`` -- ``gl``, and ``tiled``
-            for a heap of more grains than ``gl`` draws whole or where ``gl`` has
-            no OpenGL context.
+            for a heap of more than :data:`AUTO_GL_GRAINS` grains or where ``gl``
+            has no OpenGL context.
         workers: Worker processes; 0 picks from the cores, about one per six.
         gpus: The GPUs workers render on (and step on, with ``device="cuda"``),
             round-robin, as ``CUDA_VISIBLE_DEVICES`` names them. Empty uses every
@@ -165,10 +165,13 @@ def _build(spec: CollectSpec):
         raise ValueError(f"the scene has no camera {missing or 'at all'}; it has {[c.name for c in sim.cameras]}")
     name = spec.renderer
     if name == "auto":
-        from robosimstudio.solvers.render.gl import MAX_SPHERES
+        from robosimstudio.core.render.deformables import deformable_drawables
 
-        # gl draws cloth, ropes and grains from their particles too; a heap past its sphere budget it would thin
-        name = "tiled" if int(sim.model.particle_count) > MAX_SPHERES else "gl"
+        # gl draws cloth and ropes as meshes, cheaply, but each grain as a sphere set from Python (a few us a
+        # grain a camera): a heap of more than AUTO_GL_GRAINS goes to tiled, which draws particles natively
+        handles = getattr(getattr(sim, "scene", None), "handles", None)
+        drawn = deformable_drawables(sim.model, getattr(handles, "deformables", None))
+        name = "tiled" if sum(len(p.particles) for p in drawn.points) > AUTO_GL_GRAINS else "gl"
     try:
         renderer = sim.make_renderer(name, cameras=cameras, channels=("rgb",))
     except (RuntimeError, ValueError) as exc:  # no context, or a visual MuJoCo will not compile
@@ -177,6 +180,10 @@ def _build(spec: CollectSpec):
         print(f"[collect] gl unavailable ({exc}); rendering with tiled", flush=True)
         name, renderer = "tiled", sim.make_renderer("tiled", cameras=cameras, channels=("rgb",))
     return sim, renderer, name, cameras
+
+
+AUTO_GL_GRAINS = 5000
+"""The most grains ``auto`` gives ``gl``: about 25 ms a camera a frame at its ~5 us a sphere."""
 
 
 def _run_episode(spec: CollectSpec, sim, renderer, renderer_name: str, cameras, episode: int) -> dict[str, Any]:

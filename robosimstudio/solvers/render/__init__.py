@@ -42,6 +42,7 @@ __all__ = [
     "default_renderer",
     "list_renderers",
     "look_kwargs",
+    "machine_renderer",
     "register_renderer",
     "rt_cores",
     "rtx_available",
@@ -243,6 +244,12 @@ def choose_renderer(requested: str = "", device: Any = None) -> tuple[str, str]:
                 f"--extra-index-url https://pypi.nvidia.com; or leave it unset to pick by the machine"
             )
         return name, f"{ENV}={name}" if source == ENV else "asked for"
+    return machine_renderer(device)
+
+
+def machine_renderer(device: Any = None) -> tuple[str, str]:
+    """What :func:`choose_renderer` picks with nothing named: ``rtx`` where ``device`` has RT cores and ovrtx is
+    installed, else ``tiled``; and why."""
     capable, gpu = rt_cores(device)
     if not capable:
         return FALLBACK, gpu

@@ -68,7 +68,8 @@ def send(sock: socket.socket, header: dict, blobs: list | tuple = ()) -> None:
         data = blob
         if not isinstance(blob, bytes | bytearray):
             view = memoryview(blob)
-            data = view.cast("B") if view.c_contiguous else view.tobytes()  # a strided view is copied, not refused
+            # a strided view is copied, not refused; an empty one (a surface with nothing this frame) cannot be cast
+            data = view.cast("B") if view.c_contiguous and view.nbytes else view.tobytes()
         parts += [_LEN.pack(len(data)), data]
     for part in parts:
         sock.sendall(part)
@@ -78,6 +79,8 @@ def receive(sock: socket.socket) -> tuple[dict, list[bytes]]:
     """One message: the header and its blobs."""
     (n,) = _LEN.unpack(_read_exact(sock, _LEN.size))
     header = json.loads(_read_exact(sock, n).decode("utf-8"))
+    if not isinstance(header, dict):
+        raise ValueError(f"not a message: a {type(header).__name__}")
     blobs = []
     for _ in range(int(header.get("nblobs", 0))):
         (size,) = _LEN.unpack(_read_exact(sock, _LEN.size))

@@ -251,7 +251,9 @@ class PanelRenderView(Panel):
         # the old one is still alive doubles the peak, and on a contended card
         # that is the difference between a resize and a fallback to tiled.
         for key in [k for k in self._renderers if k not in used]:
-            self._close(self._renderers.pop(key))
+            gone = self._renderers.pop(key)
+            if not any(r is gone for r in self._renderers.values()):  # one a retargeting backend shares stays
+                self._close(gone)
             if self._built == key:
                 self._renderer = self._built = None
         for client, key in zip(clients, used, strict=True):
@@ -391,8 +393,18 @@ class PanelRenderView(Panel):
         return (width, height, self.env.model, self.locked)
 
     def _ensure(self, client, key: tuple) -> bool:
-        """Build the renderer of this key, if there is not one yet. False when it would not build."""
+        """Build the renderer of this key, if there is not one yet. False when it would not build.
+
+        A backend that reads its cameras every frame (``retargets``: Blender, a process with the scene in it)
+        serves every shape and every client from one renderer, aimed per push, rather than one per shape.
+        """
         if key in self._renderers:
+            return True
+        shared = next(
+            (r for k, r in self._renderers.items() if k[2] is key[2] and getattr(r, "retargets", False)), None
+        )
+        if shared is not None:
+            self._renderers[key] = shared
             return True
         width, height = key[0], key[1]
         spec = self._spec(client, width, height)
@@ -465,7 +477,10 @@ class PanelRenderView(Panel):
         spec = self._spec(client, key[0], key[1])
         if spec is None:
             return False
-        renderer.cameras[0] = spec
+        if getattr(renderer, "retargets", False):  # shared across shapes: aimed, with this camera's channels
+            renderer.aim([spec], channels=["rgb", "depth"] if getattr(spec, "background", "") else ["rgb"])
+        else:
+            renderer.cameras[0] = spec
         try:
             frames = renderer.render(self.env.state)
         except Exception as exc:
@@ -611,7 +626,7 @@ class PanelRenderView(Panel):
         result outputs when a renderer goes without being closed, and a page
         that swaps tasks builds one per swap.
         """
-        for renderer in self._renderers.values():
+        for renderer in {id(r): r for r in self._renderers.values()}.values():  # a shared one once
             self._close(renderer)
         self._renderers.clear()
         self._renderer = None

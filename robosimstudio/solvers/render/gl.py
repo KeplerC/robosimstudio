@@ -73,12 +73,16 @@ SMALL_BATCH = 1000
 
 def sphere_strides(sizes: Sequence[int], budget: int = MAX_SPHERES) -> list[int]:
     """Per batch of grains, draw every k-th: 1 for all when they fit the budget; else the small batches whole
-    and the large ones one stride, enough to bring them under what the small ones leave."""
-    if sum(sizes) <= budget:
+    and the large ones one stride, enough to bring them under what the small ones leave -- or, when the small
+    ones alone are past it, every batch one stride. Each batch's ``ceil(n / k)`` then sums to the budget plus at
+    most one a batch, which is what the scene is sized for."""
+    total = sum(sizes)
+    if total <= budget:
         return [1] * len(sizes)
     small = sum(n for n in sizes if n < SMALL_BATCH)
-    large = sum(n for n in sizes if n >= SMALL_BATCH)
-    stride = max(1, -(-large // max(1, budget - small)))
+    if small >= budget:  # many small bodies past the budget by themselves: every batch one stride
+        return [-(-total // budget)] * len(sizes)
+    stride = -(-(total - small) // (budget - small))
     return [1 if n < SMALL_BATCH else stride for n in sizes]
 
 

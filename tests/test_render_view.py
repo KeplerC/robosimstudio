@@ -325,6 +325,41 @@ class TestLockingToARigCamera(unittest.TestCase):
         self.assertIs(panel._letterbox(fits, client), fits)
 
 
+class _Aimed:
+    """A renderer that reads its cameras every frame, as Blender's does, counting how often it is closed."""
+
+    retargets = True
+
+    def __init__(self) -> None:
+        self.closed = 0
+        self.aimed: list = []
+
+    def aim(self, cameras, channels=None) -> None:
+        self.aimed.append((list(cameras), channels))
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class TestOneRendererForEveryShape(unittest.TestCase):
+    """A backend that reads its cameras every frame (Blender: a process holding the scene) serves every shape."""
+
+    def test_a_new_shape_shares_the_renderer_rather_than_starting_another(self) -> None:
+        panel = _panel(world_model=True)
+        shared = _Aimed()
+        model = panel.env.model
+        panel._renderers[(100, 100, model, "")] = shared
+        self.assertTrue(panel._ensure(object(), (200, 120, model, "")))
+        self.assertIs(panel._renderers[(200, 120, model, "")], shared)
+
+    def test_a_shared_renderer_is_closed_once(self) -> None:
+        panel = _panel(world_model=True)
+        shared = _Aimed()
+        panel._renderers = {(100, 100, panel.env.model, ""): shared, (200, 120, panel.env.model, ""): shared}
+        panel._release()
+        self.assertEqual(shared.closed, 1)
+
+
 class TestTheQualityDial(unittest.TestCase):
     def test_the_passes_pair_is_taken_as_given(self) -> None:
         self.assertEqual(_panel(world_model=True, passes=(2, 9)).passes, (2, 9))

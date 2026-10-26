@@ -623,7 +623,12 @@ class TestUp(unittest.TestCase):
         argv = ["--run-dir", str(self.tmp), "up", "--scene", str(scene)]
         self.assertEqual(ctl.main([*argv, "--renderer", "auto"]), 0, "the machine's pick is what it draws with")
         self.assertEqual(ctl.main([*argv, "--renderer", "rtx"]), 0, "and the renderer that pick is")
-        self.assertEqual(ctl.main([*argv, "--renderer", "gl"]), 1, "another renderer is not silently ignored")
+        page.status.update(renderer_asked="rtx", renderer_drawing="rtx", renderer_machine="rtx")
+        self.assertEqual(ctl.main([*argv, "--renderer", "auto"]), 0, "rtx named is what auto picks here")
+        page.status.update(renderer_asked="gl", renderer_drawing="gl", renderer_machine="rtx")
+        self.assertEqual(ctl.main([*argv, "--renderer", "auto"]), 1, "gl named is not what auto picks here")
+        self.assertEqual(ctl.main([*argv, "--renderer", "gl"]), 0, "the one it was started under")
+        self.assertEqual(ctl.main([*argv, "--renderer", "tiled"]), 1, "another renderer is not silently ignored")
         self.assertEqual(ctl.main([*argv, "--renderer", "blendr"]), 2, "a misspelling is said before the page is")
 
     def test_up_refuses_a_missing_scene_file(self) -> None:

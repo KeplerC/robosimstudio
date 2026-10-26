@@ -822,9 +822,11 @@ def _differs_from_running(args: argparse.Namespace, status: dict) -> str:
     asked = str(getattr(args, "renderer", "") or "").strip()
     started = str(status.get("renderer_asked") or "")
     drawing = str(status.get("renderer_drawing") or "")
-    # the renderer it was started under, or the one it draws with (rtx, picked by the machine), or "auto" for a page
-    # left to the machine's pick
-    if asked and asked not in (started, drawing) and not (asked == "auto" and started in ("", "auto")):
+    machine = str(status.get("renderer_machine") or "")
+    # the renderer it was started under, or the one it draws with, or "auto" for a page drawing what the machine
+    # would pick (left to it, or named the same)
+    pick = asked == "auto" and (started in ("", "auto") or (drawing and drawing == machine))
+    if asked and asked not in (started, drawing) and not pick:
         running = drawing or started or "the machine's pick"
         return f"a page is already up drawing with {running}; `quit` it and run `up --renderer {asked}` again"
     return ""

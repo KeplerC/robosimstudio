@@ -114,6 +114,21 @@ class TestTheWire(unittest.TestCase):
         np.testing.assert_array_equal(np.frombuffer(blobs[0], dtype=np.uint8).reshape(48, 64, 3), image)
         np.testing.assert_array_equal(np.frombuffer(blobs[1], dtype=np.float32), depth)
 
+    def test_an_empty_array_travels_as_no_bytes(self) -> None:
+        """A particle surface with nothing to draw this frame is an empty mesh, not an error."""
+        from robosimstudio.solvers.render.blender_worker import receive, send
+
+        a, b = socket.socketpair()
+        try:
+            strided = np.arange(12, dtype=np.float32).reshape(4, 3)[:, :2]
+            send(a, {"op": "frame"}, [np.zeros((0, 3), np.float32), np.zeros((0, 3), np.int32), strided])
+            _, blobs = receive(b)
+        finally:
+            a.close()
+            b.close()
+        self.assertEqual(blobs[:2], [b"", b""])
+        np.testing.assert_array_equal(np.frombuffer(blobs[2], dtype=np.float32).reshape(4, 2), strided)
+
     def test_a_closed_connection_is_an_error_not_a_hang(self) -> None:
         from robosimstudio.solvers.render.blender_worker import receive
 
@@ -245,18 +260,21 @@ class TestTheProcess(unittest.TestCase):
     def test_a_connection_that_does_not_say_the_token_is_not_given_the_scene(self) -> None:
         from robosimstudio.solvers.render import blender as B
 
-        def impostor(executable, port):
-            root = str(Path(B.__file__).resolve().parents[3])
-            code = (
-                f"import socket, sys; sys.path.insert(0, {root!r})\n"
-                "from robosimstudio.solvers.render.blender_worker import send\n"
-                f"s = socket.create_connection(('127.0.0.1', {port})); send(s, {{'token': 'guess'}}); s.recv(1)\n"
-            )
-            return [sys.executable, "-c", code]
+        def impostor(said):
+            def argv(executable, port):
+                code = (
+                    "import socket, struct\n"
+                    f"s = socket.create_connection(('127.0.0.1', {port})); b = {said!r}.encode()\n"
+                    "s.sendall(struct.pack('<Q', len(b)) + b); s.recv(1)\n"
+                )
+                return [sys.executable, "-c", code]
 
-        with mock.patch.object(B, "blender_argv", impostor):
-            with self.assertRaisesRegex(RuntimeError, "before it connected"):
-                B.RendererBlender(_tiny_model(), [_cam()], blender=sys.executable, timeout=30.0)
+            return argv
+
+        for said in ('{"token": "guess", "nblobs": 0}', "[]"):  # a wrong token, and JSON that is no greeting
+            with self.subTest(said=said), mock.patch.object(B, "blender_argv", impostor(said)):
+                with self.assertRaisesRegex(RuntimeError, "before it connected"):
+                    B.RendererBlender(_tiny_model(), [_cam()], blender=sys.executable, timeout=30.0)
 
     def test_a_broken_connection_closes_the_renderer(self) -> None:
         """A reply half read would answer the next request, so the renderer is done with."""
