@@ -863,6 +863,29 @@ class StudyLines(unittest.TestCase):
         model["things"]["crate"]["density_max"] = 26.0
         self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["model"])
 
+    def test_a_shallow_rest_without_a_frozen_run_is_a_note(self) -> None:
+        model = {**CLEAN, "settle": {"crate": {"rise_mm": 0.0, "aside_mm": 0.0, "turn_deg": 0.0, "overlap_mm": 2.0}}}
+        runs = _clean_runs()
+        runs.pop("frozen")
+        result = physics.verdict(model, runs)
+        self.assertIsNone(_words(result)["settle"])
+        self.assertIn("play frozen to see whether it is pushed out", result["report"])
+
+    def test_drop_names_a_carry_it_did_not_release(self) -> None:
+        model = {**CLEAN, "things": {"crate": {"mass_kg": 1.0}}}
+        runs = self._drop_runs(fell=True)
+        runs["written"]["carried_later"] = ["mug"]
+        result = physics.verdict(model, runs)
+        self.assertIsNone(_words(result)["drop"])
+        self.assertIn("mug, carried later, was not released", result["report"])
+
+    def test_a_flight_not_judged_is_said_beside_one_that_flew(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"].update(free_flight_not_falling=4, free_flight_longest=4)
+        runs["written"]["things"]["box"] = {**_thing(0.0), "flight_unread": "the replay's collision pass failed"}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIn("not judged for box", result["report"])
+
     def test_shape_volumes(self) -> None:
         import newton
 

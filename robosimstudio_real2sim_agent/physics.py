@@ -221,14 +221,7 @@ def real_hand(sim: Any, arm: Any, name: str = "") -> str | None:
             return None
     labels = " ".join(own or every) + " " + robot_name(sim).lower()
     hand = str(getattr(getattr(arm, "gripper_spec", None), "name", "") or getattr(arm, "gripper", "") or "").lower()
-    words = hand + " " + labels
-    if re.search(r"2f.?85|robotiq|driver_joint.*follower|follower.*driver_joint", words):
-        return "robotiq_2f85"
-    if re.search(r"panda|franka|fr3", words):
-        return "panda_hand"
-    if re.search(r"(?<![a-z0-9])yam", words):
-        return "yam"
-    return None
+    return _hand_kind(hand + " " + labels)
 
 
 def real_arm_torque(sim: Any, arm: Any = None) -> tuple[float, ...] | None:
@@ -376,10 +369,10 @@ def _hidden_colliders(sim: Any) -> dict[int, str]:
 
 def _shape_volume(m: Any, s: int, tables: tuple | None = None) -> float:
     """A collision shape's volume [m³]: Newton's own mass of it at a density of 1, a hollow shell's by its wall.
-    ``tables`` is ``(shape_type, shape_scale, shape_source, shape_is_solid, shape_thickness)`` already on the host, for a
+    ``tables`` is ``(shape_type, shape_scale, shape_source, shape_is_solid, shape_margin)`` already on the host, for a
     caller asking about many."""
     if tables is None:
-        solid, thick = getattr(m, "shape_is_solid", None), getattr(m, "shape_thickness", None)
+        solid, thick = getattr(m, "shape_is_solid", None), getattr(m, "shape_margin", None)
         tables = (
             m.shape_type.numpy(),
             m.shape_scale.numpy(),
@@ -486,13 +479,13 @@ class _SideContacts:
         self.contacts = self.pipe.contacts()
         self.shape_body = sim.model.shape_body.numpy()
 
-    def read(self, bq: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def read(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """This state's contacting shape pairs and their separation [m] (negative: overlapping)."""
         self.pipe.collide(self.sim.state, self.contacts)
         c = self.contacts
         count = int(c.rigid_contact_count.numpy()[0])
         n = min(count, len(c.rigid_contact_shape0))
-        self.overflowed = count > n  # this read lost the pairs past the buffer: what it says is incomplete
+        self.overflowed = count >= len(c.rigid_contact_shape0)  # full: Newton stops writing at the cap, pairs lost
         a, b = c.rigid_contact_shape0[:n].numpy(), c.rigid_contact_shape1[:n].numpy()
         if not n:
             return a, b, np.zeros(0)
@@ -623,7 +616,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
     )
     collide = int(newton.ShapeFlags.COLLIDE_SHAPES)
     flags = m.shape_flags.numpy()
-    solid, thick = getattr(m, "shape_is_solid", None), getattr(m, "shape_thickness", None)
+    solid, thick = getattr(m, "shape_is_solid", None), getattr(m, "shape_margin", None)
     tables = (
         m.shape_type.numpy(),
         m.shape_scale.numpy(),
@@ -655,7 +648,8 @@ def model_facts(sim: Any) -> dict[str, Any]:
     # where it was written (so an overlap is still there), a twin's own entity may keep where the warm-up left it (so
     # the settle above says it). The robot's fingers count: a hand that starts inside the thing is the same fault
     try:
-        side = _SideContacts.of(sim)
+        # kept on the sim when a replay will read with it (something is unread), else built for this one read
+        side = _SideContacts.of(sim) if unread_things(sim, list(th)) else _SideContacts(sim)
         a, b, gap = side.read()
         if side.overflowed:
             out["settle_error"] = (
@@ -1061,7 +1055,7 @@ class Replay:
                     self._mixed_friction(probe)
         if self.side is not None and n and contacts and self.mode in ("written", "drop", "plain"):
             try:
-                a, b, gap = self.side.read(bq)
+                a, b, gap = self.side.read()
             except Exception as exc:  # flight goes unjudged for what only this pass reads; the row stands
                 self.side_error = f"the replay's collision pass failed ({type(exc).__name__}: {exc})"[:200]
                 self.side = None
@@ -1271,6 +1265,7 @@ class Replay:
             ]
             out["apex_step"] = start
             out["carried"] = carried
+            out["carried_later"] = sorted(k for k in tops if k not in carried)
             out["z_after"] = {
                 k: [round(float(r["pose"][k][2]), 4) for r in rows[start : start + skip + 40]] for k in carried
             }
@@ -1515,25 +1510,38 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
         except Exception:
             reader.error = reader.error or traceback.format_exc()[-800:]
 
-    wrapped = False
+    wrapped: list[str] = []
+    grace = max(25, int(OVERRUN * steps))
+    cut_at = [0]  # the step plain was first cut at: the routine's own cleanup then has `grace` steps
+
+    def cap(fn: Any) -> Any:
+        def capped(*a: Any, **kw: Any) -> Any:
+            now = int(getattr(sim, "step_count", 0) or 0)
+            if past_limit() and (not cut_at[0] or now >= cut_at[0] + grace):
+                cut_at[0] = cut_at[0] or now
+                raise Overrun(now - start)
+            return fn(*a, **kw)
+
+        return capped
+
     if limit:
-        run = sim.run
-
-        def capped(count: int = 1, *a: Any, **kw: Any) -> Any:
-            if past_limit():
-                raise Overrun(int(getattr(sim, "step_count", 0) or 0) - start)
-            return run(count, *a, **kw)
-
-        try:
-            sim.run = capped  # an instance attribute, gone in the finally: the class's own run is untouched
-            wrapped = True
-        except AttributeError:  # a sim that takes no attribute: cut at yields only
-            pass
+        for attr in ("run", "step"):  # instance attributes, gone in the finally: the class's own methods are untouched
+            fn = getattr(sim, attr, None)
+            if fn is None:
+                continue
+            try:
+                setattr(sim, attr, cap(fn))
+                wrapped.append(attr)
+            except AttributeError:  # a sim that takes no attribute: cut at yields only
+                pass
     try:
-        reader = Replay(sim, "plain")
-        reader.kept = [fn for hooks in sim.hook_lists().values() for fn in hooks]
-        reader.hooks0 = {id(fn) for fn in reader.kept}
-        reader.log(contacts=False)
+        try:
+            reader = Replay(sim, "plain")
+            reader.kept = [fn for hooks in sim.hook_lists().values() for fn in hooks]
+            reader.hooks0 = {id(fn) for fn in reader.kept}
+            reader.log(contacts=False)
+        except Exception as exc:  # the replay's own fault: not the routine's reading
+            raise Broken(f"setting up plain: {type(exc).__name__}: {exc}") from exc
         while True:
             try:
                 next(routine)
@@ -1550,6 +1558,8 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
                 except Exception:
                     pass
                 break
+    except Broken as exc:
+        outcome = f"{FAILED}: {exc}"[:300]
     except Overrun:  # the cap on its own stepping
         outcome = PLAIN_LONG
         try:
@@ -1566,9 +1576,9 @@ def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator
     except Exception as exc:
         outcome = f"{type(exc).__name__}: {str(exc)[:300]}" if reader is not None else f"{FAILED}: {exc}"[:300]
     finally:
-        if wrapped:
+        for attr in wrapped:
             try:
-                del sim.run
+                delattr(sim, attr)
             except AttributeError:
                 pass
         store["plain"] = (
@@ -1672,9 +1682,7 @@ def _model_lines(
             k for k, t in ((frozen or {}).get("things") or {}).items() if t.get("moved_max_mm", 0.0) > settle_mm
         }
         resting = {
-            k: v
-            for k, v in settle.items()
-            if OVERLAP_MM < v.get("overlap_mm", 0.0) <= SINK_MM and k not in pushed_out and frozen is not None
+            k: v for k, v in settle.items() if OVERLAP_MM < v.get("overlap_mm", 0.0) <= SINK_MM and k not in pushed_out
         }
         inside = {k: v for k, v in settle.items() if v.get("overlap_mm", 0.0) > OVERLAP_MM and k not in resting}
         rolled = {k: v for k, v in settle.items() if v["aside_mm"] > 1.5 * settle_mm and abs(v["rise_mm"]) <= settle_mm}
@@ -1699,8 +1707,12 @@ def _model_lines(
             line(
                 None,
                 "settle",
-                f"{k} rests {resting[k]['overlap_mm']:.1f} mm into {resting[k].get('inside', 'its support')} and stays "
-                "there with the robot frozen: a contact that soft, say why",
+                f"{k} rests {resting[k]['overlap_mm']:.1f} mm into {resting[k].get('inside', 'its support')}"
+                + (
+                    " and stays there with the robot frozen: a contact that soft, say why"
+                    if frozen is not None
+                    else ": play frozen to see whether it is pushed out"
+                ),
             )
         elif rolled:
             k = max(rolled, key=lambda n: rolled[n]["aside_mm"])
@@ -1758,6 +1770,16 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
         return bool(_ended_elsewhere(drop, written, [k], round_axes=axes, bystanders=False))
 
     stayed = [k for k in carried if not fell(k)]
+    later = written.get("carried_later") or []
+    if later and not stayed:
+        line(
+            None,
+            "drop",
+            f"with the fingers opened at the top of the first carry (step {written.get('apex_step', 0)}) "
+            f"{', '.join(carried)} fell; {', '.join(later)}, carried later, was not released: one drop tests the "
+            "carries under way at its release",
+        )
+        return
     if not stayed:
         line(
             True,
@@ -1932,8 +1954,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             else f"stopped: {written['outcome']}",
         )
         unjudged = {k: t["flight_unread"] for k, t in written["things"].items() if t.get("flight_unread")}
+        unjudged_note = "not judged for " + "; ".join(f"{k} ({why})" for k, why in unjudged.items()) if unjudged else ""
         if unjudged and not flew:
-            line(None, "flight", "not judged for " + "; ".join(f"{k} ({why})" for k, why in unjudged.items()))
+            line(None, "flight", unjudged_note)
         if flew:
             longest = {k: t.get("free_flight_longest", 0) for k, t in written["things"].items()}
             long = max(longest.values(), default=0) >= FLIGHT_STEPS
@@ -1941,7 +1964,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 False if long else None,
                 "flight",
                 f"free of every contact but not falling at g, steps: {flew}: "
-                + ("something that is not a contact carries it" if long else "say in the report what holds it"),
+                + ("something that is not a contact carries it" if long else "say in the report what holds it")
+                + (f"; {unjudged_note}" if unjudged_note else ""),
             )
     frozen = runs.get("frozen")
     if frozen and frozen.get("nonfinite"):
