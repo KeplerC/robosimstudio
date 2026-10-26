@@ -511,6 +511,43 @@ def _mount(request: SceneRequest, binding: Binding, scene: CellSpec | None, spec
     return request.embodiment_pose
 
 
+def _arm_mounts(request: SceneRequest, binding: Binding, spec: EmbodimentSpec) -> dict[str, Xform]:
+    """Where each arm the pairing places on its own stands, in world coordinates, by arm name.
+
+    Checked here rather than where ``arms_at`` was written because this is the
+    first place the robot being built is known -- a binding may name another
+    robot than the request did. A name the robot does not have is refused with
+    the names it has, as :func:`_roles` refuses an arm role; so is a robot that
+    arrives inside the scene's own import, which this compiler never imports
+    and so cannot take apart.
+    """
+    if not binding.arm_mounts:
+        return {}
+    names = [a.name for a in spec.arms]
+    mounts: dict[str, Xform] = {}
+    for name, pose in binding.arm_mounts:
+        if name not in names:
+            raise ValueError(
+                f"scene {request.full_name!r}: arms_at places arm {name!r}, and robot {spec.name!r} has arms {names}"
+            )
+        if name in mounts:
+            raise ValueError(f"scene {request.full_name!r}: arms_at places arm {name!r} twice")
+        values = tuple(float(v) for v in pose)
+        if len(values) != 7:
+            raise ValueError(
+                f"scene {request.full_name!r}: arm {name!r}'s mount is a pose (x, y, z, qx, qy, qz, qw), "
+                f"and it was given {len(values)} numbers"
+            )
+        mounts[name] = values
+    if spec.resident(binding.scene_resident):
+        raise ValueError(
+            f"scene {request.full_name!r}: arms_at places arms of {spec.name!r}, which arrives inside the "
+            "scene's own import and is never imported here, so its arms cannot be moved apart. Import the "
+            "robot on its own (scene_resident=False) to place its arms."
+        )
+    return mounts
+
+
 def _roles(binding: Binding, spec: EmbodimentSpec | None, request: SceneRequest) -> tuple[str, str]:
     """Which arm works and which supports, resolved to real arm names.
 
@@ -761,10 +798,14 @@ def _build_base(
             from dataclasses import replace as _replace
 
             embodiment_spec = _replace(embodiment_spec, cross_arm_collisions=crossed)
+        arm_mounts = _arm_mounts(request, binding, embodiment_spec)
         embodiment = _resolve_entity(_EMBODIMENT_ENTITY)(
             embodiment_spec,
             pose=_mount(request, binding, scene_spec, embodiment_spec),
             scene_resident=binding.scene_resident,
+            # Only when stated, so an embodiment entity written before this
+            # keyword existed still builds every scene that does not use it.
+            **({"arm_mounts": arm_mounts} if arm_mounts else {}),
         )
         embodiment.build_into(builder, episode)
         embodiment.apply_actuation(builder)

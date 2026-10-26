@@ -150,6 +150,17 @@ class Binding:
             pairing a declaration rather than a measurement.
         mount_point: Name a mount the scene already declares, instead of
             deriving one. Ignored when ``mount`` is set.
+        arm_mounts: ``(arm name, pose)`` pairs placing single arms of the
+            robot, each pose the world pose of that arm's base body (its
+            :attr:`ArmSpec.base_body_name`, else the body its first joint hangs
+            on, as the robot's file declares it). Empty leaves every arm where
+            ``mount`` and the file put it.
+
+            Absolute, not relative to ``mount``: a named arm stands at its pose
+            wherever the robot stands, and an arm left out still follows the
+            robot. What a cell whose arms stand on separate mounts needs, said
+            without copying the robot's file to move the arms inside it.
+            ``rss.robot(arms_at=...)`` writes it from work-surface poses.
         work_arm: Which arm does the task. ``""`` is the embodiment's first.
         support_arm: Which arm holds, anchors or steadies. ``""`` means the task
             needs only one arm; naming one on an embodiment that has no such arm
@@ -182,6 +193,7 @@ class Binding:
     gripper: str = ""
     mount: Xform | None = None
     mount_point: str = ""
+    arm_mounts: tuple[tuple[str, Xform], ...] = ()
     work_arm: str = ""
     support_arm: str = ""
     arm_actuation: ActuationSpec | None = None
