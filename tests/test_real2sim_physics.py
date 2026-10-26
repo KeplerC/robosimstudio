@@ -264,6 +264,22 @@ class Verdict(unittest.TestCase):
         runs["frozen"]["things"]["hook"] = runs["frozen"]["things"].pop("crate")
         self.assertNotIn("the attachment the contact line names", physics.verdict(CLEAN, runs)["report"])
 
+    def test_a_grip_lost_on_the_same_model_says_it_is_marginal(self) -> None:
+        runs = _clean_runs()
+        runs["built"] = {**_run(moved=20.0), "lowered": {"friction": 0, "torque": 0}}  # let go early
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["built"])
+        self.assertIn("the grasp is that marginal, or the outcome differs from run to run", result["report"])
+
+    def test_a_row_naming_another_thing_is_not_this_ones_hold(self) -> None:
+        runs = _clean_runs()
+        runs["frozen"]["things"]["crate"]["moved_max_mm"] = 3.0
+        runs["frozen"]["things"]["key"] = _thing(0.1)
+        runs["written"]["robot_equalities_on"] = [3]
+        model = {**CLEAN, "robot_equalities": {"3": "key_weld"}}
+        result = physics.verdict(model, runs)
+        self.assertIn("crate moved 3.0 mm with the robot frozen: a few millimetres", result["report"])
+
     def test_a_built_replay_the_page_cut_is_not_read(self) -> None:
         runs = _clean_runs()
         runs["built"] = {**_run(outcome=physics.STOPPED), "lowered": {"friction": 0, "torque": 0}}
@@ -1077,6 +1093,29 @@ class StudyLines(unittest.TestCase):
         self.assertIsNone(_words(physics.verdict(stem, runs))["frozen"])
         door = {**CLEAN, "elastic_parts": ["stem#1"]}  # one sprung joint (a door) is not a stem
         self.assertIs(_words(physics.verdict(door, runs))["frozen"], False)
+
+    def test_the_enforced_torque_reads_an_actuator_by_its_dof(self) -> None:
+        arr = lambda v: types.SimpleNamespace(numpy=lambda: np.asarray(v))  # noqa: E731
+        # a free box first (joint 0, DOFs 0-5), then a three-joint arm on DOFs 6-8 and a finger on DOF 9
+        mj = types.SimpleNamespace(
+            actuator_trntype=arr([0, 0, 1, 0]),
+            actuator_trnid=arr([[6, 0], [7, 0], [8, 0], [9, 0]]),  # Newton stores the DOF, not the joint
+            actuator_forcerange=arr([[-28, 28], [-28, 28], [-10, 10], [-100, 100]]),
+            actuator_has_forcerange=arr([1, 1, 1, 1]),
+            actuator_gear=arr([[1.0], [1.0], [2.0], [1.0]]),
+        )
+        m = types.SimpleNamespace(joint_effort_limit=arr([1e6] * 10), mujoco=mj)
+        np.testing.assert_allclose(physics._enforced_effort(m, np.array([6, 7, 8])), [28.0, 28.0, 20.0])
+        no_mj = types.SimpleNamespace(joint_effort_limit=arr([1e6] * 10))
+        np.testing.assert_allclose(physics._enforced_effort(no_mj, np.array([6])), [1e6])
+
+    def test_an_equality_label_names_the_longest_thing_it_holds_whole(self) -> None:
+        things = {"key", "key_2", "white_bottle"}
+        self.assertEqual(physics._label_thing("key_weld", things), "key")
+        self.assertEqual(physics._label_thing("key_2_weld", things), "key_2")
+        self.assertEqual(physics._label_thing("key-ring_weld", things), "")
+        self.assertEqual(physics._label_thing("white_bottle_seal", things), "white_bottle")
+        self.assertEqual(physics._label_thing("a weld", things), "")
 
     def test_shape_volumes(self) -> None:
         import newton
