@@ -34,6 +34,13 @@ settle a material runs while the scene is built is not a routine's step.
 the contact force: contacts are read after the last substep, and one that
 comes and goes inside a step reads as none, while the step's velocity change
 still carries it.
+
+**Contacts are MuJoCo's.** A scene that leaves the default arrangement hands
+its free rigid things to a VBD island coupled to the robot, and there the
+fingers' contacts with them are resolved by VBD and never reach MuJoCo's list:
+a box carried in the hand reads as touching nothing. Such a thing is named
+as unread -- its grip is not reported and its free flight not judged -- rather
+than accused of flying.
 """
 
 from __future__ import annotations
@@ -207,6 +214,30 @@ def fingers(sim: Any) -> dict[str, np.ndarray]:
         a: np.asarray(sorted({int(s) for g in arm.finger_groups for _, sh in g for s in sh}), dtype=np.int64)
         for a, arm in sim.scene.handles.arms.items()
     }
+
+
+def unread_things(sim: Any, names: list[str]) -> dict[str, str]:
+    """The things whose contacts the contact probe cannot see, each with the solver that steps it.
+
+    The probe reads MuJoCo's contact list. In a coupled scene a thing another island owns (the VBD a default
+    arrangement gives free rigid bodies) has its contacts resolved there, so it reads as touching nothing; with no
+    probe at all, nothing is read.
+    """
+    probe = getattr(sim, "contacts", None)
+    if probe is None:
+        return dict.fromkeys(names, "no contact probe")
+    program = getattr(getattr(sim, "pipeline", None), "program", None)
+    if program is None or not program.coupled:
+        return {}
+    out = {}
+    for name in names:
+        try:
+            solver = program.solver_for(name)
+        except KeyError:  # not an entity of its own (a part of something else): read with its owner
+            continue
+        if solver is not probe.solver:
+            out[name] = type(solver).__name__
+    return out
 
 
 def model_facts(sim: Any) -> dict[str, Any]:
@@ -412,13 +443,18 @@ class Replay:
         free_kind = _joint_kinds().get("free", -1)
         jt, jc = sim.model.joint_type.numpy(), sim.model.joint_child.numpy()
         free_bodies = {int(c) for t, c in zip(jt, jc, strict=False) if int(t) == free_kind}
-        # a thing on a hinge, or one a cloth or a soft body can push (their contacts are not MuJoCo's), does not fall
-        # at g when nothing in MuJoCo's list touches it: free flight is read only where it means something
+        # a thing on a hinge, one a cloth or a soft body can push, or one another solver steps (their contacts are
+        # not MuJoCo's) does not fall at g when nothing in MuJoCo's list touches it: free flight is read only where
+        # it means something
         soft_scene = bool(sim.particle_probes())
+        self.unread = unread_things(sim, self.names)
         self.free = {
             name
             for name in self.names
-            if not soft_scene and len(self.th[name]["bodies"]) == 1 and self.th[name]["bodies"][0] in free_bodies
+            if not soft_scene
+            and name not in self.unread
+            and len(self.th[name]["bodies"]) == 1
+            and self.th[name]["bodies"][0] in free_bodies
         }
         self.parts = [(f"{name}#{k}", b) for name in self.names for k, b in enumerate(self.th[name]["bodies"][1:], 1)]
         self.arms = list(self.fing)
@@ -712,6 +748,7 @@ class Replay:
             "suction_held": sorted(self.suction_held),
             "latched": sorted(self.latched),
             "thing_targets_moved": round(self.drive_moved, 6),
+            "contacts_unread": dict(self.unread),
             "things": {},
         }
         if not rows:
@@ -1152,15 +1189,23 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 if p50:
                     grip.append(f"{k} {p50:g} N (p95 {p95:g}) by hand {i + 1}")
         mu = written.get("finger_mu")
-        detail = (
-            ("the fingers pressed " + "; ".join(grip))
-            if grip
-            else "no finger force on a rigid thing (a deformable's is not read)"
-        )
+        unread = {k: v for k, v in (written.get("contacts_unread") or {}).items() if k in names}
+        if grip:
+            detail = "the fingers pressed " + "; ".join(grip)
+        elif unread:
+            detail = "no finger force read"
+        else:
+            detail = "no finger force on a rigid thing (a deformable's is not read)"
+        if unread:
+            detail += (
+                "; not read for "
+                + ", ".join(f"{k} (stepped by {v})" for k, v in unread.items())
+                + ": its contacts are another solver's, so its grip and its free flight are not judged"
+            )
         if mu:
             detail += f"; the solver used friction {mu[0]:g} to {mu[1]:g} at the finger contacts"
         line(
-            None if (mu and mu[1] > REAL_MU) else True,
+            None if (unread or (mu and mu[1] > REAL_MU)) else True,
             "grip",
             detail + (" (above any real pad: the built line is the one to trust)" if mu and mu[1] > REAL_MU else ""),
         )

@@ -149,6 +149,22 @@ class Verdict(unittest.TestCase):
         self.assertIsNone(_words(result)["flight"])
         self.assertIs(_words(result)["written"], True)
 
+    def test_a_thing_another_solver_steps_is_named_not_cleared(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[0.0, 0.0], [0.0, 0.0]]
+        runs["written"]["contacts_unread"] = {"crate": "SolverVBD"}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIsNone(_words(result)["grip"])  # a note to explain, not a pass on a grip nobody read
+        self.assertIn("no finger force read; not read for crate (stepped by SolverVBD)", result["report"])
+        self.assertNotIn("no finger force on a rigid thing", result["report"])
+
+    def test_an_unread_thing_that_did_not_move_is_not_named(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["contacts_unread"] = {"bystander": "SolverVBD"}
+        result = physics.verdict(CLEAN, runs)
+        self.assertIs(_words(result)["grip"], True)
+        self.assertNotIn("bystander", result["report"])
+
     def test_open_is_not_read_when_the_written_run_moved_nothing(self) -> None:
         runs = _clean_runs()
         runs["written"]["things"]["crate"]["moved_max_mm"] = 3.0
@@ -542,3 +558,34 @@ class CommandLine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnreadThings(unittest.TestCase):
+    """Which things' contacts MuJoCo's list cannot show: those another island steps, or all with no probe."""
+
+    def _sim(self, *, probe=True, coupled=True, owners=None):
+        mujoco, vbd = object(), object()
+        owners = owners if owners is not None else {"box": vbd, "lid": mujoco}
+
+        def solver_for(name):
+            if name not in owners:
+                raise KeyError(name)
+            return owners[name]
+
+        program = types.SimpleNamespace(coupled=coupled, solver_for=solver_for)
+        return types.SimpleNamespace(
+            contacts=types.SimpleNamespace(solver=mujoco) if probe else None,
+            pipeline=types.SimpleNamespace(program=program),
+        )
+
+    def test_a_thing_in_another_island_is_unread(self) -> None:
+        self.assertEqual(physics.unread_things(self._sim(), ["box", "lid"]), {"box": "object"})
+
+    def test_a_single_island_scene_reads_everything(self) -> None:
+        self.assertEqual(physics.unread_things(self._sim(coupled=False), ["box", "lid"]), {})
+
+    def test_no_probe_reads_nothing(self) -> None:
+        self.assertEqual(physics.unread_things(self._sim(probe=False), ["box"]), {"box": "no contact probe"})
+
+    def test_a_name_no_island_owns_is_left_to_its_owner(self) -> None:
+        self.assertEqual(physics.unread_things(self._sim(), ["lid#1"]), {})

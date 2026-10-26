@@ -84,6 +84,8 @@ class Replays(unittest.TestCase):
 
         written = self._play("written", store)
         self.assertGreater(written["base_turn"], 0.2)
+        # the default arrangement gives the free cube a VBD island of its own: MuJoCo's list cannot show its contacts
+        self.assertEqual(store["written"]["contacts_unread"], {"cube": "SolverVBD"})
         self.assertEqual(store["written"]["steps"], STEPS)
         self.assertEqual(store["written"]["outcome"], "finished")
 

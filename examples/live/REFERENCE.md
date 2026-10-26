@@ -397,6 +397,12 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   and the friction MuJoCo mixed at those contacts (the larger of the two
   surfaces'): a hand whose own pads carry 2 or 4 grips with that, not with the
   number written for the thing.
+  A thing another solver steps is named instead (`not read for box (stepped
+  by SolverVBD)`), and its free flight is not judged: the default arrangement
+  gives free rigid things a VBD island coupled to the robot, whose finger
+  contacts never reach MuJoCo's list. Put the handled things in the robot's
+  MuJoCo island (`backends=(("*", rss.backend("mujoco", ...)),)`) to have
+  their grip read.
 
 Every replay starts at the reset with the page held (it is put back as it
 was when `physics` ends): a routine that only works once the page has run a
