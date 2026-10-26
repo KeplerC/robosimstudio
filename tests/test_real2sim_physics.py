@@ -1356,6 +1356,37 @@ class StudyLines(unittest.TestCase):
         self.assertIs(read["registered"], False, "registered by the twin, from a file the library does not ship")
         self.assertEqual(read["file"], str(here))
 
+    def test_a_copy_of_the_robot_file_fails_whatever_it_is_named(self) -> None:
+        import tempfile
+        from dataclasses import replace
+
+        import robosimstudio as rss
+        from robosimstudio.robots.registry import EMBODIMENTS, get_embodiment
+
+        EMBODIMENTS.load()
+        yam = get_embodiment("yam_bimanual")
+        folder = Path(tempfile.mkdtemp(prefix="twin-robot-"))
+        copy = folder / "arms.xml"
+        copy.write_text(physics._robot_file(yam).read_text().replace('pos="0 0.3', 'pos="0 0.31'))  # an arm moved
+        own = folder / "ur.xml"
+        own.write_text('<mujoco><worldbody><body name="base"><body name="shoulder"/></body></worldbody></mujoco>')
+
+        def sim(spec):
+            return types.SimpleNamespace(scene=types.SimpleNamespace(embodiment=types.SimpleNamespace(spec=spec)))
+
+        for name in ("yam_bimanual", "keybox_yam"):
+            read = physics.robot_departures(sim(replace(yam, name=name, asset=rss.AssetSpec(path=str(copy)))))
+            self.assertEqual((read["registered"], read["as"]), (True, "yam_bimanual"), name)
+            self.assertIn("is a copy of the registered yam_bimanual", read["file"])
+        self.assertIs(
+            physics.robot_departures(sim(replace(yam, name="ur", asset=rss.AssetSpec(path=str(own)))))["registered"],
+            False,
+            "a robot of the twin's own, nothing like a shipped one",
+        )
+        suction = get_embodiment("yam_bimanual_suction")
+        read = physics.robot_departures(sim(replace(suction, name="twin_suction")))
+        self.assertEqual((read["as"], read["hand"], read["gripper"]), ("yam_bimanual_suction", "", ""))
+
     def test_drawn_parts_that_do_not_collide_fail_past_a_centimetre(self) -> None:
         runs = _clean_runs()
         result = physics.verdict({**CLEAN, "gravity": 9.81, "drawn_only_mm": {"flower_1": 62.0}}, runs)
