@@ -567,8 +567,8 @@ class TestUp(unittest.TestCase):
         code = f"print({line!r}, flush=True)\nimport time\ntime.sleep(60)\n"
         real = ctl.spawn_server
 
-        def spawn(argv, log_path):
-            proc = real([sys.executable, "-c", code], log_path)
+        def spawn(argv, log_path, renderer=""):
+            proc = real([sys.executable, "-c", code], log_path, renderer)
             self.procs.append(proc)
             return proc
 
@@ -586,6 +586,36 @@ class TestUp(unittest.TestCase):
         other = _write(self.tmp, SCENE, name="other.py")
         self.assertEqual(ctl.main([*argv, str(other)]), 1, "another file is not silently ignored")
         self.assertEqual(ctl.main([*argv, str(scene), "--share"]), 1, "nor is --share on a page without one")
+
+    def test_the_server_draws_with_the_renderer_up_names(self) -> None:
+        proc = ctl.spawn_server(
+            [sys.executable, "-c", f"import os; print(os.environ.get({ctl.RENDERER_ENV!r}), flush=True)"],
+            self.log,
+            "gl",
+        )
+        self.procs.append(proc)
+        proc.wait(30)
+        self.assertEqual(self.log.read_text().strip(), "gl")
+
+    def test_up_refuses_a_renderer_nobody_registered(self) -> None:
+        scene = _write(self.tmp, SCENE)
+        rc = ctl.main(["--run-dir", str(self.tmp), "up", "--scene", str(scene), "--renderer", "raytracer"])
+        self.assertEqual(rc, 2)
+        self.assertFalse(self.log.exists(), "nothing was started")
+
+    def test_the_renderers_up_names_are_the_librarys(self) -> None:
+        from robosimstudio.solvers.render import AUTO, RENDERERS
+
+        self.assertEqual(set(ctl.RENDERERS), {*RENDERERS, AUTO})
+
+    def test_up_on_a_running_page_says_when_it_draws_with_another_renderer(self) -> None:
+        scene = _write(self.tmp, SCENE)
+        status = {"file": str(scene.resolve()), "share_url": None, "url": "u", "pid": 1, "renderer_asked": ""}
+        page = _FakePage(self.tmp / "ctl.sock", status)
+        self.addCleanup(page.close)
+        argv = ["--run-dir", str(self.tmp), "up", "--scene", str(scene)]
+        self.assertEqual(ctl.main([*argv, "--renderer", "auto"]), 0, "the machine's pick is what it draws with")
+        self.assertEqual(ctl.main([*argv, "--renderer", "gl"]), 1, "another renderer is not silently ignored")
 
     def test_up_refuses_a_missing_scene_file(self) -> None:
         rc = ctl.main(["--run-dir", str(self.tmp), "up", "--scene", str(self.tmp / "absent.py")])

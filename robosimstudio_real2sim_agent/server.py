@@ -138,10 +138,13 @@ READS_THE_SCENE = ("snapshot", "compare", "check", "eval", "play", "physics", "r
 not build, a bare scene standing in, a save not built yet), and they are refused while no scene is in."""
 MISSING_STAMPS = object()
 """The stamps not given: the status takes them itself."""
-FIRST_RENDER = (
-    "; the first path-traced picture in a process compiles the renderer's shaders, "
-    "which can take minutes -- later ones take seconds"
-)
+FIRST_RENDER = {
+    "rtx": "; the first path-traced picture in a process compiles the renderer's shaders, "
+    "which can take minutes -- later ones take seconds",
+    "blender": "; the first Blender picture in a process starts Blender and hands it the scene, "
+    "which takes seconds -- a frame then takes about a second on a GPU, several on a CPU",
+}
+"""What the first picture in a process costs, by renderer, said in ``status`` while it is drawn."""
 
 
 def _read_replay(run: dict) -> bool:
@@ -248,6 +251,11 @@ class LiveServer:
         """The one ``status`` queued for the main thread, which every caller meanwhile waits on."""
         self.rendered = False
         """Whether a still has been rendered in this process; the first one compiles the path tracer."""
+        from robosimstudio.solvers.render import ENV as RENDERER_ENV
+
+        self.renderer_asked = os.environ.get(RENDERER_ENV, "").strip()
+        """The renderer the page was started under (``up --renderer``), ``""`` for the machine's pick. A scene that
+        sets the variable itself changes what draws -- ``status``'s ``renderer`` says -- but not this."""
         self.script_meta: dict[int, dict] = {}
         """Per playing script (by ``id``): its serial, its name, and where it started."""
         self.scripts_started = 0
@@ -845,7 +853,7 @@ class LiveServer:
             moved = checks.motion_line(motion)
             checks.log_append(
                 self.run_dir,
-                {"cmd": "record", "scene": self.scene_id, "note": moved, **summary},
+                {"cmd": "record", "scene": self.scene_id, "note": moved, "renderer": self.renderer()[0], **summary},
             )
             print(
                 f"[live] take {summary['take']!r} written ({why}): {summary['frames']} frames, {summary['seconds']:.1f} s",
@@ -1088,6 +1096,7 @@ class LiveServer:
             "url": self.url,
             "share_url": self.share_url,
             "pid": os.getpid(),
+            "renderer_asked": getattr(self, "renderer_asked", ""),
             "file": str(self.path),
             "run_dir": str(self.run_dir),
             "pending_save": self._pending_save(stamps),
@@ -1106,6 +1115,17 @@ class LiveServer:
             "takes_written": list(self.takes_written),
             "last_error": self.last_error,
         }
+
+    def renderer(self) -> tuple[str, str]:
+        """The renderer the page's pictures are drawn with, and why: ``ROBOSIMSTUDIO_RENDERER`` (``up --renderer``),
+        or what the machine can run. ``("", why)`` when the name set cannot be built here."""
+        platform = getattr(self.sim, "platform", None)
+        if platform is None:
+            return "", "no scene"
+        try:
+            return platform.renderer_for("")
+        except (ValueError, ImportError) as exc:
+            return "", str(exc)
 
     def light_status(self, stamps: Any = MISSING_STAMPS) -> dict:
         """The status a waiting client polls: the busy one, with where the scene is in time; nothing read off it."""
@@ -1156,7 +1176,7 @@ class LiveServer:
             or (name in ("play", "eval") and bool(request.get("record")))
         )
         if what and renders and not self.rendered:
-            what += FIRST_RENDER
+            what += FIRST_RENDER.get(self.renderer()[0], "")
         try:
             with self._busy(what) if what else nullcontext():
                 reply = handler(**{k: v for k, v in request.items() if k != "cmd"})
@@ -1164,6 +1184,7 @@ class LiveServer:
             reply = {"ok": False, "error": traceback.format_exc()[-3000:]}
         if renders and reply.get("ok"):
             self.rendered = True
+            reply.setdefault("renderer", self.renderer()[0])
         if name in READS_THE_SCENE and self._pending_save():
             reply["pending"] = "a save is not built yet: this is the scene before it -- `./ctl status --wait` first"
         if self.build_error and name in READS_THE_SCENE:
@@ -1203,6 +1224,7 @@ class LiveServer:
             "cell": scene.cell,
             "names": names,
             "cameras": [c.name for c in sim.cameras],
+            "renderer": "{} ({})".format(*self.renderer()),
             "finite": bool(sim.state_is_finite()),
             "routines": self.routine_names(),
             "board": list(self.board),
@@ -1353,6 +1375,7 @@ class LiveServer:
                     "scene": self.scene_id,
                     "note": note,
                     "png": reply.get("beside") or str(path),  # the pair, when there is one: what was judged
+                    "renderer": self.renderer()[0] if not browser else "browser",
                 },
             )
         return reply
@@ -1499,6 +1522,7 @@ class LiveServer:
                 "note": note,
                 "ref": Path(ref).name,
                 "look": pictures["look"],
+                "renderer": self.renderer()[0],
             },
         )
         return {

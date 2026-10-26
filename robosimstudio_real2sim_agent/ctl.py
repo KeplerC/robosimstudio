@@ -104,6 +104,11 @@ POLL_SECONDS = 0.5
 START_HINT = "./ctl up    (in examples/live, or in a twin's folder)"
 SERVE_FLAGS = ("hold", "no_watch", "share", "dark", "hide_scenery", "camera_view")
 """``up``'s switches that are the server's, spelled as argparse attributes."""
+RENDERERS = ("rtx", "blender", "gl", "tiled", "auto")
+"""What ``up --renderer`` takes besides a dotted path: the library's registered renderers and ``auto``, spelled
+here so ``ctl`` starts without importing the library."""
+RENDERER_ENV = "ROBOSIMSTUDIO_RENDERER"
+"""The variable the server's renderer is named by (``robosimstudio.solvers.render.ENV``)."""
 CATALOGS = ("robots", "grippers", "cells", "assets")
 """What ``catalog`` can list; ``assets`` runs the registries' discovery, which takes seconds."""
 VERBOSE = (
@@ -167,6 +172,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--scene", default="", help="the file to execute and watch (default: scene.py beside the run directory)"
     )
     up.add_argument("--share", action="store_true", help="ask viser for a public URL as well")
+    up.add_argument(
+        "--renderer",
+        default="",
+        help="what draws every picture: rtx, blender, gl or tiled (default: rtx where the GPU has RT cores and "
+        "ovrtx is installed, else tiled)",
+    )
     # Kept, not documented: the page has one shape, and these are the knobs a
     # person who has read the server's source may turn.
     up.add_argument("--hold", action="store_true", help=argparse.SUPPRESS)
@@ -755,8 +766,14 @@ def serve_argv(args: argparse.Namespace, sock: Path) -> list[str]:
     return argv
 
 
-def spawn_server(argv: list[str], log_path: Path) -> subprocess.Popen:
-    """Start the server in a session of its own, its output to ``log_path`` (truncated first)."""
+def spawn_server(argv: list[str], log_path: Path, renderer: str = "") -> subprocess.Popen:
+    """Start the server in a session of its own, its output to ``log_path`` (truncated first).
+
+    ``renderer`` names what draws its pictures, as ``ROBOSIMSTUDIO_RENDERER`` in its environment.
+    """
+    env = dict(os.environ)
+    if renderer:
+        env[RENDERER_ENV] = renderer
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "wb") as log:
         return subprocess.Popen(
@@ -765,6 +782,7 @@ def spawn_server(argv: list[str], log_path: Path) -> subprocess.Popen:
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
 
 
@@ -801,6 +819,10 @@ def _differs_from_running(args: argparse.Namespace, status: dict) -> str:
         )
     if args.share and not status.get("share_url"):
         return "a page is already up with no public URL; `quit` it and run `up --share` again"
+    asked = str(getattr(args, "renderer", "") or "").strip()
+    if asked and asked.replace("auto", "") != str(status.get("renderer_asked") or "").replace("auto", ""):
+        running = status.get("renderer_asked") or "the machine's pick"
+        return f"a page is already up drawing with {running}; `quit` it and run `up --renderer {asked}` again"
     return ""
 
 
@@ -931,7 +953,11 @@ def cmd_up(args: argparse.Namespace, sock: Path) -> int:
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)  # before anything is written into it
     log_path = Path(args.log) if args.log else run_dir / "serve.log"
-    proc = spawn_server(serve_argv(args, sock), log_path)
+    asked = str(getattr(args, "renderer", "") or "").strip()
+    if asked and asked not in RENDERERS and "." not in asked:
+        print(f"ctl: no renderer {asked!r}; choose {', '.join(RENDERERS)}, or a dotted path", file=sys.stderr)
+        return 2
+    proc = spawn_server(serve_argv(args, sock), log_path, asked)
     (run_dir / "serve.pid").write_text(f"{proc.pid}\n")
     (run_dir / "serve.log.path").write_text(f"{proc.pid} {log_path.resolve()}\n")  # for a page with no /proc
     try:

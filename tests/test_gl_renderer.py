@@ -44,19 +44,33 @@ def _camera(name="c", *, dx=0.0, dy=0.0, **kwargs):
 class TestWhatIsRefused(unittest.TestCase):
     """Before any context is opened, so it runs wherever the module does."""
 
-    def test_particles_are_refused_naming_the_renderer_that_draws_them(self) -> None:
-        from robosimstudio.solvers.render.gl import RendererGL
-
-        model = types.SimpleNamespace(particle_count=120, world_count=1)
-        with self.assertRaisesRegex(ValueError, "120 particles.*'tiled'"):
-            RendererGL(model, [_camera(eye=(1, 1, 1), look_at=(0, 0, 0))])
-
     def test_a_fleet_is_refused(self) -> None:
         from robosimstudio.solvers.render.gl import RendererGL
 
         model = types.SimpleNamespace(particle_count=0, world_count=4)
         with self.assertRaisesRegex(ValueError, "one world"):
             RendererGL(model, [_camera(eye=(1, 1, 1), look_at=(0, 0, 0))])
+
+
+class TestWhichOpenGL(unittest.TestCase):
+    def test_a_mac_opens_cgl_and_linux_egl_unless_a_variable_names_one(self) -> None:
+        import os
+        from unittest import mock
+
+        from robosimstudio.solvers.render import gl
+
+        clear = {"MUJOCO_GL": "", "PYOPENGL_PLATFORM": ""}
+        with mock.patch.dict(os.environ, clear), mock.patch.object(gl.sys, "platform", "darwin"):
+            self.assertEqual(gl._platform(), "cgl", "a Mac has no EGL")
+        with mock.patch.dict(os.environ, clear), mock.patch.object(gl.sys, "platform", "linux"):
+            self.assertEqual(gl._platform(), "egl")
+        with (
+            mock.patch.dict(os.environ, {**clear, "MUJOCO_GL": "glfw"}),
+            mock.patch.object(gl.sys, "platform", "darwin"),
+        ):
+            self.assertEqual(gl._platform(), "glfw")
+        with mock.patch.dict(os.environ, {**clear, "MUJOCO_GL": "osmesa"}):
+            self.assertEqual(gl._platform(), "osmesa")
 
 
 class TestColours(unittest.TestCase):
@@ -245,6 +259,66 @@ class TestItDrawsWhatTiledDraws(unittest.TestCase):
             np.testing.assert_array_equal(kept, copy)
         finally:
             gl.close()
+
+
+class TestDeformables(unittest.TestCase):
+    """A cloth is drawn where its particles are, moved every frame, as the tiled tracer draws it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import robosimstudio as rss
+        from robosimstudio_materials.cloth import sheet
+
+        scene = rss.Scene(cell="bench_075")
+        scene.add(rss.robot("yam_bimanual"))
+        scene.add(sheet(name="towel", at=(-0.15, -0.2, 0.08), size=(0.12, 0.12), cells=(8, 8), color=(0.8, 0.2, 0.2)))
+        cls.sim = scene.build()
+        cls.camera = _camera("top", eye=(0.51, -0.14, 1.3), look_at=(0.51, -0.13, 0.75))  # world: the bench is at x 0.6
+        try:
+            cls.sim.make_renderer("gl", cameras=[cls.camera]).close()
+        except RuntimeError as exc:
+            cls.sim.close()
+            raise unittest.SkipTest(f"no OpenGL context here: {exc}") from exc
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.sim.close()
+
+    def _both(self):
+        channels = ("rgb", "depth", "seg")
+        tiled = self.sim.make_renderer("tiled", cameras=[self.camera], channels=channels).render(self.sim.state)
+        gl = self.sim.make_renderer("gl", cameras=[self.camera], channels=channels)
+        try:
+            return tiled["top"], gl.render(self.sim.state)["top"]
+        finally:
+            gl.close()
+
+    def test_the_cloth_falls_in_the_picture_as_it_does_in_the_tracers(self) -> None:
+        from robosimstudio.solvers.render.tiled import SEG_SOFT_MESH
+
+        for _ in range(2):  # where it was built, and after it fell onto the bench
+            tiled, gl = self._both()
+            cloth = tiled["seg"] == SEG_SOFT_MESH
+            self.assertGreater(int(cloth.sum()), 200, "the towel is in the picture")
+            self.assertGreater(((gl["seg"] == SEG_SOFT_MESH) == cloth).mean(), 0.99)
+            self.assertLess(float(np.median(np.abs(tiled["depth"][cloth] - gl["depth"][cloth]))), 0.002)
+            red = gl["rgb"][cloth].astype(np.float64).mean(axis=0)
+            self.assertGreater(red[0], 1.5 * red[2], "in its own colour")
+            self.sim.run(60)
+
+    def test_a_particle_body_is_spheres_labelled_as_the_tracers_label_them(self) -> None:
+        from robosimstudio.solvers.render.tiled import SEG_PARTICLES, SEG_SOFT_MESH
+
+        towel = self.sim.scene.handles.deformables["towel"]
+        grains = types.SimpleNamespace(particles=towel.particles, triangles=np.zeros((0, 3)), tube_radius=0.0,
+                                       point_radius=0.006, surface=None)  # fmt: skip
+        gl = self.sim.make_renderer("gl", cameras=[self.camera], channels=("seg",), deformables={"towel": grains})
+        try:
+            seg = gl.render(self.sim.state)["top"]["seg"]
+        finally:
+            gl.close()
+        self.assertGreater(int((seg == SEG_PARTICLES).sum()), 50, "drawn as its particles")
+        self.assertEqual(int((seg == SEG_SOFT_MESH).sum()), 0, "and not as the model's triangles over them")
 
 
 if __name__ == "__main__":

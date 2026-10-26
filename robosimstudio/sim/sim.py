@@ -373,7 +373,7 @@ class Sim(EnvBase):
             frame = sim.render()
             imageio.imwrite("still.png", frame["rgb"])
         """
-        from robosimstudio.solvers.render import FALLBACK
+        from robosimstudio.solvers.render import PUBLIC
 
         spec = self._camera_for(camera)
         backend, why = self.platform.renderer_for("")
@@ -389,8 +389,8 @@ class Sim(EnvBase):
             self._say_fallback(backend, why)
             self._still_renderer = self.make_renderer(backend, cameras=[spec], channels=list(asked))
             self._still_key = key
-            if backend != FALLBACK:
-                self._still_renderer.render(self.state)  # the first frame only builds the stage
+            if backend == PUBLIC:
+                self._still_renderer.render(self.state)  # the path tracer's first frame only builds the stage
         self.sync()
         frame = self._still_renderer.render(self.state)[spec.name]
         if spec.background and "rgb" in frame:
