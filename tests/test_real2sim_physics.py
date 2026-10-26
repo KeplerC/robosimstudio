@@ -1289,6 +1289,30 @@ class StudyLines(unittest.TestCase):
         self.assertIsNone(_words(physics.verdict({**CLEAN, "robot_spec": inline}, runs))["robot"])
         self.assertNotIn("robot", _words(physics.verdict(CLEAN, runs)), "no robot facts read, no line")
 
+    def test_a_robot_the_twin_registered_from_its_own_folder_is_its_own_file(self) -> None:
+        from dataclasses import replace
+
+        import robosimstudio as rss
+        from robosimstudio.robots.registry import EMBODIMENTS, get_embodiment, register_embodiment
+
+        EMBODIMENTS.load()
+        yam = get_embodiment("yam_bimanual")
+        here = Path(__file__).resolve().parent / "twin_robot_probe" / "arms.xml"
+        own = replace(yam, name="study_twin_registered_yam", asset=rss.AssetSpec(path=str(here)))
+        if "study_twin_registered_yam" not in EMBODIMENTS._items:
+            register_embodiment(own)
+
+        def sim(spec):
+            return types.SimpleNamespace(scene=types.SimpleNamespace(embodiment=types.SimpleNamespace(spec=spec)))
+
+        self.assertEqual(
+            physics.robot_departures(sim(yam)),
+            {"name": "yam_bimanual", "registered": True, "file": "", "arm": "", "gripper": ""},
+        )
+        read = physics.robot_departures(sim(own))
+        self.assertIs(read["registered"], False, "registered by the twin, from a file the library does not ship")
+        self.assertEqual(read["file"], str(here))
+
     def test_drawn_parts_that_do_not_collide_fail_past_a_centimetre(self) -> None:
         runs = _clean_runs()
         result = physics.verdict({**CLEAN, "gravity": 9.81, "drawn_only_mm": {"flower_1": 62.0}}, runs)
@@ -1312,6 +1336,8 @@ class StudyLines(unittest.TestCase):
             shape_transform=arr([[0, 0, 0, 0, 0, 0, 1], [0.015, 0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 0, 0, 1]]),
             shape_body=arr([0, 0, 0]),
             shape_source=[None, None, None],
+            body_count=1,
+            joint_count=0,
         )
         flower = types.SimpleNamespace(bodies=[0], body=0, shapes=[0, 1, 2], static=False)
         sim = types.SimpleNamespace(
@@ -1320,6 +1346,11 @@ class StudyLines(unittest.TestCase):
         self.assertAlmostEqual(physics.drawn_only_reach(sim)["flower"], 30.0, places=1)
         flower.shapes = [0, 2]
         self.assertEqual(physics.drawn_only_reach(sim), {}, "a drawn part inside its collider")
+        flower.shapes = [0, 1, 2]
+        model.joint_count = 1  # the stem welded to the world: a vase on the bench, scenery
+        model.joint_type = arr([int(newton.JointType.FIXED)])
+        model.joint_parent, model.joint_child = arr([-1]), arr([0])
+        self.assertEqual(physics.drawn_only_reach(sim), {}, "scenery welded to the world is left out")
 
     def test_shape_volumes(self) -> None:
         import newton

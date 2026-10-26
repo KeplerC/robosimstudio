@@ -563,10 +563,13 @@ class _SideContacts:
 def drawn_only_reach(sim: Any) -> dict[str, float]:
     """Per handled thing, how far its drawn shapes that do not collide reach outside its colliders [mm], body by body
     in the body's own frame (the larger of the per-axis overhangs of their bounding boxes); things that reach no
-    farther than a millimetre are left out. What is drawn and does not collide passes through what it meets."""
+    farther than a millimetre are left out. What is drawn and does not collide passes through what it meets. A body
+    held to the world by fixed joints only (a lamp, a vase of flowers on the bench) is scenery, and is left out."""
+    from robosimstudio.core.render.plate import static_bodies
     from robosimstudio.core.render.visual import shape_geometry
 
     m = sim.model
+    fixed = static_bodies(m)
     flags, kind, scale, xf = (
         m.shape_flags.numpy(),
         m.shape_type.numpy(),
@@ -590,6 +593,8 @@ def drawn_only_reach(sim: Any) -> dict[str, float]:
     for name, t in things(sim).items():
         worst = 0.0
         for b in t["bodies"]:
+            if b < 0 or (b < len(fixed) and fixed[b]):
+                continue
             mine = [int(x) for x in t["shapes"] if int(sb[int(x)]) == b]
             hit = [p for x in mine if int(flags[x]) & collide and (p := points(x)) is not None]
             drawn = [
@@ -613,9 +618,10 @@ def drawn_only_reach(sim: Any) -> dict[str, float]:
 
 def robot_departures(sim: Any) -> dict[str, Any]:
     """How the robot the scene was built with differs from the registered one of its name: its file, its arm servo,
-    its gripper servo (each a few words, empty when the same), or ``registered: False`` when no robot of its name is
-    registered (a file of the twin's own, whose limits cannot be held to anything). A mount (``at=``, ``arms_at=``)
-    is not a departure."""
+    its gripper servo (each a few words, empty when the same), or ``registered: False`` when the library ships no
+    robot of its name (a file of the twin's own, whose limits cannot be held to anything; one the twin registered
+    itself, from its own folder, is that too). A mount (``at=``, ``arms_at=``) is not a departure."""
+    from robosimstudio.paths import resolve_asset, resolve_path
     from robosimstudio.robots.registry import get_embodiment
 
     spec = getattr(getattr(sim.scene, "embodiment", None), "spec", None)
@@ -624,6 +630,12 @@ def robot_departures(sim: Any) -> dict[str, Any]:
     try:
         reg = get_embodiment(spec.name)
     except (KeyError, ValueError):
+        reg = None
+    try:  # the library's robots are files under its assets' embodiments/
+        shipped = reg is not None and resolve_asset(reg.asset).is_relative_to(resolve_path("embodiments"))
+    except (FileNotFoundError, AttributeError, TypeError):
+        shipped = False
+    if not shipped:
         return {"name": spec.name, "registered": False, "file": str(getattr(spec.asset, "path", ""))}
 
     def servo(a: Any) -> str:
@@ -2026,7 +2038,7 @@ def _robot_line(model: dict, line: Any) -> None:
             None,
             "robot",
             f"{spec.get('name') or 'the robot'} is built from {spec.get('file') or 'a file'}, which "
-            "nothing registered: its servo gains and limits are the file's own and are not checked",
+            "the library does not ship: its servo gains and limits are the file's own and are not checked",
         )
         return
     gone = [spec[k] for k in ("file", "arm", "gripper") if spec.get(k)]
