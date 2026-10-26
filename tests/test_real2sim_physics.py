@@ -648,7 +648,7 @@ class StudyLines(unittest.TestCase):
         runs["written"].update(carried=["crate"], apex_step=300)
         end = (0.9, 0.5, 0.9) if fell else (0.4, 0.0, 1.2)
         runs["drop"] = _run(end=end)
-        runs["drop"]["held_rows"] = 1
+        runs["drop"].update(held_rows=1, release_rows=200, release_skip=10)
         runs["drop"]["things"]["crate"].update(robot_after_release_steps=robot_steps, robot_after_release_N=robot_n)
         return runs
 
@@ -704,6 +704,8 @@ class StudyLines(unittest.TestCase):
         self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)
         self.assertIsNone(_words(physics.verdict({**CLEAN, "elastic_parts": ["stem#11"]}, runs))["frozen"])
         runs["written"]["contacts_unread"] = {"stem": "stepped by SolverVBD"}
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["frozen"], False)  # 6.2 mm is more than a sag
+        runs["frozen"]["things"]["stem#11"] = _thing(3.4)
         self.assertIsNone(_words(physics.verdict(CLEAN, runs))["frozen"])
 
     def test_a_round_things_spin_about_its_axis_is_not_a_different_end(self) -> None:
@@ -809,6 +811,11 @@ class StudyLines(unittest.TestCase):
         result = physics.verdict(CLEAN, runs)
         self.assertIsNone(_words(result)["flight"])
         self.assertIn("not judged for crate", result["report"])
+
+    def test_a_release_too_near_the_end_is_not_read(self) -> None:
+        runs = self._drop_runs(fell=False)
+        runs["drop"]["release_rows"] = 12
+        self.assertIsNone(_words(physics.verdict({**CLEAN, "things": {"crate": {"mass_kg": 1.0}}}, runs))["drop"])
 
     def test_shape_volumes(self) -> None:
         import newton

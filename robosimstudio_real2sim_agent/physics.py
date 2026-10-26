@@ -357,32 +357,17 @@ def _hidden_colliders(sim: Any) -> dict[int, str]:
 
 
 def _shape_volume(m: Any, s: int, tables: tuple | None = None) -> float:
-    """A collision shape's volume [m³] from its kind and scale; a mesh's from its triangles (divergence theorem).
-    ``tables`` is ``(shape_type, shape_scale, shape_source)`` already on the host, for a caller asking about many."""
+    """A collision shape's volume [m³]: Newton's own mass of it at a density of 1. ``tables`` is ``(shape_type,
+    shape_scale, shape_source)`` already on the host, for a caller asking about many."""
     types_, scales, sources = tables or (m.shape_type.numpy(), m.shape_scale.numpy(), getattr(m, "shape_source", None))
-    kind, (a, b, c) = int(types_[s]), (float(v) for v in scales[s][:3])
-    g = newton.GeoType
-    if kind == int(g.BOX):
-        return 8.0 * a * b * c
-    if kind == int(g.SPHERE):
-        return 4.0 / 3.0 * math.pi * a**3
-    if kind == int(g.CAPSULE):
-        return math.pi * a * a * 2.0 * b + 4.0 / 3.0 * math.pi * a**3
-    if kind == int(g.CYLINDER):
-        return math.pi * a * a * 2.0 * b
-    if kind == int(g.CONE):
-        return math.pi * a * a * 2.0 * b / 3.0
-    if kind == int(g.ELLIPSOID):
-        return 4.0 / 3.0 * math.pi * a * b * c
-    if kind in (int(g.MESH), int(g.CONVEX_MESH)):
-        src = (sources or [None] * (s + 1))[s]
-        v, idx = getattr(src, "vertices", None), getattr(src, "indices", None)
-        if v is None or idx is None:
-            return 0.0
-        v = np.asarray(v, dtype=np.float64) * np.array([a, b, c])
-        t = np.asarray(idx, dtype=np.int64).reshape(-1, 3)
-        return abs(float(np.einsum("ij,ij->i", v[t[:, 0]], np.cross(v[t[:, 1]], v[t[:, 2]])).sum()) / 6.0)
-    return 0.0
+    src = (sources or [None] * (s + 1))[s]
+    try:
+        mass, _com, _inertia = newton.geometry.compute_inertia_shape(
+            int(types_[s]), wp.vec3(*(float(v) for v in scales[s][:3])), src, density=1.0
+        )
+        return max(float(mass), 0.0)
+    except Exception:  # a shape Newton gives no mass to (a plane, a field): no volume to weigh it by
+        return 0.0
 
 
 def _round_axis(m: Any, shapes: list[int]) -> list[float] | None:
@@ -600,7 +585,12 @@ def model_facts(sim: Any) -> dict[str, Any]:
     # where it was written (so an overlap is still there), a twin's own entity may keep where the warm-up left it (so
     # the settle above says it). The robot's fingers count: a hand that starts inside the thing is the same fault
     try:
-        a, b, gap = _SideContacts.of(sim).read()
+        side = _SideContacts.of(sim)
+        a, b, gap = side.read()
+        if side.overflowed:
+            out["settle_error"] = (
+                "the start overlap read overflowed the collision pass's buffer: what it found is partial"
+            )
         sowner = np.full(len(m.shape_body.numpy()), -1, dtype=np.int64)
         names = list(th)
         for i, name in enumerate(names):
@@ -746,11 +736,13 @@ class Replay:
         soft_scene = bool(sim.particle_probes())
         self.unread = unread_things(sim, self.names)
         self.side = None
+        self.side_error = ""
         if self.unread and not soft_scene:  # contacts across islands read by a pass of the replay's own
             try:
                 self.side = _SideContacts.of(sim)
-            except Exception:
+            except Exception as exc:
                 self.side = None
+                self.side_error = f"the replay's collision pass could not be built ({type(exc).__name__})"
         self.unread_mask = np.array([name in self.unread for name in self.names] + [False], dtype=bool)
         self.free = {
             name
@@ -760,7 +752,7 @@ class Replay:
             and len(self.th[name]["bodies"]) == 1
             and self.th[name]["bodies"][0] in free_bodies
         }
-        self.side_overflowed = False
+        self.side_overflowed = 0
         self.hidden = _hidden_colliders(sim)
         self.hidden_mask = np.zeros(n, dtype=bool)
         self.hidden_mask[list(self.hidden)] = True
@@ -991,7 +983,7 @@ class Replay:
                     self._mixed_friction(probe)
         if self.side is not None and n and contacts:
             a, b, gap = self.side.read(bq)
-            self.side_overflowed = self.side_overflowed or self.side.overflowed
+            self.side_overflowed += int(self.side.overflowed)
             close = gap < NEAR_MM / 1000.0
             a, b, gap = a[close], b[close], gap[close]
             for x, y in ((a, b), (b, a)):
@@ -1095,6 +1087,7 @@ class Replay:
         }
         if not rows:
             return out
+        skip = max(10, int(0.5 / self.dt))  # the fingers' own time to open, for drop's reading
         for name in self.names + [p for p, _ in self.parts]:
             P = np.array([r["pose"][name] for r in rows])
             bad = ~np.isfinite(P).all(axis=1)
@@ -1124,15 +1117,17 @@ class Replay:
                 if i in self.hidden_touch:
                     t["hidden_touch"] = sorted(self.hidden_touch[i])
                 if self.mode == "drop" and self.hold_from:
-                    skip = max(10, int(0.5 / self.dt))  # the fingers' own time to open is not the robot bearing it
                     after = rows[self.hold_from + skip : self.hold_from + skip + RELEASE_WINDOW]
                     t["robot_after_release_steps"] = int(sum(1 for r in after if r["robot_touch"][i]))
                     t["robot_after_release_N"] = (
                         round(float(np.median([r["robot"][i] for r in after])), 2) if after else 0.0
                     )
-                read_by_pass = name in self.unread and self.side is not None
-                if read_by_pass and self.side_overflowed:
-                    t["flight_unread"] = "the replay's collision pass overflowed its buffer"
+                if name in self.unread and self.side is None and self.side_error:
+                    t["flight_unread"] = self.side_error
+                elif name in self.unread and self.side is not None and self.side_overflowed > 0.1 * len(rows):
+                    t["flight_unread"] = (
+                        f"the replay's collision pass overflowed its buffer on {self.side_overflowed} steps"
+                    )
                 elif name in self.free and t["moved_max_mm"] > FLIGHT_MM:
                     stepped = rows[1:]  # row 0 is the start, read without contacts
                     near = np.array([r["near"][i] for r in stepped]) == 0
@@ -1167,10 +1162,14 @@ class Replay:
             out["apex_step"] = int(np.argmax(rise >= 0.9 * rise.max())) if len(rise) else 0
             out["carried"] = carried if len(rise) else []
             start = out["apex_step"]
-            out["z_after"] = {k: [round(float(z), 4) for z in Z[start : start + 40, j]] for j, k in enumerate(carried)}
-        if self.mode == "drop" and self.hold_from:
             out["z_after"] = {
-                k: [round(float(r["pose"][k][2]), 4) for r in rows[self.hold_from : self.hold_from + 40]]
+                k: [round(float(z), 4) for z in Z[start : start + skip + 40, j]] for j, k in enumerate(carried)
+            }
+        out["release_skip"] = skip
+        if self.mode == "drop" and self.hold_from:
+            out["release_rows"] = max(0, len(rows) - 1 - self.hold_from)
+            out["z_after"] = {
+                k: [round(float(r["pose"][k][2]), 4) for r in rows[self.hold_from : self.hold_from + skip + 40]]
                 for k in self.names
             }
         soft = {}
@@ -1385,49 +1384,62 @@ def replay(
 
 def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator[None]:
     """The routine played with nothing hooked in -- no cap, no hold, no hook on any list -- and read only at its own
-    yields: where the things are, what touches them.
+    yields (and once more when it returns): where the things are, what touches them.
 
-    What a routine that looks for the replay's hooks cannot tell from a play. A routine that takes several steps between
-    yields is read that coarsely (each row's time is the steps since the last). The page's own limit stops one that
-    never ends, stored as :data:`STOPPED`.
+    What a routine that looks for the replay's hooks cannot tell from a play. It is cut at a yield a little past the
+    written run's length; one the page stops past that length (``./ctl physics``'s wait running out) is read as not
+    ending unwatched, one stopped before it is played again. A routine that steps without ever yielding is read at its
+    start and its end, and, with no hook to cut it, ends only when it ends -- as it would on the Run button.
     """
-    reader = Replay(sim, "plain")
-    reader.kept = [fn for hooks in sim.hook_lists().values() for fn in hooks]
-    reader.hooks0 = {id(fn) for fn in reader.kept}
-    reader.log(contacts=False)
-    outcome = "finished"
     start = int(getattr(sim, "step_count", 0) or 0)
     limit = steps + max(25, int(OVERRUN * steps)) if steps else 0
+    outcome = "finished"
+    reader = None
+
+    def past_limit() -> bool:
+        return bool(limit) and int(getattr(sim, "step_count", 0) or 0) - start > limit
+
+    def read() -> None:
+        reader.steps += 1
+        try:
+            reader.log()
+        except Exception:
+            reader.error = reader.error or traceback.format_exc()[-800:]
+
     try:
+        reader = Replay(sim, "plain")
+        reader.kept = [fn for hooks in sim.hook_lists().values() for fn in hooks]
+        reader.hooks0 = {id(fn) for fn in reader.kept}
+        reader.log(contacts=False)
         while True:
             try:
                 next(routine)
             except StopIteration:
+                if int(getattr(sim, "step_count", 0) or 0) != (reader.stamps[-1] if reader.stamps else start):
+                    read()  # the steps it took after its last yield
                 break
             yield
-            reader.steps += 1
-            if limit and int(getattr(sim, "step_count", 0) or 0) - start > limit:  # read at its yields, cut there
+            read()
+            if past_limit():  # read at its yields, cut there
                 outcome = PLAIN_LONG
                 try:
                     routine.close()
                 except Exception:
                     pass
                 break
-            try:
-                reader.log()
-            except Exception:
-                reader.error = reader.error or traceback.format_exc()[-800:]
     except GeneratorExit:
-        outcome = STOPPED
+        outcome = PLAIN_LONG if past_limit() else STOPPED
         try:
             routine.close()
         except Exception:
             pass
         raise
     except Exception as exc:
-        outcome = f"{type(exc).__name__}: {str(exc)[:300]}"
+        outcome = f"{type(exc).__name__}: {str(exc)[:300]}" if reader is not None else f"{FAILED}: {exc}"[:300]
     finally:
-        store["plain"] = reader.summary(outcome)
+        store["plain"] = (
+            reader.summary(outcome) if reader is not None else {"outcome": outcome, "steps": 0, "things": {}}
+        )
 
 
 # --------------------------------------------------------------------------- the verdict
@@ -1571,15 +1583,22 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
     if drop.get("held_rows") == 0:
         line(None, "drop", "not read: this hand has no fingers to open")
         return
+    if drop.get("nonfinite"):
+        line(None, "drop", "not read: the solver blew up in it")
+        return
+    if drop.get("release_rows", 0) < int(drop.get("release_skip", 10)) + RELEASE_WINDOW // 2:
+        line(None, "drop", "not read: the carry's top comes too near the end of the run to watch a fall")
+        return
 
     def fell(k: str) -> bool:
         """Lower than the written run at the same moment after the release (a carried thing rides along; a dropped one
         falls at g), or ending somewhere else than the written run left it."""
         a, b = (drop.get("z_after") or {}).get(k, []), (written.get("z_after") or {}).get(k, [])
         n = min(len(a), len(b))
+        skip = int(drop.get("release_skip", 10))
         start = (written.get("things", {}).get(k) or {}).get("start")
         height = (b[0] - start[2]) if (b and start) else 0.015
-        if n > 10 and min(np.subtract(a[10:n], b[10:n])) < -min(0.015, 0.5 * max(height, 0.0)):
+        if n > skip + 5 and min(np.subtract(a[skip:n], b[skip:n])) < -min(0.015, 0.5 * max(height, 0.0)):
             return True
         axes = {n: t["round_axis"] for n, t in model.get("things", {}).items() if t.get("round_axis")}
         return bool(_ended_elsewhere(drop, written, [k], round_axes=axes, bystanders=False))
@@ -1625,6 +1644,9 @@ def _plain_line(model: dict, runs: dict, written: dict, names: list[str], line: 
         return
     if written.get("outcome") != "finished":
         line(None, "plain", "not read: the written replay did not finish")
+        return
+    if plain.get("nonfinite"):
+        line(None, "plain", "not read: the solver blew up in it")
         return
     if plain["outcome"] != "finished":
         line(
@@ -1758,7 +1780,9 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
                 + ("something that is not a contact carries it" if long else "say in the report what holds it"),
             )
     frozen = runs.get("frozen")
-    if frozen:
+    if frozen and frozen.get("nonfinite"):
+        line(None, "frozen", "not read: the solver blew up in it")
+    elif frozen:
         # a rigid thing has nothing to settle into; a heap, a liquid or a draped cloth can still be relaxing at the
         # reset, so its drift is a note for the report, not a fault
         unread_things_ = set((runs.get("written") or {}).get("contacts_unread") or {})
@@ -1773,7 +1797,11 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
         elastic = (
             set(model.get("elastic_parts", []))
             | sunk
-            | {k for k in frozen.get("things", {}) if "#" in k and k.split("#")[0] in unread_things_}
+            | {
+                k
+                for k, t in frozen.get("things", {}).items()
+                if "#" in k and k.split("#")[0] in unread_things_ and t.get("moved_max_mm", 0.0) <= SINK_MM
+            }
         )
         rigid = {k: t["moved_max_mm"] for k, t in frozen.get("things", {}).items() if k not in elastic}
         soft = {k: t["moved_max_mm"] for k, t in frozen.get("deformables", {}).items()}
@@ -1801,6 +1829,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     opened = runs.get("open")
     if opened and opened.get("held_rows") == 0:
         line(None, "open", "not read: this hand has no fingers to hold open")
+    elif opened and opened.get("nonfinite"):
+        line(None, "open", "not read: the solver blew up in it")
     elif opened and (written.get("outcome") != "finished" or not names):
         line(
             None,
