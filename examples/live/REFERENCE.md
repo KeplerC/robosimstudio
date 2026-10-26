@@ -378,26 +378,29 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   `built`, `heavy` and `open` are NOTEs that say so.
 - **heavy** is `built` with every handled thing twice its mass: how much margin
   the grasp has.
-- **drop** plays it as written and opens the fingers at the top of the
-  written run's carry (the step where a thing it lifted was highest). What
+- **drop** plays it as written and opens the fingers early in the written
+  run's carry (where a thing it lifted first reached 90% of its height). What
   the fingers carried falls; a thing that still ends where the written run
   left it fails, unless the robot's other parts still bear its weight (two
   hands squeezing, a hook), which is a NOTE. It catches a weld or a pose
   written every step even while the fingers touch the thing.
 - **plain** plays it with nothing hooked in -- no cap, no hold, nothing on
-  any hook list -- and reads only at the routine's own yields. It fails when
-  the things end somewhere else than the replay left them, or fly with
-  nothing touching them: a routine that does something else when it is
-  replayed.
+  any hook list -- and reads only at the routine's own yields, cut there a
+  little past the written run's length. It fails when the things end
+  somewhere else than the replay left them, fly with nothing touching them,
+  or the routine does not finish: a routine that does something else when it
+  is replayed. A routine that never yields while it steps is read only at its
+  end.
 - **model** reads the scene's own numbers: gravity off the Earth's by more
   than 2% fails; a handled thing lighter than expanded polystyrene or heavier
   than lead (its mass over its colliders' volume), and a collider nothing
   draws touching a handled thing (an invisible shelf or lip), are NOTEs to
   explain.
 - **settle** reads how the scene's own settle, before the first step, moved
-  each thing from where it was put: pushed up more than 2 mm, or aside, it was
-  put inside something (the table, a finger) and fails; fallen into place is
-  fine.
+  each thing from where it was put, and how deep each sits in something at
+  the reset: more than 1 mm inside something (the table, a finger), or pushed
+  up more than 2 mm, fails; pushed aside without rising is a NOTE (it slid out
+  of something, or it is round and rolled); fallen into place is fine.
 - **contact** reads the model and the written replay. A joint between a thing
   and the robot (either way round), an equality row between them that is on at
   any step of the routine (a suction cup's seal is a NOTE instead), a thing flagged
@@ -411,7 +414,7 @@ NOTE  grip     the fingers pressed flower_1 0.7 N (p95 0.7) by hand 2; ...; the 
   pass.
 - **flight** is a single free body with nothing within the contact margin
   that does not fall at g: something holds it that is not a contact. Ten
-  steps or more fail; fewer are a NOTE (a contact that comes and goes between
+  steps or more in a row fail; fewer are a NOTE (a contact that comes and goes between
   reads). It is not read in a scene with a deformable, whose contacts are not
   in MuJoCo's list.
 - **grip** is the median force each hand's fingers put on what they moved,

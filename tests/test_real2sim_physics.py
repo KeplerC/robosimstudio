@@ -636,9 +636,11 @@ class StudyLines(unittest.TestCase):
 
     def test_a_flight_that_lasts_fails(self) -> None:
         runs = _clean_runs()
-        runs["written"]["things"]["crate"]["free_flight_not_falling"] = physics.FLIGHT_STEPS
+        crate = runs["written"]["things"]["crate"]
+        crate.update(free_flight_not_falling=physics.FLIGHT_STEPS, free_flight_longest=physics.FLIGHT_STEPS)
         self.assertIs(_words(physics.verdict(CLEAN, runs))["flight"], False)
-        runs["written"]["things"]["crate"]["free_flight_not_falling"] = physics.FLIGHT_STEPS - 1
+        # as many steps, but in short dropouts (a contact that comes and goes between reads): a note
+        crate.update(free_flight_not_falling=3 * physics.FLIGHT_STEPS, free_flight_longest=4)
         self.assertIsNone(_words(physics.verdict(CLEAN, runs))["flight"])
 
     def _drop_runs(self, *, fell: bool, robot_steps: int = 0, robot_n: float = 0.0) -> dict:
@@ -688,14 +690,12 @@ class StudyLines(unittest.TestCase):
     def test_plain_fails_a_routine_that_ends_or_carries_differently_unwatched(self) -> None:
         runs = _clean_runs()
         runs["written"]["things"]["crate"]["end_quat"] = [0.0, 0.0, 0.0, 1.0]
-        runs["plain"] = {
-            "outcome": "finished",
-            "things": {"crate": {"end": [0.4, 0.0, 1.2], "end_quat": [0, 0, 0, 1.0]}},
-        }
+        runs["plain"] = {"outcome": "finished", "things": {"crate": _thing(300.0, end=(0.4, 0.0, 1.2))}}
+        runs["plain"]["things"]["crate"]["end_quat"] = [0.0, 0.0, 0.0, 1.0]
         self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], True)
         runs["plain"]["things"]["crate"]["end"] = [0.6, 0.0, 1.2]
         self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], False)
-        runs["plain"]["things"]["crate"].update(end=[0.4, 0.0, 1.2], free_flight_not_falling=physics.FLIGHT_STEPS)
+        runs["plain"]["things"]["crate"].update(end=[0.4, 0.0, 1.2], free_flight_longest=physics.FLIGHT_STEPS)
         self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], False)
 
     def test_an_elastic_part_or_one_another_solver_steps_drifts_without_failing_frozen(self) -> None:
@@ -723,6 +723,57 @@ class StudyLines(unittest.TestCase):
         result = physics.verdict(CLEAN, runs)
         self.assertIs(_words(result)["finite"], False)
         self.assertIn("stopped being a number at step 212", result["report"])
+
+    def test_plain_that_did_not_finish_unwatched_fails_and_a_round_spin_does_not(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"]["end_quat"] = [0.0, 0.0, 0.0, 1.0]
+        runs["plain"] = {"outcome": physics.PLAIN_LONG, "things": {}}
+        self.assertIs(_words(physics.verdict(CLEAN, runs))["plain"], False)
+        spun = [0.0, 0.0, float(np.sin(np.radians(69))), float(np.cos(np.radians(69)))]
+        runs["plain"] = {
+            "outcome": "finished",
+            "things": {"crate": {**_thing(300.0, end=(0.4, 0.0, 1.2)), "end_quat": spun}},
+        }
+        model = {**CLEAN, "things": {"crate": {"round_axis": [0.0, 0.0, 1.0]}}}
+        self.assertIs(_words(physics.verdict(model, runs))["plain"], True)
+
+    def test_drop_is_not_fooled_by_a_bystander_or_a_late_brush(self) -> None:
+        model = {**CLEAN, "things": {"crate": {"mass_kg": 1.0}}}
+        runs = self._drop_runs(fell=False)
+        runs["written"]["things"]["bystander"] = _thing(0.0, hand=((0.0, 0.0), (0.0, 0.0)))
+        runs["drop"]["things"]["bystander"] = _thing(120.0, hand=((0.0, 0.0), (0.0, 0.0)))  # knocked away here
+        self.assertIs(_words(physics.verdict(model, runs))["drop"], False)
+        brushed = self._drop_runs(fell=False, robot_steps=3, robot_n=40.0)  # touched in 3 of the moments after
+        self.assertIs(_words(physics.verdict(model, brushed))["drop"], False)
+
+    def test_a_thing_the_settle_slid_aside_is_a_note(self) -> None:
+        model = {**CLEAN, "settle": {"ball": {"rise_mm": 0.0, "aside_mm": 4.0, "turn_deg": 20.0}}}
+        self.assertIsNone(_words(physics.verdict(model, _clean_runs()))["settle"])
+        model["settle"]["ball"]["overlap_mm"] = 3.0
+        self.assertIs(_words(physics.verdict(model, _clean_runs()))["settle"], False)
+
+    def test_a_squeeze_no_real_hand_gives_fails_grip(self) -> None:
+        runs = _clean_runs()
+        runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[900.0, 950.0], [0.0, 0.0]]
+        result = physics.verdict({**CLEAN, "hands": ["robotiq_2f85", "robotiq_2f85"]}, runs)
+        self.assertIs(_words(result)["grip"], False)
+        self.assertIn("4.0x the most a Robotiq 2F-85 squeezes (235 N)", result["report"])
+        runs["written"]["things"]["crate"]["hand_force_p50_p95_N"] = [[200.0, 229.0], [0.0, 0.0]]
+        self.assertIsNot(_words(physics.verdict({**CLEAN, "hands": ["robotiq_2f85"] * 2}, runs))["grip"], False)
+
+    def test_which_real_hand(self) -> None:
+        def sim(labels, name="pair"):
+            return types.SimpleNamespace(
+                scene=types.SimpleNamespace(embodiment=types.SimpleNamespace(spec=types.SimpleNamespace(name=name))),
+                model=types.SimpleNamespace(joint_label=labels),
+            )
+
+        arm = types.SimpleNamespace()
+        with mock.patch.object(physics, "_robot_joint_labels", side_effect=lambda s: list(s.model.joint_label)):
+            robotiq = sim(["l_hand_right_driver_joint", "l_hand_right_follower_joint"])
+            self.assertEqual(physics.real_hand(robotiq, arm), "robotiq_2f85")
+            self.assertEqual(physics.real_hand(sim([], name="yam_bimanual"), arm), "yam")
+            self.assertIsNone(physics.real_hand(sim(["j1"], name="arm"), arm))
 
     def test_shape_volumes(self) -> None:
         import newton

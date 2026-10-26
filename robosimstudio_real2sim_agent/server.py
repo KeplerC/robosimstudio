@@ -1635,7 +1635,12 @@ class LiveServer:
                     "ok": False,
                     "error": "no physics replays of this scene: `./ctl physics` plays them (a save since starts them over)",
                 }
-            unread = [mode for mode, run in self.physics.items() if not _read_replay(run)]
+            # plain cut or stopped unwatched is its reading (the routine did not end as the replay did), not a refusal
+            unread = [
+                mode
+                for mode, run in self.physics.items()
+                if not _read_replay(run) and not (mode == "plain" and run.get("outcome") == physics.STOPPED)
+            ]
             if unread:
                 return {
                     "ok": False,

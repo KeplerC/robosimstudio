@@ -44,7 +44,7 @@ from it), so their free flight is judged and the fingers touching them is
 seen; only the force is not read there.
 
 **Two replays the routine cannot tell from a play.** ``drop`` holds the
-fingers open from the top of the written run's carry: what the fingers were
+fingers open from early in the written run's carry (where a thing it lifted first reached 90% of its height): what the fingers were
 carrying falls, and what still rides along with nothing touching it is
 carried by something that is not a contact. ``plain`` plays the routine with
 nothing hooked in at all and reads only where the things end: a routine that
@@ -87,6 +87,8 @@ HEAVY = 2.0
 """How much heavier ``heavy`` makes every handled thing."""
 
 STOPPED = "stopped before it ended (a reset, a save or Stop)"
+
+PLAIN_LONG = "still going, played with nothing watching, when the written replay had long ended"
 """The outcome of a replay the page stopped: not a reading, so ``./ctl physics`` plays it again."""
 
 FAILED = "the replay itself failed"
@@ -128,6 +130,20 @@ the bar grasp datasets hold a valid grasp's penetration to."""
 
 CARRIED_MM = 20.0
 """A thing lifted this far off its start [mm] was carried: what ``drop`` releases."""
+
+HAND_FORCE = {
+    "robotiq_2f85": ("a Robotiq 2F-85", 235.0),
+    "panda_hand": ("a Franka hand", 140.0),
+    "yam": ("a YAM's linear gripper", 50.0),
+}
+"""The most each real hand squeezes [N]: the 2F-85's datasheet 235 N; the Franka hand's 140 N peak (70 N continuous);
+the YAM's 50 N, the clamp i2rt's driver holds a blocked gripper at. A finger force well past it is a hand no real one is."""
+
+HAND_FORCE_MARGIN = 1.25
+"""How far past the real hand's most the fingers may press before grip fails (a contact spike is not a squeeze)."""
+
+RELEASE_WINDOW = 25
+"""Steps after drop's release that say what holds a thing: the robot must touch it in most of them to be bearing it."""
 
 NEAR_MM = 2.0
 """Within this gap [mm] a pair the replay's own collision pass reports is touching: Newton reports every pair inside
@@ -175,6 +191,21 @@ def _match_arm(words: str) -> tuple[float, ...] | None:
     for key in sorted(ARM_TORQUE, key=len, reverse=True):
         if re.search(rf"(?<![a-z0-9]){key}e?(?![a-z0-9])", words.lower()):  # ur5e is a UR5; ur30, fur3, yaml are not
             return ARM_TORQUE[key]
+    return None
+
+
+def real_hand(sim: Any, arm: Any) -> str | None:
+    """Which real hand an arm's fingers are, by the names its model uses, or ``None``: a Robotiq 2F-85 by its
+    driver/coupler/follower linkage or its name, a Franka hand, a YAM's linear gripper."""
+    labels = " ".join(_robot_joint_labels(sim)).lower() + " " + robot_name(sim).lower()
+    hand = str(getattr(getattr(arm, "gripper_spec", None), "name", "") or getattr(arm, "gripper", "") or "").lower()
+    words = hand + " " + labels
+    if re.search(r"2f.?85|robotiq|driver_joint.*follower|follower.*driver_joint", words):
+        return "robotiq_2f85"
+    if re.search(r"panda|franka|fr3", words):
+        return "panda_hand"
+    if re.search(r"(?<![a-z0-9])yam", words):
+        return "yam"
     return None
 
 
@@ -288,9 +319,10 @@ def unread_things(sim: Any, names: list[str]) -> dict[str, str]:
 def _hidden_colliders(sim: Any) -> dict[int, str]:
     """Static colliders nothing draws, by shape: a prop a camera cannot see that a thing can still rest on.
 
-    A shape that collides and is not drawn, owned by no thing and not the robot's, whose label (up to its first
-    ``/``) names no drawn shape either: a visible table whose collider is a separate invisible box is not hidden.
-    A plane (the ground) is not a prop.
+    A shape that collides and is not drawn, owned by no thing and not the robot's, in a group with no drawn shape: a
+    static's group is its name (a label up to its first ``/``, less a ``_collision_NN`` proxy suffix), or its body when
+    it was welded in place. A visible table whose collider is a separate invisible box is not hidden; a plane (the
+    ground) is not a prop.
     """
     m = sim.model
     flags, sb = m.shape_flags.numpy(), m.shape_body.numpy()
@@ -300,26 +332,31 @@ def _hidden_colliders(sim: Any) -> dict[int, str]:
     plane = int(newton.GeoType.PLANE)
     owned = {int(x) for t in things(sim).values() for x in t["shapes"]}
     robot = {int(x) for x in np.asarray(sim.scene.handles.robot_shapes, dtype=np.int64)}
-    drawn = {str(labels[i]).split("/")[0] for i in range(len(flags)) if int(flags[i]) & visible}
+    robot_bodies = {int(b) for b in _robot_bodies(sim)}
+
+    def group(i: int) -> str:
+        if int(sb[i]) >= 0:
+            return f"body {int(sb[i])}"
+        return re.sub(r"_collision_\d+$", "", str(labels[i]).split("/")[0])
+
+    drawn = {group(i) for i in range(len(flags)) if int(flags[i]) & visible}
     out = {}
     for i in range(len(flags)):
-        key = str(labels[i]).split("/")[0]
-        if (
-            int(flags[i]) & collide
-            and not int(flags[i]) & visible
-            and int(kind[i]) != plane
-            and i not in owned
-            and i not in robot
-            and key not in drawn
-            and int(sb[i]) < 0
-        ):
-            out[i] = key or f"shape {i}"
+        if not int(flags[i]) & collide or int(flags[i]) & visible or int(kind[i]) == plane:
+            continue
+        if i in owned or i in robot or int(sb[i]) in robot_bodies:
+            continue
+        key = group(i)
+        if key not in drawn:
+            out[i] = (str(labels[i]).split("/")[0] or key) if int(sb[i]) < 0 else (str(labels[i]) or key)
     return out
 
 
-def _shape_volume(m: Any, s: int) -> float:
-    """A collision shape's volume [m³] from its kind and scale; a mesh's from its triangles (divergence theorem)."""
-    kind, (a, b, c) = int(m.shape_type.numpy()[s]), (float(v) for v in m.shape_scale.numpy()[s][:3])
+def _shape_volume(m: Any, s: int, tables: tuple | None = None) -> float:
+    """A collision shape's volume [m³] from its kind and scale; a mesh's from its triangles (divergence theorem).
+    ``tables`` is ``(shape_type, shape_scale, shape_source)`` already on the host, for a caller asking about many."""
+    types_, scales, sources = tables or (m.shape_type.numpy(), m.shape_scale.numpy(), getattr(m, "shape_source", None))
+    kind, (a, b, c) = int(types_[s]), (float(v) for v in scales[s][:3])
     g = newton.GeoType
     if kind == int(g.BOX):
         return 8.0 * a * b * c
@@ -334,7 +371,7 @@ def _shape_volume(m: Any, s: int) -> float:
     if kind == int(g.ELLIPSOID):
         return 4.0 / 3.0 * math.pi * a * b * c
     if kind in (int(g.MESH), int(g.CONVEX_MESH)):
-        src = (getattr(m, "shape_source", None) or [None] * (s + 1))[s]
+        src = (sources or [None] * (s + 1))[s]
         v, idx = getattr(src, "vertices", None), getattr(src, "indices", None)
         if v is None or idx is None:
             return 0.0
@@ -376,7 +413,21 @@ def _round_axis(m: Any, shapes: list[int]) -> list[float] | None:
 
 class _SideContacts:
     """A collision pass of the replay's own over the whole model: the contacts a thing in another island has, which
-    MuJoCo's list never holds. Read-only, after a step, on the state it left; nothing is solved from it."""
+    MuJoCo's list never holds. Read-only, after a step, on the state it left; nothing is solved from it. One per model,
+    reused by every replay of it (:meth:`of`)."""
+
+    _cache: ClassVar[dict[int, tuple[Any, _SideContacts]]] = {}
+
+    @classmethod
+    def of(cls, sim: Any) -> _SideContacts:
+        """This model's pass, built once."""
+        key = id(sim.model)
+        hit = cls._cache.get(key)
+        if hit is None or hit[0] is not sim.model:
+            cls._cache.clear()  # one live model at a time on a page; a rebuilt one replaces it
+            hit = cls._cache[key] = (sim.model, cls(sim))
+        hit[1].sim = sim
+        return hit[1]
 
     def __init__(self, sim: Any) -> None:
         self.sim = sim
@@ -385,7 +436,7 @@ class _SideContacts:
         self.contacts = self.pipe.contacts()
         self.shape_body = sim.model.shape_body.numpy()
 
-    def read(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def read(self, bq: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """This state's contacting shape pairs and their separation [m] (negative: overlapping)."""
         self.pipe.collide(self.sim.state, self.contacts)
         c = self.contacts
@@ -393,7 +444,7 @@ class _SideContacts:
         a, b = c.rigid_contact_shape0.numpy()[:n], c.rigid_contact_shape1.numpy()[:n]
         if not n:
             return a, b, np.zeros(0)
-        bq = self.sim.state.body_q.numpy()
+        bq = self.sim.state.body_q.numpy() if bq is None else bq
 
         def world(shapes: np.ndarray, local: np.ndarray) -> np.ndarray:
             body = self.shape_body[shapes]
@@ -452,6 +503,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
             for name, t in th.items()
         },
         "finger_mu": {a: sorted({round(float(v), 3) for v in mu[s]}) for a, s in fing.items()},
+        "hands": [real_hand(sim, arm) for arm in sim.scene.handles.arms.values()],
     }
     kinds = _joint_kinds()
     free, fixed_kind = kinds.get("free", -1), kinds.get("fixed", -2)
@@ -519,8 +571,9 @@ def model_facts(sim: Any) -> dict[str, Any]:
     )
     collide = int(newton.ShapeFlags.COLLIDE_SHAPES)
     flags = m.shape_flags.numpy()
+    tables = (m.shape_type.numpy(), m.shape_scale.numpy(), getattr(m, "shape_source", None))
     for name, t in th.items():
-        vol = sum(_shape_volume(m, int(x)) for x in t["shapes"] if int(flags[int(x)]) & collide)
+        vol = sum(_shape_volume(m, int(x), tables) for x in t["shapes"] if int(flags[int(x)]) & collide)
         out["things"][name]["volume_l"] = round(vol * 1000.0, 4)
         out["things"][name]["density"] = round(out["things"][name]["mass_kg"] / vol, 1) if vol > 0 else None
     # where the scene's settle (before the first step) moved each thing from where it was put: pushed up or aside, it
@@ -539,7 +592,7 @@ def model_facts(sim: Any) -> dict[str, Any]:
     # where it was written (so an overlap is still there), a twin's own entity may keep where the warm-up left it (so
     # the settle above says it). The robot's fingers count: a hand that starts inside the thing is the same fault
     try:
-        a, b, gap = _SideContacts(sim).read()
+        a, b, gap = _SideContacts.of(sim).read()
         sowner = np.full(len(m.shape_body.numpy()), -1, dtype=np.int64)
         names = list(th)
         for i, name in enumerate(names):
@@ -553,8 +606,10 @@ def model_facts(sim: Any) -> dict[str, Any]:
                 if i >= 0 and sowner[q] != i and -g * 1000.0 > out["settle"][names[i]]["overlap_mm"]:
                     out["settle"][names[i]]["overlap_mm"] = round(float(-g * 1000.0), 2)
                     out["settle"][names[i]]["inside"] = str(labels[q]).split("/")[-1] or f"shape {q}"
-    except Exception:  # a model no collision pass can be built over: the settle's own reading stands
-        pass
+    except (
+        Exception
+    ) as exc:  # a model no collision pass can be built over: the settle's own reading stands, and says so
+        out["settle_error"] = f"the start overlap could not be read ({type(exc).__name__}: {exc})"[:300]
     out["hidden"] = sorted(set(_hidden_colliders(sim).values()))
     for name, t in th.items():
         if len(t["bodies"]) == 1:
@@ -684,9 +739,10 @@ class Replay:
         soft_scene = bool(sim.particle_probes())
         self.unread = unread_things(sim, self.names)
         self.side = None
-        if self.unread and not soft_scene:  # their contacts read by a pass of the replay's own
+        coupled = getattr(getattr(getattr(sim, "pipeline", None), "program", None), "coupled", False)
+        if (self.unread or coupled) and not soft_scene:  # contacts across islands read by a pass of the replay's own
             try:
-                self.side = _SideContacts(sim)
+                self.side = _SideContacts.of(sim)
             except Exception:
                 self.side = None
         self.unread_mask = np.array([name in self.unread for name in self.names] + [False], dtype=bool)
@@ -930,14 +986,16 @@ class Replay:
                 if self.steps % 10 == 0:
                     self._mixed_friction(probe)
         if self.side is not None and n and contacts:
-            a, b, gap = self.side.read()
+            a, b, gap = self.side.read(bq)
             close = gap < NEAR_MM / 1000.0
             a, b, gap = a[close], b[close], gap[close]
             for x, y in ((a, b), (b, a)):
                 ox = self.owner[x]
                 keep = ox >= 0
                 ys, ox, g = y[keep], ox[keep], gap[keep]
-                real = self.unread_mask[ox] & (self.owner[ys] != ox)
+                other = self.owner[ys] != ox
+                np.add.at(near, ox[other & ~self.unread_mask[ox]], 1)  # a MuJoCo thing touching another island's
+                real = self.unread_mask[ox] & other
                 np.add.at(near, ox[real], 1)
                 on_finger = real & (self.finger_of[ys] >= 0)
                 np.add.at(touch, (ox[on_finger], self.finger_of[ys][on_finger]), 1)
@@ -1059,7 +1117,7 @@ class Replay:
                 if i in self.hidden_touch:
                     t["hidden_touch"] = sorted(self.hidden_touch[i])
                 if self.mode == "drop" and self.hold_from:
-                    after = rows[self.hold_from + 1 :]
+                    after = rows[self.hold_from + 1 : self.hold_from + 1 + RELEASE_WINDOW]  # the moments after it
                     t["robot_after_release_steps"] = int(sum(1 for r in after if r["robot_touch"][i]))
                     t["robot_after_release_N"] = (
                         round(float(np.median([r["robot"][i] for r in after])), 2) if after else 0.0
@@ -1075,17 +1133,24 @@ class Replay:
                     g = np.ravel(self.sim.model.gravity.numpy())[:3]
                     off = np.linalg.norm(acc - g, axis=1)
                     t["free_flight_steps"] = int(free.sum())
-                    t["free_flight_not_falling"] = int((free & (off > 3.0)).sum())
+                    flying = free & (off > 3.0)
+                    t["free_flight_not_falling"] = int(flying.sum())
+                    runs_ = np.diff(np.concatenate([[0], flying.astype(np.int8), [0]]))
+                    t["free_flight_longest"] = int(
+                        (np.flatnonzero(runs_ == -1) - np.flatnonzero(runs_ == 1)).max(initial=0)
+                    )
             out["things"][name] = t
         # the top of the carry: the step where a thing lifted off its start was highest, what drop releases at
         carried = [k for k in self.names if out["things"][k]["rise_max_mm"] > CARRIED_MM]
         if carried:
             Z = np.array([[r["pose"][k][2] for k in carried] for r in rows])
+            good = np.isfinite(Z).all(axis=1)
+            Z = Z[: int(np.argmin(good))] if not good.all() else Z  # up to the first row that is not a number
             rise = (Z - Z[0]).max(axis=1)
             # early in the carry (where it first reaches 90% of its height), not over where it is set down: a thing
             # dropped above its own goal lands where it was going anyway
-            out["apex_step"] = int(np.argmax(rise >= 0.9 * rise.max()))
-            out["carried"] = carried
+            out["apex_step"] = int(np.argmax(rise >= 0.9 * rise.max())) if len(rise) else 0
+            out["carried"] = carried if len(rise) else []
             start = out["apex_step"]
             out["z_after"] = {k: [round(float(z), 4) for z in Z[start : start + 40, j]] for j, k in enumerate(carried)}
         if self.mode == "drop" and self.hold_from:
@@ -1224,7 +1289,7 @@ def replay(
     if mode not in MODES:
         raise ValueError(f"mode {mode!r} is not one of {', '.join(MODES)}")
     if mode == "plain":
-        yield from _plain(sim, routine, store)
+        yield from _plain(sim, routine, store, steps)
         return
     capped = mode != "written"
     limit = steps + max(25, int(OVERRUN * steps))
@@ -1303,7 +1368,7 @@ def replay(
         store[mode] = tap.summary(outcome) if tap is not None else {"outcome": outcome, "steps": 0, "things": {}}
 
 
-def _plain(sim: Any, routine: Iterator, store: dict) -> Iterator[None]:
+def _plain(sim: Any, routine: Iterator, store: dict, steps: int = 0) -> Iterator[None]:
     """The routine played with nothing hooked in -- no cap, no hold, no hook on any list -- and read only at its own
     yields: where the things are, what touches them.
 
@@ -1316,6 +1381,8 @@ def _plain(sim: Any, routine: Iterator, store: dict) -> Iterator[None]:
     reader.hooks0 = {id(fn) for fn in reader.kept}
     reader.log(contacts=False)
     outcome = "finished"
+    start = int(getattr(sim, "step_count", 0) or 0)
+    limit = steps + max(25, int(OVERRUN * steps)) if steps else 0
     try:
         while True:
             try:
@@ -1324,6 +1391,13 @@ def _plain(sim: Any, routine: Iterator, store: dict) -> Iterator[None]:
                 break
             yield
             reader.steps += 1
+            if limit and int(getattr(sim, "step_count", 0) or 0) - start > limit:  # read at its yields, cut there
+                outcome = PLAIN_LONG
+                try:
+                    routine.close()
+                except Exception:
+                    pass
+                break
             try:
                 reader.log()
             except Exception:
@@ -1351,14 +1425,20 @@ def _moved(run: dict, floor: float = 20.0) -> list[str]:
 
 
 def _ended_elsewhere(
-    run: dict, written: dict, names: list[str], mm: float = 50.0, deg: float = 30.0, round_axes: dict | None = None
+    run: dict,
+    written: dict,
+    names: list[str],
+    mm: float = 50.0,
+    deg: float = 30.0,
+    round_axes: dict | None = None,
+    bystanders: bool = True,
 ) -> str:
     """What did not end where the written run left it, said in a few words; ``""`` when everything did.
 
     Each thing has to end within ``mm`` and ``deg`` of its written end, and to have moved on the way at least a
     third as far as the written run moved it: a mug lifted and set back near its start ends there too.
     """
-    for k in {**written.get("things", {}), **written.get("deformables", {})}:
+    for k in {**written.get("things", {}), **written.get("deformables", {})} if bystanders else ():
         a = run.get("things", {}).get(k) or run.get("deformables", {}).get(k)
         if k not in names and a and a.get("moved_max_mm", 0.0) > mm:  # left alone as written, knocked away here
             return f"{k}, which the written run left alone, was moved {a['moved_max_mm']:.0f} mm"
@@ -1418,12 +1498,9 @@ def _model_lines(model: dict, written: dict, names: list[str], line: Any) -> Non
         line(True, "model", f"gravity {model['gravity']:g} m/s²; the handled things' densities are ones objects have")
     settle = model.get("settle") or {}
     if settle:
-        pushed = {
-            k: v
-            for k, v in settle.items()
-            if v["rise_mm"] > SETTLE_MM or (v["aside_mm"] > 1.5 * SETTLE_MM and v["rise_mm"] > -SETTLE_MM)
-        }
+        pushed = {k: v for k, v in settle.items() if v["rise_mm"] > SETTLE_MM}
         inside = {k: v for k, v in settle.items() if v.get("overlap_mm", 0.0) > OVERLAP_MM}
+        rolled = {k: v for k, v in settle.items() if v["aside_mm"] > 1.5 * SETTLE_MM and abs(v["rise_mm"]) <= SETTLE_MM}
         if inside:
             k = max(inside, key=lambda n: inside[n]["overlap_mm"])
             line(
@@ -1440,6 +1517,16 @@ def _model_lines(model: dict, written: dict, names: list[str], line: Any) -> Non
                 f"the scene's settle pushed {k} {v['rise_mm']:.1f} mm up and {v['aside_mm']:.1f} mm aside before the "
                 "first step: it was put inside something",
             )
+        elif rolled:
+            k = max(rolled, key=lambda n: rolled[n]["aside_mm"])
+            line(
+                None,
+                "settle",
+                f"the scene's settle moved {k} {rolled[k]['aside_mm']:.1f} mm aside before the first step: put inside "
+                "something it slid out of, or round and rolled: say which",
+            )
+        elif model.get("settle_error"):
+            line(None, "settle", f"not read: {model['settle_error']}")
         else:
             worst = max(abs(v["rise_mm"]) + v["aside_mm"] for v in settle.values())
             deep = max(v.get("overlap_mm", 0.0) for v in settle.values())
@@ -1475,7 +1562,7 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
         if n > 10 and min(np.subtract(a[10:n], b[10:n])) < -0.015:
             return True
         axes = {n: t["round_axis"] for n, t in model.get("things", {}).items() if t.get("round_axis")}
-        return bool(_ended_elsewhere(drop, written, [k], round_axes=axes))
+        return bool(_ended_elsewhere(drop, written, [k], round_axes=axes, bystanders=False))
 
     stayed = [k for k in carried if not fell(k)]
     if not stayed:
@@ -1490,7 +1577,7 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
     def held_by_robot(k: str) -> bool:
         """Touched, and (where the force is read) pressed hard enough to bear the thing's weight between them."""
         t = drop["things"].get(k, {})
-        if not t.get("robot_after_release_steps", 0):
+        if t.get("robot_after_release_steps", 0) < RELEASE_WINDOW // 2:  # touched for most of the moments after it
             return False
         weight = float((model.get("things", {}).get(k) or {}).get("mass_kg", 0.0)) * GRAVITY
         return k in unread or t.get("robot_after_release_N", 0.0) >= 0.5 * weight
@@ -1511,7 +1598,7 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any) -> None:
         )
 
 
-def _plain_line(runs: dict, written: dict, names: list[str], line: Any) -> None:
+def _plain_line(model: dict, runs: dict, written: dict, names: list[str], line: Any) -> None:
     """``plain``: the routine played with nothing hooked in; the things should end where the written replay left them."""
     plain = runs.get("plain")
     if not plain:
@@ -1523,26 +1610,22 @@ def _plain_line(runs: dict, written: dict, names: list[str], line: Any) -> None:
         line(
             False,
             "plain",
-            f"played with nothing watching, the routine stopped ({plain['outcome']}) where the replay finished",
+            f"played with nothing watching, the routine did not finish as the replay did ({plain['outcome']})",
         )
         return
-    for k in names:
-        a, b = plain["things"].get(k), written["things"].get(k)
-        if not a or not b:
-            continue
-        off = float(np.linalg.norm(np.subtract(a["end"], b["end"])) * 1000)
-        turn = _turn_deg(np.asarray(a["end_quat"]), np.asarray(b["end_quat"])) if "end_quat" in b else 0.0
-        if off > 50.0 or turn > 30.0:
-            line(
-                False,
-                "plain",
-                f"played with nothing watching, {k} ended {off:.0f} mm and {turn:.0f}° from where the replay left it: the routine does something else when it is replayed",
-            )
-            return
+    axes = {k: t["round_axis"] for k, t in model.get("things", {}).items() if t.get("round_axis")}
+    elsewhere = _ended_elsewhere(plain, written, names, round_axes=axes)
+    if elsewhere:
+        line(
+            False,
+            "plain",
+            f"played with nothing watching, {elsewhere}: the routine does something else when it is replayed",
+        )
+        return
     flew = {
-        k: t.get("free_flight_not_falling", 0)
+        k: t.get("free_flight_longest", 0)
         for k, t in plain.get("things", {}).items()
-        if t.get("free_flight_not_falling", 0) >= FLIGHT_STEPS
+        if t.get("free_flight_longest", 0) >= FLIGHT_STEPS
     }
     if flew:
         line(
@@ -1629,7 +1712,8 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             else f"stopped: {written['outcome']}",
         )
         if flew:
-            long = max(flew.values()) >= FLIGHT_STEPS
+            longest = {k: t.get("free_flight_longest", 0) for k, t in written["things"].items()}
+            long = max(longest.values(), default=0) >= FLIGHT_STEPS
             line(
                 False if long else None,
                 "flight",
@@ -1747,6 +1831,15 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             k: [i + 1 for i, n in enumerate(written["things"].get(k, {}).get("finger_touch_steps", [])) if n]
             for k in unread
         }
+        hands = model.get("hands") or []
+        crushed = []
+        for k in names:
+            for i, (_p50, p95) in enumerate(written["things"].get(k, {}).get("hand_force_p50_p95_N", [])):
+                real = HAND_FORCE.get(hands[i]) if i < len(hands) and hands[i] else None
+                if real and p95 > HAND_FORCE_MARGIN * real[1]:
+                    crushed.append(
+                        f"{k} {p95:g} N by hand {i + 1}, {p95 / real[1]:.1f}x the most {real[0]} squeezes ({real[1]:g} N)"
+                    )
         if grip:
             detail = "the fingers pressed " + "; ".join(grip)
         elif unread:
@@ -1766,13 +1859,15 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
             )
         if mu:
             detail += f"; the solver used friction {mu[0]:g} to {mu[1]:g} at the finger contacts"
+        if crushed:
+            detail = "the fingers pressed " + "; ".join(crushed) + ": a squeeze no real hand gives; " + detail
         line(
-            None if (unread or (mu and mu[1] > REAL_MU)) else True,
+            False if crushed else None if (unread or (mu and mu[1] > REAL_MU)) else True,
             "grip",
             detail + (" (above any real pad: the built line is the one to trust)" if mu and mu[1] > REAL_MU else ""),
         )
     _drop_line(model, runs, written, line)
-    _plain_line(runs, written, names, line)
+    _plain_line(model, runs, written, names, line)
     word = {True: "PASS", False: "FAIL", None: "NOTE"}
     return {
         "passed": all(c["ok"] is not False for c in lines),
