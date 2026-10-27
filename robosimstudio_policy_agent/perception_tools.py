@@ -216,6 +216,19 @@ def _load() -> tuple[Any, Any]:
         return _loaded[0], _loaded[1]
 
 
+def _opened(binary: np.ndarray) -> np.ndarray:
+    """``binary`` opened by a 2x2 square: what is left is every 2x2 block that fits inside it.
+
+    As its two halves. OpenCV anchors an even kernel at (1, 1) for both, so
+    ``MORPH_OPEN`` moved every mask, and its box, one pixel down and to the
+    right; the dilation anchored at (0, 0) undoes the erosion's shift exactly.
+    """
+    import cv2
+
+    opening = np.ones((2, 2), np.uint8)
+    return cv2.dilate(cv2.erode(binary, opening), opening, anchor=(0, 0))
+
+
 def _palette_segment(arr: np.ndarray, query: str, max_results: int) -> dict[str, Any]:
     """Segment the suite's declared synthetic palette when SAM3 is unavailable.
 
@@ -268,12 +281,7 @@ def _palette_segment(arr: np.ndarray, query: str, max_results: int) -> dict[str,
 
     binary = mask.astype(np.uint8) * 255
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-    # The opening by a 2x2 kernel, as its two halves. OpenCV anchors an even
-    # kernel at (1, 1) for both, so ``MORPH_OPEN`` moved every mask, and its box,
-    # one pixel down and to the right; the dilation anchored at (0, 0) undoes
-    # the erosion's shift exactly.
-    opening = np.ones((2, 2), np.uint8)
-    binary = cv2.dilate(cv2.erode(binary, opening), opening, anchor=(0, 0))
+    binary = _opened(binary)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     found: list[tuple[float, int, np.ndarray, list[float]]] = []
     for label in range(1, count):
