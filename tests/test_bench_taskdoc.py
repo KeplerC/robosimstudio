@@ -9,25 +9,18 @@ import unittest
 from robosimstudio_bench.goals.combinators import Leaf
 from robosimstudio_bench.goals.gauntlet import _reward_measure
 from robosimstudio_bench.goals.reward import Gated, build_reward, reading_key
-from robosimstudio_bench.taskdoc import VAB_INDUSTRIAL_V1, apply_bindings, merge_suite, parse_problem, parse_suite
+from robosimstudio_bench.taskdoc import VAB_INDUSTRIAL_V1, apply_bindings, merge_suite
 from robosimstudio_bench.taskdoc.parse import parse_condition
 from robosimstudio_bench.taskdoc.reader import parse_sexp
+from tests.fixtures import taskdocs
 
 TIER = "fast"
 """Parsing only: no scene, no GPU."""
 
 
-def _suite(text):
-    return parse_suite(parse_sexp(text))
-
-
-def _problem(text):
-    return parse_problem(parse_sexp(text))
-
-
 class TestApplyBindingsBindsTheReward(unittest.TestCase):
     def test_measure_and_mask_are_bound(self):
-        doc = _problem(
+        doc = taskdocs.doc(
             "(define (problem p) (:objects hammer bin) (:goal (In hammer bin))"
             " (:reward (progress (In hammer bin) (:gate 1.0) (:gated-by (In hammer bin)))))"
         )
@@ -43,7 +36,7 @@ class TestApplyBindingsBindsTheReward(unittest.TestCase):
         self.assertEqual(doc.reward["progress"][0], ["In", "hammer", "bin"])
 
     def test_the_bound_reward_reads_the_atom_not_the_comparison(self):
-        doc = _problem(
+        doc = taskdocs.doc(
             "(define (problem p) (:objects hammer bin) (:goal (In hammer bin))"
             " (:reward (progress (In hammer bin) (:gate 1.0))))"
         )
@@ -58,7 +51,7 @@ class TestApplyBindingsBindsTheReward(unittest.TestCase):
         self.assertEqual(_reward_measure(bound.reward), ("containment", ("hammer", "bin")))
 
     def test_the_gated_bound_reward_reads_the_atom(self):
-        doc = _problem(
+        doc = taskdocs.doc(
             "(define (problem p) (:objects hammer bin) (:goal (In hammer bin))"
             " (:reward (progress (In hammer bin) (:gate 1.0) (:gated-by (In hammer bin)))))"
         )
@@ -68,7 +61,7 @@ class TestApplyBindingsBindsTheReward(unittest.TestCase):
         self.assertEqual(clause.of.key, reading_key("containment"))
 
     def test_bound_inside_connectives_and_modals(self):
-        doc = _problem(
+        doc = taskdocs.doc(
             "(define (problem p) (:objects hammer bin)"
             " (:reward (progress (and (hold-for 2 (In hammer bin)) (lifted hammer)) (:gate 1.0))))"
         )
@@ -81,9 +74,9 @@ class TestApplyBindingsBindsTheReward(unittest.TestCase):
 
 class TestSuiteName(unittest.TestCase):
     def test_kept_as_written(self):
-        suite = _suite("(define (suite MySuite))")
+        suite = taskdocs.suite("(define (suite MySuite))")
         self.assertEqual(suite.name, "MySuite")
-        doc = merge_suite(_problem("(define (problem v1) (:suite MySuite))"), suite)
+        doc = merge_suite(taskdocs.doc("(define (problem v1) (:suite MySuite))"), suite)
         self.assertEqual(doc.suite, "MySuite")
 
 

@@ -24,29 +24,18 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.fixtures import taskdocs
 from tests.fixtures.registries import restored
 
 TIER = "fast"
 
 ROOT = Path(__file__).resolve().parents[1]
 
-PREAMBLE = """
-import robosimstudio as rss
-from robosimstudio.assetlib import register_asset
-from robosimstudio.domains.rigid import Body
+PREAMBLE = "from tests.fixtures.taskdocs import register_cube\nregister_cube()\n"
+"""What a subprocess runs first: the cube the document places, registered for the life of the process."""
 
-register_asset(Body.from_spec(rss.box(name="cube", half=(0.025,) * 3, at=(0.0, 0.1, 0.03)), name="text_probe_cube"))
-"""
-
-DOCUMENT = """
-(define (problem text_probe)
-  (:language put the cube in the square)
-  (:staging (:scene bench_075) (:embodiment panda) (:physics mujoco_500hz@v1))
-  (:objects cube - text_probe_cube)
-  (:regions (square (:ranges ((0.05 -0.20 0.15 -0.10)))))
-  (:goal (>= (containment cube square) 1.0))
-  (:artifacts (:graph pick "pick_place")))
-"""
+DOCUMENT = taskdocs.DOCUMENT.replace("(:goal", '(:artifacts (:graph pick "pick_place"))\n  (:goal')
+"""The fixture's cube-in-a-square document, with a graph to resolve."""
 
 
 def _run(script: str, *, refuse: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
@@ -88,15 +77,18 @@ def _stated():
     whatever this process runs next.
     """
     from robosimstudio.assetlib.registry import ASSETS
+    from robosimstudio.roots import task_roots
     from robosimstudio_bench.taskbuild import text
     from robosimstudio_bench.taskbuild.registry import SUITES
 
     with (
-        mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_TASK_ROOTS": ""}),
+        mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_TASK_ROOTS": "", "ROBOSIMSTUDIO_TASK_ROOTS_ONLY": "1"}),
         restored(ASSETS, SUITES),
         mock.patch.object(text, "_FROM_TEXT", set()),
     ):
-        exec(PREAMBLE, {})
+        if task_roots():
+            raise AssertionError(f"a string task's test would scan {task_roots()}")
+        taskdocs.register_cube()
         yield
 
 

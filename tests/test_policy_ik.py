@@ -39,7 +39,7 @@ import numpy as np
 
 from robosimstudio_policy_agent.ik import IKBackend
 from robosimstudio_policy_agent.motion_tools import MotionTools
-from tests.fixtures.policy import StubSolver, ik_backend
+from tests.fixtures.policy import StubSolver, ik_backend, pose
 
 TIER = "fast"
 """Real backends over a one-arm stub env and stubbed solvers and planners: no GPU, no scene."""
@@ -62,28 +62,10 @@ def _backend(planner=None, *, honours_roll=False, line=None, prefer_planned=True
     return backend
 
 
-def _missing(error: float) -> IKBackend:
-    """A backend whose solver lands every solve ``error`` metres short, whatever it is asked."""
-    return ik_backend(StubSolver(error), waypoints=4, iterations=4)
-
-
-def _line_backend(solver) -> IKBackend:
-    return ik_backend(solver, waypoints=4, iterations=4)
-
-
-def _solver(position_error, rotation_error) -> IKBackend:
-    """A backend over a solver that always lands a fixed miss."""
-    return ik_backend(StubSolver(position_error, rotation_error), waypoints=10, iterations=4)
-
-
 def _ik_with(planner) -> IKBackend:
     ik = ik_backend(planner=planner)
     ik.last_position_error = 0.0123  # an earlier solved line's arrival
     return ik
-
-
-def _pose(x: float) -> dict:
-    return {"position": {"x": x, "y": 0.0, "z": 0.0}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}
 
 
 class _Planner:
@@ -212,32 +194,21 @@ class TestThePlannersVerbsAreThePlanners(unittest.TestCase):
             _ = _backend(None).no_such_thing
 
 
-POSE = {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}
-
-
 class TestTheGateIsAdjustable(unittest.TestCase):
     def test_a_20mm_miss_passes_the_default_gate(self):
-        self.assertIsNotNone(_missing(0.020).plan_linear(POSE, POSE))
+        self.assertIsNotNone(ik_backend(StubSolver(0.020), waypoints=4).plan_linear(pose(), pose()))
 
     def test_and_is_refused_when_the_caller_asks_for_5mm(self):
-        self.assertIsNone(_missing(0.020).plan_linear(POSE, POSE, tolerance=0.005))
+        self.assertIsNone(ik_backend(StubSolver(0.020), waypoints=4).plan_linear(pose(), pose(), tolerance=0.005))
 
     def test_a_plan_that_passes_still_reports_how_far_it_landed(self):
-        b = _missing(0.020)
-        b.plan_linear(POSE, POSE)
+        b = ik_backend(StubSolver(0.020), waypoints=4)
+        b.plan_linear(pose(), pose())
         self.assertAlmostEqual(b.last_position_error, 0.020, places=6)
 
 
-class _Kinematics:
-    dof = 1
-    arm_coords = (0,)
-
-
-class _Converging:
+class _Converging(StubSolver):
     """Each solve lands closer than the one before, as an unconverged one does."""
-
-    capabilities = frozenset()
-    kinematics = _Kinematics
 
     def __init__(self):
         self.calls = 0
@@ -248,11 +219,8 @@ class _Converging:
         return seed, np.tile([0.02 / self.calls, 0.0], (seed.shape[0], 1))
 
 
-class _ByPlace:
+class _ByPlace(StubSolver):
     """Misses by ``mid`` between the ends, ``end_error`` at x=1, and 0.5 m whenever roll is held."""
-
-    capabilities = frozenset()
-    kinematics = _Kinematics
 
     def __init__(self, mid, end_error):
         self.mid, self.end_error = mid, end_error
@@ -266,21 +234,21 @@ class _ByPlace:
 
 class TestALinesArrival(unittest.TestCase):
     def test_is_the_last_waypoints_error_not_a_fresh_solves(self):
-        b = _line_backend(_Converging())
-        self.assertIsNotNone(b.plan_linear(_pose(0.0), _pose(1.0), num_waypoints=4))
+        b = ik_backend(_Converging(), waypoints=4)
+        self.assertIsNotNone(b.plan_linear(pose(0.0), pose(1.0), num_waypoints=4))
         self.assertAlmostEqual(b.last_position_error, 0.02 / 4, places=9)
 
 
 class TestWhyNoLine(unittest.TestCase):
     def test_a_roll_free_end_is_judged_roll_free_at_the_callers_tolerance(self):
-        b = _line_backend(_ByPlace(mid=0.0, end_error=0.02))
-        self.assertIsNone(b.plan_linear(_pose(0.0), _pose(1.0), tolerance=0.01))
+        b = ik_backend(_ByPlace(mid=0.0, end_error=0.02), waypoints=4)
+        self.assertIsNone(b.plan_linear(pose(0.0), pose(1.0), tolerance=0.01))
         self.assertIn("out of reach", b.last_refusal)
         self.assertIn("20 mm against a 10 mm tolerance", b.last_refusal)
 
     def test_a_reachable_end_behind_an_impossible_line_says_so(self):
-        b = _line_backend(_ByPlace(mid=0.2, end_error=0.04))
-        self.assertIsNone(b.plan_linear(_pose(0.0), _pose(1.0), tolerance=0.05))
+        b = ik_backend(_ByPlace(mid=0.2, end_error=0.04), waypoints=4)
+        self.assertIsNone(b.plan_linear(pose(0.0), pose(1.0), tolerance=0.05))
         self.assertIn("reachable on its own", b.last_refusal)
 
 
@@ -308,9 +276,6 @@ class _Mute(_Backend):
         del self.last_refusal
 
 
-_END = {"position": {"x": 0.4, "y": 0.0, "z": 0.3}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}
-
-
 class TestTheRefusalCarriesTheBackendsReason(unittest.TestCase):
     def test_the_solvers_own_account_reaches_the_caller(self):
         detail = (
@@ -318,13 +283,13 @@ class TestTheRefusalCarriesTheBackendsReason(unittest.TestCase):
             "the leg; at waypoint 3 of 40 the solver was 2 mm and 41 deg off"
         )
         tools = MotionTools(_Backend(refusal=detail))
-        result = tools.plan_linear(end=_END)
+        result = tools.plan_linear(end=pose(0.4, 0.0, 0.3))
         self.assertFalse(result["planned"])
         self.assertEqual(result["reason"], detail)
 
     def test_a_backend_that_does_not_explain_keeps_the_generic_reason(self):
         tools = MotionTools(_Mute())
-        result = tools.plan_linear(end=_END)
+        result = tools.plan_linear(end=pose(0.4, 0.0, 0.3))
         self.assertFalse(result["planned"])
         self.assertEqual(result["reason"], "no linear plan holds this move's constraint")
 
@@ -332,12 +297,9 @@ class TestTheRefusalCarriesTheBackendsReason(unittest.TestCase):
         plan = {"waypoints": [{"positions": [0.0]}]}
         # Stale text from an earlier refusal must not be read as this call's.
         tools = MotionTools(_Backend(plan=plan, refusal="something from before"))
-        result = tools.plan_linear(end=_END)
+        result = tools.plan_linear(end=pose(0.4, 0.0, 0.3))
         self.assertTrue(result["planned"])
         self.assertEqual(result["reason"], "")
-
-
-_POSE = {"position": {"x": 0.0, "y": 0.0, "z": 0.0}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}
 
 
 class TestTheHeldRotationRefusalNamesTheBindingConstraint(unittest.TestCase):
@@ -349,8 +311,8 @@ class TestTheHeldRotationRefusalNamesTheBindingConstraint(unittest.TestCase):
     """
 
     def _refuse(self, position_error, rotation_error):
-        backend = _solver(position_error, rotation_error)
-        result = backend.plan_linear(_POSE, _POSE, hold_rotation=True)
+        backend = ik_backend(StubSolver(position_error, rotation_error), waypoints=10)
+        result = backend.plan_linear(pose(), pose(), hold_rotation=True)
         self.assertIsNone(result)
         return backend.last_refusal
 
@@ -384,7 +346,7 @@ class _AnsweringPlanner:
 
 class TestPlannedLineArrival(unittest.TestCase):
     def test_a_planner_answer_does_not_carry_the_last_lines_error(self):
-        result = MotionTools(_ik_with(_AnsweringPlanner())).plan_linear(_pose(0.1), start=_pose(0.0))
+        result = MotionTools(_ik_with(_AnsweringPlanner())).plan_linear(pose(0.1), start=pose(0.0))
         self.assertTrue(result["planned"])
         self.assertIsNone(result["position_error_m"])
 

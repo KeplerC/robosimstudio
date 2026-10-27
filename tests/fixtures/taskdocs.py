@@ -5,12 +5,12 @@ The checker, the gauntlet's static stages and the simulation check are pure
 functions of a document and a vocabulary, and the docstrings that say so also
 say their tests "hand in a five-line fake". This is that fake, written once:
 
-* :func:`doc` -- a document string, parsed.
+* :func:`doc` and :func:`suite` -- a document or suite string, parsed.
 * :data:`DOCUMENT` -- one cube, one square, one containment goal: the smallest
   document every stage of the gauntlet passes, staged on a real cell with real
   physics so lowering it is lowering a real task.
 * :func:`cube_asset` -- the cube :data:`DOCUMENT` places, registered for the
-  block and taken back afterwards.
+  block and taken back afterwards (:func:`register_cube` registers it for good).
 * :class:`FakeCatalog` -- both catalogs a document meets: the typechecker's
   four-method protocol and :mod:`~robosimstudio_bench.goals.simcheck`'s record
   lookup, from one table of assets.
@@ -28,12 +28,24 @@ from types import SimpleNamespace
 from typing import Any
 
 from robosimstudio.assetlib.semantics.atoms import ArgSpec, AtomSpec
-from robosimstudio_bench.taskdoc.ast import TaskDoc
-from robosimstudio_bench.taskdoc.parse import parse_problem
+from robosimstudio_bench.taskdoc.ast import SuiteDoc, TaskDoc
+from robosimstudio_bench.taskdoc.parse import parse_problem, parse_suite
 from robosimstudio_bench.taskdoc.reader import parse_sexp
 from tests.fixtures.registries import restored
 
-__all__ = ["CUBE", "DOCUMENT", "TWO", "Asset", "FakeCatalog", "FakeEnv", "cube_asset", "doc", "write"]
+__all__ = [
+    "CUBE",
+    "DOCUMENT",
+    "TWO",
+    "Asset",
+    "FakeCatalog",
+    "FakeEnv",
+    "cube_asset",
+    "doc",
+    "register_cube",
+    "suite",
+    "write",
+]
 
 CUBE = "text_probe_cube"
 """The asset :data:`DOCUMENT` places; :func:`cube_asset` registers it."""
@@ -62,6 +74,11 @@ def doc(text: str) -> TaskDoc:
     return parse_problem(parse_sexp(text))
 
 
+def suite(text: str) -> SuiteDoc:
+    """One ``(define (suite ...))`` string, parsed."""
+    return parse_suite(parse_sexp(text))
+
+
 def write(folder: str | Path, text: str, name: str = "t.task") -> Path:
     """``text`` as a document file in ``folder``, for the stages that read a path."""
     path = Path(folder) / name
@@ -69,17 +86,23 @@ def write(folder: str | Path, text: str, name: str = "t.task") -> Path:
     return path
 
 
-@contextlib.contextmanager
-def cube_asset(name: str = CUBE) -> Iterator[str]:
-    """A 50 mm rigid cube registered as ``name`` for the block; the asset registry is put back after."""
+def register_cube(name: str = CUBE) -> str:
+    """Register a 50 mm rigid cube as ``name``, for good: a subprocess's, or inside a block that restores the registry."""
     import robosimstudio as rss
     from robosimstudio.assetlib import register_asset
-    from robosimstudio.assetlib.registry import ASSETS
     from robosimstudio.domains.rigid import Body
 
+    register_asset(Body.from_spec(rss.box(name="cube", half=(0.025,) * 3, at=(0.0, 0.1, 0.03)), name=name))
+    return name
+
+
+@contextlib.contextmanager
+def cube_asset(name: str = CUBE) -> Iterator[str]:
+    """The cube of :func:`register_cube` for the block; the asset registry is put back after."""
+    from robosimstudio.assetlib.registry import ASSETS
+
     with restored(ASSETS):
-        register_asset(Body.from_spec(rss.box(name="cube", half=(0.025,) * 3, at=(0.0, 0.1, 0.03)), name=name))
-        yield name
+        yield register_cube(name)
 
 
 CONTAINMENT = AtomSpec(

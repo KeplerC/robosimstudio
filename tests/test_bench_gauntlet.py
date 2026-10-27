@@ -116,9 +116,7 @@ class TestTheGauntletRunsItsStagesInOrder(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        cube = taskdocs.cube_asset()
-        cube.__enter__()
-        self.addCleanup(cube.__exit__, None, None, None)
+        self.enterContext(taskdocs.cube_asset())
 
     def _run(self, text: str, **kwargs) -> gauntlet.Report:
         return gauntlet.run(taskdocs.write(self.tmp.name, text), **kwargs)

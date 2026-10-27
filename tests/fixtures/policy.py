@@ -25,7 +25,7 @@ import numpy as np
 from robosimstudio_policy_agent.ik import IKBackend
 from tests.fixtures.arrays import host
 
-__all__ = ["InlineBus", "StubSolver", "ik_backend"]
+__all__ = ["InlineBus", "StubSolver", "ik_backend", "pose"]
 
 
 class InlineBus:
@@ -96,3 +96,8 @@ def ik_backend(
     )
     backend.prefer_planned = prefer_planned
     return backend
+
+
+def pose(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> dict:
+    """An ``Se3Pose`` at ``(x, y, z)`` with the identity rotation."""
+    return {"position": {"x": x, "y": y, "z": z}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}

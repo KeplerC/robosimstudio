@@ -7,28 +7,21 @@ from __future__ import annotations
 import unittest
 
 from robosimstudio_bench.taskbuild.staging import Staging, parse_staging
-from robosimstudio_bench.taskdoc import merge_suite, parse_problem, parse_suite
+from robosimstudio_bench.taskdoc import merge_suite
 from robosimstudio_bench.taskdoc.reader import parse_sexp
+from tests.fixtures import taskdocs
 
 TIER = "fast"
 """Parsing and lowering only: no scene, no GPU."""
 
 
-def _suite(text):
-    return parse_suite(parse_sexp(text))
-
-
-def _problem(text):
-    return parse_problem(parse_sexp(text))
-
-
 class TestStagingMergesClauseByClause(unittest.TestCase):
     def test_variant_count_keeps_suite_sampler(self):
-        suite = _suite(
+        suite = taskdocs.suite(
             "(define (suite s) (:staging (:scene bench_0728)"
             " (:episodes (:count 50) (:sampler foo) (:model-key-fields layout))))"
         )
-        doc = merge_suite(_problem("(define (problem v1) (:staging (:episodes (:count 5))))"), suite)
+        doc = merge_suite(taskdocs.doc("(define (problem v1) (:staging (:episodes (:count 5))))"), suite)
         self.assertEqual(
             doc.staging["episodes"],
             [[":sampler", "foo"], [":model-key-fields", "layout"], [":count", 5]],
@@ -36,8 +29,8 @@ class TestStagingMergesClauseByClause(unittest.TestCase):
         self.assertEqual(doc.staging["scene"], "bench_0728")
 
     def test_a_value_with_a_head_is_replaced_whole(self):
-        suite = _suite("(define (suite s) (:staging (:embodiment yam_bimanual (:work-arm left))))")
-        doc = merge_suite(_problem("(define (problem v1) (:staging (:embodiment panda)))"), suite)
+        suite = taskdocs.suite("(define (suite s) (:staging (:embodiment yam_bimanual (:work-arm left))))")
+        doc = merge_suite(taskdocs.doc("(define (problem v1) (:staging (:embodiment panda)))"), suite)
         self.assertEqual(doc.staging["embodiment"], "panda")
 
 

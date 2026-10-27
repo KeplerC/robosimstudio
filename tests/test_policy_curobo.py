@@ -18,6 +18,7 @@ from unittest import mock
 import numpy as np
 
 from robosimstudio_policy_agent.planners.curobo import MotionBackendCuRobo
+from tests.fixtures.policy import pose
 
 TIER = "fast"
 """Backends built bare with stubbed cuRobo modules: no GPU, no cuRobo."""
@@ -151,10 +152,6 @@ class CollisionSpheresTest(unittest.TestCase):
         self.assertEqual(spheres, {"hand": []})
 
 
-def _pose(x: float) -> dict:
-    return {"position": {"x": x, "y": 0.0, "z": 0.0}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}
-
-
 class TestCuroboShortMove(unittest.TestCase):
     def test_a_rotation_in_place_is_planned_free(self):
         planner = object.__new__(MotionBackendCuRobo)
@@ -167,7 +164,7 @@ class TestCuroboShortMove(unittest.TestCase):
             return {"waypoints": ["free"]}
 
         planner._plan = plan
-        self.assertEqual(planner.plan_linear(_pose(0.0), _pose(0.0)), {"waypoints": ["free"]})
+        self.assertEqual(planner.plan_linear(pose(0.0), pose(0.0)), {"waypoints": ["free"]})
         self.assertEqual(calls, [None])
 
 

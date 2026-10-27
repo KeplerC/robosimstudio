@@ -98,22 +98,29 @@ class FakeFleet:
 
 
 class FakeSnapshot:
-    """One readback: each world's joint coordinates, commanded targets and body rows."""
+    """One readback of every world: joint coordinates, commanded targets and body rows, world first.
+
+    A single world may be given without its world axis. Indexed strictly: a
+    world the snapshot does not hold raises, so a test that reads the wrong
+    world fails rather than reading another one's rows.
+    """
 
     def __init__(self, coords, *, targets=None, body=None, step: int = 0) -> None:
         self._coords = np.atleast_2d(np.asarray(coords, dtype=np.float64))
         self._targets = None if targets is None else np.atleast_2d(np.asarray(targets, dtype=np.float64))
         self._body = None if body is None else np.asarray(body, dtype=np.float64)
+        if self._body is not None and self._body.ndim == 2:
+            self._body = self._body[None]
         self.step = step
 
     def coords(self, world: int) -> np.ndarray:
-        return self._coords[min(world, len(self._coords) - 1)]
+        return self._coords[world]
 
     def targets(self, world: int) -> np.ndarray | None:
-        return None if self._targets is None else self._targets[min(world, len(self._targets) - 1)]
+        return None if self._targets is None else self._targets[world]
 
     def body(self, world: int) -> np.ndarray:
-        return self._body
+        return self._body[world]
 
 
 def step_service(fleet: Any = None, *, cadence: int = 1, arm_names=("arm",)) -> StepService:

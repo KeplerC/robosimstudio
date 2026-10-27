@@ -35,9 +35,7 @@ TAPE = AssetRecord(
 
 class TestTheCatalogAnswersBothSpellings(unittest.TestCase):
     def setUp(self):
-        context = registered(ASSETS, TAPE.name, TAPE)
-        context.__enter__()
-        self.addCleanup(context.__exit__, None, None, None)
+        self.enterContext(registered(ASSETS, TAPE.name, TAPE))
         self.catalog = AssetCatalog()
 
     def test_an_asset_is_there_or_it_is_not(self):
