@@ -15,6 +15,7 @@ the test moves time and nothing is left to the scheduler.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import time
 from collections.abc import Callable, Iterator
 from unittest import mock
@@ -53,15 +54,46 @@ class FakeClock:
         self.advance(seconds)
 
 
-@contextlib.contextmanager
-def fake_clock(*targets: str, start: float = 1000.0) -> Iterator[FakeClock]:
-    """Patch each dotted ``targets`` (``"pkg.mod.time.monotonic"``) with one shared :class:`FakeClock`.
+class _FakeTime:
+    """A module's ``time``, with ``monotonic``, ``time``, ``perf_counter`` and ``sleep`` on the fake clock.
 
-    A target ending in ``sleep`` gets the clock's ``sleep``; anything else gets
-    the clock itself, so ``time.monotonic()`` and ``time.time()`` both read it.
+    Everything else is the real ``time`` module's, so ``time.strftime`` still works.
+    """
+
+    def __init__(self, clock: FakeClock) -> None:
+        self._clock = clock
+
+    def __getattr__(self, name: str):
+        if name in ("monotonic", "time", "perf_counter"):
+            return self._clock
+        if name == "sleep":
+            return self._clock.sleep
+        return getattr(time, name)
+
+
+@contextlib.contextmanager
+def fake_clock(*modules: str, start: float = 1000.0) -> Iterator[FakeClock]:
+    """Give each named module one shared :class:`FakeClock` in place of its ``time``.
+
+    ``fake_clock("robosimstudio_policy_agent.fleet.barrier")`` replaces that
+    module's own binding of ``time`` -- what its ``import time`` made -- so its
+    ``time.monotonic()`` and ``time.sleep()`` read and move the fake clock, while
+    the ``time`` module itself, and every other module and thread, keep real time.
+    A dotted name that is not a module (``"pkg.mod.monotonic"``, for a module
+    that did ``from time import monotonic``) is patched with the clock itself,
+    or with its ``sleep`` when the name ends in ``sleep``.
     """
     clock = FakeClock(start)
     with contextlib.ExitStack() as stack:
-        for target in targets:
-            stack.enter_context(mock.patch(target, clock.sleep if target.endswith("sleep") else clock))
+        for target in modules:
+            try:
+                module = importlib.import_module(target)
+            except ImportError:
+                module = None
+            if module is not None:
+                if not hasattr(module, "time"):
+                    raise AttributeError(f"{target} has no `time` of its own to replace; name its function instead")
+                stack.enter_context(mock.patch.object(module, "time", _FakeTime(clock)))
+            else:
+                stack.enter_context(mock.patch(target, clock.sleep if target.endswith("sleep") else clock))
         yield clock

@@ -10,13 +10,16 @@ import os
 import pathlib
 import tempfile
 import textwrap
+import time
 import unittest
 from unittest import mock
 
 TIER = "fast"
 """No GPU: the runner over a throwaway tree of tiny test modules."""
 
-_SPEC = importlib.util.spec_from_file_location("testrun_under_test", pathlib.Path("scripts/testrun.py"))
+_SPEC = importlib.util.spec_from_file_location(
+    "testrun_under_test", pathlib.Path(__file__).resolve().parents[1] / "scripts" / "testrun.py"
+)
 run = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(run)
 
@@ -83,6 +86,32 @@ class TestSelection(unittest.TestCase):
         with tree({"test_x": textwrap.dedent(PASSING) + "raise SystemExit('imported')\n"}):
             self.assertEqual(run.classes("tests.test_x"), ["tests.test_x.TestOne", "tests.test_x.TestTwo"])
 
+    def test_a_class_on_a_local_base_is_listed_and_a_test_less_helper_is_not(self) -> None:
+        body = """
+            import unittest
+            from somewhere import ImportedCase
+            TIER = "fast"
+            class _Instant(unittest.TestCase):
+                def helper(self): pass
+            class TestOnTheHelper(_Instant):
+                def test_x(self): pass
+            class _Mixin:
+                def test_shared(self): pass
+            class TestMixedIn(_Mixin, unittest.TestCase):
+                pass
+            class TestOnAnImportedBase(ImportedCase):
+                pass
+            class NotATest:
+                def test_looks_like_one(self): pass
+            class _ProbeEntity(ImportedEntity):
+                def step(self): pass
+        """
+        with tree({"test_x": body}):
+            self.assertEqual(
+                run.classes("tests.test_x"),
+                ["tests.test_x.TestOnTheHelper", "tests.test_x.TestMixedIn", "tests.test_x.TestOnAnImportedBase"],
+            )
+
     def test_a_module_with_no_test_case_runs_whole(self) -> None:
         with tree({"test_x": 'TIER = "fast"\n'}):
             self.assertEqual(run.classes("tests.test_x"), ["tests.test_x"])
@@ -104,6 +133,23 @@ class TestSelection(unittest.TestCase):
         self.assertIn("test_untiered", err.getvalue())
 
 
+class TestNothingToRun(unittest.TestCase):
+    def test_a_run_that_found_no_tests_is_not_a_failure(self) -> None:
+        got = run.read_outcome("m", run.NO_TESTS_RAN, 0.1, "Ran 0 tests in 0.000s\n\nNO TESTS RAN\n")
+        self.assertTrue(got.ok)
+
+    def test_a_helper_base_run_alone_passes(self) -> None:
+        helper = """
+            import unittest
+            TIER = "fast"
+            class _Helper(unittest.TestCase):
+                def helper(self): pass
+        """
+        with tree({"test_h": helper}):
+            outcomes = run.run_parallel(["tests.test_h._Helper"], 1, None, [], stream=io.StringIO())
+        self.assertTrue(outcomes[0].ok, outcomes[0].output)
+
+
 class TestRefusals(unittest.TestCase):
     def _main(self, *argv: str) -> tuple[int, str]:
         err = io.StringIO()
@@ -114,6 +160,11 @@ class TestRefusals(unittest.TestCase):
         code, err = self._main("--tier", "medium", "-j", "4")
         self.assertEqual(code, 2)
         self.assertIn("--gpus", err)
+
+    def test_a_card_named_twice_is_refused(self) -> None:
+        code, err = self._main("--tier", "medium", "--gpus", "0,0")
+        self.assertEqual(code, 2)
+        self.assertIn("twice", err)
 
     def test_cards_are_refused_for_a_tier_that_hides_them(self) -> None:
         code, err = self._main("--tier", "fast", "--gpus", "0,1")
@@ -147,6 +198,32 @@ class TestRunningInParallel(unittest.TestCase):
         cards = {o.output.split("card=")[1].split()[0] for o in outcomes}
         self.assertTrue(cards <= {"7", "3"}, cards)
         self.assertEqual(len(outcomes), 6)
+
+    def test_a_worker_forgets_the_shells_device_for_its_own_card(self) -> None:
+        device = CARD.replace(
+            'os.environ.get("CUDA_VISIBLE_DEVICES", "unset")', 'repr(os.environ.get("ROBOSIMSTUDIO_DEVICE"))'
+        )
+        with tree({"test_dev": device}), mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_DEVICE": "cuda:3"}):
+            outcomes = run.run_parallel(["tests.test_dev"], 0, None, [], gpus=["1"], stream=io.StringIO())
+        self.assertIn("card=''", outcomes[0].output)
+
+    def test_a_run_past_its_timeout_is_killed_and_shows_what_it_printed(self) -> None:
+        hang = """
+            import time, unittest
+            TIER = "fast"
+            class TestHang(unittest.TestCase):
+                def test_hang(self):
+                    print("got this far", flush=True)
+                    time.sleep(60)
+        """
+        with tree({"test_hang": hang}):
+            start = time.monotonic()
+            outcomes = run.run_parallel(["tests.test_hang"], 1, None, [], stream=io.StringIO(), timeout=3.0)
+        self.assertLess(time.monotonic() - start, 30.0)
+        self.assertEqual(outcomes[0].code, run.TIMED_OUT)
+        self.assertFalse(outcomes[0].ok)
+        self.assertIn("got this far", outcomes[0].output)
+        self.assertIn("killed after 3 s", outcomes[0].output)
 
     def test_classes_run_as_their_own_processes(self) -> None:
         with tree({"test_a": PASSING}):
