@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import subprocess
 import threading
-import time
 import types
 import unittest
 from pathlib import Path
@@ -28,6 +27,7 @@ from robosimstudio_policy_agent.connector import _routed_servo_move
 from robosimstudio_policy_agent.facade import GapEnvFacade
 from robosimstudio_policy_agent.graph_solution import SolutionGraph
 from robosimstudio_policy_agent.robot_tools import RobotTools
+from tests.fixtures.waits import fake_clock
 
 TIER = "fast"
 
@@ -89,35 +89,37 @@ class TestRelativeGripPresets(unittest.TestCase):
 
 
 class _SlowBus:
-    """Steps once per ``wait_for_step``, taking ``delay`` seconds each time."""
+    """Steps once per ``wait_for_step``, taking ``delay`` seconds of ``clock`` each time."""
 
-    def __init__(self, delay: float) -> None:
+    def __init__(self, delay: float, clock) -> None:
         self.delay = delay
+        self.clock = clock
         self.snapshot = types.SimpleNamespace(step=0)
 
     def wait_for_step(self, *, after, timeout):
         if timeout < self.delay:
-            time.sleep(timeout)
+            self.clock.advance(timeout)
             raise BusTimeout("quiet")
-        time.sleep(self.delay)
+        self.clock.advance(self.delay)
         self.snapshot = types.SimpleNamespace(step=after + 1)
 
 
 class TestWaitIsOneDeadline(unittest.TestCase):
     def test_the_timeout_bounds_the_whole_wait_not_each_step(self):
-        tools = RobotTools.__new__(RobotTools)
-        tools.bus = _SlowBus(0.02)
-        start = time.monotonic()
-        out = tools.wait_steps(steps=1000, timeout_s=0.2)
-        elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 1.0)
-        self.assertLess(out["waited"], 1000)
-        self.assertGreater(out["waited"], 0)
+        with fake_clock("robosimstudio_policy_agent.robot_tools") as clock:
+            tools = RobotTools.__new__(RobotTools)
+            tools.bus = _SlowBus(0.25, clock)
+            start = clock.now
+            out = tools.wait_steps(steps=1000, timeout_s=2.0)
+        # Eight quarter-second steps fill the two seconds; a per-step budget would wait all 1000.
+        self.assertEqual(out["waited"], 8)
+        self.assertEqual(clock.now - start, 2.0)
 
     def test_a_wait_inside_its_budget_counts_every_step(self):
-        tools = RobotTools.__new__(RobotTools)
-        tools.bus = _SlowBus(0.0)
-        self.assertEqual(tools.wait_steps(steps=5, timeout_s=5.0), {"waited": 5})
+        with fake_clock("robosimstudio_policy_agent.robot_tools") as clock:
+            tools = RobotTools.__new__(RobotTools)
+            tools.bus = _SlowBus(0.0, clock)
+            self.assertEqual(tools.wait_steps(steps=5, timeout_s=5.0), {"waited": 5})
 
 
 class TestServoVerbsRouteUnreachable(unittest.TestCase):

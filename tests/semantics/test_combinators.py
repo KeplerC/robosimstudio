@@ -401,5 +401,16 @@ class TestReset(unittest.TestCase):
                 self.assertEqual(first, again, "a reset node must score the same sequence again")
 
 
+class TestPeakAndIntegralMissingKey(unittest.TestCase):
+    """A key the measure did not report raises, as the reward clause does."""
+
+    def test_both_raise(self):
+        leaf = Leaf(fn=lambda ctx: (True, 1.0, {"other": 2.0}))
+        for node in (Peak(of=leaf, key="value", value=1.0), Integral(of=leaf, key="value", value=1.0)):
+            node.reset(ctx())
+            with self.subTest(node=type(node).__name__), self.assertRaisesRegex(KeyError, "'value'"):
+                node(ctx(0.1))
+
+
 if __name__ == "__main__":
     unittest.main()

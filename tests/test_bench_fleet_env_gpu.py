@@ -7,6 +7,7 @@ import numpy as np
 
 TIER = "medium"
 
+
 TASK = """
 (define (problem fix_bench_settled)
   (:staging (:scene bench_075) (:embodiment panda) (:physics mujoco_500hz@v1) (:max-steps 50)
