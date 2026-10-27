@@ -11,6 +11,8 @@ does not initialise CUDA::
     uv run python scripts/testrun.py --tier medium   # a GPU and a scene, by hand
     uv run python scripts/testrun.py --tier slow     # a GPU and minutes, by hand
     uv run --extra cpu --no-group rtx python scripts/testrun.py --tier cpu   # real scenes, no GPU
+    uv run python scripts/testrun.py --tier fast -j 16                    # a process per module
+    uv run python scripts/testrun.py --tier medium --gpus 0,1,2,3         # one card per worker
 
 Naming the modules by hand still works and is what ``unittest`` sees either way::
 
@@ -24,6 +26,12 @@ double-counted by another. ``scripts/testrun.py`` enforces that every module
 declares one: it exits non-zero, naming the module, rather than run a suite
 that silently leaves one out. CI runs the fast and cpu tiers; the medium and
 slow tiers are run by hand on a GPU machine.
+
+Shared stand-ins live in :mod:`tests.fixtures`: :mod:`~tests.fixtures.arrays`
+for a Warp array, :mod:`~tests.fixtures.registries` to register something for
+one test, :mod:`~tests.fixtures.waits` for a bounded wait and a clock the test
+owns, and :mod:`~tests.fixtures.sockets` for a directory short enough for a
+socket. Reach for one before writing a private copy.
 
 ``python -m`` puts the repo root on ``sys.path``, so nothing needs installing and
 ``PYTHONPATH`` stays empty.
