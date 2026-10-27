@@ -1252,7 +1252,11 @@ def _join_points(argv: list[str]) -> list[str]:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(_join_points(list(sys.argv[1:] if argv is None else argv)))
-    sock = socket_path(args.run_dir, args.sock)
+    try:
+        sock = socket_path(args.run_dir, args.sock)
+    except OSError as exc:  # a run directory too deep for any socket path: one line, and how to name one
+        print(f"ctl: {exc}", file=sys.stderr)
+        return 2
     if args.cmd == "new":
         return cmd_new(args)
     if args.cmd == "camera":

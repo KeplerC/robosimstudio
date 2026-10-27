@@ -60,14 +60,24 @@ class NoReply(TimeoutError):
 SUN_PATH_MAX = 100
 """Bytes a Unix socket path may have on Linux (108, less the terminator and a margin)."""
 
+SOCKET_DIRS = ("/tmp",)
+"""Where a run directory too deep for its own socket gets one, before the temp directory: the first that is a
+directory and leaves the path short enough. ``/tmp`` first because it is short and the same for every process,
+where ``TMPDIR`` is neither: an agent's session can set one 150 bytes deep, and a client started from another
+shell would look for the socket somewhere else."""
+
 
 def socket_path(run_dir: str | os.PathLike | None, sock: str | os.PathLike | None = None) -> Path:
     """Where the socket is: an explicit ``sock`` wins, else ``<run_dir>/ctl.sock``.
 
     A run directory deep enough that the socket's path would not fit a
     ``sockaddr_un`` -- a worktree under a session's scratch directory did it --
-    is given a short path in the temp directory instead, named by a hash of
-    the run directory so the server and every client resolve the same one.
+    is given a short path in :data:`SOCKET_DIRS` or the temp directory instead,
+    named by a hash of the run directory so the server and every client resolve
+    the same one.
+
+    Raises:
+        OSError: When no such directory leaves the path short enough; ``--sock`` names one.
     """
     if sock:
         return Path(sock)
@@ -78,8 +88,16 @@ def socket_path(run_dir: str | os.PathLike | None, sock: str | os.PathLike | Non
     import hashlib
     import tempfile
 
-    digest = hashlib.sha1(os.fsencode(full)).hexdigest()[:12]
-    return Path(tempfile.gettempdir()) / f"rss-live-{digest}.sock"
+    name = f"rss-live-{hashlib.sha1(os.fsencode(full)).hexdigest()[:12]}.sock"
+    roots = (*SOCKET_DIRS, tempfile.gettempdir())
+    for root in roots:
+        short = Path(root) / name
+        if len(os.fsencode(short)) <= SUN_PATH_MAX and os.path.isdir(root):
+            return short
+    raise OSError(
+        f"no directory short enough for the control socket of {full.parent} (tried {', '.join(roots)}): "
+        f"give --sock a path of at most {SUN_PATH_MAX} bytes"
+    )
 
 
 def ready_line(url: str, sock: Path | str, scene: Path | str, share: str | None = None) -> str:
