@@ -32,7 +32,7 @@ import numpy as np
 
 from tests.fixtures.viser_stubs import _StubGui, _StubSession
 
-__all__ = ["FakeArmPanel", "FakeEnv", "FakeGripper", "FakeIK", "FakeSession"]
+__all__ = ["FakeArmPanel", "FakeEnv", "FakeGripper", "FakeIK", "FakeSession", "FakeSpace"]
 
 HOME = ((0.3, 0.0, 0.2), (0.0, 0.0, 0.0, 1.0))
 """Where a fake hand starts: 300 mm out, 200 mm up, unrotated (xyzw)."""
@@ -125,12 +125,26 @@ class FakeArmPanel:
         self.calls.append("resume")
 
 
+class FakeSpace:
+    """A control space as the leader arm's preflight reads it: joints per arm, and its arms."""
+
+    def __init__(self, per_arm: int) -> None:
+        self.per_arm = per_arm
+        self.arms: list = []
+
+
 class FakeEnv:
-    """An env as the studio's panels read it."""
+    """An env as the studio's panels and the leader arm's preflight read it.
+
+    ``arms`` are the robot's arm names in declaration order, which is the
+    order the action vector takes them in; ``per_arm`` is how many joints the
+    ``joint_position`` control space gives each.
+    """
 
     def __init__(
         self,
         arms: tuple[str, ...] = (),
+        per_arm: int = 0,
         *,
         control_hz: float = 50.0,
         grippers: bool = True,
@@ -154,19 +168,26 @@ class FakeEnv:
         self.cameras = tuple(cameras)
         self.obs = dict(obs or {})
         self.last_result = None
+        self._space = FakeSpace(per_arm)
 
     def arm(self, name: str) -> FakeIK:
         return self.iks[name]
 
+    def use_control(self, mode: str) -> FakeSpace:
+        return self._space
+
 
 class FakeSession(_StubSession):
-    """:class:`_StubSession` and the rest of a session's surface a panel reaches for."""
+    """:class:`_StubSession` and the rest of a session's surface a panel or the leader arm reaches for."""
 
-    def __init__(self, env=None, gui=None, arms: dict | None = None) -> None:
+    def __init__(self, env=None, arms: dict | None = None, *, gui=None) -> None:
         super().__init__(env if env is not None else FakeEnv(), gui if gui is not None else _StubGui())
         self.arms = dict(arms or {})
         self.panels: list = []
         self.hooks: list = []
+        self.leader_arm = None
+        self.quit_requested = False
+        self.closed = 0
         self.selected = None
         self.selections: list = []
         self.driver = None
@@ -176,6 +197,9 @@ class FakeSession(_StubSession):
 
     def each_step(self, fn) -> None:
         self.hooks.append(fn)
+
+    def close(self) -> None:
+        self.closed += 1
 
     def select(self, subject) -> None:
         self.selected = subject

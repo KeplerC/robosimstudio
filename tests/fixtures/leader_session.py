@@ -7,14 +7,15 @@ preflight and one leader thread's tick) and
 session's way in and out). Nothing here opens a serial port, builds a scene or
 starts a thread: :class:`Loop` is the real loop with its thread never started,
 and the rest is just enough of an env and a session for the code under test to
-ask its questions of.
+ask its questions of -- the studio's own fakes, from :mod:`tests.fixtures.studio_fakes`,
+so no two fixtures hold two classes under one name.
 """
 
 from __future__ import annotations
 
 from robosimstudio.robots.teleop import force_feedback as ffb
 from tests.fixtures.leader_feedback import instant
-from tests.fixtures.studio_fakes import FakeArmPanel
+from tests.fixtures.studio_fakes import FakeArmPanel, FakeEnv, FakeSession, FakeSpace
 
 __all__ = ["FakeArmPanel", "FakeEnv", "FakeSession", "FakeSpace", "InstantWaits", "Loop"]
 
@@ -46,37 +47,3 @@ class Loop(ffb.LeaderArmLoop):
             **kwargs,
         }
         super().__init__("left", servos, servos.config, **options)
-
-
-class FakeSpace:
-    def __init__(self, per_arm):
-        self.per_arm = per_arm
-        self.arms = []
-
-
-class FakeEnv:
-    """Just enough env for the preflight: an arm order and a control space."""
-
-    def __init__(self, slots, per_arm):
-        self.scene = type("Scene", (), {"embodiment": type("Emb", (), {"iks": dict.fromkeys(slots)})()})()
-        self._space = FakeSpace(per_arm)
-
-    def use_control(self, mode):
-        return self._space
-
-
-class FakeSession:
-    def __init__(self, env, arms=None):
-        self.env = env
-        self.arms = arms or {}
-        self.panels = []
-        self.leader_arm = None
-        self.quit_requested = False
-        self.hooks = []
-        self.closed = 0
-
-    def each_step(self, fn):
-        self.hooks.append(fn)
-
-    def close(self):
-        self.closed += 1
