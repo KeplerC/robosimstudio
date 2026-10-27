@@ -20,6 +20,7 @@ from __future__ import annotations
 import atexit
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -86,11 +87,14 @@ class FakeStatus:
 
     def __init__(self, path: Path, replies: list[dict]) -> None:
         self.replies = list(replies)
+        self._lock = threading.Lock()
+        """The socket answers each connection on a thread of its own: two polls must not take one reply."""
         self.socket = wire.ControlSocket(path, self._answer)
         self.socket.start()
 
     def _answer(self, request: dict) -> dict:
-        return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        with self._lock:
+            return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
 
     def close(self) -> None:
         self.socket.close()
