@@ -10,7 +10,10 @@ to exactly what it held, names and origins, on the way out.
 It loads the registry first. A registry fills itself lazily, on the first
 lookup, by importing the modules that register into it; a snapshot taken before
 that would put back the empty registry afterwards while it still believed
-itself loaded, and every later lookup in the process would miss.
+itself loaded, and every later lookup in the process would miss. A populator
+added inside the block (``add_discover``) is taken back with the rest. Watchers
+(``registry.watch``) are not told of the restore: a test that watches a registry
+undoes its own watch.
 """
 
 from __future__ import annotations
@@ -27,15 +30,19 @@ def restored(*registries: Any) -> Iterator[None]:
     """Snapshot each registry's entries and put them back on exit, removing anything added."""
     for registry in registries:
         registry.load()
-    saved = [(registry, dict(registry._items), dict(registry._origins), registry._loaded) for registry in registries]
+    saved = [
+        (registry, dict(registry._items), dict(registry._origins), list(registry._discover), registry._loaded)
+        for registry in registries
+    ]
     try:
         yield
     finally:
-        for registry, items, origins, loaded in saved:
+        for registry, items, origins, discover, loaded in saved:
             registry._items.clear()
             registry._items.update(items)
             registry._origins.clear()
             registry._origins.update(origins)
+            registry._discover[:] = discover
             registry._loaded = loaded
 
 
