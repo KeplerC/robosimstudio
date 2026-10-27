@@ -40,7 +40,7 @@ class TestTheTowelExamplePinchesItsEdge(unittest.TestCase):
         import robosimstudio as rss
 
         cls.sim, kwargs = _run("01_cloth/00_towel.py")
-        cls.session = open_session(cls.sim, 9500, kwargs.get("page"))
+        cls.session = open_session(cls.sim, 0, kwargs.get("page"))
         tick(cls.session, 30)  # the towel lands from 20 mm
         cls.surface = rss.get_cell("bench_0728").surface_z
         ids = np.asarray(cls.sim["towel"].entity.particles, dtype=np.int64)
@@ -110,7 +110,7 @@ class TestYourOwnClothExamplePinchesItsHem(unittest.TestCase):
         import robosimstudio as rss
 
         cls.sim, kwargs = _run("01_cloth/04_your_own_cloth.py")
-        cls.session = open_session(cls.sim, 9501, kwargs.get("page"))
+        cls.session = open_session(cls.sim, 0, kwargs.get("page"))
         # The page's reset puts the sheet back flat over the ball, which is where it was built.
         tick(cls.session, 180)
         origin = np.array(rss.get_cell("bench_075").surface_frame[:3])

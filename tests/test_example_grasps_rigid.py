@@ -89,28 +89,24 @@ class TestHelloWorldLiftsTheCube(_Lift, unittest.TestCase):
     """``00_getting_started/00_hello_world``: the cube lands under the Panda's hand."""
 
     EXAMPLE = "00_getting_started/00_hello_world.py"
-    PORT = 9210
 
 
 class TestCoreConceptsLiftsTheCube(_Lift, unittest.TestCase):
     """``00_getting_started/01_core_concepts``: the page is the bench of the two places."""
 
     EXAMPLE = "00_getting_started/01_core_concepts.py"
-    PORT = 9211
 
 
 class TestTheAddedRobotLiftsTheCube(_Lift, unittest.TestCase):
     """``04_extending/00_add_a_robot``: a robot declared inline grips like a registered one."""
 
     EXAMPLE = "04_extending/00_add_a_robot.py"
-    PORT = 9212
 
 
 class TestThePanelPageLiftsTheCube(_Lift, unittest.TestCase):
     """``05_studio/00_your_own_panel``: the cube in the middle, a drag over it and down."""
 
     EXAMPLE = "05_studio/00_your_own_panel.py"
-    PORT = 9213
     HOVER = 0.10
     STARTS_OVER = False
 
@@ -123,7 +119,6 @@ class TestTheLeaderArmFollowerLiftsTheCube(_Lift, unittest.TestCase):
     down, and drives the same follower in the same scene."""
 
     EXAMPLE = "09_teleop/00_leader_arm.py"
-    PORT = 9214
     HOVER = 0.06
     TURN = (0.0, 1.0, 0.0, 0.0)  # the YAM's tool pointing down, jaws closing along world y
     STARTS_OVER = False
@@ -144,7 +139,7 @@ class TestTheFirstTaskByHand(unittest.TestCase):
 
     def test_pick_carry_and_let_go_in_the_square(self) -> None:
         env, _ = _run("06_tasks/00_your_first_task.py")
-        session = open_session(env, 9215)
+        session = open_session(env, 0)
         try:
             self.assertIsNotNone(session.goal_panel, "the goal beside the scene")
             tick(session, 25)

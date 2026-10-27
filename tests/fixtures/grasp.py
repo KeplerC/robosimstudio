@@ -23,8 +23,12 @@ import numpy as np
 __all__ = ["Grasp", "drag_to_grasp", "go", "open_session", "tick"]
 
 
-def open_session(sim, port: int, page: Callable | None = None):
-    """A studio session on ``sim`` with the page an example opens, and no browser, pacing or tunnel."""
+def open_session(sim, port: int = 0, page: Callable | None = None):
+    """A studio session on ``sim`` with the page an example opens, and no browser, pacing or tunnel.
+
+    ``port`` 0, the default, lets the system pick a free one: a fixed port collides
+    with whatever else is serving on the machine, or with another worker's session.
+    """
     from robosimstudio_studio.session import StudioConfig, StudioSession
 
     session = StudioSession(sim, config=StudioConfig(port=port, panels="drive", speed="max", live=False))
