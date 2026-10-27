@@ -18,6 +18,7 @@ import numpy as np
 from robosimstudio_real2sim_agent import ctl, physics
 from robosimstudio_real2sim_agent.server import LiveServer
 from robosimstudio_real2sim_agent.wire import ROUTINE_PLAYING
+from tests.fixtures.live_server import bare_live_server
 
 TIER = "fast"
 
@@ -815,11 +816,8 @@ class Layout(unittest.TestCase):
 
 
 def _server(root: Path) -> LiveServer:
-    live = LiveServer.__new__(LiveServer)
-    live.script, live.scene_id, live.run_dir = [], "abc", root
-    live.physics, live.physics_model, live.physics_scene = {}, {}, ""
-    live.ns = {"routine": lambda sim, session: iter(())}
-    return live
+    """A server whose run directory is ``root``, over scene ``abc`` with a routine that does nothing."""
+    return bare_live_server(root, run_dir=root, scene_id="abc", ns={"routine": lambda sim, session: iter(())})
 
 
 class Refusals(unittest.TestCase):

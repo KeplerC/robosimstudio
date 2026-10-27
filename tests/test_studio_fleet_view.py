@@ -10,34 +10,15 @@ from unittest import mock
 import numpy as np
 
 from robosimstudio_studio.fleet_view import _place
+from tests.fixtures.viser_stubs import _StubScene
 
 TIER = "fast"
 """No GPU: a stand-in viewer records what the grid asks of it."""
 
 
-class _Handle:
-    def __init__(self, text: str, position) -> None:
-        self.text = text
-        self.position = position
-        self.removed = False
-
-    def remove(self) -> None:
-        self.removed = True
-
-
-class _Scene:
-    def __init__(self) -> None:
-        self.added: dict[str, _Handle] = {}
-
-    def add_label(self, name: str, *, text: str, position) -> _Handle:
-        handle = _Handle(text, position)
-        self.added[name] = handle
-        return handle
-
-
 class _Viewer:
     def __init__(self) -> None:
-        self.server = SimpleNamespace(scene=_Scene())
+        self.server = SimpleNamespace(scene=_StubScene())
         self.model = SimpleNamespace(up_axis=2)
         self.world_offsets = np.zeros((2, 3), np.float32)
         self.closed = False

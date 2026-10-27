@@ -11,7 +11,9 @@ gesture was asymmetric.
 Two changes, checked here.
 
 **A grip is a button**, beside the slider that stays for the grip which is
-neither open nor shut, in a folder that now opens by default.
+neither open nor shut, in a folder that now opens by default. That half is
+bookkeeping and is :mod:`tests.test_studio_panels`' ``TestTheGrip``, over fakes;
+what is here is what a real hand does with it.
 
 **A click on what you are already holding puts it down.** The toggle every
 direct manipulation interface uses, and it costs no new control. Rigid handles
@@ -50,56 +52,6 @@ def _session(sim, port: int):
     return StudioSession(sim, config=StudioConfig(port=port, panels="drive"))
 
 
-class TestTheGrip(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.sim = _sim()
-        cls.session = _session(cls.sim, 8931)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.session.teardown()
-
-    def test_one_click_shuts_the_hand_and_one_opens_it(self) -> None:
-        """What the slider took a drag to say."""
-        panel = self.session.arms[sorted(self.session.arms)[0]]
-        for asked, expected in ((1.0, 1.0), (0.0, 0.0)):
-            panel.grip_request = asked
-            panel.drain()
-            self.assertEqual(expected, panel.gripper_command)
-            self.assertEqual(expected, panel._grip.value, "the slider did not follow the button")
-
-    def test_the_request_is_applied_on_the_main_thread_not_in_the_callback(self) -> None:
-        """The panel contract: a callback assigns, ``drain`` acts. Asserted because
-        the slider has to move too, and writing a widget from viser's threadpool
-        is the one thing the contract forbids."""
-        panel = self.session.arms[sorted(self.session.arms)[0]]
-        panel.gripper_command = 0.0
-        panel.grip_request = 1.0
-        self.assertEqual(0.0, panel.gripper_command, "the request was acted on before drain")
-        panel.drain()
-        self.assertIsNone(panel.grip_request)
-        self.assertEqual(1.0, panel.gripper_command)
-
-    def test_the_grip_button_is_there_and_writes_only_a_request(self) -> None:
-        import inspect
-
-        from robosimstudio_studio import panels
-
-        source = inspect.getsource(panels.PanelArm.build)
-        self.assertIn('add_button_group("Grip"', source)
-        self.assertIn('setattr(self, "grip_request"', source)
-
-    def test_the_arm_folder_opens_by_default(self) -> None:
-        """Half of what a person came here to do should not start behind a fold."""
-        import inspect
-
-        from robosimstudio_studio import panels
-
-        source = inspect.getsource(panels.PanelArm.build)
-        self.assertIn("expand_by_default=True", source)
-
-
 class TestStoppingAPolicyHoldsWhatItHeld(unittest.TestCase):
     """``Stop`` gives the arm back. It must not open the hand on the way.
 
@@ -115,7 +67,7 @@ class TestStoppingAPolicyHoldsWhatItHeld(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.sim = _sim()
-        cls.session = _session(cls.sim, 8935)
+        cls.session = _session(cls.sim, 0)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -157,7 +109,7 @@ class TestStoppingAPolicyHoldsWhatItHeld(unittest.TestCase):
 class TestClickingAgainLetsGo(unittest.TestCase):
     def test_a_second_click_on_a_body_releases_it(self) -> None:
         sim = _sim()
-        session = _session(sim, 8933)
+        session = _session(sim, 0)
         try:
             objects = session.objects
             body = int(sorted(objects.by_body)[0])
@@ -176,7 +128,7 @@ class TestClickingAgainLetsGo(unittest.TestCase):
 
     def test_a_second_click_on_a_cloth_grip_releases_it(self) -> None:
         sim = _sim(cloth=True)
-        session = _session(sim, 8934)
+        session = _session(sim, 0)
         try:
             deformables = session.deformables
             self.assertIsNotNone(deformables)
@@ -194,7 +146,7 @@ class TestClickingAgainLetsGo(unittest.TestCase):
     def test_clicking_elsewhere_on_the_same_sheet_adds_a_second_grip(self) -> None:
         """The toggle must not turn a two-handed hold into a one-handed one."""
         sim = _sim(cloth=True)
-        session = _session(sim, 8935)
+        session = _session(sim, 0)
         try:
             deformables = session.deformables
             q = np.asarray(sim["towel"].particle_q, dtype=np.float64)
@@ -213,7 +165,7 @@ class TestTheClothSlots(unittest.TestCase):
     def test_regrip_seizes_again_rather_than_letting_go(self) -> None:
         """The newest handle sits at distance 0 from itself, which the click toggle reads as "let go"."""
         sim = _sim(cloth=True)
-        session = _session(sim, 9321)
+        session = _session(sim, 0)
         try:
             deformables = session.deformables
             point = np.asarray(sim["towel"].particle_q[0], dtype=np.float64)
@@ -233,7 +185,7 @@ class TestTheClothSlots(unittest.TestCase):
         import types
 
         sim = _sim(cloth=True)
-        session = _session(sim, 9322)
+        session = _session(sim, 0)
         try:
             deformables = session.deformables
             q = np.asarray(sim["towel"].particle_q, dtype=np.float64)

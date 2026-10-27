@@ -11,45 +11,10 @@ from unittest import mock
 from robosimstudio.specs.params import REBUILD, ParamUI, ui
 from robosimstudio_studio.tuning.arrangement import ArrangementBinder
 from robosimstudio_studio.tuning.binder import SpecBinder
+from tests.fixtures.viser_stubs import _StubGui
 
 TIER = "fast"
 """No GPU: a stand-in gui and specs that are dataclasses."""
-
-
-class _Widget:
-    def __init__(self, initial_value=None, **_):
-        self._value = initial_value
-        self._callbacks = []
-
-    def on_update(self, fn):
-        self._callbacks.append(fn)
-
-    @property
-    def value(self):
-        return self._value
-
-    @value.setter
-    def value(self, value):
-        if value == self._value:
-            return
-        self._value = value
-        for fn in self._callbacks:
-            fn(None)
-
-
-class _Gui:
-    def __init__(self):
-        self.widgets = {}
-
-    def add_markdown(self, *_a, **_k):
-        return _Widget()
-
-    def _add(self, label, **kw):
-        widget = _Widget(**kw)
-        self.widgets[label] = widget
-        return widget
-
-    add_checkbox = add_dropdown = add_text = add_slider = add_number = _add
 
 
 @dataclass(frozen=True)
@@ -62,16 +27,16 @@ class _Spec:
 class SetSpecRecordsNothing(unittest.TestCase):
     def test_moving_widgets_to_a_new_spec_is_not_an_edit(self):
         binder = SpecBinder(_Spec())
-        binder.build(_Gui())
+        binder.build(_StubGui())
         binder.set_spec(replace(_Spec(), stiff=13700.0 * 1.37, damp=0.9, mode="b"))
         self.assertEqual(binder.pending, {})
 
     def test_a_real_edit_still_records(self):
-        gui = _Gui()
+        gui = _StubGui()
         binder = SpecBinder(_Spec())
         binder.build(gui)
         binder.set_spec(replace(_Spec(), damp=0.9))
-        gui.widgets["damp"].value = 0.25
+        gui.find("damp").value = 0.25
         self.assertEqual(binder.pending, {"damp": 0.25})
 
 
@@ -80,9 +45,9 @@ class PendingRebuildForgetsWhatWasSetBack(unittest.TestCase):
         spec = SimpleNamespace(with_=lambda **_: spec)
         binder = ArrangementBinder(spec)
         binder._fold = mock.Mock()
-        gui = _Gui()
+        gui = _StubGui()
         binder._add(gui, "rates:substeps", "substeps", 4, ParamUI(tier=REBUILD, range=(1.0, 16.0), step=1.0))
-        return binder, gui.widgets["substeps *"]
+        return binder, gui.find("substeps *")
 
     def test_set_back_to_the_built_value(self):
         binder, widget = self._binder()
@@ -97,9 +62,9 @@ class PendingRebuildForgetsWhatWasSetBack(unittest.TestCase):
         spec = SimpleNamespace(with_=lambda **_: spec)
         binder = ArrangementBinder(spec)
         binder._fold = mock.Mock()
-        gui = _Gui()
+        gui = _StubGui()
         binder._add(gui, "rates:edge_ke", "edge_ke", built, ParamUI(tier=REBUILD, range=(1.0, 1e6), log=True))
-        return binder, gui.widgets["edge_ke *"]
+        return binder, gui.find("edge_ke *")
 
     def test_a_log_slider_dragged_back_onto_its_grid_is_set_back(self):
         import math
@@ -125,29 +90,19 @@ class PendingRebuildForgetsWhatWasSetBack(unittest.TestCase):
         self.assertEqual(binder.pending_rebuild(), ("rates:edge_ke",))
 
 
-class _HeadedGui(_Gui):
-    """The fake gui, also keeping the section headers it was handed."""
-
-    def __init__(self):
-        super().__init__()
-        self.headers = []
-
-    def add_markdown(self, text="", *_a, **_k):
-        self.headers.append(text)
-        return _Widget()
-
-
 class OneSectionPerBackendTheSceneUses(unittest.TestCase):
     """GENERIC names an mpm backend for three particle domains and a superdex one for soft."""
 
     def _sections(self, domains):
         from robosimstudio.specs import GENERIC
 
-        gui = _HeadedGui()
+        gui = _StubGui()
         binder = ArrangementBinder(GENERIC, domains=domains)
         binder.build(gui)
         backends = [
-            h for h in gui.headers if h.startswith("**") and h.endswith(("mujoco**", "vbd**", "mpm**", "superdex**"))
+            h
+            for h in (m.content for m in gui.markdown)
+            if h.startswith("**") and h.endswith(("mujoco**", "vbd**", "mpm**", "superdex**"))
         ]
         return binder, backends
 

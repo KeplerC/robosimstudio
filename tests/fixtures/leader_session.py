@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from robosimstudio.robots.teleop import force_feedback as ffb
 from tests.fixtures.leader_feedback import instant
+from tests.fixtures.studio_fakes import FakeArmPanel
 
 __all__ = ["FakeArmPanel", "FakeEnv", "FakeSession", "FakeSpace", "InstantWaits", "Loop"]
 
@@ -62,17 +63,6 @@ class FakeEnv:
 
     def use_control(self, mode):
         return self._space
-
-
-class FakeArmPanel:
-    def __init__(self):
-        self.suspended = False
-
-    def suspend(self):
-        self.suspended = True
-
-    def resume(self):
-        self.suspended = False
 
 
 class FakeSession:

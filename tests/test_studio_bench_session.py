@@ -219,7 +219,10 @@ class TestFleetBasePairing(unittest.TestCase):
         fleet.assert_called_once()
 
     def test_a_task_without_a_base_is_not_checked(self):
-        bench_session.base_declares(_base().with_pairing("", "panda_robotiq", ""))
+        build = mock.Mock(side_effect=AssertionError("a task with no base was built as one"))
+        with mock.patch("robosimstudio_bench.run.fleet.fleet_build_task", build):
+            self.assertIsNone(bench_session.base_declares(_base().with_pairing("", "panda_robotiq", "")))
+        build.assert_not_called()
 
 
 if __name__ == "__main__":

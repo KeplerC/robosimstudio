@@ -1,9 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Fitting a camera to points read off a still: the camera comes back, a mirror is refused, a misread point stands out."""
+"""Fitting a camera to points read off a still: the camera comes back, a mirror is refused, a misread point stands out.
+
+The fit starts from cameras all round the points -- 26 directions, two
+distances and three fields of view, 156 least-squares solves -- because nothing
+about it is convex. Every test here but the one that needs the whole search
+asks for four directions (or names the field of view), which finds the same
+camera in a tenth of the time; the search itself, on the mirrored set it exists
+to refuse, is :mod:`tests.test_real2sim_calib_search`'s.
+"""
 
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -14,8 +23,21 @@ TIER = "fast"
 """No GPU: points a known camera projected."""
 
 
+FEW_STARTS = 4
+"""Directions the fit starts from here, of the 26 it tries: enough to find these cameras."""
+
+
+def few_starts() -> mock._patch:
+    """The fit's search, cut to :data:`FEW_STARTS` directions round the points."""
+    sphere = calib._sphere
+    return mock.patch.object(calib, "_sphere", lambda n: sphere(min(n, FEW_STARTS)))
+
+
 class TestCameraFit(unittest.TestCase):
     CAM = CameraSpec(name="c", width=1280, height=720, fov_y=48, eye=(1.9, -0.7, 1.6), look_at=(0.6, 0.1, 0.75))
+
+    def setUp(self) -> None:
+        self.enterContext(few_starts())
 
     def _points(self, n: int = 10) -> tuple[np.ndarray, np.ndarray]:
         rng = np.random.default_rng(3)
@@ -29,11 +51,6 @@ class TestCameraFit(unittest.TestCase):
         self.assertAlmostEqual(fit["fov_y"], 48.0, places=1)
         spec = CameraSpec(name="fit", **fit["spec"])
         self.assertLess(np.abs(spec.project(world)[0] - pixels).max(), 0.5, "the printed keywords make that camera")
-
-    def test_a_mirrored_set_is_refused(self) -> None:
-        world, pixels = self._points()
-        with self.assertRaisesRegex(ValueError, "mirror"):
-            calib.fit_camera(world * np.array([1.0, -1.0, 1.0]), pixels, 1280, 720)
 
     def test_a_point_read_off_wrong_stands_out(self) -> None:
         world, pixels = self._points(12)

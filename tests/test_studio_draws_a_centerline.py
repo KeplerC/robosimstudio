@@ -58,7 +58,7 @@ class TestACenterlineIsDrawnAsATube(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.sim = _rope_scene("superdex")
-        cls.session = _session(cls.sim, 8973)
+        cls.session = _session(cls.sim, 0)
         cls.viewer = cls.session.viewer
         cls.key = cls.viewer._qualify("/model/garments/rope")
 
@@ -111,7 +111,7 @@ class TestACenterlineIsDrawnAsATube(unittest.TestCase):
 class TestACapsuleChainIsNotATube(unittest.TestCase):
     def test_a_rope_on_newton_is_drawn_by_its_capsules_alone(self) -> None:
         sim = _rope_scene("vbd")
-        session = _session(sim, 8974)
+        session = _session(sim, 0)
         try:
             self.assertNotIn("rope", sim.handles.deformables, "a capsule chain is bodies, not particles")
             session.draw()

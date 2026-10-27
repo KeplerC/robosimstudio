@@ -13,8 +13,10 @@ So: a selection, and a seam.
 The selection is a filter and nothing more. *Which panels a scene warrants* is
 still decided by the scene -- a page over a cable has no cloth folder however it
 is configured -- and :meth:`StudioSession._selected` only decides which of those
-to show. Both halves are checked here, because a filter that quietly became the
-thing deciding what exists would pass a test that only counted folders.
+to show. The filter is :mod:`tests.test_studio_session`'s ``TestTheSelection``,
+over panels that are never built; what is here is that a real scene still
+decides what exists, because a filter that quietly became the thing deciding
+would pass a test that only counted folders.
 
 Transport is deliberately not selectable: Pause, Speed and Reset are built
 inline rather than as a panel, so no selection can take away the ability to stop
@@ -60,81 +62,12 @@ def _keys(session) -> set[str]:
     return {panel_key(p) for p in session.panels}
 
 
-class TestTheSelection(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.sim = _sim()
-
-    def test_all_is_the_default_and_is_no_filter(self) -> None:
-        session = _session(self.sim, 8951)
-        try:
-            keys = _keys(session)
-            self.assertLessEqual(set(DRIVE), keys)
-            # The half a selection exists to remove is present without one.
-            # No "events": the narration panel left with the description layer.
-            for key in ("video", "record", "overlay", "regions"):
-                with self.subTest(panel=key):
-                    self.assertIn(key, keys)
-        finally:
-            session.teardown()
-
-    def test_drive_keeps_exactly_the_drive_panels(self) -> None:
-        session = _session(self.sim, 8952, panels="drive")
-        try:
-            self.assertEqual(set(DRIVE), _keys(session))
-        finally:
-            session.teardown()
-
-    def test_the_keys_may_be_given_directly(self) -> None:
-        session = _session(self.sim, 8953, panels=("object", "cloth"))
-        try:
-            self.assertEqual({"object", "cloth"}, _keys(session))
-        finally:
-            session.teardown()
-
-    def test_drive_leaves_out_the_scene_list_and_the_look(self) -> None:
-        """Both are session-wide furniture, and a page showing one rope wants
-        neither. ``Appearance`` is built inline rather than as a panel, so it is
-        gated by the same selection through ``_wants``."""
-        session = _session(self.sim, 8959, panels="drive")
-        try:
-            self.assertNotIn("scene", _keys(session))
-            self.assertFalse(session._wants("appearance"))
-        finally:
-            session.teardown()
-        whole = _session(self.sim, 8960)
-        try:
-            self.assertIn("scene", _keys(whole))
-            self.assertTrue(whole._wants("appearance"))
-        finally:
-            whole.teardown()
-
-    def test_a_dropped_panel_is_forgotten_not_just_hidden(self) -> None:
-        """``drain_click`` reaches ``self.objects`` by name, and its ``is not
-        None`` guard is the only thing between a click and a panel whose
-        ``build`` never ran."""
-        session = _session(self.sim, 8954, panels=("scene",))
-        try:
-            self.assertIsNone(session.objects)
-            self.assertIsNone(session.deformables)
-            self.assertIsNone(session.video)
-            self.assertEqual({}, session.arms)
-            session.drain_click()  # no ray pending; must not raise
-        finally:
-            session.teardown()
-
-    def test_an_unknown_name_says_what_the_names_are(self) -> None:
-        with self.assertRaises(ValueError) as caught:
-            _session(self.sim, 8955, panels="minimal").teardown()
-        self.assertIn("drive", str(caught.exception))
-
-
 class TestTheSceneStillDecidesWhatExists(unittest.TestCase):
     """A selection filters; it does not conjure."""
 
     def test_asking_for_cloth_on_a_scene_with_none_gets_none(self) -> None:
         sim = _sim(cloth=False)
-        session = _session(sim, 8956, panels=("object", "cloth"))
+        session = _session(sim, 0, panels=("object", "cloth"))
         try:
             self.assertEqual({"object"}, _keys(session))
             self.assertIsNone(session.deformables)
@@ -173,7 +106,7 @@ class TestATaskPageKeepsItsDocument(unittest.TestCase):
 
         self.assertEqual("drive", _VIEW_DEFAULTS["panels"])
         env, _ = _run("06_tasks/00_your_first_task.py")
-        session = self._view(env, 9220)
+        session = self._view(env, 0)
         try:
             keys = _keys(session)
             self.assertLessEqual({"goal", "regions", "solution"}, keys, "the document's panels")
@@ -189,7 +122,7 @@ class TestATaskPageKeepsItsDocument(unittest.TestCase):
 
     def test_a_bare_scene_under_drive_is_unchanged(self) -> None:
         """The other half: no document, nothing added -- the same four keys as ever."""
-        session = self._view(_sim(cloth=True), 9221)
+        session = self._view(_sim(cloth=True), 0)
         try:
             self.assertEqual(set(DRIVE), _keys(session))
         finally:
@@ -199,7 +132,7 @@ class TestATaskPageKeepsItsDocument(unittest.TestCase):
         from tests.fixtures.examples import _run
 
         env, _ = _run("06_tasks/00_your_first_task.py")
-        session = _session(env, 9222, panels=("object",))
+        session = _session(env, 0, panels=("object",))
         try:
             self.assertEqual({"object"}, _keys(session))
             self.assertIsNone(session.goal_panel)
@@ -212,7 +145,7 @@ class TestATaskPageKeepsItsDocument(unittest.TestCase):
         from tests.fixtures.examples import _run
 
         env, _ = _run("07_policies/00_pick_and_place.py")
-        session = self._view(env, 9223)
+        session = self._view(env, 0)
         try:
             self.assertIn("pick", session.driver.choices)
             session.driver.start_requested = True  # what the Run button's callback writes
@@ -244,7 +177,7 @@ class TestABareScenePageIsUsable(unittest.TestCase):
 
         scene = rss.Scene(cell="void", name="justarobot")
         scene.add(rss.robot("panda"))
-        session = _session(scene.build(control_mode="joint_position"), 8961, panels="drive")
+        session = _session(scene.build(control_mode="joint_position"), 0, panels="drive")
         try:
             self.assertIsNotNone(session.objects, "a robot alone got no handles")
             self.assertIn("object", _keys(session))
@@ -256,7 +189,7 @@ class TestABareScenePageIsUsable(unittest.TestCase):
         """``Env.reset`` takes an episode and ``EnvBase.reset`` does not. ``adopt``
         dispatched on that and the Reset button did not, so pressing Reset on any
         example paused the page on a ``TypeError``."""
-        session = _session(_sim(cloth=False), 8963, panels="drive")
+        session = _session(_sim(cloth=False), 0, panels="drive")
         try:
             session.reset_requested = True
             session.tick()
@@ -271,7 +204,7 @@ class TestABareScenePageIsUsable(unittest.TestCase):
         """``PanelCloth`` read ``env.doc`` and ``env.last_context`` outright, and
         ``PanelTune`` read ``env.task``: three attributes a ``Sim`` has none of.
         Stepping is what reaches them, so it is stepped."""
-        session = _session(_sim(cloth=True), 8962, panels="all")
+        session = _session(_sim(cloth=True), 0, panels="all")
         try:
             for _ in range(4):
                 session.tick()
@@ -290,7 +223,7 @@ class TestLettingGoIsVisible(unittest.TestCase):
 
     def test_the_controls_appear_when_you_are_holding_something(self) -> None:
         sim = _sim(cloth=False)
-        session = _session(sim, 8964, panels="drive")
+        session = _session(sim, 0, panels="drive")
         try:
             session.refresh_holding()
             for widget in self._widgets(session):
@@ -316,7 +249,7 @@ class TestLettingGoIsVisible(unittest.TestCase):
 
     def test_release_last_lets_go_of_one_and_leaves_the_rest(self) -> None:
         sim = _sim(cloth=False)
-        session = _session(sim, 8967, panels="drive")
+        session = _session(sim, 0, panels="drive")
         try:
             first, second = (int(b) for b in sorted(session.objects.by_body)[:2])
             for body in (first, second):
@@ -337,7 +270,7 @@ class TestLettingGoIsVisible(unittest.TestCase):
         import numpy as np
 
         sim = _sim(cloth=True)
-        session = _session(sim, 8968, panels="drive")
+        session = _session(sim, 0, panels="drive")
         try:
             session.objects.click_body(int(sorted(session.objects.by_body)[0]))
             session.objects.drain()
@@ -354,7 +287,7 @@ class TestLettingGoIsVisible(unittest.TestCase):
 
     def test_move_together_reaches_every_kind(self) -> None:
         sim = _sim(cloth=True)
-        session = _session(sim, 8969, panels="drive")
+        session = _session(sim, 0, panels="drive")
         try:
             session.linked_request = True
             session.tick()
@@ -385,7 +318,7 @@ class TestLettingGoIsVisible(unittest.TestCase):
         """The cloth fold carried "missed by 30 mm"; a page with no fold would
         otherwise answer a wide click with nothing, which reads as broken."""
         sim = _sim(cloth=True)
-        session = _session(sim, 8970, panels="drive")
+        session = _session(sim, 0, panels="drive")
         try:
             session.deformables.click_at("towel", (5.0, 5.0, 5.0))
             session.deformables.drain()
@@ -413,7 +346,7 @@ class TestAGripPinnedToAHandIsTakenWhereItIs(unittest.TestCase):
         from tests.fixtures.grasp import open_session, tick
 
         sim = _sim(cloth=True)
-        session = open_session(sim, 8971)
+        session = open_session(sim, 0)
         try:
             grips = session.deformables
             arm = next(iter(session.arms))
@@ -441,7 +374,7 @@ class TestAGripPinnedToAHandIsTakenWhereItIs(unittest.TestCase):
         from tests.fixtures.grasp import tick
 
         sim = _sim(cloth=True)
-        session = _session(sim, 8972)
+        session = _session(sim, 0)
         try:
             grips = session.deformables
             arm = next(iter(session.arms))
@@ -498,7 +431,7 @@ class TestASetGrabsPinGoesWithTheGrab(unittest.TestCase):
         return session, session.deformables, next(iter(session.arms)), pins
 
     def test_the_dropdown_follows_the_pin_both_ways(self) -> None:
-        session, grips, arm, pins = self._open(8977)
+        session, grips, arm, pins = self._open(0)
         try:
             self.assertTrue(grips.grab_set("edge", arm=arm), "the set grab took nothing, so this is untested")
             (slot,) = [h.index for h in grips.handles.live]
@@ -511,7 +444,7 @@ class TestASetGrabsPinGoesWithTheGrab(unittest.TestCase):
     def test_letting_go_unpins_what_the_grab_pinned(self) -> None:
         import numpy as np
 
-        session, grips, arm, pins = self._open(8978)
+        session, grips, arm, pins = self._open(0)
 
         def reset() -> None:
             session.reset_requested = True
@@ -533,7 +466,7 @@ class TestASetGrabsPinGoesWithTheGrab(unittest.TestCase):
             session.teardown()
 
     def test_a_pin_the_user_set_stays(self) -> None:
-        session, grips, arm, pins = self._open(8979)
+        session, grips, arm, pins = self._open(0)
         try:
             pins[0].value = arm  # the user pins slot 1 to the hand
             self.assertTrue(grips.grab_set("edge"), "the set grab took nothing, so this is untested")
@@ -557,7 +490,7 @@ class TestAPagesSetGrabIsItsOwn(unittest.TestCase):
         import numpy as np
 
         sim = _sim_with_an_edge()
-        session = _session(sim, 8980)
+        session = _session(sim, 0)
         try:
             grips, arm = session.deformables, next(iter(session.arms))
             q = np.asarray(sim.state.particle_q.numpy(), dtype=np.float64)
@@ -583,7 +516,7 @@ class TestAPagesSetGrabIsItsOwn(unittest.TestCase):
         import numpy as np
 
         sim = _sim_with_an_edge()
-        session = _session(sim, 8982)
+        session = _session(sim, 0)
         try:
             grips, arm = session.deformables, next(iter(session.arms))
             inputs = session.server.gui._gui_input_handle_from_uuid.values()
@@ -611,7 +544,7 @@ class TestTheInspectorWaitsToBeAsked(unittest.TestCase):
         """A hand-assembled scene has no "first thing the goal is about", and the
         old fallback opened the page on whatever sorted first."""
         sim = _sim(cloth=False)
-        session = _session(sim, 8965, panels="drive")
+        session = _session(sim, 0, panels="drive")
         try:
             self.assertIsNone(session.selected)
             self.assertIsNone(session.inspector._folder, "an Inspector heading before anybody clicked")
@@ -620,7 +553,7 @@ class TestTheInspectorWaitsToBeAsked(unittest.TestCase):
 
     def test_clicking_something_brings_it_up(self) -> None:
         sim = _sim(cloth=False)
-        session = _session(sim, 8966, panels="drive")
+        session = _session(sim, 0, panels="drive")
         try:
             subject = session.index.by_name("cube")
             self.assertIsNotNone(subject)
@@ -638,7 +571,7 @@ class TestTheSeam(unittest.TestCase):
         cls.sim = _sim(cloth=False)
 
     def test_each_step_runs_on_a_step_and_not_on_a_paused_pass(self) -> None:
-        session = _session(self.sim, 8957, panels=("object",))
+        session = _session(self.sim, 0, panels=("object",))
         try:
             calls = []
             session.each_step(lambda: calls.append(1))
@@ -652,7 +585,7 @@ class TestTheSeam(unittest.TestCase):
 
     def test_the_viser_surface_is_visers_own(self) -> None:
         """So a component written against a bare ``ViserServer`` drops in."""
-        session = _session(self.sim, 8958, panels=("object",))
+        session = _session(self.sim, 0, panels=("object",))
         try:
             self.assertIs(session.gui, session.server.gui)
             self.assertIs(session.scene, session.server.scene)

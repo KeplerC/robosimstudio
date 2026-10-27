@@ -102,15 +102,16 @@ class TestAFieldAKindAddsReachesItsWriter(unittest.TestCase):
     def test_yield_angle_set_on_the_folder_lands_where_the_kind_routes_it(self) -> None:
         plastic: dict = {}
         panel, gui, _ = _page(_sheet("paper", PaperMaterialSpec(), plastic=plastic))
-        _slider(gui, "yield_angle").fire(0.0)
+        _slider(gui, "yield_angle").fire(0.3)  # off its 0.0 default: viser calls back only on a change
         panel.drain()
-        self.assertEqual({"yield_angle": 0.0}, plastic)
+        self.assertEqual({"yield_angle": 0.3}, plastic)
 
     def test_revert_writes_the_kinds_fields_back_too(self) -> None:
         plastic: dict = {}
         panel, gui, _ = _page(_sheet("paper", PaperMaterialSpec(), plastic=plastic))
-        _slider(gui, "yield_angle").fire(0.0)
+        _slider(gui, "yield_angle").fire(0.3)
         panel.drain()
+        self.assertEqual(0.3, plastic["yield_angle"])
         panel.revert_requested = True
         panel.drain()
         self.assertAlmostEqual(PaperMaterialSpec().yield_angle, plastic["yield_angle"])

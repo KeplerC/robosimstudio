@@ -66,7 +66,7 @@ class TestEverySegmentIsGrabbable(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.sim = _sim()
-        cls.session = _session(cls.sim, 8941)
+        cls.session = _session(cls.sim, 0)
         cls.objects = cls.session.objects
         cls.bodies = tuple(int(b) for b in cls.sim.handles.objects["rope"].bodies)
 

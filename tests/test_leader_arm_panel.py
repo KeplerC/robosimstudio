@@ -20,29 +20,11 @@ from __future__ import annotations
 import unittest
 
 from robosimstudio_studio.leader_arm import PanelLeaderArm
+from tests.fixtures.studio_fakes import FakeArmPanel
+from tests.fixtures.viser_stubs import _StubWidget
 
 TIER = "fast"
 """No GPU, no scene, no serial port."""
-
-
-class _FakeWidget:
-    def __init__(self, value="") -> None:
-        self.value = value
-
-
-class _FakeArmPanel:
-    def __init__(self) -> None:
-        self.suspended = False
-        self.suspend_calls = 0
-        self.resume_calls = 0
-
-    def suspend(self) -> None:
-        self.suspended = True
-        self.suspend_calls += 1
-
-    def resume(self) -> None:
-        self.suspended = False
-        self.resume_calls += 1
 
 
 class _FakeController:
@@ -102,8 +84,8 @@ def _panel(arms=None, *, env=None, connect_fn=None, calibration_fn=None) -> Pane
     panel.disconnect_requested = False
     panel._connect_fn = connect_fn
     panel._calibration_fn = calibration_fn
-    panel._enabled = _FakeWidget(False)
-    panel._state = _FakeWidget("not connected")
+    panel._enabled = _StubWidget(False)
+    panel._state = _StubWidget("not connected")
     return panel
 
 
@@ -116,7 +98,7 @@ class TestConnecting(unittest.TestCase):
             return _FakeController(action=None)
 
         panel = _panel(
-            {"left": _FakeArmPanel(), "right": _FakeArmPanel()},
+            {"left": FakeArmPanel(), "right": FakeArmPanel()},
             connect_fn=connect_fn,
             calibration_fn=lambda path: {"LEFTSN": "left-cal", "RIGHTSN": "right-cal"},
         )
@@ -130,7 +112,7 @@ class TestConnecting(unittest.TestCase):
 
     def test_an_arm_missing_from_the_calibration_file_is_reported_and_left_unconnected(self) -> None:
         panel = _panel(
-            {"left": _FakeArmPanel(), "right": _FakeArmPanel()},
+            {"left": FakeArmPanel(), "right": FakeArmPanel()},
             connect_fn=lambda port, arms: _FakeController(action=None),
             calibration_fn=lambda path: {"LEFTSN": "left-cal"},
         )
@@ -143,7 +125,7 @@ class TestConnecting(unittest.TestCase):
 
     def test_an_arm_with_no_port_typed_in_is_reported_and_left_unconnected(self) -> None:
         panel = _panel(
-            {"left": _FakeArmPanel(), "right": _FakeArmPanel()},
+            {"left": FakeArmPanel(), "right": FakeArmPanel()},
             connect_fn=lambda port, arms: _FakeController(action=None),
             calibration_fn=lambda path: {"LEFTSN": "left-cal", "RIGHTSN": "right-cal"},
         )
@@ -162,7 +144,7 @@ class TestConnecting(unittest.TestCase):
             return _FakeController(action=None)
 
         panel = _panel(
-            {"left": _FakeArmPanel(), "right": _FakeArmPanel()},
+            {"left": FakeArmPanel(), "right": FakeArmPanel()},
             connect_fn=connect_fn,
             calibration_fn=lambda path: {"LEFTSN": "left-cal", "RIGHTSN": "right-cal"},
         )
@@ -178,7 +160,7 @@ class TestConnecting(unittest.TestCase):
             raise FileNotFoundError(path)
 
         panel = _panel(
-            {"left": _FakeArmPanel()},
+            {"left": FakeArmPanel()},
             connect_fn=lambda port, arms: _FakeController(action=None),
             calibration_fn=calibration_fn,
         )
@@ -191,7 +173,7 @@ class TestConnecting(unittest.TestCase):
 
 class TestTogglingHandsTheArmBetweenGizmoAndLeaderArm(unittest.TestCase):
     def test_enabling_requires_at_least_one_arm_to_already_be_connected(self) -> None:
-        left, right = _FakeArmPanel(), _FakeArmPanel()
+        left, right = FakeArmPanel(), FakeArmPanel()
         panel = _panel({"left": left, "right": right})
         panel.controllers = {}  # nothing connected
         panel.enabled_requested = True
@@ -204,7 +186,7 @@ class TestTogglingHandsTheArmBetweenGizmoAndLeaderArm(unittest.TestCase):
         self.assertEqual(panel._enabled.value, False)
 
     def test_enabling_with_every_arm_connected_suspends_every_arm_panel(self) -> None:
-        left, right = _FakeArmPanel(), _FakeArmPanel()
+        left, right = FakeArmPanel(), FakeArmPanel()
         env = _FakeEnv(_FakeActionSpace())
         panel = _panel({"left": left, "right": right}, env=env)
         panel.controllers = {"left": _FakeController(action=[0.0]), "right": _FakeController(action=[0.0])}
@@ -218,7 +200,7 @@ class TestTogglingHandsTheArmBetweenGizmoAndLeaderArm(unittest.TestCase):
         self.assertTrue(panel.enabled)
 
     def test_enabling_with_only_one_arm_connected_suspends_only_that_arm(self) -> None:
-        left, right = _FakeArmPanel(), _FakeArmPanel()
+        left, right = FakeArmPanel(), FakeArmPanel()
         env = _FakeEnv(_FakeActionSpace())
         panel = _panel({"left": left, "right": right}, env=env)
         panel.controllers = {"left": _FakeController(action=[0.0])}  # right stays on the gizmo
@@ -232,7 +214,7 @@ class TestTogglingHandsTheArmBetweenGizmoAndLeaderArm(unittest.TestCase):
         self.assertFalse(right.suspended)
 
     def test_disabling_resumes_every_arm_panel(self) -> None:
-        left = _FakeArmPanel()
+        left = FakeArmPanel()
         panel = _panel({"left": left})
         panel.controllers = {"left": _FakeController(action=[0.0])}
         panel.enabled = True
@@ -251,7 +233,7 @@ class TestDrainAppliesTheCombinedAction(unittest.TestCase):
     def test_every_controller_is_read_and_concatenated_in_the_sessions_own_arm_order(self) -> None:
         space = _FakeActionSpace(holds={None: [0.0, 0.0, 0.0, 0.0]})
         env = _FakeEnv(space)
-        left, right = _FakeArmPanel(), _FakeArmPanel()
+        left, right = FakeArmPanel(), FakeArmPanel()
         panel = _panel({"left": left, "right": right}, env=env)
         panel.controllers = {
             "left": _FakeController(action=[1.0, 0.0]),
@@ -270,7 +252,7 @@ class TestDrainAppliesTheCombinedAction(unittest.TestCase):
         env = _FakeEnv(None)
         space = _FakeActionSpace(holds={env.control: [9.0, 1.0, 8.0, 0.5]})
         env._space = space
-        left, right = _FakeArmPanel(), _FakeArmPanel()
+        left, right = FakeArmPanel(), FakeArmPanel()
         panel = _panel({"left": left, "right": right}, env=env)
         panel.controllers = {"left": _FakeController(action=[1.0, 0.0])}  # right never connected
         panel.enabled = True
@@ -282,7 +264,7 @@ class TestDrainAppliesTheCombinedAction(unittest.TestCase):
     def test_a_connected_but_disabled_panel_polls_nothing(self) -> None:
         space = _FakeActionSpace()
         env = _FakeEnv(space)
-        panel = _panel({"left": _FakeArmPanel()}, env=env)
+        panel = _panel({"left": FakeArmPanel()}, env=env)
         controller = _FakeController(action=[0.0, 0.0])
         panel.controllers = {"left": controller}
 
@@ -294,7 +276,7 @@ class TestDrainAppliesTheCombinedAction(unittest.TestCase):
 
 class TestDisconnecting(unittest.TestCase):
     def test_disconnect_closes_every_controller_and_resumes_the_arms(self) -> None:
-        left = _FakeArmPanel()
+        left = FakeArmPanel()
         panel = _panel({"left": left})
         controller = _FakeController(action=[0.0])
         panel.controllers = {"left": controller}
@@ -310,7 +292,7 @@ class TestDisconnecting(unittest.TestCase):
         self.assertFalse(left.suspended)
 
     def test_close_disconnects(self) -> None:
-        panel = _panel({"left": _FakeArmPanel()})
+        panel = _panel({"left": FakeArmPanel()})
         controller = _FakeController(action=[0.0])
         panel.controllers = {"left": controller}
         panel.gizmo = None

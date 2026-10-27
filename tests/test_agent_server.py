@@ -188,7 +188,7 @@ class TestAResetThatFails(unittest.TestCase):
 
         scene = rss.Scene(cell="void", name="reset-fails")
         scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.1)))
-        session = StudioSession(scene.build(), config=StudioConfig(port=9332, panels="drive"))
+        session = StudioSession(scene.build(), config=StudioConfig(port=0, panels="drive"))
         try:
 
             def boom():

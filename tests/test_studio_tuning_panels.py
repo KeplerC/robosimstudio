@@ -13,55 +13,10 @@ from robosimstudio_studio.tuning import panels as panels_mod
 from robosimstudio_studio.tuning.metrics import Reading
 from robosimstudio_studio.tuning.panels import PanelReadings, PanelTune
 from robosimstudio_studio.tuning.tuner import MaterialTuner
+from tests.fixtures.viser_stubs import _StubGui, _StubWidget
 
 TIER = "fast"
 """No GPU: a stand-in gui and tuner."""
-
-
-class _Widget:
-    def __init__(self, initial_value=None, **_):
-        self._value = initial_value
-        self._callbacks = []
-
-    def on_update(self, fn):
-        self._callbacks.append(fn)
-
-    on_click = on_update
-
-    @property
-    def value(self):
-        return self._value
-
-    @value.setter
-    def value(self, value):
-        if value == self._value:
-            return
-        self._value = value
-        for fn in self._callbacks:
-            fn(None)
-
-
-class _Folder:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return False
-
-
-class _Gui:
-    def __init__(self):
-        self.texts = {}
-
-    def add_folder(self, *_, **__):
-        return _Folder()
-
-    def add_button(self, *_, **__):
-        return _Widget()
-
-    def add_text(self, label, initial_value=None, **_):
-        self.texts[label] = _Widget(initial_value)
-        return self.texts[label]
 
 
 class _Tuner:
@@ -93,7 +48,7 @@ def _tune_panel():
     panel.cloth_requested = panel.preset_requested = ""
     panel.revert_requested = panel.rebuild_requested = panel.save_requested = False
     panel._presets = ("(as built)", "denim", "silk")
-    panel._preset = _Widget(panel._presets[0])
+    panel._preset = _StubWidget(panel._presets[0])
     panel._preset.on_update(lambda _: setattr(panel, "preset_requested", str(panel._preset.value)))
     panel._pending = None
     panel._calibration = None
@@ -148,19 +103,19 @@ class ReadingsRows(unittest.TestCase):
         panel = _readings_panel()
         readings = [Reading("sag", 1.0, "cm")]
         panel._read = lambda: list(readings)
-        gui = _Gui()
+        gui = _StubGui()
         panel.build(gui)
         readings.append(Reading("folded", 0.5))
         panel.refresh()
         self.assertIn("folded", panel._rows)
-        self.assertEqual(gui.texts["folded"].value, "0.5")
+        self.assertEqual(gui.find("folded").value, "0.5")
 
 
 class ReadingsRefuseWhileDriven(unittest.TestCase):
     def _check(self, **session):
         panel = _readings_panel(**session)
         panel._read = lambda: []
-        panel.build(_Gui())
+        panel.build(_StubGui())
         panel.measure_requested = panel.resettle_requested = True
         with mock.patch.object(panels_mod, "relax") as relax:
             panel.drain()
@@ -177,7 +132,7 @@ class ReadingsRefuseWhileDriven(unittest.TestCase):
     def test_measures_when_idle(self):
         panel = _readings_panel()
         panel._read = lambda: []
-        panel.build(_Gui())
+        panel.build(_StubGui())
         panel.measure_requested = True
         with mock.patch.object(panels_mod, "relax", return_value=(True, 12)) as relax:
             panel.drain()

@@ -31,6 +31,7 @@ from robosimstudio_real2sim_agent.scenefile import (
     run_scene_file,
 )
 from robosimstudio_real2sim_agent.server import LiveServer
+from tests.fixtures.live_server import bare_live_server
 
 TIER = "fast"
 """No GPU: scene files that are compiled and run against a ``build`` that only records."""
@@ -155,27 +156,8 @@ class SceneFileSim(unittest.TestCase):
 
 
 def _script_server(root: Path) -> LiveServer:
-    live = LiveServer.__new__(LiveServer)
-    live.path = root / "scene.py"
-    live.head_stepped, live._head_ready = False, None
-    live.ended, live.takes_written, live.serving = {}, [], "scene"
-    live.runs, live.run_target, live.scene_id, live.watch_enabled = 0, 0, "", False
-    live.runs_ended, live._walked = {}, (-1.0, [])
-    live._arms_before, live.resets = {}, 0
-    live.log_path, live._motions = "", {}
-    live.scene_paths = ScenePaths(root)
-    live.build_error, live._tick_error = "", ""
-    live.busy_state = ("", 0.0, False)
-    live.script_meta = {}
-    live.scripts_started = 0
-    live.last_script = {}
-    live.sim = mock.MagicMock(step_count=0)
-    live.session = types.SimpleNamespace(arms={})
-    live.script = []
-    live.recorder = None
-    live.run_budget = 0
-    live.last_error = ""
-    return live
+    """A server over the scene folder ``root`` whose sim answers anything."""
+    return bare_live_server(root, sim=mock.MagicMock(step_count=0))
 
 
 class EvictHelpers(unittest.TestCase):

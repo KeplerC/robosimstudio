@@ -25,6 +25,7 @@ from robosimstudio.core.cameras import CameraSpec
 from robosimstudio.solvers.render.tiled import SEG_PARTICLES, SEG_SOFT_MESH, _labels
 from robosimstudio_real2sim_agent import checks, compare, frames
 from robosimstudio_real2sim_agent import compare as C
+from tests.fixtures.gate_sim import GateSim, gate_server
 
 TIER = "fast"
 """No GPU: arrays stand in for renders."""
@@ -519,27 +520,9 @@ class TestTake(unittest.TestCase):
             self.assertTrue(Path(strip).exists())
 
 
-class _GateSim:
-    cameras = ()
-
-    def state_is_finite(self) -> bool:
-        return True
-
-    def names(self) -> list[str]:
-        return []
-
-    def run(self, steps: int) -> None:
-        pass
-
-    def sync(self) -> None:
-        pass
-
-
 class TestGate(unittest.TestCase):
     def test_a_failed_routine_is_not_a_failed_build(self) -> None:
-        server = types.SimpleNamespace(
-            sim=_GateSim(), last_error="Traceback\nRuntimeError: routine broke", build_error=""
-        )
+        server = gate_server(GateSim(), last_error="Traceback\nRuntimeError: routine broke")
         builds = checks.gate(server, steps=1)["checks"][0]
         self.assertEqual(builds["name"], "builds")
         self.assertTrue(builds["ok"], builds["detail"])
@@ -557,28 +540,9 @@ class _Probe:
         return []
 
 
-class _ProbeSim:
-    cameras = ()
-    contacts = _Probe()
-    model = None
-    handles = types.SimpleNamespace(objects={})
-
-    def state_is_finite(self) -> bool:
-        return True
-
-    def names(self) -> list[str]:
-        return []
-
-    def run(self, steps: int) -> None:
-        pass
-
-    def sync(self) -> None:
-        pass
-
-
 class TestGateProbe(unittest.TestCase):
     def test_a_probe_that_raises_is_a_failed_line(self) -> None:
-        server = types.SimpleNamespace(sim=_ProbeSim(), last_error="", build_error="")
+        server = gate_server(GateSim(contacts=_Probe(), handles=types.SimpleNamespace(objects={})))
         result = checks.gate(server, steps=1)
         line = next(c for c in result["checks"] if c["name"] == "penetration")
         self.assertFalse(line["ok"])
@@ -663,29 +627,17 @@ class GateSeesDeformables(unittest.TestCase):
     def test_a_rope_that_sinks_fails_rest_and_a_thing_with_no_position_is_named(self) -> None:
         points = np.zeros((4, 3))
 
-        class Sim:
-            cameras = ()
-            scene = _deformable_sim(points, {"rope": _handle([0, 1, 2, 3])}).scene
-            state = types.SimpleNamespace(particle_q=types.SimpleNamespace(numpy=points.copy))
+        def run(steps: int) -> None:
+            points[2, 2] -= 0.0079  # one node sinks 7.9 mm; the centre moves 2 mm
 
-            def state_is_finite(self) -> bool:
-                return True
-
-            def names(self) -> list[str]:
-                return ["rope", "ghost"]
-
-            def run(self, steps: int) -> None:
-                points[2, 2] -= 0.0079  # one node sinks 7.9 mm; the centre moves 2 mm
-
-            def sync(self) -> None:
-                pass
-
-            def __getitem__(self, name):
-                if name == "ghost":
-                    raise KeyError(name)
-                return types.SimpleNamespace(position=points.mean(axis=0))
-
-        server = types.SimpleNamespace(sim=Sim(), build_error="")
+        sim = GateSim(
+            names=["rope", "ghost"],
+            positions={"rope": lambda: points.mean(axis=0)},  # the ghost has none
+            on_run=run,
+            scene=_deformable_sim(points, {"rope": _handle([0, 1, 2, 3])}).scene,
+            state=types.SimpleNamespace(particle_q=types.SimpleNamespace(numpy=points.copy)),
+        )
+        server = gate_server(sim)
         with mock.patch.object(checks, "_penetration", return_value=(0.0, [])):
             result = checks.gate(server, steps=1)
         rest = next(c for c in result["checks"] if c["name"] == "rest")
@@ -702,32 +654,18 @@ class RestOfAHeap(unittest.TestCase):
             particles=np.arange(100), triangles=np.zeros((0, 3)), tube_radius=0.0, point_radius=0.002
         )
 
-        class Sim:
-            cameras = ()
-            scene = _deformable_sim(points, {"rice": heap}).scene
-            state = types.SimpleNamespace(particle_q=types.SimpleNamespace(numpy=points.copy))
+        def run(steps: int) -> None:
+            points[7, 2] += 0.01  # one grain bounces 10 mm
 
-            def state_is_finite(self) -> bool:
-                return True
-
-            def names(self) -> list[str]:
-                return ["rice"]
-
-            def run(self, steps: int) -> None:
-                points[7, 2] += 0.01  # one grain bounces 10 mm
-
-            def sync(self) -> None:
-                pass
-
-            def __getitem__(self, name):
-                raise KeyError(name)
+        sim = GateSim(
+            names=["rice"],
+            on_run=run,
+            scene=_deformable_sim(points, {"rice": heap}).scene,
+            state=types.SimpleNamespace(particle_q=types.SimpleNamespace(numpy=points.copy)),
+        )
 
         with mock.patch.object(checks, "_penetration", return_value=(0.0, [])):
-            rest = next(
-                c
-                for c in checks.gate(types.SimpleNamespace(sim=Sim(), build_error=""), steps=1)["checks"]
-                if c["name"] == "rest"
-            )
+            rest = next(c for c in checks.gate(gate_server(sim), steps=1)["checks"] if c["name"] == "rest")
         self.assertTrue(rest["ok"], rest["detail"])
 
 
@@ -740,29 +678,20 @@ def _case_rest(lid_after: tuple) -> dict:
         objects={"case": None}, statics={}, deformables={}, entity=lambda name: types.SimpleNamespace(bodies=(1, 2))
     )
 
-    class Sim:
-        cameras = ()
-        scene = types.SimpleNamespace(handles=handles)
-        state = types.SimpleNamespace(body_q=types.SimpleNamespace(numpy=body_q.copy))
-        model = types.SimpleNamespace(body_com=types.SimpleNamespace(numpy=lambda: com))
+    def run(steps: int) -> None:
+        body_q[2, 3:7] = lid_after
 
-        def state_is_finite(self) -> bool:
-            return bool(np.isfinite(body_q).all())
-
-        def names(self) -> list[str]:
-            return ["case"]
-
-        def run(self, steps: int) -> None:
-            body_q[2, 3:7] = lid_after
-
-        def sync(self) -> None:
-            pass
-
-        def __getitem__(self, name):
-            return types.SimpleNamespace(position=body_q[1, :3].copy())  # the base, which stays
-
+    sim = GateSim(
+        names=["case"],
+        positions={"case": body_q[1, :3].copy},  # the base, which stays: a view, copied when read
+        finite=lambda: bool(np.isfinite(body_q).all()),
+        on_run=run,
+        scene=types.SimpleNamespace(handles=handles),
+        state=types.SimpleNamespace(body_q=types.SimpleNamespace(numpy=body_q.copy)),
+        model=types.SimpleNamespace(body_com=types.SimpleNamespace(numpy=lambda: com)),
+    )
     with mock.patch.object(checks, "_penetration", return_value=(0.0, [])):
-        result = checks.gate(types.SimpleNamespace(sim=Sim(), build_error=""), steps=1)
+        result = checks.gate(gate_server(sim), steps=1)
     return next(c for c in result["checks"] if c["name"] == "rest")
 
 

@@ -31,48 +31,21 @@ from robosimstudio_real2sim_agent import checks, ctl
 from robosimstudio_real2sim_agent import server as server_mod
 from robosimstudio_real2sim_agent.scenefile import (
     Loaded,
-    ScenePaths,
-    SceneRegistrations,
     helper_files,
 )
 from robosimstudio_real2sim_agent.server import LiveServer
-from tests.fixtures.live_server import FakePage
+from tests.fixtures.live_server import FakePage, bare_live_server
 from tests.fixtures.sockets import short_dir
+from tests.fixtures.studio_fakes import FakeArmPanel
 
 TIER = "fast"
 """No GPU and no page: the server's state machine over stand-in sessions and sims."""
 
 
-class _Arm:
-    def __init__(self) -> None:
-        self.suspended = False
-        self.calls: list[str] = []
-
-    def suspend(self) -> None:
-        self.suspended = True
-        self.calls.append("suspend")
-
-    def resume(self) -> None:
-        self.suspended = False
-        self.calls.append("resume")
-
-
 def _server() -> LiveServer:
-    live = LiveServer.__new__(LiveServer)
-    live.path = Path("/nonexistent/scene.py")
-    live.script, live.recorder, live.run_budget, live.last_error = [], None, 0, ""
-    live.head_stepped, live._head_ready, live.last_take = False, None, {}
-    live.ended, live.takes_written, live.serving = {}, [], "scene"
-    live.runs, live.run_target, live.scene_id, live.watch_enabled = 0, 0, "", False
-    live.runs_ended, live._walked = {}, (-1.0, [])
-    live._arms_before, live.resets = {}, 0
-    live.log_path, live._motions = "", {}
-    live.build_error, live._tick_error = "", ""
-    live.busy_state = ("", 0.0, False)
-    live._status_lock, live._status_pending = threading.Lock(), None
-    live.script_meta, live.scripts_started, live.last_script = {}, 0, {}
-    live.sim = types.SimpleNamespace(step_count=0)
-    live.session = types.SimpleNamespace(arms={"left": _Arm(), "right": _Arm()})
+    """A server whose session holds two arm panels and whose takes nobody writes."""
+    session = types.SimpleNamespace(arms={"left": FakeArmPanel("left"), "right": FakeArmPanel("right")})
+    live = bare_live_server(session=session)
     live._finish_recorder = lambda why: None  # type: ignore[method-assign]
     return live
 
@@ -844,31 +817,8 @@ class HeldUpByARoutine(unittest.TestCase):
 
 
 def _lifecycle_server() -> LiveServer:
-    live = LiveServer.__new__(LiveServer)
-    live.path = Path("/nonexistent/scene.py")
-    live.head_stepped, live._head_ready = False, None
-    live.ended, live.takes_written, live.serving = {}, [], "scene"
-    live.runs, live.run_target, live.scene_id, live.watch_enabled = 0, 0, "", False
-    live.runs_ended, live._walked = {}, (-1.0, [])
-    live._arms_before, live.resets = {}, 0
-    live.log_path, live._motions = "", {}
-    live.scene_paths = ScenePaths(Path("/nonexistent"))
-    live.build_error, live._tick_error = "", ""
-    live.busy_state = ("", 0.0, False)
-    live.script_meta = {}
-    live.scripts_started = 0
-    live.last_script = {}
-    live.registrations = SceneRegistrations(Path("/nonexistent"))
-    live.sim = mock.MagicMock(step_count=0)
-    live.script = []
-    live.recorder = None
-    live.run_budget = 0
-    live.last_error = ""
-    live.board = {}
-    live.ns = {}
-    live.session = mock.MagicMock()
-    live.session.paused = False
-    return live
+    """A server over a sim and a session that answer anything, for what serve and show do around them."""
+    return bare_live_server(sim=mock.MagicMock(step_count=0), session=mock.MagicMock(paused=False))
 
 
 class ServeFinishesTheTake(unittest.TestCase):
@@ -966,28 +916,9 @@ class RoutineNames(unittest.TestCase):
         self.assertTrue(reply["ok"], reply)
 
 
-def _script_server(root: Path) -> LiveServer:
-    live = LiveServer.__new__(LiveServer)
-    live.path = root / "scene.py"
-    live.head_stepped, live._head_ready = False, None
-    live.ended, live.takes_written, live.serving = {}, [], "scene"
-    live.runs, live.run_target, live.scene_id, live.watch_enabled = 0, 0, "", False
-    live.runs_ended, live._walked = {}, (-1.0, [])
-    live._arms_before, live.resets = {}, 0
-    live.log_path, live._motions = "", {}
-    live.scene_paths = ScenePaths(root)
-    live.build_error, live._tick_error = "", ""
-    live.busy_state = ("", 0.0, False)
-    live.script_meta = {}
-    live.scripts_started = 0
-    live.last_script = {}
-    live.sim = mock.MagicMock(step_count=0)
-    live.session = types.SimpleNamespace(arms={})
-    live.script = []
-    live.recorder = None
-    live.run_budget = 0
-    live.last_error = ""
-    return live
+def _script_server(root: Path | None = None) -> LiveServer:
+    """A server over ``root`` (a fresh folder when not given) whose sim answers anything."""
+    return bare_live_server(root, sim=mock.MagicMock(step_count=0))
 
 
 class FakeRecorder:
@@ -1020,7 +951,7 @@ class FakeRecorder:
 
 class ScriptQueue(unittest.TestCase):
     def setUp(self) -> None:
-        self.live = _script_server(Path(tempfile.gettempdir()))
+        self.live = _script_server()
         self.finished: list[str] = []
         self.live._finish_recorder = self.finished.append  # type: ignore[method-assign]
         patcher = mock.patch.object(server_mod.checks, "Recorder", FakeRecorder)
@@ -1161,11 +1092,14 @@ class _Session:
 
 
 def _running(budget: int) -> LiveServer:
-    host = LiveServer.__new__(LiveServer)
-    host.script, host.run_budget, host.runs, host.run_target = [], budget, 1, 100
-    host.runs_ended = {}
-    host.session = _Session()
-    host.sim = types.SimpleNamespace(step_count=50, state_is_finite=lambda: True)
+    """A server half way through ``run 100`` (step 50), ``budget`` steps of it left."""
+    host = bare_live_server(
+        sim=types.SimpleNamespace(step_count=50, state_is_finite=lambda: True),
+        session=_Session(),
+        run_budget=budget,
+        runs=1,
+        run_target=100,
+    )
     host._finish_recorder = lambda why: None  # type: ignore[method-assign]
     host._end_scripts = lambda how: None  # type: ignore[method-assign]
     return host

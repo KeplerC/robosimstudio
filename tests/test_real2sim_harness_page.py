@@ -21,7 +21,8 @@ import numpy as np
 TIER = "medium"
 """Builds a YAM with a towel and starts a viser server."""
 
-PORT = 9361
+PORT = 0
+"""Any free port: the page takes whatever the OS hands it."""
 
 SCENE = """import robosimstudio as rss
 from robosimstudio_studio.routine import hand, reach

@@ -10,22 +10,10 @@ import unittest.mock
 import numpy as np
 
 from robosimstudio_studio.regions import HELD_COLOR, IDLE_COLOR, PanelRegions
-from tests.fixtures.viser_stubs import _StubGui, _StubScene, _StubSession
+from tests.fixtures.viser_stubs import _StubGui, _StubSession
 
 TIER = "fast"
 """No GPU, no browser: a stub scene records the boxes and labels."""
-
-
-class _RegionScene(_StubScene):
-    def add_box(self, name, **kwargs):
-        node = self._node(name, True)
-        node.color = kwargs.get("color")
-        return node
-
-    def add_label(self, name, text, **kwargs):
-        node = self._node(name, True)
-        node.position = kwargs.get("position")
-        return node
 
 
 def _regions_panel():
@@ -37,7 +25,6 @@ def _regions_panel():
         model=types.SimpleNamespace(body_count=0),
     )
     session = _StubSession(env, _StubGui())
-    session.server.scene = _RegionScene()
     panel = PanelRegions(session)
     panel.bounds = lambda name, body_q: (np.zeros(3), np.ones(3))
     panel.build(session.server.gui)
