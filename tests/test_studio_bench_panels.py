@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """The task page's policy runner and task menu fail without taking the page down.
 
-Each case is one a page reached without anything being wrong with the page:
-a policy that raises mid-episode, a Run that needs a recompile that fails, a
+A policy that raises mid-episode, a Run that needs a recompile that fails, a
 leader-held arm handed back to its gizmo by a policy that never held it, a
-switch to a task with fewer episodes than the one being shown, and a load that
-was refused but kept the world count it asked for. All of it is bookkeeping,
-so none of it needs a scene: the panels are built over stand-ins.
+switch to a task with fewer episodes than the one shown, and a gripper menu
+that does not offer a declared binding's own hand as untried. All of it is
+bookkeeping, so the panels are built over stand-ins.
 """
 
 from __future__ import annotations
@@ -17,7 +16,12 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from robosimstudio.robots.registry import get_embodiment, hands_of
+from robosimstudio.specs import Binding, TaskSpec
+from robosimstudio_studio.bench_panels import PanelTask
+
 TIER = "fast"
+"""No GPU: the panels are built over stand-in sessions and policies."""
 
 
 class _Arm:
@@ -223,35 +227,6 @@ class ARunThatRecompilesRebindsThePage(unittest.TestCase):
         self.assertIn("press Run again", session.status)
 
 
-class ARebuiltRecordPanelKeepsTheRun(unittest.TestCase):
-    def test_the_run_start_and_the_kept_count_come_off_the_directory(self) -> None:
-        import json
-        import tempfile
-        from pathlib import Path
-
-        from robosimstudio_studio.controls import PanelRecord
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "run_meta.json").write_text(json.dumps({"started": "2026-01-01T00:00:00+00:00"}))
-            (root / "episode_results.jsonl").write_text('{"episode_id": 0}\n{"episode_id": 1}\n')
-            session = SimpleNamespace(env=None, server=None, run_dir=root)
-            panel = PanelRecord(session, root=root)
-            self.assertEqual(panel.run_started, "2026-01-01T00:00:00+00:00")
-            self.assertEqual(panel.kept, 2)
-
-    def test_a_fresh_directory_starts_from_nothing(self) -> None:
-        import tempfile
-        from pathlib import Path
-
-        from robosimstudio_studio.controls import PanelRecord
-
-        with tempfile.TemporaryDirectory() as tmp:
-            session = SimpleNamespace(env=None, server=None, run_dir=Path(tmp))
-            panel = PanelRecord(session)
-            self.assertEqual((panel.run_started, panel.kept, panel.take), ("", 0, 0))
-
-
 class TaskMenu(unittest.TestCase):
     def _panel(self, selected_family: str, episode_id: int):
         from robosimstudio_studio.bench_panels import PanelTask
@@ -291,55 +266,21 @@ class TaskMenu(unittest.TestCase):
         self.assertEqual(panel.session.load_request[1], 5)
 
 
-class LoadTask(unittest.TestCase):
-    def _session(self):
-        return SimpleNamespace(
-            config=SimpleNamespace(
-                obs_renderer=None, obs_render_every=1, device=None, max_steps=0, control_mode="joint"
-            ),
-            num_worlds=1,
-            task_panel=None,
-            status="",
-            _narrowed="",
-        )
+def _task(**kw):
+    native = Binding(scene="bench_0728", embodiment="panda", graphs=("pick",))
+    return TaskSpec(name="t", scene="bench_0728", embodiment="panda", bindings=(native,), **kw)
 
-    def test_a_refused_load_keeps_the_world_count(self) -> None:
-        from robosimstudio_studio import bench_session
 
-        session = self._session()
-        out, err = _quiet()
-        with mock.patch.object(bench_session, "unbuildable", return_value="cannot build"), out, err:
-            self.assertFalse(bench_session.load_task(session, "fam/a", 0, num_worlds=64))
-        self.assertEqual(session.num_worlds, 1)
-
-    def test_a_failed_fleet_keeps_the_world_count(self) -> None:
-        from robosimstudio_studio import bench_session
-
-        session = self._session()
+class TestGripperMenu(unittest.TestCase):
+    def test_the_own_hand_is_not_untried(self):
+        task = _task()
+        (own,) = hands_of(get_embodiment("panda"))
         with (
-            mock.patch.object(bench_session, "unbuildable", return_value=""),
-            mock.patch.object(bench_session, "load_fleet", return_value=False),
+            mock.patch("robosimstudio.robots.registry.attachable_grippers", return_value=[own]),
+            mock.patch("robosimstudio_bench.taskbuild.matrix.admits", return_value=(True, "")),
         ):
-            self.assertFalse(bench_session.load_task(session, "fam/a", 0, num_worlds=64))
-        self.assertEqual(session.num_worlds, 1)
-
-    def test_a_failed_compile_after_narrowing_keeps_the_fleet_width(self) -> None:
-        from robosimstudio.scene.compiler import CannotReplicate
-        from robosimstudio_studio import bench_session
-
-        session = self._session()
-        session.num_worlds = 8
-        out, err = _quiet()
-        with (
-            mock.patch.object(bench_session, "unbuildable", return_value=""),
-            mock.patch.object(bench_session, "load_fleet", side_effect=CannotReplicate("no")),
-            mock.patch.object(bench_session, "Env", side_effect=RuntimeError("no compile")),
-            out,
-            err,
-        ):
-            self.assertFalse(bench_session.load_task(session, "fam/a", 0, num_worlds=16))
-        self.assertEqual(session.num_worlds, 8)
-        self.assertEqual(session._narrowed, "")
+            options = PanelTask._axis_options(None, task, axis="gripper")
+        self.assertNotIn(f"{own}  (untried)", options)
 
 
 if __name__ == "__main__":

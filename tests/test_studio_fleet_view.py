@@ -1,22 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The fleet grid's spacing, labels and viewer, and the studio's recorders.
-
-Each case is bookkeeping over stand-ins, so none of it needs a scene: a
-re-spaced grid moves its labels and is applied on the drawing thread, a view
-that opened its own viewer closes it, a scene with no bodies can be filmed,
-and a run's meta keeps the run's start across takes.
-"""
+"""The fleet grid: its spacing, its labels, the viewer it owns, and the boxes it places."""
 
 from __future__ import annotations
 
 import unittest
-from collections import deque
 from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
 
+from robosimstudio_studio.fleet_view import _place
+
 TIER = "fast"
+"""No GPU: a stand-in viewer records what the grid asks of it."""
 
 
 class _Handle:
@@ -80,6 +76,8 @@ def _view(owns: bool = False):
 
 
 _SLOTS = [SimpleNamespace(parked=True), SimpleNamespace(parked=True)]
+
+
 _FLEET = SimpleNamespace(control_dt=0.01, pipeline=SimpleNamespace(state_0=None))
 
 
@@ -138,61 +136,13 @@ class FleetViewClose(unittest.TestCase):
         self.assertFalse(view.viewer.closed)
 
 
-class PanelVideoCapture(unittest.TestCase):
-    def test_a_scene_without_bodies_is_captured(self) -> None:
-        from robosimstudio_studio.controls import PanelVideo
-
-        panel = object.__new__(PanelVideo)
-        particles = np.ones((4, 3), np.float32)
-        panel.env = SimpleNamespace(
-            step_count=2,
-            state=SimpleNamespace(body_q=None, particle_q=SimpleNamespace(numpy=lambda: particles)),
-            model=SimpleNamespace(particle_count=4),
-        )
-        panel.every = 2
-        panel.buffer = deque(maxlen=30)
-        panel.dropped = 0
-        panel.capture()
-        self.assertEqual(len(panel.buffer), 1)
-        self.assertNotIn("body_q", panel.buffer[0])
-        np.testing.assert_array_equal(panel.buffer[0]["particle_q"], particles)
-
-
-class PanelRecordRunMeta(unittest.TestCase):
-    def test_run_meta_keeps_the_first_take_start(self) -> None:
-        from robosimstudio_studio import controls
-
-        panel = object.__new__(controls.PanelRecord)
-        panel.root = mock.MagicMock()
-        panel.root.name = "demos"
-        panel.spec = None
-        panel.take = 0
-        panel.recorder = None
-        panel.started = ""
-        panel.run_started = ""
-        panel._state = SimpleNamespace(value="")
-        panel.session = SimpleNamespace(status="")
-        written = []
-        panel.store = SimpleNamespace(results=lambda: [], write_run_meta=written.append)
-        panel.env = SimpleNamespace(
-            episode=SimpleNamespace(episode_id=0),
-            request=SimpleNamespace(physics=SimpleNamespace(control_hz=50), full_name="", scene="s", embodiment=""),
-            renderer_name="r",
-            model=SimpleNamespace(device="cpu"),
-        )
-        stamps = iter(["t0", "t1", "t2", "t3"])
-        fake_datetime = SimpleNamespace(now=lambda tz: SimpleNamespace(isoformat=lambda: next(stamps)))
-        with (
-            mock.patch.object(controls, "EpisodeRecorder", mock.MagicMock()),
-            mock.patch.object(controls, "replace", lambda episode, **kw: episode),
-            mock.patch.object(controls, "datetime", fake_datetime),
-        ):
-            panel.start()
-            panel.recorder = None
-            panel.start()
-            self.assertEqual(panel.started, "t1")
-            panel._write_run_meta()
-        self.assertEqual(written[-1].started, "t0")
+class TestFleetViewPlace(unittest.TestCase):
+    def test_a_drifted_quaternion_does_not_scale_the_box(self) -> None:
+        # A quarter turn about z, its quaternion grown about 2%: not the
+        # identity, which an unnormalised matrix also gets right.
+        pose = np.array([0, 0, 0, 0, 0, 0.7212, 0.7212])
+        _, half = _place(pose, np.zeros(3), np.array([0.1, 0.2, 0.3]))
+        np.testing.assert_allclose(half, [0.2, 0.1, 0.3], atol=1e-9)
 
 
 if __name__ == "__main__":

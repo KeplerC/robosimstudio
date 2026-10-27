@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The tuning binders: set_spec records nothing, and a field set back is not pending.
-
-A fake gui stands in for viser, firing ``on_update`` synchronously on a
-``.value`` assignment that changes the value -- which is what viser does.
-"""
+"""The tuning binders: ``set_spec`` records nothing, a field set back is not pending, one section per backend."""
 
 from __future__ import annotations
 
@@ -17,6 +13,7 @@ from robosimstudio_studio.tuning.arrangement import ArrangementBinder
 from robosimstudio_studio.tuning.binder import SpecBinder
 
 TIER = "fast"
+"""No GPU: a stand-in gui and specs that are dataclasses."""
 
 
 class _Widget:

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The live page's fixes on a GPU: a routine written with the studio's helpers moves the arm, and a towel is named.
 
-:mod:`tests.test_real2sim_harness_fixes` holds them with no page. Here they are
+:mod:`tests.test_real2sim_server` and :mod:`tests.test_real2sim_checks` hold them with no page. Here they are
 held on one: a routine built from :func:`robosimstudio_studio.routine.reach`
 yields without stepping, so the page has to step it -- before, the page held
 its own stepping for every routine and the hand "stopped 278 mm short" at the

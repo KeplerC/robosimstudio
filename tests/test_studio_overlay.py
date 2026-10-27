@@ -259,5 +259,21 @@ class TestColoursMeanWhatTheRegionBoxesMean(unittest.TestCase):
         self.assertEqual(HELD_COLOR, REGION_GREEN)
 
 
+class TestOverlayAfterReset(unittest.TestCase):
+    def test_the_next_drain_redraws(self) -> None:
+        panel = PanelOverlay.__new__(PanelOverlay)
+        panel.showing = {("k", "f"): []}
+        panel.session = types.SimpleNamespace(overlay_request=[], render_every=4)
+        panel.env = types.SimpleNamespace(step_count=100)
+        panel._synced = -1
+        redrawn = []
+        panel._replace = lambda: redrawn.append(panel.env.step_count)
+        panel.drain()
+        panel.env.step_count = 0
+        panel.on_reset({}, {})
+        panel.drain()
+        self.assertEqual(redrawn, [100, 0])
+
+
 if __name__ == "__main__":
     unittest.main()

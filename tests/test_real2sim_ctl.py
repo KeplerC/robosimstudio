@@ -1,13 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``robosimstudio_real2sim_agent`` with no page: the file's contract, the wire, the command line, and ``up``.
+"""``ctl``, the command line onto the live page: what each line parses to, what it waits on, and ``up`` and ``new``.
 
-:mod:`tests.test_agent_server` starts a page on a GPU and drives it the way
-an agent does. This is the half that needs neither a GPU nor a browser, and it
-is the half that gates every commit: the scene file's contract holds on files
-that never build, the socket answers one line for one line with a handler
-that is not a simulator, every command line parses and every ``--help`` exits
-0, the client imports nothing of the library, and ``up`` recognises a server
-that came up, one that died, and one that is still building.
+Every command line parses and every ``--help`` exits 0; the client imports
+nothing of the library; ``run``, ``play`` and ``status --wait`` end on the
+page's own word for how a run or routine ended; ``up`` recognises a server
+that came up, one that died and one still building; ``new`` makes a twin's
+folder and refuses one inside another scene.
 """
 
 from __future__ import annotations
@@ -15,24 +13,28 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
-import numpy as np
-
-import robosimstudio as rss
-from robosimstudio_real2sim_agent import ctl, scenefile, stills, wire
+from robosimstudio_real2sim_agent import ctl, wire
+from tests.fixtures.live_server import FakePage, FakeStatus
+from tests.fixtures.real2sim_clips import flat_clip
 
 TIER = "fast"
-"""No GPU, no page: files that are compiled, a socket on a temp path, subprocesses that only parse."""
+"""No GPU and no page: a socket answering from a dict stands in for the page."""
+
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
 SCENE = 'import robosimstudio as rss\nscene = rss.Scene(cell="void", name="t")\n'
 
 
@@ -40,201 +42,6 @@ def _write(directory: Path, text: str, name: str = "scene.py") -> Path:
     path = directory / name
     path.write_text(text)
     return path
-
-
-class TestTheSceneFileContract(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="agent-"))
-        self.calls: list[dict] = []
-
-    def build(self, scene, **kwargs):
-        self.calls.append(kwargs)
-        return ("built", scene)
-
-    def test_a_file_that_binds_no_scene_is_refused(self) -> None:
-        path = _write(self.tmp, "x = 1\n")
-        with self.assertRaises(TypeError) as caught:
-            scenefile.run_scene_file(path, build=self.build)
-        self.assertIn("scene", str(caught.exception))
-        self.assertEqual(self.calls, [], "nothing is built for a file with no scene")
-
-    def test_a_bound_sim_wins_over_building(self) -> None:
-        loaded = scenefile.run_scene_file(
-            _write(self.tmp, SCENE + "sim = rss.Sim.__new__(rss.Sim)\n"), build=self.build
-        )
-        self.assertIsInstance(loaded.sim, rss.Sim)
-        self.assertEqual(self.calls, [])
-        self.assertIsInstance(loaded.scene, rss.Scene)
-        self.assertGreaterEqual(loaded.seconds, 0.0)
-
-    def test_build_is_the_default_control_mode_with_BUILD_over_it(self) -> None:
-        scenefile.run_scene_file(_write(self.tmp, SCENE), build=self.build)
-        self.assertEqual(self.calls, [{"control_mode": "joint_position"}])
-        scenefile.run_scene_file(
-            _write(self.tmp, SCENE + 'BUILD = {"control_mode": "osc", "x": 1}\n'),
-            build=self.build,
-        )
-        self.assertEqual(
-            self.calls[-1],
-            {"control_mode": "osc", "x": 1},
-            "BUILD merges over the default",
-        )
-
-    def test_the_doors_are_shut_while_the_file_runs_and_open_after(self) -> None:
-        doors = {name: getattr(rss, name) for name in scenefile.DOORS}
-        text = (
-            SCENE
-            + "opened = [rss.view(None), rss.draw(None), rss.viewer(None)]\nfrom robosimstudio import view\nvia = view(1)\n"
-        )
-        loaded = scenefile.run_scene_file(_write(self.tmp, text), build=self.build)
-        self.assertEqual(
-            loaded.ns["opened"],
-            [None, None, None],
-            "a page-opening call is a no-op while the file runs",
-        )
-        self.assertIsNone(
-            loaded.ns["via"],
-            "reached through `from robosimstudio import`, still the no-op",
-        )
-        for name, door in doors.items():
-            self.assertIs(getattr(rss, name), door, f"rss.{name} is the real one again after")
-        with self.assertRaises(ZeroDivisionError):
-            scenefile.run_scene_file(_write(self.tmp, "1 / 0\n"), build=self.build)
-        for name, door in doors.items():
-            self.assertIs(
-                getattr(rss, name),
-                door,
-                f"rss.{name} is restored even when the file raises",
-            )
-
-    def test_the_file_runs_as_scene_not_main(self) -> None:
-        text = SCENE + 'if __name__ == "__main__":\n    raise RuntimeError("a main guard fired")\n'
-        loaded = scenefile.run_scene_file(_write(self.tmp, text), build=self.build)
-        self.assertEqual(loaded.ns["__name__"], "scene")
-
-    def test_stamp_and_the_fallback(self) -> None:
-        self.assertIsNone(scenefile.stamp(self.tmp / "absent.py"))
-        path = _write(self.tmp, "a = 1\n")
-        first = scenefile.stamp(path)
-        self.assertIsInstance(first, tuple)
-        path.write_text("a = 12\n")
-        self.assertNotEqual(scenefile.stamp(path), first, "a longer file is a different stamp")
-        self.assertIsInstance(scenefile.fallback_scene(), rss.Scene)
-
-
-class TestTheWire(unittest.TestCase):
-    def test_where_the_socket_is(self) -> None:
-        self.assertEqual(wire.socket_path(None), Path("run") / "ctl.sock")
-        deep = Path(tempfile.gettempdir()) / ("d" * 60) / ("e" * 60) / "run"
-        short = wire.socket_path(deep)
-        self.assertLessEqual(
-            len(str(short)),
-            wire.SUN_PATH_MAX,
-            "a run directory too deep for sockaddr_un gets a short path",
-        )
-        self.assertEqual(
-            short,
-            wire.socket_path(deep),
-            "the same one every time, so the server and its clients agree",
-        )
-        self.assertNotEqual(
-            short,
-            wire.socket_path(deep.with_name("run2")),
-            "and a different one per run directory",
-        )
-        self.assertEqual(wire.socket_path("d"), Path("d") / "ctl.sock")
-        self.assertEqual(wire.socket_path("d", "s.sock"), Path("s.sock"), "an explicit socket wins")
-
-    def test_the_ready_line_reads_back(self) -> None:
-        line = wire.ready_line("http://localhost:8080", "/r/ctl.sock", "/r/scene.py")
-        self.assertTrue(line.startswith(wire.READY_PREFIX))
-        parsed = wire.parse_ready("noise\n" + line + "\nmore noise\n")
-        self.assertEqual(
-            parsed,
-            {
-                "url": "http://localhost:8080",
-                "sock": "/r/ctl.sock",
-                "scene": "/r/scene.py",
-                "share": None,
-            },
-        )
-        shared = wire.parse_ready(wire.ready_line("http://localhost:1", "/s", "/f", "https://x.y/z"))
-        self.assertEqual(shared["share"], "https://x.y/z")
-        self.assertIsNone(wire.parse_ready("nothing here"))
-
-    def test_encode_spells_tolist_by_attribute(self) -> None:
-        reply = json.loads(wire.encode({"a": np.arange(3), "b": np.float32(1.5), "c": Path("p")}))
-        self.assertEqual(reply, {"a": [0, 1, 2], "b": 1.5, "c": "p"})
-
-    def test_one_line_in_one_line_out(self) -> None:
-        tmp = Path(tempfile.mkdtemp(prefix="w-"))
-        path = tmp / "ctl.sock"
-
-        def handler(request: dict) -> dict:
-            if request.get("cmd") == "boom":
-                raise ValueError("no")
-            return {"ok": True, "echo": request}
-
-        server = wire.ControlSocket(path, handler)
-        server.start()
-        deadline = time.time() + 5.0
-        while not path.exists() and time.time() < deadline:
-            time.sleep(0.05)
-        try:
-            self.assertEqual(
-                wire.request(path, {"cmd": "status", "n": 1}, 5.0),
-                {"ok": True, "echo": {"cmd": "status", "n": 1}},
-            )
-            failed = wire.request(path, {"cmd": "boom"}, 5.0)
-            self.assertFalse(failed["ok"])
-            self.assertIn("ValueError: no", failed["error"])
-            for raw in (b"not json\n", b"[1, 2]\n"):
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                    client.settimeout(5.0)
-                    client.connect(str(path))
-                    client.sendall(raw)
-                    reply = json.loads(client.makefile("rb").readline())
-                self.assertFalse(reply["ok"])
-                self.assertIn("bad request", reply["error"])
-        finally:
-            server.close()
-        self.assertFalse(path.exists(), "close unlinks the socket")
-        with self.assertRaises(wire.NoServer):
-            wire.request(path, {"cmd": "status"}, 1.0)
-
-    def test_a_live_socket_is_refused_and_a_stale_one_replaced(self) -> None:
-        path = Path(tempfile.mkdtemp(prefix="w-")) / "ctl.sock"
-        first = wire.ControlSocket(path, lambda request: {"ok": True, "who": "first"})
-        first.start()
-        try:
-            second = wire.ControlSocket(path, lambda request: {"ok": True, "who": "second"})
-            with self.assertRaises(FileExistsError, msg="a running server's socket is not taken over"):
-                second.start()
-            second.close()
-            self.assertEqual(
-                wire.request(path, {"cmd": "status"}, 5.0)["who"],
-                "first",
-                "and the refused one did not unlink it on the way out",
-            )
-        finally:
-            first.close()
-        # A socket file nobody answers on: what a server killed with -9 leaves.
-        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        stale.bind(str(path))
-        stale.close()
-        self.assertTrue(path.exists())
-        third = wire.ControlSocket(path, lambda request: {"ok": True, "who": "third"})
-        third.start()
-        try:
-            self.assertEqual(wire.request(path, {"cmd": "status"}, 5.0)["who"], "third")
-        finally:
-            third.close()
-
-    def test_a_bind_failure_is_the_callers(self) -> None:
-        """Raised by ``start`` on the caller's thread, so the server never prints a ready line over it."""
-        path = Path(tempfile.mkdtemp(prefix="w-")) / ("s" * 200 + ".sock")
-        with self.assertRaises(OSError):
-            wire.ControlSocket(path, lambda request: {"ok": True}).start()
 
 
 class TestTheCommandLine(unittest.TestCase):
@@ -444,24 +251,12 @@ class TestTheCommandLine(unittest.TestCase):
         self.assertIn(" up", done.stderr)
 
 
-class _FakePage:
-    """A socket answering ``status`` from a dict the test changes, for the client's half."""
-
-    def __init__(self, path: Path, status: dict) -> None:
-        self.status = dict(status)
-        self.socket = wire.ControlSocket(path, lambda request: {"ok": True, **self.status})
-        self.socket.start()
-
-    def close(self) -> None:
-        self.socket.close()
-
-
 class TestTheRunWait(unittest.TestCase):
     """``run N`` waits on the page's word for how that run ended; whatever ends it, the wait ends saying so."""
 
     def setUp(self) -> None:
         self.path = Path(tempfile.mkdtemp(prefix="run-")) / "ctl.sock"
-        self.page = _FakePage(self.path, {"step": 0, "time": 0.0, "runs_ended": {}})
+        self.page = FakePage(self.path, {"step": 0, "time": 0.0, "runs_ended": {}})
         self.addCleanup(self.page.close)
         self.run = {"ok": True, "run": 2, "step": 40, "target": 1040}
 
@@ -579,7 +374,7 @@ class TestUp(unittest.TestCase):
 
     def test_up_on_a_running_page_says_when_it_is_not_the_one_asked_for(self) -> None:
         scene = _write(self.tmp, SCENE)
-        page = _FakePage(self.tmp / "ctl.sock", {"file": str(scene.resolve()), "share_url": None, "url": "u", "pid": 1})
+        page = FakePage(self.tmp / "ctl.sock", {"file": str(scene.resolve()), "share_url": None, "url": "u", "pid": 1})
         self.addCleanup(page.close)
         argv = ["--run-dir", str(self.tmp), "up", "--scene"]
         self.assertEqual(ctl.main([*argv, str(scene)]), 0, "the same file: a no-op naming the page")
@@ -618,7 +413,7 @@ class TestUp(unittest.TestCase):
             "renderer_asked": "",
             "renderer_drawing": "rtx",
         }
-        page = _FakePage(self.tmp / "ctl.sock", status)
+        page = FakePage(self.tmp / "ctl.sock", status)
         self.addCleanup(page.close)
         argv = ["--run-dir", str(self.tmp), "up", "--scene", str(scene)]
         self.assertEqual(ctl.main([*argv, "--renderer", "auto"]), 0, "the machine's pick is what it draws with")
@@ -637,38 +432,297 @@ class TestUp(unittest.TestCase):
         self.assertFalse(self.log.exists(), "nothing was started")
 
 
-class TestStills(unittest.TestCase):
-    def test_parsing(self) -> None:
-        self.assertEqual(stills.parse_vec("1, 2.5,-3"), (1.0, 2.5, -3.0))
-        with self.assertRaises(ValueError):
-            stills.parse_vec("1,2")
-        self.assertEqual(stills.parse_size("", (4, 3)), (4, 3))
-        self.assertEqual(stills.parse_size("320X180", (4, 3)), (320, 180))
+class TestUpOnAFile(unittest.TestCase):
+    def test_up_on_a_regular_file_leaves_it(self) -> None:
+        import argparse
+        import contextlib
+        import io
 
-    def test_to_uint8(self) -> None:
-        self.assertEqual(stills.to_uint8(np.full((2, 2, 3), 0.5)).tolist()[0][0], [127, 127, 127])
-        kept = np.full((2, 2, 3), 200, dtype=np.uint8)
-        self.assertIs(stills.to_uint8(kept).dtype.type, np.uint8)
-        self.assertEqual(
-            int(stills.to_uint8(np.full((1, 1, 3), 300.0))[0, 0, 0]),
-            255,
-            "clipped, not wrapped",
+        from robosimstudio_real2sim_agent import ctl
+
+        tmp = Path(tempfile.mkdtemp(prefix="w-"))
+        path, scene = tmp / "f.txt", tmp / "scene.py"
+        path.write_text("precious")
+        scene.write_text("")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = ctl.cmd_up(argparse.Namespace(scene=str(scene), share=False), path)
+        self.assertEqual(code, 2)
+        self.assertIn("is not a socket", err.getvalue())
+        self.assertEqual(path.read_text(), "precious")
+
+
+class CtlWaits(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(dir="/tmp"))
+        self.sock = self.tmp / "s.sock"
+        self.log = self.tmp / "serve.log"
+        self.log.write_text("")
+
+    def test_a_routine_is_waited_for_with_its_output_streamed(self) -> None:
+        playing = {"ok": True, "step": 10, "time": 0.2, "last_script": {}, "busy": ""}
+        done = {"ok": True, "step": 30, "time": 0.5, "busy": "", "speed": 0.4, "takes_written": ["take1"]}
+        done["ended"] = {"7": {"serial": 7, "name": "tidy", "how": "finished", "steps": 20, "wall_seconds": 1.2}}
+        fake = FakeStatus(self.sock, [playing, done])
+        self.addCleanup(fake.close)
+        with open(self.log, "a") as f:
+            f.write("[tidy] lid open\n")
+        printed: list[str] = []
+        with mock.patch("builtins.print", lambda *a, **k: printed.append(" ".join(map(str, a)))):
+            reply = ctl.wait_for_script(self.sock, {"serial": 7, "recording": "/r/take1.mp4"}, self.log, 0, 30.0)
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["take"], "take1")
+        self.assertIn("[tidy] lid open", printed)
+
+    def test_a_routine_is_told_its_own_ending_not_the_newest(self) -> None:
+        mine = {"serial": 1, "name": "a", "how": "failed", "error": "RoutineError: a broke"}
+        newer = {"serial": 2, "name": "b", "how": "finished"}
+        fake = FakeStatus(self.sock, [{"ok": True, "busy": "", "last_script": newer, "ended": {"1": mine, "2": newer}}])
+        self.addCleanup(fake.close)
+        reply = ctl.wait_for_script(self.sock, {"serial": 1}, self.log, 0, 30.0)
+        self.assertFalse(reply["ok"])
+        self.assertEqual(reply["routine"], "a")
+
+    def test_a_take_written_and_then_another_started_counts_as_written(self) -> None:
+        done = {"ok": True, "busy": "", "ended": {"3": {"serial": 3, "name": "a", "how": "finished"}}}
+        fake = FakeStatus(self.sock, [{**done, "recording": "take2", "last_take": "", "takes_written": ["take1"]}])
+        self.addCleanup(fake.close)
+        reply = ctl.wait_for_script(self.sock, {"serial": 3, "take": "take1"}, self.log, 0, 30.0)
+        self.assertEqual(reply["take"], "take1")
+
+    def test_status_wait_does_not_wait_out_a_playing_routine(self) -> None:
+        stepping = {"ok": True, "busy": "playing one step of a routine", "busy_routine": True}
+        fake = FakeStatus(self.sock, [stepping])
+        self.addCleanup(fake.close)
+        self.assertTrue(ctl.wait_until_free(self.sock, 5.0)["busy_routine"])
+
+    def test_a_failed_routine_is_an_error_with_its_traceback(self) -> None:
+        ended = {"serial": 2, "name": "eval", "how": "failed", "error": "RoutineError: stopped 364 mm short"}
+        fake = FakeStatus(self.sock, [{"ok": True, "busy": "", "ended": {"2": ended}}])
+        self.addCleanup(fake.close)
+        reply = ctl.wait_for_script(self.sock, {"serial": 2}, self.log, 0, 30.0)
+        self.assertFalse(reply["ok"])
+        self.assertIn("364 mm short", reply["error"])
+
+    def test_status_wait_returns_once_the_page_is_free(self) -> None:
+        busy = {"ok": True, "busy": "rendering a still", "busy_seconds": 3.0}
+        fake = FakeStatus(self.sock, [busy, {"ok": True, "busy": "", "pending_save": True}, {"ok": True, "busy": ""}])
+        self.addCleanup(fake.close)
+        self.assertEqual(ctl.wait_until_free(self.sock, 30.0), {"ok": True, "busy": ""})
+
+    def test_a_run_is_waited_for_through_a_busy_page_until_its_ending(self) -> None:
+        busy = {"ok": True, "busy": "rebuilding the scene file", "step": 90, "runs_ended": {}}
+        ended = {"serial": 3, "how": "done", "step": 160, "target": 160, "finite": True}
+        fake = FakeStatus(
+            self.sock, [busy, busy, {"ok": True, "busy": "", "step": 160, "time": 2.7, "runs_ended": {"3": ended}}]
         )
+        self.addCleanup(fake.close)
+        reply = ctl.wait_for_steps(self.sock, {"run": 3, "step": 40, "target": 160}, 60.0)
+        self.assertEqual((reply["ok"], reply["step"], reply["finite"]), (True, 160, True))
 
-    def test_the_reference_stands_beside_the_render_at_its_height(self) -> None:
-        from PIL import Image
+    def test_a_routine_that_finished_without_its_take_is_no_success(self) -> None:
+        ended = {"serial": 5, "name": "lift", "how": "finished"}
+        status = {"ok": True, "busy": "", "ended": {"5": ended}, "takes_written": [], "last_error": "ffmpeg died"}
+        fake = FakeStatus(self.sock, [status])
+        self.addCleanup(fake.close)
+        reply = ctl.wait_for_script(self.sock, {"serial": 5, "take": "t1"}, self.log, 0, 5.0)
+        self.assertFalse(reply["ok"])
+        self.assertIn("its take t1 was not written: ffmpeg died", reply["error"])
 
-        tmp = Path(tempfile.mkdtemp(prefix="pair-"))
-        ref = tmp / "ref.png"
-        Image.fromarray(np.zeros((4, 6, 3), dtype=np.uint8)).save(ref)
-        render = np.full((8, 8, 3), 255, dtype=np.uint8)
-        pair = stills.side_by_side(render, str(ref))
-        self.assertEqual(pair.shape, (8, 8 + 12, 3), "the reference is scaled to the render's height")
-        self.assertEqual(int(pair[0, 0, 0]), 255)
-        image, label = stills.load_reference(str(ref), width=42)
-        self.assertEqual((image.shape[1], label), (42, "ref.png"))
-        out = stills.save_png(pair, tmp / "deep" / "pair.png")
-        self.assertTrue(out.exists(), "save_png makes the directory")
+    def test_a_failure_on_a_scene_that_was_not_the_files_says_so(self) -> None:
+        printed: list[str] = []
+        with mock.patch("builtins.print", lambda *a, **k: printed.append(" ".join(map(str, a)))):
+            code = ctl.show({"ok": False, "error": "RoutineError", "stale": "the last save did not build"}, False)
+        self.assertEqual(code, 1)
+        self.assertIn("stale: the last save did not build", printed)
+
+    def test_a_run_keeps_the_notes_its_own_reply_carried(self) -> None:
+        ended = {"serial": 1, "how": "done", "step": 5, "target": 5, "finite": True}
+
+        def answer(request: dict) -> dict:
+            if request["cmd"] == "run":
+                return {"ok": True, "run": 1, "step": 0, "target": 5, "stale": "the last save did not build"}
+            return {"ok": True, "busy": "", "step": 5, "time": 0.1, "runs_ended": {"1": ended}}
+
+        sock = self.tmp / "run.sock"
+        server = wire.ControlSocket(sock, answer)
+        server.start()
+        self.addCleanup(server.close)
+        printed: list[str] = []
+        with mock.patch("builtins.print", lambda *a, **k: printed.append(" ".join(map(str, a)))):
+            code = ctl.main(["--run-dir", str(self.tmp / "run"), "--sock", str(sock), "--json", "run", "5"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(printed[-1])["stale"], "the last save did not build")
+
+    def test_a_long_run_says_where_it_is_and_gives_up_at_its_limit(self) -> None:
+        fake = FakeStatus(self.sock, [{"ok": True, "busy": "", "step": 45, "runs_ended": {}}])
+        self.addCleanup(fake.close)
+        said: list[str] = []
+        clock = iter(range(0, 10_000, 4))
+        fake_time = types.SimpleNamespace(monotonic=lambda: float(next(clock)), sleep=lambda s: None)
+        with mock.patch.object(ctl, "time", fake_time), mock.patch.object(ctl, "_say", said.append):
+            reply = ctl.wait_for_steps(self.sock, {"run": 3, "step": 40, "target": 1040}, 30.0)
+        self.assertFalse(reply["ok"])
+        self.assertIn("still running, step 45 of 1040 after 30 s", reply["error"])
+        self.assertTrue(said and "step 45 of 1040" in said[0], said)
+
+    def test_a_take_is_not_held_up_by_another_routines_step(self) -> None:
+        done = {"serial": 4, "name": "lift", "how": "finished"}
+        stepping = {"busy": "playing one step of a routine", "busy_routine": True, "recording": ""}
+        fake = FakeStatus(self.sock, [{"ok": True, **stepping, "ended": {"4": done}, "takes_written": ["t1"]}])
+        self.addCleanup(fake.close)
+        reply = ctl.wait_for_script(self.sock, {"serial": 4, "take": "t1"}, self.log, 0, 5.0)
+        self.assertEqual(reply["take"], "t1")
+
+    def test_up_asks_a_running_page_for_the_light_status(self) -> None:
+        asked: list[dict] = []
+        scene = self.tmp / "scene.py"
+        scene.write_text("")
+
+        def answer(request: dict) -> dict:
+            asked.append(request)
+            return {"ok": True, "file": str(scene.resolve()), "url": "http://x", "pid": 1, "share_url": None}
+
+        sock = self.tmp / "up.sock"
+        server = wire.ControlSocket(sock, answer)
+        server.start()
+        self.addCleanup(server.close)
+        with mock.patch("builtins.print"):
+            ctl.main(["--run-dir", str(self.tmp / "run"), "--sock", str(sock), "up", "--scene", str(scene)])
+        self.assertTrue(asked and asked[0].get("light"), asked)
+
+    def test_a_pending_save_is_counted_in_the_waits_own_seconds(self) -> None:
+        fake = FakeStatus(self.sock, [{"ok": True, "busy": "", "busy_seconds": 0.0, "pending_save": True}])
+        self.addCleanup(fake.close)
+        said: list[str] = []
+        clock = iter(range(0, 10_000, 4))
+        fake_time = types.SimpleNamespace(monotonic=lambda: float(next(clock)), sleep=lambda s: None)
+        with mock.patch.object(ctl, "time", fake_time), mock.patch.object(ctl, "_say", said.append):
+            ctl.wait_until_free(self.sock, 30.0)
+        self.assertTrue(said and not said[-1].endswith("(0 s)"), said)
+
+    def test_ref_frames_without_a_page_says_what_was_wrong_in_one_line(self) -> None:
+        clip = flat_clip(self.tmp / "c.mp4", 2, "red")
+        (self.tmp / "scene.py").write_text("")
+        printed: list[str] = []
+        with mock.patch("builtins.print", lambda *a, **k: printed.append(" ".join(map(str, a)))):
+            code = ctl.main(["--run-dir", str(self.tmp / "run"), "ref", "frames", str(clip), "--at", "0:a,x:b"])
+        self.assertEqual(code, 1)
+        self.assertTrue(printed and printed[-1].startswith("ctl: "), printed)
+
+    def test_up_prints_its_log_and_status_does_not(self) -> None:
+        printed: list[str] = []
+        with mock.patch("builtins.print", lambda *a, **k: printed.append(" ".join(map(str, a)))):
+            ctl.show({"ok": True, "url": "http://x", "log": "/x/serve.log"}, False)
+            ctl.show({"ok": True, "busy": "", "server_log": "/x/serve.log"}, False)
+        self.assertEqual(sum("/x/serve.log" in line for line in printed), 1)
+
+    def test_ref_frames_needs_no_page(self) -> None:
+        clip = flat_clip(self.tmp / "c.mp4", 2, "red")
+        (self.tmp / "scene.py").write_text("")  # the page would put ref/ beside it
+        run_dir = self.tmp / "run"
+        code = ctl.main(["--run-dir", str(run_dir), "--json", "ref", "frames", str(clip), "--at", "0:start,end"])
+        self.assertEqual(code, 0)
+        timeline = json.loads((self.tmp / "ref" / "timeline.json").read_text())
+        self.assertEqual([a.get("label", "") for a in timeline["anchors"]], ["start", ""])
+
+
+class TwinInsideAScene(unittest.TestCase):
+    def test_a_twin_is_not_made_where_another_scenes_page_would_take_it_for_its_own(self) -> None:
+        live = Path(tempfile.mkdtemp())
+        (live / "ctl").write_text("")
+        outer = live / "twins" / "a"
+        outer.mkdir(parents=True)
+        (outer / "scene.py").write_text("")
+        with mock.patch("builtins.print"):
+            code = ctl.main(["--run-dir", str(live / "run"), "new", "b", "--dir", str(outer / "b")])
+        self.assertEqual(code, 1)
+        self.assertFalse((outer / "b").exists())
+        with mock.patch("builtins.print"):
+            self.assertEqual(ctl.main(["--run-dir", str(live / "run"), "new", "c"]), 0, "twins/ is no scene's code")
+
+
+class TwinInsideAServedFolder(unittest.TestCase):
+    def test_a_folder_a_page_served_from_is_a_scene_whatever_its_file_is_called(self) -> None:
+        live = Path(tempfile.mkdtemp())
+        (live / "ctl").write_text("")
+        served = live / "bench"
+        (served / "run").mkdir(parents=True)
+        (served / "run" / "serve.log").write_text("")
+        with mock.patch("builtins.print"):
+            code = ctl.main(["--run-dir", str(live / "run"), "new", "t", "--dir", str(served / "t")])
+        self.assertEqual(code, 1)
+
+
+class TwinFolder(unittest.TestCase):
+    def setUp(self) -> None:
+        self.live = Path(tempfile.mkdtemp())
+        self.run_dir = self.live / "run"
+        self.clip = self.live / "clip.mov"
+        self.clip.write_bytes(b"not really a clip")
+
+    def test_new_makes_the_folder_with_its_own_ctl(self) -> None:
+        self.assertEqual(ctl.main(["--run-dir", str(self.run_dir), "new", "lid", "--ref", str(self.clip)]), 0)
+        twin = self.live / "twins" / "lid"
+        self.assertEqual(sorted(p.name for p in twin.iterdir()), ["REPORT.md", "ctl", "ref", "scene.py"])
+        self.assertEqual((twin / "ref" / "clip.mov").read_bytes(), b"not really a clip")
+        self.assertTrue(os.access(twin / "ctl", os.X_OK))
+        self.assertIn("## Shortcuts and departures from the reference", (twin / "REPORT.md").read_text())
+        compile((twin / "scene.py").read_text(), "scene.py", "exec")
+        self.assertEqual(
+            ctl.main(["--run-dir", str(self.run_dir), "new", "lid"]), 1, "an existing twin is not overwritten"
+        )
+        self.assertEqual(ctl.main(["--run-dir", str(self.run_dir), "new", "../escape"]), 2)
+
+    def test_new_from_inside_a_twin_made_anywhere_is_refused(self) -> None:
+        elsewhere = self.live / "work" / "lid"
+        ctl.main(["--run-dir", str(self.run_dir), "new", "lid", "--dir", str(elsewhere)])
+        self.assertEqual(ctl.main(["--run-dir", str(elsewhere / "run"), "new", "nested"]), 1)
+
+    def test_two_references_of_one_name_are_refused(self) -> None:
+        (self.live / "a").mkdir()
+        (self.live / "b").mkdir()
+        for d in ("a", "b"):
+            (self.live / d / "IMG_0001.MOV").write_bytes(b"x")
+        argv = ["--run-dir", str(self.run_dir), "new", "lid"]
+        argv += ["--ref", str(self.live / "a" / "IMG_0001.MOV"), "--ref", str(self.live / "b" / "IMG_0001.MOV")]
+        self.assertEqual(ctl.main(argv), 2)
+        self.assertFalse((self.live / "twins" / "lid").exists())
+
+    def test_a_twin_unzipped_away_from_a_checkout_runs_on_python(self) -> None:
+        import subprocess
+
+        ctl.main(["--run-dir", str(self.run_dir), "new", "lid"])
+        moved = Path(tempfile.mkdtemp()) / "lid"
+        shutil.copytree(self.live / "twins" / "lid", moved)
+        env = {**os.environ, "PYTHON": sys.executable}
+        done = subprocess.run(
+            [str(moved / "ctl"), "status"], capture_output=True, text=True, timeout=60, check=False, env=env
+        )
+        self.assertEqual(done.returncode, 2)
+        self.assertIn(str(moved / "run" / "ctl.sock"), done.stderr)
+
+    def test_new_from_inside_a_twin_is_refused(self) -> None:
+        ctl.main(["--run-dir", str(self.run_dir), "new", "lid"])
+        twin = self.live / "twins" / "lid"
+        self.assertEqual(ctl.main(["--run-dir", str(twin / "run"), "new", "nested"]), 1)
+        self.assertFalse((twin / "twins").exists())
+
+    def test_its_ctl_pins_run_in_the_folder(self) -> None:
+        import subprocess
+
+        twin = self.live / "elsewhere"
+        ctl.main(["--run-dir", str(self.run_dir), "new", "lid", "--dir", str(twin)])
+        done = subprocess.run([str(twin / "ctl"), "status"], capture_output=True, text=True, timeout=60, check=False)
+        self.assertEqual(done.returncode, 2)
+        self.assertIn(str(twin / "run" / "ctl.sock"), done.stderr)
+
+    def test_up_serves_the_scene_beside_its_run_directory(self) -> None:
+        printed: list[str] = []
+        with mock.patch("builtins.print", lambda *a, **k: printed.append(" ".join(map(str, a)))):
+            code = ctl.main(["--run-dir", str(self.run_dir), "up", "--timeout", "1"])
+        self.assertEqual(code, 2)
+        self.assertIn(str(self.live / "scene.py"), printed[0])
 
 
 if __name__ == "__main__":

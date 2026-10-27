@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """The tuning panels: the preset dropdown follows reverts, late readings get a row,
 and Measure / Re-settle refuse while a policy drives or a take records.
-
-A fake gui stands in for viser, firing ``on_update`` synchronously on a
-``.value`` assignment that changes the value -- which is what viser does.
 """
 
 from __future__ import annotations
@@ -18,6 +15,7 @@ from robosimstudio_studio.tuning.panels import PanelReadings, PanelTune
 from robosimstudio_studio.tuning.tuner import MaterialTuner
 
 TIER = "fast"
+"""No GPU: a stand-in gui and tuner."""
 
 
 class _Widget:

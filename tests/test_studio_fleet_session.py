@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The studio's fleet page takes each world's start pose from the fleet, as the runner does."""
 
 from __future__ import annotations
@@ -8,6 +9,7 @@ from unittest import mock
 import numpy as np
 
 TIER = "fast"
+"""No GPU: a stand-in fleet hands out settled poses."""
 
 
 class _Snapshot:

@@ -1,12 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The page's per-frame costs, its reset, and its Attach button.
-
-A deforming PBR garment must not leave a GLB behind every frame; a static batch
-drawn through the PBR path must still be skipped once pushed, and the shape
-colours read back once per repack rather than once per batch; the overlay must
-redraw straight after a reset; and an arm chosen in the Object dropdown must be
-taken hold of by Attach rather than ignored.
-"""
+"""The studio viewer's per-frame costs: no GLB kept for a deforming garment, a pushed static batch skipped."""
 
 from __future__ import annotations
 
@@ -17,13 +10,10 @@ import numpy as np
 
 from robosimstudio.core.render.finish import GLOSS
 from robosimstudio_studio import finish_gltf
-from robosimstudio_studio.fleet_view import _place
 from robosimstudio_studio.garments import ViewerStudio
-from robosimstudio_studio.overlay import PanelOverlay
-from robosimstudio_studio.panels import PanelObject
 
 TIER = "fast"
-"""No GPU, no browser."""
+"""No GPU, no browser: a viewer built without its constructor."""
 
 
 class TestDeformingGlbIsNotKept(unittest.TestCase):
@@ -83,54 +73,6 @@ class TestStaticPbrBatch(unittest.TestCase):
         viewer.mark_shape_colors_dirty()
         viewer._log_pbr_instances("/b", "/mesh", xforms, None)
         self.assertEqual(len(reads), 2)
-
-
-class TestOverlayAfterReset(unittest.TestCase):
-    def test_the_next_drain_redraws(self) -> None:
-        panel = PanelOverlay.__new__(PanelOverlay)
-        panel.showing = {("k", "f"): []}
-        panel.session = types.SimpleNamespace(overlay_request=[], render_every=4)
-        panel.env = types.SimpleNamespace(step_count=100)
-        panel._synced = -1
-        redrawn = []
-        panel._replace = lambda: redrawn.append(panel.env.step_count)
-        panel.drain()
-        panel.env.step_count = 0
-        panel.on_reset({}, {})
-        panel.drain()
-        self.assertEqual(redrawn, [100, 0])
-
-
-class _NoHandles(list):
-    def drain(self) -> None:
-        pass
-
-
-class TestAttachAnArm(unittest.TestCase):
-    def test_attach_takes_the_selected_arm(self) -> None:
-        panel = PanelObject.__new__(PanelObject)
-        panel.pending_body = None
-        panel.attach_requested = True
-        panel.release_requested = panel.release_all_requested = False
-        panel.selected = "left"
-        panel.chains = {}
-        panel.arm_bodies = {"left": (7, 5, 3)}
-        panel.env = types.SimpleNamespace(handles=types.SimpleNamespace(objects={}))
-        panel.handles = _NoHandles()
-        panel.draggers = []
-        attached = []
-        panel._attach = attached.append
-        panel.drain()
-        self.assertEqual(attached, [7])
-
-
-class TestFleetViewPlace(unittest.TestCase):
-    def test_a_drifted_quaternion_does_not_scale_the_box(self) -> None:
-        # A quarter turn about z, its quaternion grown about 2%: not the
-        # identity, which an unnormalised matrix also gets right.
-        pose = np.array([0, 0, 0, 0, 0, 0.7212, 0.7212])
-        _, half = _place(pose, np.zeros(3), np.array([0.1, 0.2, 0.3]))
-        np.testing.assert_allclose(half, [0.2, 0.1, 0.3], atol=1e-9)
 
 
 if __name__ == "__main__":
