@@ -17,6 +17,7 @@ from robosimstudio.core.math import quat_from_axis_angle, quat_multiply, quat_to
 from robosimstudio_policy_agent import servo
 from robosimstudio_policy_agent.fleet import stepper
 from robosimstudio_policy_agent.servo import CartesianServo
+from tests.fixtures.fleet import FakeSnapshot, step_service
 
 TIER = "fast"
 """Quaternions and stub backends: no GPU, no scene."""
@@ -24,7 +25,15 @@ TIER = "fast"
 
 class SharedOrientationLawTest(unittest.TestCase):
     def test_stepper_uses_the_servo_helpers(self) -> None:
-        """What the fleet stepper reads for a servo goal and its arrival is the serial servo's, sample by sample."""
+        """One law, shared: the stepper holds the servo's own two functions, and decides arrival by them.
+
+        By identity, so a copy that drifted could not hide behind agreeing on a
+        sample; and by what the stepper decides, so the law it holds is the one
+        it applies: a roll-honouring move whose tool sits at ``-q`` of its goal
+        ``q`` has arrived, as one at ``q`` has, because the two are one rotation.
+        """
+        self.assertIs(stepper.solver_goal, servo.solver_goal)
+        self.assertIs(stepper.rotation_error, servo.rotation_error)
         rng = np.random.default_rng(11)
         for honours_roll in (False, True):
             for _ in range(20):
@@ -36,6 +45,22 @@ class SharedOrientationLawTest(unittest.TestCase):
                 self.assertAlmostEqual(
                     stepper.rotation_error(a, b, honours_roll), servo.rotation_error(a, b, honours_roll), places=12
                 )
+        goal = rng.normal(size=4)
+        goal /= np.linalg.norm(goal)
+        service = step_service()
+        for measured in (goal, -goal):
+            program = stepper._Program(
+                "servo",
+                goal=(np.array([0.4, 0.0, 0.3]), "arm", None),
+                deadline=100,
+                tolerance=0.01,
+                requested_quat=goal,
+                rot_tolerance=0.01,
+                honours_roll=True,
+            )
+            snapshot = FakeSnapshot([[0.0, 0.0, 0.0]], body=[[0.4, 0.0, 0.3, *measured]])
+            done, _error, result = service._finished(0, 0, program, snapshot)
+            self.assertEqual((done, (result or {}).get("outcome")), (True, "reached"))
 
     def test_servo_methods_wrap_the_helpers(self) -> None:
         rng = np.random.default_rng(3)

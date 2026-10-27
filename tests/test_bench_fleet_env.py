@@ -7,6 +7,7 @@ import dataclasses
 import unittest
 from types import SimpleNamespace
 
+from robosimstudio.scene import compiler
 from robosimstudio.scene.compiler import CannotReplicate
 from robosimstudio.scene.entity import Entity
 from robosimstudio.specs import TaskSpec
@@ -24,6 +25,8 @@ class TestABatchedEnvRefusesAnUndeclaredPairing(unittest.TestCase):
         with self.assertRaises(KeyError) as caught:
             FleetEnv(spec, num_worlds=2, scene="bench_b", device="cpu")
         self.assertIn("declares no binding", str(caught.exception))
+        # Not fixed by narrowing the grid, so not answered the way a replication refusal is.
+        self.assertNotIsInstance(caught.exception, CannotReplicate)
 
 
 def _with_params(arrangement, **params):
@@ -116,6 +119,17 @@ class _Publisher(Entity):
         return {"bond_fraction": 0.0}
 
 
+class _WorldAwarePublisher(_Publisher):
+    world_aware = True
+
+
+class _Hooked(Entity):
+    """An entity that puts kernels in the substep block, written for one world."""
+
+    def contribute_hooks(self, hooks) -> None:
+        pass
+
+
 class _Probed(Entity):
     """Particles, and a probe opened per world over them."""
 
@@ -130,7 +144,7 @@ def _entity(cls, name: str, particles: int = 0):
 
 
 class TestWhatAWaveCanScore(unittest.TestCase):
-    """``scoring_refusal``: the branches beyond the plain refusals ``test_fleet`` pins."""
+    """``scoring_refusal``: the branches beyond the plain refusals ``TestTheEmptyContextIsCoveredByTheRefusal`` pins."""
 
     def test_a_rigid_scene_is_scored_per_world(self):
         self.assertEqual(fleet.scoring_refusal(SimpleNamespace(by_name={"cube": _entity(Entity, "cube")})), "")
@@ -150,6 +164,100 @@ class TestWhatAWaveCanScore(unittest.TestCase):
             by_name={"z_towel": _entity(Entity, "z_towel", 8), "a_towel": _entity(Entity, "a_towel", 8)}
         )
         self.assertIn("(a_towel, z_towel)", fleet.scoring_refusal(scene))
+
+
+class TestCannotReplicate(unittest.TestCase):
+    """The refusal a page answers by narrowing rather than by refusing.
+
+    Most scenes cannot be built at more than one world yet. On an interactive
+    page that is not a failed load -- the selection is a *task*, and the world
+    count is a preference on it -- so the studio catches this one type and
+    rebuilds at one world. Which only works if it stays distinguishable from
+    every other way a compile can fail, and stays catchable by the handlers
+    written before it had a name.
+    """
+
+    def test_it_is_a_kind_of_not_implemented_error(self):
+        """A wave the fleet refuses is caught by a handler written for ``NotImplementedError``."""
+        from robosimstudio_bench.envs.fleet import FleetEnv
+
+        fleet = FleetEnv.__new__(FleetEnv)
+        fleet.build_task = TaskSpec(name="t", control_mode="joint_position")
+        with self.assertRaises(NotImplementedError) as caught:
+            fleet._check_documents([fleet.build_task, TaskSpec(name="t", control_mode="ee_delta")])
+        self.assertIsInstance(caught.exception, CannotReplicate)
+
+
+class TestTheEmptyContextIsCoveredByTheRefusal(unittest.TestCase):
+    """`FleetEnv.context` fills no `particles`, and only per-world `entities`, safely.
+
+    Safely only because `fleet.scoring_refusal` declines every scene that would
+    read anything else; an entity is handed over only when it declares
+    `world_aware` (the gear board: per-world latch and spin windows, and
+    a `published_states` that reads `WorldState.world`). Lifting the rest with
+    `entities` short would take every published state with it: `bind._published`
+    reads that dict, so a peel would raise `BindError` on every episode.
+    Both refusals are pure functions of the entities, so they are asked here of
+    entities that were never built.
+    """
+
+    def test_the_refusal_still_declines_scenes_with_deformables(self):
+        """It asks what a thing *is*, not which view held it.
+
+        The clause read ``scene.deformables`` -- a bin -- so a publisher that
+        owned a handle sat in ``objects`` and slipped past it. Both halves ask
+        the entity now, which is what this pins: the scene below has no bins at
+        all, only ``by_name``."""
+        from robosimstudio_bench.envs.fleet import scoring_refusal
+
+        towel = Entity(SimpleNamespace(name="towel"))
+        towel.range.particles = (0, 64)
+        self.assertIn("made of particles (towel)", scoring_refusal(SimpleNamespace(by_name={"towel": towel})))
+        film = _Publisher(SimpleNamespace(name="film"))
+        self.assertIn("publishing states (film)", scoring_refusal(SimpleNamespace(by_name={"film": film})))
+        # And the one way through: a publisher that answers per world says so.
+        board = _WorldAwarePublisher(SimpleNamespace(name="board"))
+        self.assertEqual(scoring_refusal(SimpleNamespace(by_name={"board": board})), "")
+
+    def test_the_compilers_refusal_is_about_the_physics_alone(self):
+        """The two refusals answer different questions and must stay apart.
+
+        A deformable's physics replicates -- four worlds to within 2e-10 -- so
+        the compiler has nothing to say about it; what cannot be replicated is a
+        substep kernel with world-0 indices baked into it. Scoring is this
+        class's problem, and saying so twice would leave the fleet's own gap
+        depending on the compiler remembering it.
+        """
+        towel = Entity(SimpleNamespace(name="towel"))
+        towel.range.particles = (0, 64)
+        no_physics = SimpleNamespace(physics=None)
+        self.assertEqual(compiler._replication_refusal(SimpleNamespace(entities=[towel]), no_physics), "")
+        hooked = _Hooked(SimpleNamespace(name="cutter"))
+        refusal = compiler._replication_refusal(SimpleNamespace(entities=[towel, hooked]), no_physics)
+        self.assertIn("substep physics written for one world: cutter", refusal)
+
+    def test_a_cutting_block_is_refused_for_what_its_goal_reads(self):
+        """The cutter's published ``pieces``, not the eight corners its block is drawn at.
+
+        Asked of the particles first, a one-world wave of
+        ``examples/06_tasks/09_cutting_scored`` was refused for the corners, with
+        "the physics replicates correctly", and the cutter's does not: at two
+        worlds the compiler refuses its one-world substep hooks.
+        """
+        from tests.fixtures.packs import has_pack
+
+        if not has_pack("cutting"):
+            self.skipTest("the cutting pack is not installed")
+        import robosimstudio as rss
+        from robosimstudio_bench.envs.fleet import scoring_refusal
+        from robosimstudio_materials.cutting.entity import EntityCuttable
+
+        tofu = EntityCuttable(rss.cuttable(name="tofu", knife=rss.knife(name="knife"), size=(0.06, 0.1, 0.04)))
+        tofu.range.particles = (0, 8)  # the corners, as its build adds them
+        self.assertTrue(tofu.carries_particles)
+        refusal = scoring_refusal(SimpleNamespace(by_name={"tofu": tofu}))
+        self.assertIn("publishing states (tofu)", refusal)
+        self.assertNotIn("replicates correctly", refusal)
 
 
 if __name__ == "__main__":

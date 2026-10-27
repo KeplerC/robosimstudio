@@ -3,6 +3,7 @@
 apart from a mistake in the file, one set of gate words shared with the reward,
 and a selector refused on an atom that reports nothing."""
 
+import importlib
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -14,13 +15,26 @@ from robosimstudio_bench.taskdoc.parse import parse_condition
 from robosimstudio_bench.taskdoc.reader import parse_sexp
 from tests.fixtures import taskdocs
 
+# The package re-exports a function named `gauntlet`, which shadows the module.
+gauntlet = importlib.import_module("robosimstudio_bench.goals.gauntlet")
+
 TIER = "fast"
 """Parsed documents and a stub catalog: no scene, no GPU."""
 
 
 class TestOneSetOfGateWords(unittest.TestCase):
     def test_reward_reads_the_checkers_spellings(self):
-        """Every gate and mask spelling the checker reads is one the reward builds, and refuses at zero."""
+        """The reward, the checker and the gauntlet read one set of spellings, and each one builds.
+
+        The sets are compared both ways, so a spelling only the reward knows --
+        one the checker would read as a second measure -- fails here as surely
+        as one only the checker knows. Then every spelling is built, and a zero
+        gate in it refused by the reward and reported by the checker alike.
+        """
+        for module in (reward, gauntlet):
+            with self.subTest(module=module.__name__):
+                self.assertEqual(set(module._GATE_WORDS), set(typecheck._GATE_WORDS))
+                self.assertEqual(set(module._MASK_WORDS), set(typecheck._MASK_WORDS))
 
         def node(form):
             return Leaf(fn=lambda ctx: (True, 1.0, {}))
