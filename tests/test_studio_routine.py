@@ -39,6 +39,12 @@ def _pick(sim, session):
     yield from reach(session, "right", over(0.15))
 
 
+def _out_of_reach(sim, session):
+    from robosimstudio_studio.routine import reach
+
+    yield from reach(session, "right", (5.0, 5.0, 5.0), speed=10.0, settle=0.2)
+
+
 class TestARoutinePlaysFromItsButton(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -71,6 +77,38 @@ class TestARoutinePlaysFromItsButton(unittest.TestCase):
 
     def _said(self) -> str:
         return str(self.panel._status.value)
+
+
+class TestAHandThatCannotArrive(unittest.TestCase):
+    """The arrival check on a real arm: its IK, its setpoint law and a target five metres out of reach.
+
+    Its own page, so it asks nothing of what another test left the arm doing.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.sim, kwargs = _run("00_getting_started/00_hello_world.py")
+        cls.session = open_session(cls.sim, 0, kwargs.get("page"))
+        cls.session.add_routines({"Out of reach": _out_of_reach})
+        cls.panel = cls.session.panels[-1]
+        tick(cls.session, 20)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.session.teardown()
+
+    def test_a_hand_that_cannot_arrive_stops_the_routine_and_says_so(self) -> None:
+        self.panel.requested = "Out of reach"
+        tick(self.session, 1)
+        for _ in range(600):
+            if self.panel.gen is None:
+                break
+            tick(self.session, 1)
+        self.assertIsNone(self.panel.gen, "the routine waited on a hand that was never coming")
+        said = str(self.panel._status.value)
+        self.assertIn("short of where it was sent", said)
+        self.assertRegex(said, r"stopped \d+ mm short", "with how far short, in millimetres")
+        self.assertFalse(any(arm.suspended for arm in self.session.arms.values()), "and the arms are the page's again")
 
 
 if __name__ == "__main__":
