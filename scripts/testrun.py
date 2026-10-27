@@ -50,7 +50,9 @@ with the slowest modules.
 A GPU tier runs in parallel only with ``--gpus``: every worker gets one card of
 its own (``CUDA_VISIBLE_DEVICES``), because two contact-heavy rollouts sharing a
 card change each other's outcome -- a held handle reads as dropped -- and that
-failure looks exactly like a regression.
+failure looks exactly like a regression. A card named twice is refused. What
+draws through Vulkan -- headless Chromium's ANGLE -- ignores
+``CUDA_VISIBLE_DEVICES`` and lands on GPU 0 whatever the worker's card.
 """
 
 from __future__ import annotations
@@ -140,17 +142,39 @@ def modules(tier: str = "") -> list[str]:
 
 
 def classes(module: str) -> list[str]:
-    """The ``TestCase`` classes a module defines, as dotted names, read by AST.
+    """The test classes a module defines, as dotted names, read by AST.
 
-    A class counts when it derives, by name, from something ending ``TestCase``;
-    a helper base with no tests of its own is still listed and runs zero tests.
+    A class is a test class when one of its bases ends ``TestCase``, or is a class
+    of the same module that is one (``class TestX(_Instant)``). A class on a base
+    the module imports is kept when it has ``test*`` methods or a ``Test*`` name:
+    whether that base is a ``TestCase`` cannot be read here, and a class left out
+    is a test that silently never runs. A helper with no ``test*`` method of its
+    own or from this module (``_Instant``, a probe entity) is left out.
     """
     path = ROOT.joinpath(*module.split(".")).with_suffix(".py")
     tree = ast.parse(path.read_text())
+    local = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+
+    def chain(node: ast.ClassDef, seen: frozenset[str] = frozenset()) -> tuple[bool, bool, bool]:
+        """(derives from a TestCase, has a test method, has a base not resolved here)."""
+        case = tests = foreign = False
+        tests = any(isinstance(item, ast.FunctionDef) and item.name.startswith("test") for item in node.body)
+        for base in node.bases:
+            name = ast.unparse(base)
+            if name.endswith("TestCase"):
+                case = True
+            elif name in local and name not in seen:
+                got = chain(local[name], seen | {node.name})
+                case, tests, foreign = case or got[0], tests or got[1], foreign or got[2]
+            elif name != "object":
+                foreign = True
+        return case, tests, foreign
+
     out = []
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and any(ast.unparse(base).endswith("TestCase") for base in node.bases):
-            out.append(f"{module}.{node.name}")
+    for name, node in local.items():
+        case, tests, foreign = chain(node)
+        if (case and tests) or (foreign and (tests or name.startswith("Test"))):
+            out.append(f"{module}.{name}")
     return out or [module]
 
 
@@ -173,8 +197,15 @@ class Outcome:
 
     @property
     def ok(self) -> bool:
-        return self.code == 0
+        # 5 is Python 3.12's "NO TESTS RAN": a class or module with nothing to run, not a failure.
+        return self.code == 0 or (self.code == NO_TESTS_RAN and self.ran == 0)
 
+
+NO_TESTS_RAN = 5
+"""``unittest``'s exit status when it found no tests to run (Python 3.12 and later)."""
+
+TIMED_OUT = 124
+"""The status a run is given when ``--timeout`` killed it, as ``timeout(1)`` gives."""
 
 _RAN = re.compile(r"^Ran (\d+) tests? in ", re.M)
 _COUNT = re.compile(r"(failures|errors|skipped|expected failures|unexpected successes)=(\d+)")
@@ -201,13 +232,16 @@ def run_parallel(
     gpus: list[str] | None = None,
     coverage: pathlib.Path | None = None,
     stream=sys.stdout,
+    timeout: float | None = None,
 ) -> list[Outcome]:
     """Run each name in its own ``python -m unittest`` process, ``jobs`` at a time.
 
     ``gpus`` pins worker *i* to card ``gpus[i]`` for every name it takes, so the
     number of workers is the number of cards. A name is taken from a shared
     queue as soon as a worker is free, so one slow module does not hold a fixed
-    shard of the others behind it.
+    shard of the others behind it. A run still going after ``timeout`` seconds is
+    killed and reported with whatever it printed, so one hung module cannot stall
+    the tier with nothing on the screen.
     """
     work: queue.Queue[str] = queue.Queue()
     for name in names:
@@ -219,7 +253,9 @@ def run_parallel(
     def worker(slot: int) -> None:
         own = dict(env if env is not None else os.environ)
         if gpus:
-            own["CUDA_VISIBLE_DEVICES"] = gpus[slot]
+            # The worker sees its one card as cuda:0, so a device or renderer the shell
+            # named (ROBOSIMSTUDIO_DEVICE=cuda:3) would point at a card it cannot see.
+            own.update(CUDA_VISIBLE_DEVICES=gpus[slot], ROBOSIMSTUDIO_DEVICE="", ROBOSIMSTUDIO_RENDERER="")
         if coverage is not None:
             own["COVERAGE_FILE"] = str(coverage)
         while True:
@@ -231,16 +267,23 @@ def run_parallel(
             if coverage is not None:
                 prefix += ["coverage", "run", "-p", f"--source={','.join(SOURCES)}", "-m"]
             start = time.monotonic()
-            done = subprocess.run(
+            child = subprocess.Popen(
                 [*prefix, "unittest", name, *extra],
                 cwd=ROOT,
                 env=own,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                check=False,
             )
-            outcome = read_outcome(name, done.returncode, time.monotonic() - start, done.stdout)
+            try:
+                output, _ = child.communicate(timeout=timeout)
+                code = child.returncode
+            except subprocess.TimeoutExpired:
+                child.kill()
+                output, _ = child.communicate()
+                output += f"\n[testrun] killed after {timeout:.0f} s; the output above is all it printed\n"
+                code = TIMED_OUT
+            outcome = read_outcome(name, code, time.monotonic() - start, output)
             with lock:
                 outcomes.append(outcome)
                 where = f" [gpu {gpus[slot]}]" if gpus else ""
@@ -306,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--by-class", action="store_true", help="with -j or --gpus: a process per TestCase class")
     parser.add_argument("--durations", type=int, default=10, help="with -j or --gpus: list this many slowest runs")
     parser.add_argument("--coverage", action="store_true", help="measure line coverage (needs the dev extra)")
+    parser.add_argument(
+        "--timeout", type=float, default=3600.0, help="with -j or --gpus: kill a run after this many seconds"
+    )
     parser.add_argument("rest", nargs="*", help="extra arguments for unittest")
     args = parser.parse_args(argv)
 
@@ -331,6 +377,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     gpus = [card.strip() for card in args.gpus.split(",") if card.strip()]
+    if len(set(gpus)) != len(gpus):
+        print(f"error: --gpus {args.gpus} names a card twice; one worker per card is the point", file=sys.stderr)
+        return 2
+    if gpus and args.jobs not in (0, 1, len(gpus)):
+        print(f"note: -j {args.jobs} is ignored with --gpus: one worker per card, {len(gpus)} in all")
     if gpus and args.tier in NO_GPU_TIERS:
         print(f"error: --gpus is for a GPU tier; {args.tier!r} runs with every GPU hidden", file=sys.stderr)
         return 2
@@ -368,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     workers = len(gpus) if gpus else jobs
     print(f"{len(names)} runs of tier {args.tier!r} on {workers} worker(s)" + (f", cards {gpus}" if gpus else ""))
     start = time.monotonic()
-    outcomes = run_parallel(names, jobs, env, extra, gpus=gpus or None, coverage=data)
+    outcomes = run_parallel(names, jobs, env, extra, gpus=gpus or None, coverage=data, timeout=args.timeout)
     code = report(outcomes, time.monotonic() - start, args.durations)
     return (coverage_report(data) or code) if data is not None else code
 
