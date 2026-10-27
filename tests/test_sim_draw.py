@@ -15,7 +15,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from robosimstudio.sim.draw import PAGE_TITLE, title_page
+from robosimstudio.sim.draw import title_page
 
 TIER = "fast"
 """CPU only: a stand-in studio session and a stand-in viser server."""
@@ -73,7 +73,6 @@ class TestTheTabIsNamed(unittest.TestCase):
         queued = []
         server = SimpleNamespace(_websock_server=SimpleNamespace(queue_message=queued.append))
         title_page(server)
-        self.assertEqual(PAGE_TITLE, "RoboSimStudio")
         (message,) = queued
         self.assertIsInstance(message, _messages.RunJavascriptMessage)
         self.assertEqual(message.source, 'document.title = "RoboSimStudio";')

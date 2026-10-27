@@ -28,10 +28,10 @@ import unittest
 
 from robosimstudio.assetlib.interface import DIRECTION, POINT, facet, interface
 from robosimstudio.assetlib.record import AssetRecord
-from robosimstudio.assetlib.registry import get_asset, list_assets
+from robosimstudio.assetlib.registry import get_asset
 from robosimstudio.assetlib.semantics.features import FeatureSpec
 from robosimstudio.assetlib.sim import SimRequirements
-from tests.fixtures.content import needs_content_assets
+from tests.fixtures.content import corpus, needs_content_assets
 
 TIER = "fast"
 """No GPU, no scene. Gates every commit."""
@@ -219,13 +219,12 @@ class TestABespokeKindIsLegalAndSaysSo(unittest.TestCase):
         self.assertEqual(self.iface.facets[0].contracts, ())
 
 
-@needs_content_assets
 class TestTheWholeCorpusReadsWithoutAssumingAShape(unittest.TestCase):
     """The sweep. Every shipped asset, parsed on its own terms.
 
     The corpus is content's -- the library declares no record of its own -- so
-    on a tree with no collection this class skips rather than sweep nothing and
-    call it a pass; the synthetic half above is the whole of the claim there.
+    on a tree with no collection the sweeps read one synthetic record instead of
+    nothing, and the two that name a shipped asset skip.
 
     Structural on purpose: the point is not that any one asset is right, it is
     that a single reader survives twelve kinds and three tiers across assets that
@@ -234,24 +233,28 @@ class TestTheWholeCorpusReadsWithoutAssumingAShape(unittest.TestCase):
     """
 
     def test_every_registered_asset_parses(self) -> None:
-        for name in list_assets():
-            with self.subTest(name):
-                iface = interface(get_asset(name))
-                self.assertEqual(len(iface.facets), len(get_asset(name).features))
+        with corpus() as names:
+            for name in names:
+                with self.subTest(name):
+                    iface = interface(get_asset(name))
+                    self.assertEqual(len(iface.facets), len(get_asset(name).features))
 
     def test_the_corpus_declares_nothing_undeclared(self) -> None:
         """What the checker already refuses, asserted where it is visible."""
-        for name in list_assets():
-            for parsed in interface(get_asset(name)).facets:
-                with self.subTest(f"{name}.{parsed.name}"):
-                    self.assertEqual(parsed.extra, ())
-                    self.assertEqual(parsed.missing, ())
+        with corpus() as names:
+            for name in names:
+                for parsed in interface(get_asset(name)).facets:
+                    with self.subTest(f"{name}.{parsed.name}"):
+                        self.assertEqual(parsed.extra, ())
+                        self.assertEqual(parsed.missing, ())
 
+    @needs_content_assets
     def test_a_facet_is_reachable_by_name_and_by_kind(self) -> None:
         port = interface(get_asset("usb_c_port"))
         self.assertEqual(port.facet("bore").kind, "cavity")
         self.assertEqual([f.name for f in port.of_kind("cavity")], ["bore"])
 
+    @needs_content_assets
     def test_asking_for_a_feature_an_asset_lacks_names_what_it_has(self) -> None:
         port = interface(get_asset("usb_c_port"))
         with self.assertRaises(KeyError) as caught:

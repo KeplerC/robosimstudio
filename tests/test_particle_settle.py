@@ -9,13 +9,12 @@ them leaves them with an unsettled rest to reset to.
 
 from __future__ import annotations
 
-import ast
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
 TIER = "fast"
-"""Stand-in things and a stand-in pipeline, and two example sources read: no GPU."""
+"""Stand-in things and a stand-in pipeline, and the two tutorial kinds imported without a build: no GPU."""
 
 
 def _thing(name: str = "towel", log: list | None = None, run: tuple[int, int] | None = None):
@@ -70,32 +69,50 @@ class TestJoinSettle(unittest.TestCase):
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
 TUTORIALS = (
     ROOT / "examples" / "01_cloth" / "04_your_own_cloth.py",
     ROOT / "examples" / "02_soft" / "02_your_own_soft.py",
 )
 
 
-def _called(path: Path) -> set[str]:
-    """The ``self.<name>(...)`` calls inside each ``on_scene_ready`` in ``path``."""
-    names: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text())):
-        if isinstance(node, ast.FunctionDef) and node.name == "on_scene_ready":
-            for call in ast.walk(node):
-                if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute):
-                    names.add(call.func.attr)
-    return names
+def _tutorial_thing(path: Path):
+    """The tutorial's own particle kind, made without a build: its ``snapshot_rest`` counts, and nothing else stands in."""
+    import importlib.util
+
+    from robosimstudio.domains.capabilities import ParticleMixin
+
+    spec = importlib.util.spec_from_file_location(f"_tutorial_{path.stem}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    (kind,) = [
+        value
+        for value in vars(module).values()
+        if isinstance(value, type) and issubclass(value, ParticleMixin) and value.__module__ == module.__name__
+    ]
+    thing = kind.__new__(kind)
+    thing.snapshots = 0
+
+    def snapshot_rest(pipeline) -> None:
+        del pipeline
+        thing.snapshots += 1
+
+    thing.snapshot_rest = snapshot_rest
+    return thing
 
 
 class TestTutorialsJoinSettle(unittest.TestCase):
     def test_each_tutorial_joins_and_does_not_snapshot_alone(self) -> None:
+        """Ready after a settled sheet, the tutorial thing lands on the record and is re-baselined by the next join."""
         for path in TUTORIALS:
             with self.subTest(path=path.name):
-                called = _called(path)
-                self.assertIn("join_settle", called)
-                self.assertNotIn("snapshot_rest", called)
+                pipeline = SimpleNamespace()
+                sheet, mine, later = _thing(), _tutorial_thing(path), _thing()
+                sheet.join_settle(pipeline, (10, 4))
+                mine.on_scene_ready(pipeline)
+                self.assertIn(mine, pipeline.particle_settles["things"], "on the scene's one settle record")
+                later.join_settle(pipeline, (20, 4))
+                self.assertEqual(2, mine.snapshots, "re-baselined once on joining and again after the later settle")
+                self.assertIsNone(mine.settle_run, "it joins without a run of its own")
 
 
 if __name__ == "__main__":

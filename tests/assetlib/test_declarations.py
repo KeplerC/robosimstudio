@@ -34,7 +34,7 @@ from robosimstudio.assetlib.semantics import (
     list_kinds,
 )
 from robosimstudio.assetlib.sim import contacts_with
-from tests.fixtures.content import HAS_CONTENT_ASSETS, needs_content_assets
+from tests.fixtures.content import HAS_CONTENT_ASSETS, corpus, needs_content_assets
 from tests.fixtures.packs import needs_rod_pack
 
 TIER = "fast"
@@ -59,52 +59,51 @@ class TestTheShippedAssets(unittest.TestCase):
             get_asset("towel")
         self.assertIn("registered: []", str(caught.exception))
 
-    @needs_content_assets
     def test_every_asset_validates(self) -> None:
         """Registration already refuses a malformed asset; this proves the
         registry did not simply fail to load any."""
-        for name in list_assets():
-            with self.subTest(asset=name):
-                self.assertEqual(get_asset(name).problems(), [])
+        with corpus() as names:
+            for name in names:
+                with self.subTest(asset=name):
+                    self.assertEqual(get_asset(name).problems(), [])
 
-    @needs_content_assets
     def test_every_asset_has_a_known_substrate(self) -> None:
-        for name in list_assets():
-            with self.subTest(asset=name):
-                self.assertTrue(is_substrate(get_asset(name).substrate))
+        with corpus() as names:
+            for name in names:
+                with self.subTest(asset=name):
+                    self.assertTrue(is_substrate(get_asset(name).substrate))
 
-    @needs_content_assets
     def test_every_feature_kind_is_registered(self) -> None:
         """An unregistered kind is *legal* -- bespoke per-object features are the
         point of an open set -- but nothing shipped should need one. A shipped
         asset reaching for an uncontracted kind means a kind is missing from the
         library, not that the asset is special."""
-        for name in list_assets():
-            for spec in get_asset(name).features:
-                with self.subTest(asset=name, feature=spec.name):
-                    self.assertTrue(is_registered_kind(spec.kind), f"{spec.kind!r} has no contract")
+        with corpus() as names:
+            for name in names:
+                for spec in get_asset(name).features:
+                    with self.subTest(asset=name, feature=spec.name):
+                        self.assertTrue(is_registered_kind(spec.kind), f"{spec.kind!r} has no contract")
 
-    @needs_content_assets
     def test_every_state_says_where_its_number_came_from(self) -> None:
         """A threshold whose justification survives only as a comment is a
         threshold nothing can check -- and these will be read by an agent
         deciding whether its task is expressible, which is a worse audience for
         folklore than a human reviewer."""
-        for name in list_assets():
-            for state in get_asset(name).states:
-                with self.subTest(asset=name, state=state.name):
-                    self.assertTrue(state.provenance, "state gates carry provenance")
+        with corpus() as names:
+            for name in names:
+                for state in get_asset(name).states:
+                    with self.subTest(asset=name, state=state.name):
+                        self.assertTrue(state.provenance, "state gates carry provenance")
 
-    @needs_content_assets
     def test_every_asset_is_json_able(self) -> None:
         """The catalog form is what an agent reads, so it must survive the trip."""
         import json
 
-        for name in list_assets():
-            with self.subTest(asset=name):
-                self.assertIsInstance(json.dumps(asset_to_dict(get_asset(name))), str)
+        with corpus() as names:
+            for name in names:
+                with self.subTest(asset=name):
+                    self.assertIsInstance(json.dumps(asset_to_dict(get_asset(name))), str)
 
-    @needs_content_assets
     def test_the_catalog_names_no_machine_path(self) -> None:
         """Files resolved beside their declaration load absolute; the catalog lists them relative.
 
@@ -113,10 +112,11 @@ class TestTheShippedAssets(unittest.TestCase):
         """
         from pathlib import Path
 
-        for name in list_assets():
-            for key, path in asset_to_dict(get_asset(name)).get("files", {}).items():
-                with self.subTest(asset=name, file=key):
-                    self.assertFalse(Path(path).is_absolute(), path)
+        with corpus() as names:
+            for name in names:
+                for key, path in asset_to_dict(get_asset(name)).get("files", {}).items():
+                    with self.subTest(asset=name, file=key):
+                        self.assertFalse(Path(path).is_absolute(), path)
 
     def test_a_file_beside_its_declaration_is_listed_relative_to_it(self) -> None:
         from types import SimpleNamespace
@@ -182,19 +182,23 @@ class TestTheCatalogAnswersUsefully(unittest.TestCase):
             get_asset("teapot")
         self.assertIn("cable_rod" if HAS_CONTENT_ASSETS else "registered: []", str(caught.exception))
 
-    @needs_content_assets
     def test_a_missing_feature_names_what_the_asset_offers(self) -> None:
-        with self.assertRaises(KeyError) as caught:
-            get_asset("towel").feature("sleeve")
+        with corpus() as names:
+            asset = next(get_asset(name) for name in names if get_asset(name).features)
+            with self.assertRaises(KeyError) as caught:
+                asset.feature("sleeve")
         message = str(caught.exception)
         self.assertIn("sleeve", message)
-        self.assertIn("grasp", message)
+        self.assertIn(asset.features[0].name, message)
 
-    @needs_content_assets
     def test_features_are_findable_by_kind(self) -> None:
         """How a handler's dispatch asks the question."""
-        self.assertTrue(get_asset("cable_peg").features_of_kind("rod"))
-        self.assertEqual(get_asset("cable_peg").features_of_kind("bond_field"), ())
+        with corpus() as names:
+            asset = next(get_asset(name) for name in names if get_asset(name).features)
+        kind = asset.features[0].kind
+        self.assertIn(asset.features[0], asset.features_of_kind(kind))
+        self.assertTrue(all(spec.kind == kind for spec in asset.features_of_kind(kind)))
+        self.assertEqual(asset.features_of_kind("no_such_kind"), ())
 
 
 @needs_content_assets
