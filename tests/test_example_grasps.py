@@ -30,7 +30,7 @@ class TestTheRigidExampleLiftsTheCube(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.sim, kwargs = _run("00_getting_started/00_hello_world.py")
-        cls.session = open_session(cls.sim, 8961, kwargs.get("page"))
+        cls.session = open_session(cls.sim, 0, kwargs.get("page"))
         tick(cls.session, 50)  # the cube lands under the hand
         cube = cls.sim["cube"]
         cls.lying = np.asarray(cube.position, dtype=np.float64)

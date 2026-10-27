@@ -38,7 +38,7 @@ class TestTheSpongeExampleLiftsTheSponge(unittest.TestCase):
         from tests.fixtures.grasp import drag_to_grasp, open_session, tick
 
         cls.sim, kwargs = _run("02_soft/00_sponge.py")
-        cls.session = open_session(cls.sim, 9311, kwargs.get("page"))
+        cls.session = open_session(cls.sim, 0, kwargs.get("page"))
         tick(cls.session, 30)  # the foam settles on the bench
         sponge = cls.sim["sponge"]
         cls.lying = np.asarray(sponge.particle_q, dtype=np.float64)

@@ -15,16 +15,21 @@ Importing this module imports nothing of the library.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["Grasp", "drag_to_grasp", "go", "open_session", "tick"]
+__all__ = ["Grasp", "drag_to_grasp", "go", "note", "open_session", "tick"]
 
 
-def open_session(sim, port: int, page: Callable | None = None):
-    """A studio session on ``sim`` with the page an example opens, and no browser, pacing or tunnel."""
+def open_session(sim, port: int = 0, page: Callable | None = None):
+    """A studio session on ``sim`` with the page an example opens, and no browser, pacing or tunnel.
+
+    ``port`` 0, the default, lets the system pick a free one: a fixed port collides
+    with whatever else is serving on the machine, or with another worker's session.
+    """
     from robosimstudio_studio.session import StudioConfig, StudioSession
 
     session = StudioSession(sim, config=StudioConfig(port=port, panels="drive", speed="max", live=False))
@@ -32,6 +37,14 @@ def open_session(sim, port: int, page: Callable | None = None):
         page(session)
     session.begin_run()
     return session
+
+
+def note(what: str) -> None:
+    """Report a measurement rather than assert it: wall-clock time, which whatever else runs on the card moves.
+
+    On stderr, where ``python -m unittest`` and the tier runner's failure output both show it.
+    """
+    print(f"note: {what}", file=sys.stderr, flush=True)
 
 
 def tick(session, steps: int) -> None:

@@ -26,12 +26,17 @@ wherever it is installed and does not count when it is only lying somewhere.
 
 from __future__ import annotations
 
+import ast
+import functools
 import importlib.util
 import os
 import unittest
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 __all__ = [
     "HAS_ROD_PACK",
@@ -40,8 +45,11 @@ __all__ = [
     "PYTHON_FLAGS",
     "env_without",
     "has_pack",
+    "imports",
+    "in_parallel",
     "materials_without",
     "needs_rod_pack",
+    "once",
 ]
 
 MATERIALS = Path(__file__).resolve().parents[2] / "robosimstudio_materials"
@@ -111,6 +119,88 @@ def env_without(stack: ExitStack, *names: str) -> dict[str, str]:
         "PYTHONPATH": os.pathsep.join(p for p in (str(site), inherited) if p),
         "CUDA_VISIBLE_DEVICES": "",
     }
+
+
+def _package_of(path: Path) -> list[str]:
+    """The dotted package ``path`` is a module of, as parts: every directory up that holds an ``__init__.py``."""
+    parts: list[str] = []
+    here = path.parent
+    while (here / "__init__.py").is_file():
+        parts.insert(0, here.name)
+        here = here.parent
+    return parts
+
+
+def imports(path: Path) -> list[tuple[str, int]]:
+    """Every module an ``import`` statement in ``path`` names, at any scope, with its line.
+
+    Absolute names, always: a relative import is resolved against the package
+    ``path`` lies in (read off the ``__init__.py`` files above it), so ``from
+    .cloth import resolve_selector`` inside a function of ``soft.py`` reads as
+    ``robosimstudio_materials.cloth`` -- the import the stand-alone law exists to
+    catch, and the one a check that matched only absolute names let through.
+    ``from a import b`` names ``a`` and, since ``b`` may be a module, ``a.b``
+    too: ``from . import cloth`` is an import of the cloth kind.
+    """
+    found: list[tuple[str, int]] = []
+    package = _package_of(path)
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            found.extend((alias.name, node.lineno) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                if node.level > len(package):
+                    raise ValueError(f"{path}:{node.lineno}: a relative import above the top package")
+                base = ".".join([*package[: len(package) - node.level + 1], *filter(None, [node.module])])
+            else:
+                base = node.module or ""
+            found.append((base, node.lineno))
+            found.extend((f"{base}.{alias.name}", node.lineno) for alias in node.names if alias.name != "*")
+    return found
+
+
+def in_parallel[T, R](fn: Callable[[T], R], items: Iterable[T]) -> list[R]:
+    """``[fn(item) for item in items]``, a few at a time on threads of their own, in order.
+
+    For the claims that are each about a fresh *process*: every one still gets
+    a process of its own, but several run at once rather than one after
+    another. Bounded -- a quarter of the machine's CPUs, never fewer than two
+    nor more than eight -- because a tier already runs a module per worker, and
+    a module that started all of its eighteen interpreters together would be
+    eighteen more.
+    """
+    items = list(items)
+    if not items:
+        return []
+    workers = min(len(items), max(2, (os.cpu_count() or 1) // 4), 8)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(fn, items))
+
+
+def once[R](fn: Callable[[], R]) -> Callable[[], R]:
+    """``fn``, run on the first call only, its answer -- or the exception it raised -- kept for every later one.
+
+    ``functools.cache`` keeps an answer but not a failure, so a module whose
+    fresh processes timed out once would start every one of them again for
+    each test that asks.
+    """
+    kept: list[tuple[bool, Any]] = []
+
+    @functools.wraps(fn)
+    def wrapper() -> R:
+        if not kept:
+            try:
+                kept.append((True, fn()))
+            except Exception as exc:
+                kept.append((False, exc))
+        ok, value = kept[0]
+        if not ok:
+            # A new exception each time, chained to the kept one: raising the kept
+            # object again would grow its traceback with every test that asks.
+            raise RuntimeError(f"{fn.__name__} failed on its first call: {value!r}") from value
+        return value
+
+    return wrapper
 
 
 HAS_ROD_PACK = has_pack("rod")

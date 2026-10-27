@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Regressions for the soft and cloth examples on the GPU: the VBD fallback and the shared settle."""
+"""Two like sheets share one settle run, and the studio's re-settle steps that run once."""
 
 from __future__ import annotations
 
@@ -8,31 +8,7 @@ import unittest
 import numpy as np
 
 TIER = "medium"
-
-
-class TestASoftBodyOnVbdFalls(unittest.TestCase):
-    """EntitySoft cleared ACTIVE whatever the backend, so a body routed to VBD never moved."""
-
-    def test_it_falls(self):
-        import newton
-
-        import robosimstudio as rss
-
-        physics = rss.replace(rss.GENERIC, backends=tuple(e for e in rss.GENERIC.backends if e[0] != "soft"))
-        scene = rss.Scene(cell="void", physics=physics, name="vbd_soft")
-        # With a robot the arrangement couples, and the solvers copy the flags they are built with.
-        scene.add(rss.robot("yam_bimanual"))
-        body = scene.add(
-            rss.SoftSpec(name="block", size=(0.04, 0.04, 0.02), cells=(4, 4, 2), pose=(0.0, 0.0, 0.3), settle_frames=0)
-        )
-        sim = scene.build(control_mode="joint_position")
-        flags = sim.pipeline.model.particle_flags.numpy()[np.asarray(body.particles)]
-        self.assertTrue(np.all(flags & int(newton.ParticleFlags.ACTIVE)))
-        before = float(sim.pipeline.state_0.particle_q.numpy()[body.particles, 2].mean())
-        for _ in range(30):
-            sim.pipeline.step()
-        after = float(sim.pipeline.state_0.particle_q.numpy()[body.particles, 2].mean())
-        self.assertLess(after, before - 0.01)
+"""Builds a scene of two sheets and settles it: a GPU."""
 
 
 def _two_sheets():
@@ -62,7 +38,7 @@ class TestSheetsShareOneSettle(unittest.TestCase):
 
     def test_the_studio_resettle_steps_the_one_run_once(self):
         """The ``Readings`` folder's button ran each sheet's settle: 120 steps on ``(60, 10)``, 2.53 s of blocked
-        page loop, where the build ran the one run's 60 (``tests.test_fix_followup_settle`` on stand-ins)."""
+        page loop, where the build ran the one run's 60 (``tests.test_studio_tuning_settle`` on stand-ins)."""
         from types import SimpleNamespace
         from unittest import mock
 

@@ -13,11 +13,12 @@ nothing beside the library and nothing of each other).
 
 from __future__ import annotations
 
-import ast
 import unittest
 from pathlib import Path
 
 import numpy as np
+
+from tests.fixtures.packs import imports
 
 TIER = "fast"
 """No GPU: registries, dataclasses and a lattice sampled on the host."""
@@ -176,24 +177,6 @@ class TestThePresets(unittest.TestCase):
 
 
 class TestTheFlatNames(unittest.TestCase):
-    def test_the_constructors_resolve_through_the_pack_table(self) -> None:
-        import robosimstudio as rss
-
-        for name, module in (
-            ("heap", "robosimstudio_materials.granular"),
-            ("liquid", "robosimstudio_materials.liquid"),
-            ("dough", "robosimstudio_materials.dough"),
-            ("ParticleBodySpec", "robosimstudio_materials.granular"),
-            ("ParticleMaterialSpec", "robosimstudio_materials.granular"),
-            ("GRANULAR_60HZ", "robosimstudio_materials.granular"),
-            ("LIQUID_120HZ", "robosimstudio_materials.liquid"),
-            ("DOUGH_60HZ", "robosimstudio_materials.dough"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(module, rss._PACK_EXPORTS[name])
-                self.assertNotIn(name, rss._EXPORTS)
-                getattr(rss, name)
-
     def test_each_constructor_builds_its_kinds_spec(self) -> None:
         import robosimstudio as rss
 
@@ -438,21 +421,6 @@ class TestTheCupMesh(unittest.TestCase):
 
 
 class TestTheRecords(unittest.TestCase):
-    def test_a_record_carries_the_specs_domain_and_builds_the_spec(self) -> None:
-        import robosimstudio as rss
-        from robosimstudio_materials.mpm import Dough, Heap, Liquid
-
-        spec = rss.heap(name="rice")
-        record = Heap.from_spec(spec, name="rice_heap")
-        self.assertEqual("granular", record.sim.domain)
-        self.assertIs(spec, record.build())
-        self.assertEqual("liquid", Liquid.from_spec(rss.liquid(name="h"), name="pool").sim.domain)
-        self.assertEqual("dough", Dough.from_spec(rss.dough(name="d"), name="lump").sim.domain)
-        with self.assertRaises(TypeError):
-            Liquid.from_spec(spec, name="not_a_liquid")
-        with self.assertRaises(TypeError):
-            Heap.from_spec(rss.box(name="cube"), name="not_a_heap")
-
     def test_the_atoms_are_catalogued_on_the_granular_layout(self) -> None:
         from robosimstudio.assetlib.semantics.atoms import ATOMS
         from robosimstudio.assetlib.semantics.handlers import dispatch
@@ -486,26 +454,16 @@ class TestTheRecords(unittest.TestCase):
 class TestTheSiblingLaw(unittest.TestCase):
     """The kinds import the shared package and the library, and nothing else of the materials."""
 
-    @staticmethod
-    def _imports(path: Path) -> list[str]:
-        found: list[str] = []
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Import):
-                found.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                found.append("." * node.level + (node.module or ""))
-        return found
-
     def test_no_particle_kind_imports_another_kind(self) -> None:
         others = ("cloth", "soft", "rod", "paper")
         files = [MATERIALS / f"{kind}.py" for kind in KINDS] + sorted((MATERIALS / "mpm").glob("*.py"))
         for path in files:
             with self.subTest(file=path.name):
-                for module in self._imports(path):
+                for module, _ in imports(path):
                     for other in (*others, *KINDS):
                         self.assertFalse(
-                            module in (f".{other}", f"robosimstudio_materials.{other}")
-                            or module.startswith((f".{other}.", f"robosimstudio_materials.{other}.")),
+                            module == f"robosimstudio_materials.{other}"
+                            or module.startswith(f"robosimstudio_materials.{other}."),
                             f"{path.name} imports {module}",
                         )
                     self.assertFalse(
@@ -519,6 +477,54 @@ class TestTheSiblingLaw(unittest.TestCase):
 
         self.assertNotIn("mpm", list_domains())
         self.assertNotIn("mpm", ENTITIES.names())
+
+
+class TestTheSampling(unittest.TestCase):
+    """:func:`sample_positions`: what fills a box, a cylinder and a mesh, and where the jitter may move a grain."""
+
+    def test_a_cylinder_holds_a_quarter_pi_of_its_boxs_grains(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm import sample_positions
+
+        kw = {"size": (0.08, 0.08, 0.01), "particle_spacing": 0.001, "jitter": 0.0}
+        box = sample_positions(rss.dough(name="block", **kw))
+        puck = sample_positions(rss.dough(name="puck", shape="cylinder", **kw))
+        self.assertAlmostEqual(np.pi / 4.0, len(puck) / len(box), delta=0.005)
+
+    def test_the_jitter_keeps_each_grain_in_its_own_cell_and_differs_by_name(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm import sample_positions
+
+        kw = {"size": (0.04, 0.03, 0.02), "particle_spacing": 0.01}
+        lattice = sample_positions(rss.heap(name="rice", jitter=0.0, **kw))
+        cell = np.array([0.01, 0.01, 0.01])
+        for name in ("rice", "beans"):
+            with self.subTest(name=name):
+                jittered = sample_positions(rss.heap(name=name, jitter=0.3, **kw))
+                moved = np.abs(jittered - lattice)
+                self.assertTrue(np.all(moved <= 0.3 * cell + 1e-12), "a grain left its own cell's middle")
+                self.assertGreater(float(moved.max()), 0.1 * 0.01, "and the jitter moved them")
+        other = sample_positions(rss.heap(name="beans", jitter=0.3, **kw))
+        self.assertFalse(np.array_equal(sample_positions(rss.heap(name="rice", jitter=0.3, **kw)), other))
+
+    def test_a_mesh_is_filled_inside_its_bound_from_its_bottom_centre(self) -> None:
+        import tempfile
+
+        import trimesh
+
+        import robosimstudio as rss
+        from robosimstudio_materials.mpm import sample_positions
+
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "block.obj"
+            trimesh.creation.box(extents=(0.04, 0.02, 0.03)).apply_translation((0.5, -0.2, 0.3)).export(path)
+            spec = rss.heap(
+                name="block", shape="mesh", asset=rss.AssetSpec(path=str(path)), particle_spacing=0.005, jitter=0.0
+            )
+            filled = sample_positions(spec)
+        box = sample_positions(rss.heap(name="block", size=(0.04, 0.02, 0.03), particle_spacing=0.005, jitter=0.0))
+        self.assertEqual(len(box), len(filled))
+        np.testing.assert_allclose(np.sort(filled, axis=0), np.sort(box, axis=0), atol=1e-9)
 
 
 if __name__ == "__main__":

@@ -50,6 +50,8 @@ __all__ = [
     "_path",
     "_run",
     "_stub_studio",
+    "scripts_module",
+    "scripts_modules",
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -185,6 +187,64 @@ def _load(rel: str):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+SCRIPTS = ROOT / "scripts"
+
+
+def _under_scripts(module) -> bool:
+    """Whether a module was loaded from ``scripts/``: its file, or a package's search path, lies there."""
+    places = [getattr(module, "__file__", None) or "", *list(getattr(module, "__path__", []) or [])]
+    return any(place and Path(place).resolve().is_relative_to(SCRIPTS) for place in places)
+
+
+@contextlib.contextmanager
+def scripts_modules(*names: str):
+    """Modules under ``scripts/`` by dotted name (``"recording.takes"``), importable while the block runs.
+
+    ``scripts/`` holds packages named like libraries (``recording``,
+    ``calibration``), and a tier runs in one process: a path entry or a module
+    left behind decides an import in every module that runs after this one. So
+    ``scripts/`` is on ``sys.path`` only inside the block, and on the way out
+    every module the block loaded from it is taken out of ``sys.modules`` again;
+    one already there before the block is someone else's, and stays. Inside the
+    block a module may import its siblings lazily, as ``recording.lockstep`` does;
+    a test that runs such code holds the block open (``cls.enterClassContext``).
+    """
+    scripts = str(SCRIPTS)
+    # A package of the same top-level name loaded from elsewhere would answer the
+    # import instead of scripts/: it steps aside for the block and comes back after.
+    tops = {name.split(".")[0] for name in names}
+    aside = {
+        key: module
+        for key, module in sys.modules.items()
+        if key.split(".")[0] in tops and module is not None and not _under_scripts(module)
+    }
+    for key in aside:
+        del sys.modules[key]
+    before = set(sys.modules)
+    sys.path.insert(0, scripts)
+    try:
+        yield tuple(importlib.import_module(name) for name in names)
+    finally:
+        if scripts in sys.path:
+            sys.path.remove(scripts)
+        for name in set(sys.modules) - before:
+            module = sys.modules.get(name)
+            if module is not None and _under_scripts(module):
+                del sys.modules[name]
+        sys.modules.update(aside)
+
+
+def scripts_module(name: str):
+    """One module under ``scripts/``, for a test that reads it and runs nothing that imports lazily.
+
+    The module object stays good after :func:`scripts_modules` has taken it out
+    of ``sys.modules``; a function in it that imports a sibling when called needs
+    the block held open instead.
+    """
+    with scripts_modules(name) as (module,):
+        return module
 
 
 def _run(rel: str):

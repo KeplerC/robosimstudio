@@ -39,7 +39,7 @@ class TestTheRopeExampleLiftsTheCable(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.sim, kwargs = _run("03_materials/00_rope.py")
-        cls.session = open_session(cls.sim, 9400, kwargs.get("page"))
+        cls.session = open_session(cls.sim, 0, kwargs.get("page"))
         tick(cls.session, 30)  # the cable lands on the bench
         bodies = np.asarray(cls.sim["cable"].bodies)
         middle = slice(len(bodies) // 2 - 1, len(bodies) // 2 + 1)  # the two capsules either side of it

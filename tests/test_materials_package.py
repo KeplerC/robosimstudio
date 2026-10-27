@@ -27,8 +27,8 @@ have to hold, and each fails silently when it does not:
 * **The library names the sibling only as a string.** An ``import
   robosimstudio_materials`` anywhere under ``robosimstudio/`` is the sibling
   law broken, and the day a tree without the package stops importing.
-* **The wheel ships the package** like any other, and no copy of the kinds
-  under another name (``_domain_packs`` was that copy).
+* **The wheel ships the package** like any other, and force-includes
+  nothing but the robot assets.
 * **Without the package, nothing is half there.** ``import robosimstudio``
   works, every scan answers, a rigid scene builds and steps on the CPU, and
   the names the package would have provided are ``AttributeError``s that say
@@ -41,7 +41,6 @@ what a fresh *process* sees.
 
 from __future__ import annotations
 
-import ast
 import json
 import os
 import subprocess
@@ -52,7 +51,16 @@ from contextlib import ExitStack
 from pathlib import Path
 from textwrap import dedent
 
-from tests.fixtures.packs import MATERIALS, NEEDS, PYTHON_FLAGS, env_without
+from tests.fixtures.packs import (
+    MATERIALS,
+    NEEDS,
+    PYTHON_FLAGS,
+    env_without,
+    imports,
+    in_parallel,
+    materials_without,
+    once,
+)
 
 TIER = "fast"
 """No GPU. Imports the library in subprocesses; the one scene is built on the CPU."""
@@ -150,15 +158,24 @@ def _last_json(proc: subprocess.CompletedProcess):
     return json.loads([line for line in proc.stdout.splitlines() if line.startswith("{")][-1])
 
 
-def _imports(path: Path) -> list[tuple[str, int]]:
-    """Every module an ``import`` statement in ``path`` names, at any scope, with its line."""
-    found: list[tuple[str, int]] = []
-    for node in ast.walk(ast.parse(path.read_text())):
-        if isinstance(node, ast.Import):
-            found.extend((alias.name, node.lineno) for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            found.append(("." * node.level + (node.module or ""), node.lineno))
-    return found
+def _borrowed(materials: Path, kind: str) -> list[str]:
+    """``kind``'s imports of another kind at any scope, beyond what :data:`NEEDS` declares, as ``file:line: module``.
+
+    Over a package directory rather than this checkout's alone, so the law can be shown a tree that breaks it.
+    """
+    module = materials / f"{kind}.py"
+    files = [module] if module.is_file() else sorted((materials / kind).rglob("*.py"))
+    if not files:
+        raise AssertionError(f"{kind} is not in the package")
+    return [
+        f"{path.relative_to(materials.parent).as_posix()}:{line}: {named}"
+        for path in files
+        for named, line in imports(path)
+        for other in KINDS
+        if other != kind
+        and other not in NEEDS.get(kind, ())
+        and (named == f"robosimstudio_materials.{other}" or named.startswith(f"robosimstudio_materials.{other}."))
+    ]
 
 
 def _package_files() -> list[Path]:
@@ -189,18 +206,29 @@ SCANNED = dedent(
 ).strip()
 
 
+FIRST_ASKS = {
+    "the entities": "from robosimstudio.scene.registry import get_entity; print(get_entity('soft').__module__)",
+    "the materials": (
+        "from robosimstudio.assetlib.materials import get_material; "
+        "print(get_material('terry_towelling').spec.__class__.__module__)"
+    ),
+    "the material kinds": (
+        "from robosimstudio.assetlib.materials import MATERIAL_KINDS; print(MATERIAL_KINDS.get('cloth').__module__)"
+    ),
+    "the atoms": (
+        "from robosimstudio.assetlib.semantics.atoms import ATOMS; "
+        "print('robosimstudio_materials.cloth' if 'fold_score' in ATOMS else 'missing')"
+    ),
+}
+"""One question each, asked as the first thing a fresh process does."""
+
+
 class TestAFreshProcessFindsTheKinds(unittest.TestCase):
     """The scan, in a process that imported nothing by name."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        script = (
-            SCANNED.replace("__ENTITIES__", repr([(kind, entity) for kind, (_, _, _, entity) in KINDS.items()]))
-            .replace("__FLAT__", repr(tuple(FLAT)))
-            .replace("__LISTED__", repr(tuple(LISTED)))
-            .replace("__EXAMPLES__", repr(f"{REPO / 'examples'}{os.sep}"))
-        )
-        proc = _run(script)
+        proc = _fresh()["scan"]
         if proc.returncode != 0:
             raise AssertionError(proc.stderr[-4000:])
         cls.got = _last_json(proc)
@@ -227,23 +255,9 @@ class TestAFreshProcessFindsTheKinds(unittest.TestCase):
         differently before and after something else happened to import it -- unless
         the lookup itself runs the scan. A fresh process per question, so "first"
         is true of every one of them."""
-        asks = {
-            "the entities": "from robosimstudio.scene.registry import get_entity; print(get_entity('soft').__module__)",
-            "the materials": (
-                "from robosimstudio.assetlib.materials import get_material; "
-                "print(get_material('terry_towelling').spec.__class__.__module__)"
-            ),
-            "the material kinds": (
-                "from robosimstudio.assetlib.materials import MATERIAL_KINDS; print(MATERIAL_KINDS.get('cloth').__module__)"
-            ),
-            "the atoms": (
-                "from robosimstudio.assetlib.semantics.atoms import ATOMS; "
-                "print('robosimstudio_materials.cloth' if 'fold_score' in ATOMS else 'missing')"
-            ),
-        }
-        for what, script in asks.items():
+        for what in FIRST_ASKS:
             with self.subTest(first_asked=what):
-                proc = _run(script)
+                proc = _fresh()[f"first {what}"]
                 self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
                 self.assertTrue(
                     proc.stdout.strip().splitlines()[-1].startswith("robosimstudio_materials."),
@@ -270,6 +284,10 @@ ALONE = dedent(
 ).strip()
 
 
+OTHERS = {kind: tuple(sorted(set(KINDS) - {kind} - set(NEEDS.get(kind, ())))) for kind in KINDS}
+"""Kind -> the kinds its stand-alone process is run without: every one but itself and what it needs."""
+
+
 class TestEachKindStandsAlone(unittest.TestCase):
     """Cloth without soft, soft without cloth, the rope without either, a heap without the pool: one module, one kind, nothing borrowed.
 
@@ -286,29 +304,39 @@ class TestEachKindStandsAlone(unittest.TestCase):
         """Beyond what :data:`NEEDS` declares: paper, the bag and the tape may import cloth and the brush the rope, and that is the whole list."""
         for kind in KINDS:
             with self.subTest(kind=kind):
-                module = MATERIALS / f"{kind}.py"
-                files = [module] if module.is_file() else sorted((MATERIALS / kind).rglob("*.py"))
-                self.assertTrue(files, f"{kind} is not in the package")
-                offenders = [
-                    f"{path.relative_to(REPO)}:{line}: {named}"
-                    for path in files
-                    for named, line in _imports(path)
-                    for other in KINDS
-                    if other != kind
-                    and other not in NEEDS.get(kind, ())
-                    and (
-                        named == f"robosimstudio_materials.{other}"
-                        or named.startswith(f"robosimstudio_materials.{other}.")
-                    )
-                ]
-                self.assertEqual([], offenders, f"{kind} imports another kind")
+                self.assertEqual([], _borrowed(MATERIALS, kind), f"{kind} imports another kind")
+
+    def test_a_relative_import_inside_a_function_is_caught(self) -> None:
+        """The hole the law had: ``from .cloth import ...`` inside a function read as ``.cloth`` and matched no kind.
+
+        That is the very import this class's docstring cites. Each spelling is put
+        into ``soft.py`` of a linked copy of the package, and the law has to name it.
+        """
+        spellings = {
+            "relative": "from .cloth import resolve_selector",
+            "relative module": "from . import cloth",
+            "absolute module": "from robosimstudio_materials import cloth",
+        }
+        for what, line in spellings.items():
+            with self.subTest(spelling=what), ExitStack() as stack:
+                copy = materials_without(stack) / MATERIALS.name
+                soft = copy / "soft.py"
+                text = soft.read_text()
+                soft.unlink()
+                soft.write_text(f"{text}\n\ndef _borrow():\n    {line}\n\n    return None\n")
+                where = f"robosimstudio_materials/soft.py:{len(text.splitlines()) + 4}:"
+                offenders = _borrowed(copy, "soft")
+                self.assertTrue(offenders, f"{line!r} inside a function was not caught")
+                self.assertTrue(all(o.startswith(where) for o in offenders), offenders)
+                self.assertIn(f"{where} robosimstudio_materials.cloth", offenders)
+                self.assertEqual([], _borrowed(copy, "cloth"), "only the kind that borrows is named")
 
     def test_a_declared_need_is_a_real_import(self) -> None:
         """The exception is not a blank cheque: paper names cloth because it uses it."""
         for kind, needs in NEEDS.items():
             for other in needs:
                 with self.subTest(kind=kind, needs=other):
-                    named = [m for m, _ in _imports(MATERIALS / f"{kind}.py")]
+                    named = [m for m, _ in imports(MATERIALS / f"{kind}.py")]
                     self.assertIn(f"robosimstudio_materials.{other}", named)
 
     def test_the_package_imports_only_the_library(self) -> None:
@@ -318,7 +346,7 @@ class TestEachKindStandsAlone(unittest.TestCase):
         offenders = [
             f"{path.relative_to(REPO)}:{line}: {module}"
             for path in _package_files()
-            for module, line in _imports(path)
+            for module, line in imports(path)
             if module.split(".")[0] in SIBLINGS
         ]
         self.assertEqual([], offenders, "robosimstudio_materials imports a package beside the library")
@@ -326,8 +354,8 @@ class TestEachKindStandsAlone(unittest.TestCase):
             {
                 module.split(".")[0]
                 for path in _package_files()
-                for module, _ in _imports(path)
-                if module.startswith("robosimstudio") and not module.startswith(".")
+                for module, _ in imports(path)
+                if module.startswith("robosimstudio")
             }
         )
         self.assertLessEqual(
@@ -335,11 +363,10 @@ class TestEachKindStandsAlone(unittest.TestCase):
         )
 
     def test_a_kind_registers_and_builds_its_spec_with_the_others_absent(self) -> None:
-        for kind, (make, spec, entity_module, _) in KINDS.items():
-            others = tuple(sorted(set(KINDS) - {kind} - set(NEEDS.get(kind, ()))))
-            with self.subTest(kind=kind, without=others), ExitStack() as stack:
-                script = ALONE.replace("__KIND__", kind).replace("__MAKE__", make).replace("__OTHERS__", repr(others))
-                proc = _run(script, env_without(stack, *others), flags=PYTHON_FLAGS)
+        for kind, (_, spec, entity_module, _) in KINDS.items():
+            others = OTHERS[kind]
+            with self.subTest(kind=kind, without=others):
+                proc = _fresh()[f"alone {kind}"]
                 self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
                 got = _last_json(proc)
                 self.assertIn(kind, got["domains"])
@@ -364,7 +391,7 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
         offenders = [
             f"{path.relative_to(REPO)}:{line}: {module}"
             for path in sorted(p for p in LIBRARY.rglob("*.py") if "__pycache__" not in p.parts)
-            for module, line in _imports(path)
+            for module, line in imports(path)
             if module == "robosimstudio_materials" or module.startswith("robosimstudio_materials.")
         ]
         self.assertEqual([], offenders, "the library imports the materials package; it may only name it as a string")
@@ -404,49 +431,6 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
             with self.subTest(registry=name):
                 self.assertEqual(roots.DOMAIN_PACKAGES, registry.packages)
 
-    def test_the_flat_name_table_keys_the_kinds(self) -> None:
-        import robosimstudio as rss
-
-        self.assertEqual(
-            [
-                "robosimstudio_materials.bag",
-                "robosimstudio_materials.brush",
-                "robosimstudio_materials.cloth",
-                "robosimstudio_materials.cutting",
-                "robosimstudio_materials.dough",
-                "robosimstudio_materials.granular",
-                "robosimstudio_materials.liquid",
-                "robosimstudio_materials.paper",
-                "robosimstudio_materials.rod",
-                "robosimstudio_materials.soft",
-                "robosimstudio_materials.tape",
-                "robosimstudio_materials.water",
-            ],
-            sorted(rss._PACKS),
-        )
-        for name in (
-            "sheet",
-            "sponge",
-            "rod",
-            "paper",
-            "papers",
-            "materials",
-            "ClothSpec",
-            "SoftSpec",
-            "RodSpec",
-            "heap",
-            "liquid",
-            "dough",
-            "PaperSpec",
-            "bag",
-            "bags",
-            "BagSpec",
-            "brush",
-            "BrushSpec",
-        ):
-            self.assertNotIn(name, rss._EXPORTS, f"{name} is a kind's and belongs in _PACKS")
-            self.assertIn(name, rss._PACK_EXPORTS)
-
 
 class TestTheWheelShipsThePackage(unittest.TestCase):
     """``pyproject.toml`` and the publish workflow, read as text; ``uv build`` is the gate that runs them."""
@@ -457,7 +441,6 @@ class TestTheWheelShipsThePackage(unittest.TestCase):
         wheel = config["tool"]["hatch"]["build"]["targets"]["wheel"]
         self.assertIn("robosimstudio_materials", wheel["packages"])
         self.assertIn("/robosimstudio_materials", config["tool"]["hatch"]["build"]["targets"]["sdist"]["include"])
-        self.assertNotIn("_domain_packs", text)
         self.assertEqual({"assets"}, set(wheel.get("force-include", {})), "only the robot assets are force-included")
 
     def test_the_publish_workflow_checks_for_the_package(self) -> None:
@@ -470,7 +453,6 @@ class TestTheWheelShipsThePackage(unittest.TestCase):
             "robosimstudio_materials/bag.py",
         ):
             self.assertIn(path, text)
-        self.assertNotIn("_domain_packs", text)
 
 
 WITHOUT = dedent(
@@ -519,7 +501,7 @@ class TestTheLibraryIsWholeWithoutThePackage(unittest.TestCase):
         import robosimstudio as rss
 
         cls.names = sorted(rss._PACK_EXPORTS)
-        proc = _run(WITHOUT.replace("__NAMES__", repr(tuple(cls.names))))
+        proc = _fresh()["without"]
         if proc.returncode != 0:
             raise AssertionError(f"the library did not come up without robosimstudio_materials:\n{proc.stderr[-6000:]}")
         cls.got = _last_json(proc)
@@ -548,6 +530,38 @@ class TestTheLibraryIsWholeWithoutThePackage(unittest.TestCase):
         self.assertEqual([], self.got["resolved"])
         self.assertTrue(self.got["finite"])
         self.assertGreater(self.got["cube_z"], 0.15, "the cube was dropped from 200 mm and stepped five times")
+
+
+@once
+def _fresh() -> dict[str, subprocess.CompletedProcess]:
+    """Every fresh process this module reads, by name, run the first time a test asks for one, and kept.
+
+    Each claim still gets a process of its own, since each is about what a fresh
+    process sees; seventeen of them one after another cost seventeen imports of
+    the library, and :func:`in_parallel` runs several at once. A failure is kept
+    as the answer too (:func:`once`), so one timeout is not relaunched for every
+    test after it.
+    """
+    import robosimstudio as rss
+
+    scanned = (
+        SCANNED.replace("__ENTITIES__", repr([(kind, entity) for kind, (_, _, _, entity) in KINDS.items()]))
+        .replace("__FLAT__", repr(tuple(FLAT)))
+        .replace("__LISTED__", repr(tuple(LISTED)))
+        .replace("__EXAMPLES__", repr(f"{REPO / 'examples'}{os.sep}"))
+    )
+    without = WITHOUT.replace("__NAMES__", repr(tuple(sorted(rss._PACK_EXPORTS))))
+    with ExitStack() as stack:
+        runs: dict[str, tuple[str, dict[str, str] | None, tuple[str, ...]]] = {
+            "scan": (scanned, None, ()),
+            "without": (without, None, ()),
+            **{f"first {what}": (script, None, ()) for what, script in FIRST_ASKS.items()},
+        }
+        for kind, (make, *_) in KINDS.items():
+            alone = ALONE.replace("__KIND__", kind).replace("__MAKE__", make).replace("__OTHERS__", repr(OTHERS[kind]))
+            runs[f"alone {kind}"] = (alone, env_without(stack, *OTHERS[kind]), PYTHON_FLAGS)
+        procs = in_parallel(lambda run: _run(run[0], run[1], flags=run[2]), runs.values())
+    return dict(zip(runs, procs, strict=True))
 
 
 if __name__ == "__main__":

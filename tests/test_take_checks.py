@@ -22,9 +22,14 @@ TIER = "fast"
 """Calls the take table's check functions on plain arrays."""
 
 REPO = Path(__file__).resolve().parents[1]
+# scripts/ holds packages named like libraries (recording, calibration), and a tier
+# runs in one process: its path entry comes off once these are imported. A later
+# lazy import of a sibling still resolves, through the package's own __path__.
 sys.path.insert(0, str(REPO / "scripts"))
-
-from recording import takes  # noqa: E402
+try:
+    from recording import takes
+finally:
+    sys.path.remove(str(REPO / "scripts"))
 
 
 def _twisted_cables(count: int, per_joint: float) -> SimpleNamespace:
