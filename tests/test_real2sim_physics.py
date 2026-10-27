@@ -1083,6 +1083,20 @@ class StudyLines(unittest.TestCase):
         runs["written"].pop("carried")
         self.assertIs(_words(physics.verdict(CLEAN, runs))["drop"], True)
 
+    def test_drop_and_heavy_leave_a_deformable_carry_unread(self) -> None:
+        runs = self._drop_runs(fell=True)
+        for r in ("written", "heavy"):
+            runs[r]["things"]["crate"]["moved_max_mm"] = 0.0
+            runs[r]["deformables"] = {"scrunchie": {**_thing(112.0), "end_mm": 8.0}}
+        runs["written"].pop("carried")
+        words = _words(physics.verdict(CLEAN, runs))
+        self.assertIsNone(words["drop"])
+        self.assertIsNone(words["heavy"])
+        runs["heavy"]["things"]["crate"]["moved_max_mm"] = runs["written"]["things"]["crate"]["moved_max_mm"] = 300.0
+        result = physics.verdict(CLEAN, runs)  # a rigid thing moved too: heavy reads it, and says what it left out
+        self.assertIs(_words(result)["heavy"], True)
+        self.assertIn("the rigid handled things 2 times as heavy (scrunchie: not)", result["report"])
+
     def test_drop_reads_a_fall_off_the_heights_after_the_release(self) -> None:
         # dropped right over where the written run set it down: it ends there too, but it fell while the written
         # run's hand still held it up

@@ -508,8 +508,9 @@ physics, so it works whichever way the routine was written. A replay other
 than `written` is cut a little past the written run's length (10%, at least
 25 steps) when its routine is still going: one waiting for a pose the frozen
 arm never reaches is read as not done. A routine's own checks stopping it is
-a reading, not an error: the line quotes them. A deformable is read by its particles; `built`
-and `heavy` change neither its friction nor its mass. `physics` resets the
+a reading, not an error: the line quotes them. A deformable is read by its own particles; `built`
+and `heavy` change neither its friction nor its mass, and `drop` follows only a rigid thing's carry,
+so where what moved is deformable `heavy` and `drop` are NOTEs that say so. `physics` resets the
 scene when it ends; it is refused while a routine plays.
 
 ### The take

@@ -2357,7 +2357,14 @@ def _drop_line(model: dict, runs: dict, written: dict, line: Any, axes: dict | N
         line(None, "drop", "not read: the written replay did not finish")
         return
     if not carried:
-        line(True, "drop", "nothing was lifted off its support, so nothing to release")
+        if soft := [k for k in _moved(written) if k in written.get("deformables", {})]:
+            line(
+                None,
+                "drop",
+                f"not read: what the routine moved is a deformable ({soft[0]}), and drop follows a rigid thing",
+            )
+        else:
+            line(True, "drop", "nothing was lifted off its support, so nothing to release")
         return
     if drop.get("held_rows") == 0:
         line(None, "drop", "not read: this hand has no fingers to open")
@@ -2871,8 +2878,17 @@ def verdict(model: dict, runs: dict[str, dict], settle_mm: float = SETTLE_MM) ->
     heavy = runs.get("heavy")
     if heavy:
         servo = " and the registered hand's own servo" if (heavy.get("lowered") or {}).get("servo") else ""
-        ok, detail, _ = held(heavy, f"the handled things {HEAVY:g} times as heavy{servo}")
-        line(True if ok else None, "heavy", detail if ok is not False else detail + " (the grasp's margin)")
+        soft = [k for k in names if k in written.get("deformables", {})]  # heavy scales only a body's mass
+        what = f"the rigid handled things {HEAVY:g} times as heavy ({', '.join(soft)}: not)" if soft else ""
+        ok, detail, _ = held(heavy, (what or f"the handled things {HEAVY:g} times as heavy") + servo)
+        if ok and soft and set(soft) == set(names):
+            line(
+                None,
+                "heavy",
+                f"not read: what the routine moved is a deformable ({soft[0]}), which heavy makes no heavier",
+            )
+        else:
+            line(True if ok else None, "heavy", detail if ok is not False else detail + " (the grasp's margin)")
     if written:
         grip = []
         for k in names:
