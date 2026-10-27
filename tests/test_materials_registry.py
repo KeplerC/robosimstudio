@@ -15,6 +15,9 @@ library's own tables have to equal this one:
 * **A record** made from one of its specs carries its domain and builds that
   very spec; handed another kind's spec, it refuses.
 * **Its materials** register under its kind, and a named one is the module's own value.
+
+A release may leave any kind out of the package; a row for a kind this
+checkout does not carry is a skipped subtest, never an import error.
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ from __future__ import annotations
 import importlib
 import unittest
 from typing import NamedTuple
+
+from tests.fixtures.packs import has_pack
 
 TIER = "fast"
 """Registries, records and specs: nothing is built, so no GPU."""
@@ -167,6 +172,23 @@ KIND_OF: dict[str, tuple[str, ...]] = {
 ``granular``: one spec, :class:`ParticleMaterialSpec`, for the three particle kinds."""
 
 
+REGISTERED_BY = {"granular": "mpm", "brush": "brush", "rod": "rod"}
+"""The module whose import registers each group of :data:`KIND_OF`: the particle presets are the shared ``mpm``'s."""
+
+PRESENT = {kind for kind, row in KINDS.items() if has_pack(row.module)}
+"""The kinds this checkout carries. A release may leave any of them out, and a test of one it left out skips."""
+
+
+def _kinds(test: unittest.TestCase):
+    """The rows of the kinds this checkout carries; each one it left out is a skipped subtest."""
+    for kind, row in KINDS.items():
+        if kind in PRESENT:
+            yield kind, row
+        else:
+            with test.subTest(kind=kind):
+                test.skipTest(f"robosimstudio_materials.{row.module} is not in this checkout")
+
+
 def _kind_module(kind: str):
     return importlib.import_module(f"robosimstudio_materials.{KINDS[kind].module}")
 
@@ -197,7 +219,7 @@ class TestTheFlatNames(unittest.TestCase):
     def test_each_flat_name_is_the_kinds_own_object(self) -> None:
         import robosimstudio as rss
 
-        for kind, row in KINDS.items():
+        for kind, row in _kinds(self):
             module = _kind_module(kind)
             for name in row.names:
                 with self.subTest(kind=kind, name=name):
@@ -209,15 +231,21 @@ class TestTheFlatNames(unittest.TestCase):
     def test_each_constructor_makes_a_spec_of_its_entity(self) -> None:
         import robosimstudio as rss
 
-        constructors = {"sheet": "cloth", "sponge": "soft", "rod": "rod", "heap": "heap", "liquid": "liquid"}
-        constructors |= {"dough": "dough", "roller": "roller", "paper": "paper", "bag": "bag", "brush": "brush"}
-        constructors |= {"tape": "tape", "cuttable": "cuttable", "knife": "knife", "water": "water"}
-        for name, entity in constructors.items():
+        constructors = {"sheet": ("cloth", "cloth"), "sponge": ("soft", "soft"), "rod": ("rod", "rod")}
+        constructors |= {"heap": ("granular", "heap"), "liquid": ("liquid", "liquid"), "dough": ("dough", "dough")}
+        constructors |= {"roller": ("dough", "roller"), "paper": ("paper", "paper"), "bag": ("bag", "bag")}
+        constructors |= {"brush": ("brush", "brush"), "tape": ("tape", "tape"), "water": ("water", "water")}
+        constructors |= {"cuttable": ("cutting", "cuttable"), "knife": ("cutting", "knife")}
+        for name, (kind, entity) in constructors.items():
             with self.subTest(constructor=name):
+                if kind not in PRESENT:
+                    self.skipTest(f"the {kind} kind is not in this checkout")
                 self.assertEqual(entity, getattr(rss, name)(name="thing").entity)
 
     def test_a_kinds_default_material_is_its_registered_one(self) -> None:
         """Paper's spec, made with no material, is made of ``PAPER``, the material registered as ``paper``."""
+        if "paper" not in PRESENT:
+            self.skipTest("the paper kind is not in this checkout")
         import robosimstudio as rss
         from robosimstudio.assetlib.materials import get_material
 
@@ -228,8 +256,8 @@ class TestTheDomains(unittest.TestCase):
     def test_each_kind_registers_its_domain_with_what_it_reads(self) -> None:
         from robosimstudio.specs.physics import get_domain, list_domains
 
-        self.assertLessEqual(set(KINDS), set(list_domains()))
-        for kind, row in KINDS.items():
+        self.assertLessEqual(PRESENT, set(list_domains()))
+        for kind, row in _kinds(self):
             with self.subTest(kind=kind):
                 domain = get_domain(kind)
                 self.assertEqual(row.reads, domain.reads)
@@ -240,7 +268,7 @@ class TestTheEntities(unittest.TestCase):
     def test_each_kind_registers_its_entities_under_their_names(self) -> None:
         from robosimstudio.scene.registry import ENTITIES
 
-        for kind, row in KINDS.items():
+        for kind, row in _kinds(self):
             for name, cls in row.entities:
                 with self.subTest(kind=kind, entity=name):
                     self.assertIs(_resolve(cls), ENTITIES.get(name))
@@ -250,7 +278,7 @@ class TestTheRecords(unittest.TestCase):
     def test_a_record_carries_its_domain_and_builds_the_spec_it_was_made_from(self) -> None:
         import robosimstudio as rss
 
-        for kind, row in KINDS.items():
+        for kind, row in _kinds(self):
             record, constructor, domain = row.record
             if not record:
                 continue
@@ -263,7 +291,7 @@ class TestTheRecords(unittest.TestCase):
     def test_a_record_refuses_a_spec_of_another_kind(self) -> None:
         import robosimstudio as rss
 
-        records = [(kind, row.record[0]) for kind, row in KINDS.items() if row.record[0]]
+        records = [(kind, row.record[0]) for kind, row in _kinds(self) if row.record[0]]
         for (kind, record), (other, _) in zip(records, records[1:] + records[:1], strict=True):
             with self.subTest(kind=kind, handed=other):
                 cls = getattr(_kind_module(kind), record)
@@ -279,6 +307,8 @@ class TestTheMaterials(unittest.TestCase):
 
         for name, (kind, constant) in NAMED_MATERIALS.items():
             with self.subTest(material=name):
+                if kind not in PRESENT:
+                    self.skipTest(f"the {kind} kind is not in this checkout")
                 spec = getattr(_kind_module(kind), constant)
                 self.assertIs(spec, get_material(name).spec)
                 self.assertEqual(kind, kind_of(spec))
@@ -286,8 +316,8 @@ class TestTheMaterials(unittest.TestCase):
     def test_every_registered_material_is_in_the_table(self) -> None:
         from robosimstudio.assetlib.materials import MATERIALS, kind_of
 
-        expected = {name: kind for name, (kind, _) in NAMED_MATERIALS.items()}
-        expected |= {name: kind for kind, names in KIND_OF.items() for name in names}
+        expected = {name: kind for name, (kind, _) in NAMED_MATERIALS.items() if kind in PRESENT}
+        expected |= {name: kind for kind, names in KIND_OF.items() if has_pack(REGISTERED_BY[kind]) for name in names}
         got = {name: kind_of(MATERIALS.get(name).spec) for name in MATERIALS.names()}
         self.assertEqual(expected, got)
 
