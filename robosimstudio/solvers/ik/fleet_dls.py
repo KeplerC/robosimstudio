@@ -223,17 +223,52 @@ def solve_q_full_batched(
     return polish_pose_batched(fk, q, targets, rot_target, lower=lower, upper=upper, active=live)
 
 
+NEAR_HALF_TURN_SIN = 1.0e-3
+"""Below this ``sin`` of a turn past a quarter, :func:`_rotvecs` reads the axis off the symmetric part."""
+
+
 def _rotvecs(turn: np.ndarray) -> np.ndarray:
-    """``[n, 3, 3]`` rotations to ``[n, 3]`` rotation vectors (the log map), per row."""
+    """``[n, 3, 3]`` rotations to ``[n, 3]`` rotation vectors (the log map), per row.
+
+    The skew part is ``2 sin(angle)`` times the axis, so dividing it by
+    ``2 sin(angle)`` is exact everywhere but where ``sin`` vanishes. At a small
+    angle the skew part over two is the vector itself to second order. Near a
+    half turn it is not: the skew part shrinks to nothing while the vector
+    grows to length pi, and the arccos the angle is read with has lost half its
+    digits there -- a turn of ``pi - 1e-7`` read as ``1e-7`` and a half turn
+    as nothing, so the polish called a wrist upside down closed. There the
+    axis comes from the symmetric part, ``(R + R^T) / 2 = cos I + (1 - cos)
+    a a^T``, its sign from the skew part, and the angle from ``atan2``.
+    """
     trace = np.trace(turn, axis1=1, axis2=2)
-    angle = np.arccos(np.clip((trace - 1.0) / 2.0, -1.0, 1.0))
+    cos = (trace - 1.0) / 2.0
+    angle = np.arccos(np.clip(cos, -1.0, 1.0))
     skew = np.stack(
         [turn[:, 2, 1] - turn[:, 1, 2], turn[:, 0, 2] - turn[:, 2, 0], turn[:, 1, 0] - turn[:, 0, 1]], axis=1
     )
     sin = np.sin(angle)
     # Small angles: the skew part over two is the vector itself to second order.
     scale = np.where(sin > 1.0e-6, angle / np.where(sin > 1.0e-6, 2.0 * sin, 1.0), 0.5)
-    return skew * scale[:, None]
+    out = skew * scale[:, None]
+    half = (cos < 0.0) & (np.linalg.norm(skew, axis=1) < 2.0 * NEAR_HALF_TURN_SIN)
+    if half.any():
+        out[half] = _near_half_turn(turn[half], skew[half], cos[half])
+    return out
+
+
+def _near_half_turn(turn: np.ndarray, skew: np.ndarray, cos: np.ndarray) -> np.ndarray:
+    """:func:`_rotvecs` for rotations within :data:`NEAR_HALF_TURN_SIN` of a half turn."""
+    symmetric = 0.5 * (turn + np.transpose(turn, (0, 2, 1)))
+    outer = (symmetric - cos[:, None, None] * np.eye(3)) / (1.0 - cos)[:, None, None]
+    # The column of a a^T through the axis's largest component, over its square root, is the axis.
+    pick = np.argmax(np.diagonal(outer, axis1=1, axis2=2), axis=1)
+    rows = np.arange(len(turn))
+    axis = outer[rows, :, pick] / np.sqrt(np.maximum(outer[rows, pick, pick], 1.0e-300))[:, None]
+    axis /= np.linalg.norm(axis, axis=1, keepdims=True)
+    # a a^T says nothing of the sign; the skew part does, wherever it is not exactly a half turn.
+    axis *= np.where(np.einsum("wi,wi->w", axis, skew) < 0.0, -1.0, 1.0)[:, None]
+    angle = np.arctan2(0.5 * np.linalg.norm(skew, axis=1), cos)
+    return axis * angle[:, None]
 
 
 POLISH_STEPS = 8

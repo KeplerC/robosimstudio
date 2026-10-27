@@ -70,13 +70,15 @@ def _transform(position: Any, quat_xyzw: Any) -> np.ndarray:
 
 
 def _rotvec(rot: np.ndarray) -> np.ndarray:
-    """A rotation matrix as axis times angle."""
-    cos = np.clip((np.trace(rot) - 1.0) / 2.0, -1.0, 1.0)
-    angle = float(np.arccos(cos))
-    if angle < 1.0e-9:
-        return np.zeros(3)
-    axis = np.array([rot[2, 1] - rot[1, 2], rot[0, 2] - rot[2, 0], rot[1, 0] - rot[0, 1]])
-    return axis / max(np.linalg.norm(axis), 1.0e-12) * angle
+    """A rotation matrix as axis times angle: the batched solver's log map, on one matrix.
+
+    Its own copy read the axis off the skew part, which vanishes at a half
+    turn: a joint that turned the tool half way round read as a random short
+    vector there.
+    """
+    from .fleet_dls import _rotvecs
+
+    return _rotvecs(np.asarray(rot, dtype=np.float64).reshape(1, 3, 3))[0]
 
 
 def _wxyz_xyz(row: np.ndarray) -> np.ndarray:
