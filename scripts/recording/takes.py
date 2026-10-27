@@ -2527,6 +2527,239 @@ ROBOT_CUTTING = (
     ),
 )
 
+
+# =============================================================================
+# Cartons: a box opened at its creases, and a blank's wall folded over a block
+# =============================================================================
+# tests/test_open_a_box.py and tests/test_fold_a_tray.py walk the same points with the arm panel's
+# cursor, headless: :func:`box_hook` and :func:`tray_fold` are where both read them.
+
+BOX = "examples/03_materials/15_box.py"
+TRAY = "examples/03_materials/16_carton.py"
+
+BOX_REACH = 0.8
+"""Where the finger lifts the flap, from its crease, as a share of the flap's depth: 56 mm on 15_box's 70."""
+TRAY_REACH = 0.6
+"""Where the shut fingertips press the wall, from its crease, as a share of its width: 30 mm on 16_carton's 50."""
+TRAY_TIP = 0.016
+"""The shut fingertips' lowest point under the tool centre [m]."""
+
+
+def finger_points(sim, state, arm: str) -> list:
+    """Each finger's collision shapes, as world points ``[n, 3]`` on the shapes' hulls or boxes."""
+    import numpy as np
+    import warp as wp
+
+    model = sim.model
+    body_q, shape_body = state.body_q.numpy(), model.shape_body.numpy()
+    flags, xforms, scales = model.shape_flags.numpy(), model.shape_transform.numpy(), model.shape_scale.numpy()
+    corners = np.array([[i, j, k] for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)], dtype=np.float64)
+    out = []
+    for side in sim.scene.embodiment.arms[arm].finger_bodies:
+        points = []
+        for s in np.flatnonzero(np.isin(shape_body, side)):
+            if not flags[s] & 2:  # newton.ShapeFlags.COLLIDE_SHAPES
+                continue
+            source = model.shape_source[s]
+            local = (
+                np.asarray(source.vertices, dtype=np.float64) if hasattr(source, "vertices") else corners
+            ) * scales[s]
+            for frame in (xforms[s], body_q[shape_body[s]]):
+                local = local @ np.array(wp.quat_to_matrix(wp.quat(*frame[3:7]))).reshape(3, 3).T + frame[:3]
+            points.append(local)
+        out.append(np.concatenate(points))
+    return out
+
+
+def box_hook(sim, session) -> dict:
+    """The right hand's path that opens 15_box's -y flap, as tool-centre points [world, m].
+
+    Its +y finger is the hook. ``seam`` is 20 mm over the seam, then into it; ``hook`` is under the
+    sprung flap at :data:`BOX_REACH` of its depth; ``arc`` follows that point round the crease in 5 degree
+    steps to 150; ``up`` and ``away`` take the hand off. Read with the tape cut and the jaws open.
+    """
+    import numpy as np
+
+    box = sim["box"].entity
+    state = session.env.state
+    here = session.arms["right"].ik.ee_pose(state)[0]
+    hook = max((p - here for p in finger_points(sim, state, "right")), key=lambda p: p[:, 1].mean())
+    low = hook[hook[:, 2] < 0.02]
+    centre = np.array([0.5 * (low[:, 0].min() + low[:, 0].max()), 0.5 * (low[:, 1].min() + low[:, 1].max()), 0.0])
+    tip = -float(low[:, 2].min())
+    clear = 0.5 * float(low[:, 1].max() - low[:, 1].min()) + box.spec.board.thickness / 2 + 0.0015
+    flap = box.hinges[box.index("major_neg")]
+    hinge = state.body_q.numpy()[flap["link"], :3].astype(np.float64)
+    middle = state.body_q.numpy()[box.body, :3].astype(np.float64)
+    r = BOX_REACH * flap["depth"]
+    out, up = np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0])
+
+    def under(phi: float):
+        along, normal = math.cos(phi) * out + math.sin(phi) * up, -math.sin(phi) * out + math.cos(phi) * up
+        return hinge + r * along - clear * normal
+
+    def aim(point):
+        return point - centre + np.array([0.0, 0.0, tip])
+
+    phi = box.angle("major_neg")
+    edge = hinge + flap["depth"] * (math.cos(phi) * out + math.sin(phi) * up)
+    seam = np.array([hinge[0], middle[1], edge[2]])
+    start = under(phi)
+    arc = [aim(under(math.radians(d))) for d in np.arange(math.degrees(phi) + 5.0, 150.1, 5.0)]
+    last = arc[-1]
+    return {
+        "over": aim(seam + np.array([0.0, 0.0, 0.02])),
+        "seam": aim(seam - np.array([0.0, 0.0, 0.01])),
+        "hook": aim(np.array([hinge[0], start[1], min(start[2], seam[2] - 0.01)])),
+        "arc": arc,
+        "up": last + np.array([0.0, 0.0, 0.03]),
+        "away": np.array([hinge[0], middle[1] + 0.03, last[2] + 0.03]),
+        "middle": middle,
+    }
+
+
+def tray_fold(sim, session) -> dict:
+    """The right hand's path that folds 16_carton's -y wall over the block, as tool-centre points [world, m].
+
+    ``over`` is 30 mm over the press point, :data:`TRAY_REACH` of the wall out from its crease; ``arc``
+    carries that point round the crease from 8 to 92 degrees in 15 steps; ``hold`` leans on the wall
+    against the block's side; ``back`` and ``up`` take the hand off it.
+    """
+    import numpy as np
+
+    blank = sim["tray"].entity
+    q = session.env.state.particle_q.numpy().astype(np.float64)
+    first = blank.range.particles[0]
+    hinge = q[np.asarray(blank.layout["hinge"]["wall_yneg"]) + first].mean(0)
+    free = q[np.asarray(blank.layout["free"]["wall_yneg"]) + first].mean(0)
+    r = TRAY_REACH * float(np.linalg.norm((free - hinge)[1:]))
+    tip = TRAY_TIP + blank.spec.material.particle_radius + 0.002
+
+    def on_wall(degrees: float, lift: float = 0.0):
+        a = math.radians(degrees)
+        along, normal = np.array([0.0, -math.cos(a), -math.sin(a)]), np.array([0.0, -math.sin(a), math.cos(a)])
+        return hinge + r * along + (tip + lift) * normal
+
+    hold = hinge + r * np.array([0.0, 0.0, -1.0]) + (tip - 0.004) * np.array([0.0, -1.0, 0.0])
+    return {
+        "over": on_wall(0.0, 0.03),
+        "on": on_wall(0.0),
+        "arc": [on_wall(d) for d in np.linspace(8.0, 92.0, 15)],
+        "hold": hold,
+        "back": hold + np.array([0.0, -0.04, 0.0]),
+        "up": hold + np.array([0.0, -0.04, 0.08]),
+    }
+
+
+def _box_path(key: str, index: int | None = None):
+    """A point of :func:`box_hook`'s path, read once per film after the tape is cut."""
+
+    def there(film):
+        if getattr(film, "hook", None) is None:
+            film.hook = box_hook(film.sim, film.session)
+        point = film.hook[key] if index is None else film.hook[key][index]
+        return tuple(float(v) for v in point)
+
+    return there
+
+
+def _tray_path(key: str, index: int | None = None):
+    """A point of :func:`tray_fold`'s path, read once per film when the hand first moves."""
+
+    def there(film):
+        if getattr(film, "fold_path", None) is None:
+            film.fold_path = tray_fold(film.sim, film.session)
+        point = film.fold_path[key] if index is None else film.fold_path[key][index]
+        return tuple(float(v) for v in point)
+
+    return there
+
+
+def _box_opened(film) -> tuple[bool, str]:
+    """``03_materials/15_box``'s readouts: the swung flap keeps past 110 degrees, the other stays down, the box stays put."""
+    import numpy as np
+
+    box = film.sim["box"].entity
+    kept, other = math.degrees(box.angle("major_neg")), math.degrees(box.angle("major_pos"))
+    moved = 1e3 * float(np.linalg.norm(film.sim.state.body_q.numpy()[box.body, :3] - film.hook["middle"]))
+    return kept > 110.0 and other < 25.0 and moved < 5.0, (
+        f"the -y flap at {kept:.1f} degrees (need 110), the +y flap at {other:.1f} (need under 25), "
+        f"the box {moved:.1f} mm from where it stood (need under 5)"
+    )
+
+
+def _tray_folded(film) -> tuple[bool, str]:
+    """``03_materials/16_carton``'s readouts: the wall still past 60 degrees and its crease keeping past 55."""
+    blank = film.sim["tray"].entity
+    angle, kept = math.degrees(blank.fold_angle("wall_yneg")), math.degrees(blank.kept_angle("wall_yneg"))
+    return (
+        angle > 60.0 and kept > 55.0,
+        f"the wall at {angle:.1f} degrees (need 60), its crease keeping {kept:.1f} (need 55)",
+    )
+
+
+ROBOT_CARTON = (
+    Take(
+        BOX,
+        # Along the crease, from +x: the flap turns in the frame's plane, and the arms stand behind the box.
+        camera=Orbit(Bench(-0.14, -0.08, 0.10), distance=0.8, azimuth=0.0, elevation=18.0, fov=40.0),
+        warmup=0.5,
+        layout=Layout(collapse=("Simulation", "Arm: left"), expand=("Box",)),
+        # 2.5 s of scene a second at 12 frames, and six points on the arc: fourteen were 557 frames and 1.8 MB.
+        speed=2.5,
+        fps=12,
+        budget=1_400_000,  # 418 frames came to 1.27 MB at the bottom of the quality ladder
+        beats=(
+            Wait(seconds=0.4, label="a taped C-flute box, 1 kg inside, under the right hand"),
+            Press(text="Cut tape", within="Box", label="Cut tape: the big flaps spring up to their crease's yield"),
+            Wait(seconds=1.0, mark="cut"),
+            Press(text="Open", within=RIGHT, label="Open: the jaws, wider than the seam shut, go in open"),
+            Wait(seconds=0.5),
+            DragTo("right", _box_path("over"), seconds_per_m=6.0, label="over the seam"),
+            Drag("right", "z", to=_box_path("seam"), seconds=1.0, label="down into the seam"),
+            DragTo("right", _box_path("hook"), seconds_per_m=12.0, label="the +y finger under the -y flap"),
+            # Every sixth point of the 5 degree arc: a 30 degree chord runs 2 mm inside the arc, toward the crease,
+            # and a drag is paced in clip time, so each point is about 3 s of clip.
+            *(
+                DragTo("right", _box_path("arc", k), seconds_per_m=6.0, label="swing the flap round its crease")
+                for k in (*range(0, 27, 6), -1)
+            ),
+            Drag("right", "z", to=_box_path("up"), seconds=0.6, label="up off the flap"),
+            DragTo("right", _box_path("away"), seconds_per_m=6.0, label="and back over the box"),
+            Wait(seconds=2.0, mark="opened", label="the flap stays open: its crease keeps the bend"),
+        ),
+        expect=(Check(_box_opened, needs=("box",)),),
+    ),
+    Take(
+        TRAY,
+        # Along the crease, from +x: the wall turns down round the block's edge in the frame's plane.
+        camera=Orbit(Bench(-0.14, -0.08, 0.06), distance=0.7, azimuth=0.0, elevation=18.0, fov=40.0),
+        warmup=0.5,
+        layout=Layout(collapse=("Simulation", "Arm: left"), expand=("Tray",)),
+        # At 15 frames and the scene's own speed the 33 s fold was 1.5 MB at the bottom of the quality ladder.
+        speed=1.5,
+        fps=12,
+        budget=1_200_000,
+        beats=(
+            Wait(seconds=0.4, label="a folding-carton blank on a block, its base held, under the right hand"),
+            Press(text="Close", within=RIGHT, label="Close: the fingertips together"),
+            Wait(seconds=0.5),
+            DragTo("right", _tray_path("over"), seconds_per_m=6.0, label="over the -y wall"),
+            Drag("right", "z", to=_tray_path("on"), seconds=1.2, label="down onto it"),
+            *(
+                DragTo("right", _tray_path("arc", k), seconds_per_m=10.0, label="push it down round the block's edge")
+                for k in range(15)
+            ),
+            DragTo("right", _tray_path("hold"), seconds_per_m=10.0, label="lean on it against the block"),
+            Wait(seconds=0.5),
+            Drag("right", "y", to=_tray_path("back"), seconds=0.8, label="back off"),
+            Drag("right", "z", to=_tray_path("up"), seconds=0.8, label="and up"),
+            Wait(seconds=2.0, mark="folded", label="the wall stays folded: its crease keeps the bend"),
+        ),
+        expect=(Check(_tray_folded, needs=("tray",)),),
+    ),
+)
+
 # The stuck label: the right hand carries a loose label by its pull tab, lays it on the box and rubs
 # it down with its shut fingertips, the drive tests/test_stick_a_label makes through the same panel.
 STICK = "examples/03_materials/09_adhesion.py"
@@ -2892,6 +3125,7 @@ TAKES: tuple[Take, ...] = (
     *ROBOT_CONTACT,
     *ROBOT_WATER,
     *ROBOT_CUTTING,
+    *ROBOT_CARTON,
     *SCORED,
 )
 

@@ -296,7 +296,9 @@ class ClothSpec:
 
     Attributes:
         name: Key in handles and particle-set names.
-        mesh: ``"grid"`` or ``"mesh"``: where the geometry comes from.
+        mesh: ``"grid"``, ``"mesh"`` or ``"given"``: where the geometry comes from. ``"given"`` is a
+            kind built on cloth whose entity lays out its own surface by overriding
+            :meth:`EntityCloth.surface`, as a carton's die-line does.
         size: Sheet dimensions ``(length, width)`` [m], ``"grid"`` only.
         cells: Grid subdivisions ``(nx, ny)``, ``"grid"`` only.
         asset: Mesh to drape, ``"mesh"`` only.
@@ -342,8 +344,8 @@ class ClothSpec:
     decor: str = ""
 
     def __post_init__(self) -> None:
-        if self.mesh not in ("grid", "mesh"):
-            raise ValueError(f"cloth mesh must be 'grid' or 'mesh', got {self.mesh!r}")
+        if self.mesh not in ("grid", "mesh", "given"):
+            raise ValueError(f"cloth mesh must be 'grid', 'mesh' or 'given', got {self.mesh!r}")
         if self.mesh == "mesh" and self.asset is None:
             raise ValueError(f"cloth {self.name!r} is a mesh but names no asset")
         if not 0.0 < self.opacity <= 1.0:
@@ -585,6 +587,10 @@ class EntityCloth(ParticleMixin, Entity):
         spec = self.spec
         if spec.mesh == "grid":
             return grid_surface(tuple(float(v) for v in spec.size), tuple(int(v) for v in spec.cells))
+        if spec.mesh == "given":
+            raise NotImplementedError(
+                f"cloth {spec.name!r} says its entity gives its surface, and {type(self).__name__} does not"
+            )
 
         import trimesh
 

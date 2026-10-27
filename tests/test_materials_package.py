@@ -52,7 +52,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from textwrap import dedent
 
-from tests.fixtures.packs import MATERIALS, NEEDS, PYTHON_FLAGS, env_without
+from tests.fixtures.packs import MATERIALS, NEEDS, PYTHON_FLAGS, built_on, env_without
 
 TIER = "fast"
 """No GPU. Imports the library in subprocesses; the one scene is built on the CPU."""
@@ -74,6 +74,7 @@ KINDS = {
     "brush": ("brush", "BrushSpec", "robosimstudio_materials.brush", "brush"),
     "tape": ("tape", "TapeSpec", "robosimstudio_materials.tape", "tape"),
     "cutting": ("cuttable", "CuttableSpec", "robosimstudio_materials.cutting.entity", "cuttable"),
+    "carton": ("carton", "CartonSpec", "robosimstudio_materials.carton.panels", "carton"),
 }
 """Kind -> its constructor, its spec, the module its entity is defined in, and the entity's registered name.
 
@@ -104,6 +105,10 @@ FLAT = {
     "CuttableSpec": "robosimstudio_materials.cutting.spec",
     "knife": "robosimstudio_materials.cutting.spec",
     "KnifeSpec": "robosimstudio_materials.cutting.spec",
+    "carton": "robosimstudio_materials.carton",
+    "CartonSpec": "robosimstudio_materials.carton.panels",
+    "CartonSheetSpec": "robosimstudio_materials.carton.sheet",
+    "BoardSpec": "robosimstudio_materials.carton.board",
 }
 """Flat name -> the module the thing behind it is defined in: each kind's constructor and spec, and the dough's roller.
 
@@ -115,6 +120,8 @@ LISTED = [
     "bag",
     "bags",
     "brush",
+    "carton",
+    "cartons",
     "cuttable",
     "cuttables",
     "dough",
@@ -308,7 +315,9 @@ class TestEachKindStandsAlone(unittest.TestCase):
         for kind, needs in NEEDS.items():
             for other in needs:
                 with self.subTest(kind=kind, needs=other):
-                    named = [m for m, _ in _imports(MATERIALS / f"{kind}.py")]
+                    module = MATERIALS / f"{kind}.py"
+                    files = [module] if module.is_file() else sorted((MATERIALS / kind).rglob("*.py"))
+                    named = [m for path in files for m, _ in _imports(path)]
                     self.assertIn(f"robosimstudio_materials.{other}", named)
 
     def test_the_package_imports_only_the_library(self) -> None:
@@ -336,7 +345,7 @@ class TestEachKindStandsAlone(unittest.TestCase):
 
     def test_a_kind_registers_and_builds_its_spec_with_the_others_absent(self) -> None:
         for kind, (make, spec, entity_module, _) in KINDS.items():
-            others = tuple(sorted(set(KINDS) - {kind} - set(NEEDS.get(kind, ()))))
+            others = tuple(sorted(set(KINDS) - {kind} - built_on(kind)))
             with self.subTest(kind=kind, without=others), ExitStack() as stack:
                 script = ALONE.replace("__KIND__", kind).replace("__MAKE__", make).replace("__OTHERS__", repr(others))
                 proc = _run(script, env_without(stack, *others), flags=PYTHON_FLAGS)
@@ -350,7 +359,7 @@ class TestEachKindStandsAlone(unittest.TestCase):
                 self.assertEqual(spec, got["spec"])
                 self.assertEqual(entity_module, got["entity"])
                 self.assertEqual(
-                    f"{kind}.py" if kind not in ("rod", "cutting") else "__init__.py", Path(got["file"]).name
+                    f"{kind}.py" if kind not in ("rod", "cutting", "carton") else "__init__.py", Path(got["file"]).name
                 )
                 self.assertEqual(
                     [], [m for m in got["loaded"] if m.split(".")[1] in others], "a module of another kind was imported"
@@ -411,6 +420,7 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
             [
                 "robosimstudio_materials.bag",
                 "robosimstudio_materials.brush",
+                "robosimstudio_materials.carton",
                 "robosimstudio_materials.cloth",
                 "robosimstudio_materials.cutting",
                 "robosimstudio_materials.dough",

@@ -41,6 +41,12 @@ and [`02_soft`](../02_soft/README.md).
   body is in the liquid's `containers`.
 - **Water**, `14`: [`water.py`](../../robosimstudio_materials/water.py) is `rss.water`,
   SPH on Genesis that keeps its volume. `water` and `oil` ship.
+- **Box and carton**, `15` and `16`: [`carton/`](../../robosimstudio_materials/carton/__init__.py)
+  is `rss.carton`, a box or a blank laid out from a die-line whose creases keep their folds.
+  The board picks the model: `rss.cartons.C_FLUTE` corrugated board is rigid panels on
+  plastic crease hinges, on MuJoCo with the arm (`rss.CARTON_60HZ`), and
+  `rss.cartons.FOLDING_CARTON` is a VBD sheet with a crease along every scored line. The
+  crease numbers are estimates, not fitted to a real box.
 
 <!-- examples:start: written by scripts/example_readmes.py from each script's docstring -->
 
@@ -365,6 +371,45 @@ uv run examples/03_materials/14_water.py
 ```
 
 Source: [`14_water.py`](14_water.py)
+
+## Box: cut the tape and open a flap
+
+![Box: cut the tape and open a flap](media/15_box.webp)
+
+A taped corrugated box under the right hand: press **Cut tape** and the two big flaps spring up a little; with the jaws open, drag the hand down into the seam, hook a finger under one flap, swing it up and over, and back off: it stays open.
+
+The box is `rss.carton`'s regular slotted container in C-flute board, 200 x 150 x 80 mm with 1 kg inside,
+on the panels model: rigid plates on crease hinges that keep a bend past 0.25 rad, on MuJoCo with the arm
+(`rss.CARTON_60HZ`). Cut, the big flaps spring to 14.8 degrees, about their crease's 14.3 degree yield, and the
+small flaps under them stay at 2.6. The hand's open jaws reach into the 6 mm seam, its +y finger lifts the -y flap
+56 mm out from the crease to 141 degrees, and two seconds after the hand has gone the flap keeps 127, the other
+at 15.9 and the box 0.4 mm from where it stood (`tests/test_open_a_box`). The **keeps** readout is the angle a
+crease holds when nothing pushes it.
+
+```bash
+uv run examples/03_materials/15_box.py
+```
+
+Source: [`15_box.py`](15_box.py)
+
+## Carton: fold a tray wall
+
+![Carton: fold a tray wall](media/16_carton.webp)
+
+A folding-carton tray blank on a block, its base held: press **Close**, drag the hand down onto a wall that runs past the block, and push it down and round the block's edge: it stays folded.
+
+The blank is `rss.carton`'s tray in folding carton board, 0.5 mm: a VBD sheet meshed from its die-line,
+each crease a row of mesh edges that bends ten times easier than the board between and keeps a bend past
+0.15 rad. Its base is pinned on the block, as a jig would hold it. The hand presses the -y wall 30 mm out
+from the crease and sweeps it down to vertical: it turns 86 degrees, and two seconds after the hand has gone
+it stands at 79, its crease keeping 78, and the other walls at 3 (`tests/test_fold_a_tray`). The **keeps**
+readout is that crease.
+
+```bash
+uv run examples/03_materials/16_carton.py
+```
+
+Source: [`16_carton.py`](16_carton.py)
 
 <!-- examples:end -->
 

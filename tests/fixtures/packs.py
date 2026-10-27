@@ -38,6 +38,7 @@ __all__ = [
     "MATERIALS",
     "NEEDS",
     "PYTHON_FLAGS",
+    "built_on",
     "env_without",
     "has_pack",
     "materials_without",
@@ -47,16 +48,35 @@ __all__ = [
 MATERIALS = Path(__file__).resolve().parents[2] / "robosimstudio_materials"
 """The sibling package, as it lies in this checkout."""
 
-NEEDS: dict[str, tuple[str, ...]] = {"paper": ("cloth",), "bag": ("cloth",), "brush": ("rod",), "tape": ("cloth",)}
+NEEDS: dict[str, tuple[str, ...]] = {
+    "paper": ("cloth",),
+    "bag": ("cloth",),
+    "brush": ("rod",),
+    "tape": ("cloth",),
+    "carton": ("paper",),
+}
 """Kind -> the kinds it is built on.
 
-``paper``, ``bag`` and ``tape`` extend cloth's spec, entity and measures, and ``brush`` builds
-its bristles with the rod kind's capsule chain and reads as a rod, so a tree that
-leaves cloth or the rope out has left paper, the bag and the tape or the brush out too:
-:func:`materials_without` drops a kind's dependents with it, and the stand-alone
-tests read this table for which kinds are expected to go. Nothing else leans on
-another kind.
+``paper``, ``bag`` and ``tape`` extend cloth's spec, entity and measures, ``brush`` builds
+its bristles with the rod kind's capsule chain and reads as a rod, and ``carton``'s sheet
+model is paper laid out from a die-line, so a tree that leaves cloth or the rope out has
+left paper, the bag, the tape and the carton or the brush out too: :func:`materials_without`
+drops a kind's dependents with it, theirs with them, and the stand-alone tests read
+:func:`built_on` for which kinds are expected to go. Nothing else leans on another kind.
 """
+
+
+def built_on(kind: str) -> set[str]:
+    """Every kind ``kind`` needs, through the kinds those need: the carton needs paper, and so cloth."""
+    found: set[str] = set()
+    todo = list(NEEDS.get(kind, ()))
+    while todo:
+        other = todo.pop()
+        if other not in found:
+            found.add(other)
+            todo.extend(NEEDS.get(other, ()))
+    return found
+
 
 PYTHON_FLAGS = ("-P",)
 """Interpreter flags for a subprocess whose ``robosimstudio_materials`` is a scratch copy.
@@ -85,9 +105,7 @@ def materials_without(stack: ExitStack, *names: str) -> Path:
     ``<dir>/robosimstudio_materials``.
     """
     dropped = set(names)
-    for kind, needs in NEEDS.items():
-        if dropped & set(needs):
-            dropped.add(kind)
+    dropped |= {kind for kind in NEEDS if built_on(kind) & dropped}
     site = Path(stack.enter_context(TemporaryDirectory())).resolve()
     copy = site / MATERIALS.name
     copy.mkdir()

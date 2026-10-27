@@ -195,6 +195,10 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
         "paper (the `paper` kind: sheets and card whose folds stay)",
         ("PaperMaterialSpec", "PaperSpec", "paper", "papers"),
     ),
+    "robosimstudio_materials.carton": (
+        "cartons (the `carton` kind: boxes and blanks cut to a die-line, whose creases keep their folds)",
+        ("CARTON_60HZ", "BoardSpec", "CartonSheetSpec", "CartonSpec", "carton", "cartons"),
+    ),
     "robosimstudio_materials.bag": (
         "bags (the `bag` kind: two layers of cloth sewn into a pocket, on SuperDex)",
         ("BAG_60HZ", "BagSpec", "bag", "bags"),
