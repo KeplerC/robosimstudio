@@ -11,6 +11,8 @@ folder and refuses one inside another scene.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -42,6 +44,12 @@ def _write(directory: Path, text: str, name: str = "scene.py") -> Path:
     path = directory / name
     path.write_text(text)
     return path
+
+
+def _subcommands(parser) -> list[str]:
+    """The subcommands a parser knows, read off its subparsers action."""
+    (action,) = (a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    return list(action.choices)
 
 
 class TestTheCommandLine(unittest.TestCase):
@@ -100,19 +108,26 @@ class TestTheCommandLine(unittest.TestCase):
         ["show", "--clear"],
         ["eval", "t.play()", "--record", "tidy", "--every", "4", "--camera", "phone"],
         ["quit"],
+        ["new", "lid", "--ref", "clip.mov", "--dir", "elsewhere/lid"],
+        ["camera", "fit", "--point", "-0.3,0.2,0.75=812,455", "--size", "640x480", "--fov", "48"],
+        ["physics", "lift", "--only", "frozen,open", "--settle-mm", "1.5"],
     )
 
     def test_every_command_parses(self) -> None:
         parser = ctl.build_parser()
         for line in self.LINES:
             with self.subTest(line=line):
-                self.assertEqual(parser.parse_args(line).cmd, line[0])
+                self.assertEqual(parser.parse_args(ctl._join_points(line)).cmd, line[0])
         args = parser.parse_args(["--run-dir", "d", "--json", "status"])
         self.assertEqual((args.run_dir, args.json), ("d", True), "--json before the command")
         self.assertTrue(parser.parse_args(["status", "--json"]).json, "--json after the command")
         self.assertFalse(parser.parse_args(["status"]).json)
 
-    def test_the_request_a_line_becomes(self) -> None:
+    def test_every_command_has_a_line_here(self) -> None:
+        """A subcommand added without one would be parsed by nothing in this class."""
+        self.assertEqual(set(_subcommands(ctl.build_parser())), {line[0] for line in self.LINES})
+
+    def test_a_path_is_resolved_where_the_caller_sits(self) -> None:
         parser = ctl.build_parser()
         req, timeout = ctl.build_request(parser.parse_args(["snapshot", "--beside", "ref.png"]), parser)
         self.assertEqual(req["cmd"], "snapshot")
@@ -121,40 +136,41 @@ class TestTheCommandLine(unittest.TestCase):
             "paths are resolved where the caller sits",
         )
         self.assertEqual(timeout, ctl.TIMEOUTS["snapshot"])
+
+    def test_catalog_names_its_kinds_and_refuses_one_it_does_not_know(self) -> None:
+        parser = ctl.build_parser()
         req, _ = ctl.build_request(parser.parse_args(["catalog", "robots", "cells"]), parser)
         self.assertEqual(req, {"cmd": "catalog", "kinds": ["robots", "cells"]})
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             ctl.build_request(parser.parse_args(["catalog", "planets"]), parser)
+
+    def test_run_is_its_steps_at_the_default_timeout(self) -> None:
+        parser = ctl.build_parser()
         req, timeout = ctl.build_request(parser.parse_args(["run", "7"]), parser)
         self.assertEqual((req, timeout), ({"cmd": "run", "steps": 7}, ctl.DEFAULT_TIMEOUT))
-        req, timeout = ctl.build_request(
-            parser.parse_args(
-                [
-                    "compare",
-                    "--ref",
-                    "r.jpg",
-                    "--key",
-                    "case=red",
-                    "--key",
-                    "socket=@1,2",
-                    "--note",
-                    "n",
-                ]
-            ),
-            parser,
-        )
+
+    def test_compare_carries_its_keys_its_note_and_its_reference(self) -> None:
+        parser = ctl.build_parser()
+        line = ["compare", "--ref", "r.jpg", "--key", "case=red", "--key", "socket=@1,2", "--note", "n"]
+        req, timeout = ctl.build_request(parser.parse_args(line), parser)
         self.assertEqual(
             (req["cmd"], req["keys"], req["note"]),
             ("compare", ["case=red", "socket=@1,2"], "n"),
         )
         self.assertTrue(Path(req["ref"]).is_absolute())
         self.assertEqual(timeout, ctl.TIMEOUTS["compare"])
+
+    def test_check_asks_nothing_of_a_photograph(self) -> None:
+        parser = ctl.build_parser()
         req, _ = ctl.build_request(
             parser.parse_args(["check", "--object", "a", "--object", "b", "--steps", "9"]),
             parser,
         )
         self.assertEqual((req["objects"], req["steps"]), (["a", "b"], 9))
         self.assertNotIn("ref", req, "the gate asks nothing of a photograph")
+
+    def test_ref_frames_leaves_the_stills_to_the_page_unless_told_where(self) -> None:
+        parser = ctl.build_parser()
         req, _ = ctl.build_request(parser.parse_args(["ref", "frames", "c.mov", "--at", "0,end"]), parser)
         self.assertEqual((req["op"], req["at"]), ("frames", "0,end"))
         # no --out: the server puts the stills in ref/ beside scene.py, wherever the shell stands
@@ -162,8 +178,11 @@ class TestTheCommandLine(unittest.TestCase):
         self.assertEqual(req["out"], "")
         req, _ = ctl.build_request(parser.parse_args(["ref", "frames", "c.mov", "--out", "elsewhere"]), parser)
         self.assertTrue(Path(req["out"]).is_absolute())
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             ctl.build_request(parser.parse_args(["ref", "frames"]), parser)
+
+    def test_eval_and_play_record_only_when_asked(self) -> None:
+        parser = ctl.build_parser()
         req, _ = ctl.build_request(
             parser.parse_args(["eval", "go()", "--record", "take1", "--every", "2"]),
             parser,
@@ -171,40 +190,47 @@ class TestTheCommandLine(unittest.TestCase):
         self.assertEqual((req["code"], req["record"], req["every"]), ("go()", "take1", 2))
         req, _ = ctl.build_request(parser.parse_args(["eval", "go()"]), parser)
         self.assertNotIn("record", req, "no recording unless asked")
-        req, _ = ctl.build_request(parser.parse_args(["log", "--last", "3"]), parser)
-        self.assertEqual(req, {"cmd": "log", "last": 3})
         req, _ = ctl.build_request(parser.parse_args(["play", "tidy", "--record", "t1"]), parser)
         self.assertEqual((req["name"], req["record"], req["every"]), ("tidy", "t1", 4))
+
+    def test_log_and_show(self) -> None:
+        parser = ctl.build_parser()
+        req, _ = ctl.build_request(parser.parse_args(["log", "--last", "3"]), parser)
+        self.assertEqual(req, {"cmd": "log", "last": 3})
         req, _ = ctl.build_request(parser.parse_args(["show", "p.png", "--label", "pair"]), parser)
         self.assertTrue(Path(req["path"]).is_absolute() and req["label"] == "pair" and not req["clear"])
         self.assertEqual(ctl.build_request(parser.parse_args(["show", "--clear"]), parser)[0]["clear"], True)
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             ctl.build_request(parser.parse_args(["show"]), parser)
 
     def test_every_help_exits_zero(self) -> None:
-        lines = [[sys.executable, "-m", "robosimstudio_real2sim_agent", "--help"]]
-        lines += [[sys.executable, "-m", "robosimstudio_real2sim_agent", line[0], "--help"] for line in self.LINES]
-        lines += [
-            [sys.executable, "-m", "robosimstudio_real2sim_agent.serve", "--help"],
-            [sys.executable, str(ROOT / "scripts" / "live.py"), "--help"],
-        ]
-        for line in lines:
-            with self.subTest(line=" ".join(line[1:])):
-                done = subprocess.run(
-                    line,
-                    capture_output=True,
-                    text=True,
-                    cwd=ROOT,
-                    timeout=300,
-                    check=False,
-                )
-                self.assertEqual(done.returncode, 0, done.stderr[-2000:])
-                if line[-2].endswith(("serve", "live.py")):
-                    self.assertIn("--camera-view", done.stdout)
-                    self.assertIn("--share", done.stdout)
+        """Every subcommand's ``--help`` in this process; the three entry points each in a fresh one, at once."""
+        parser = ctl.build_parser()
+        for name in _subcommands(parser):
+            with self.subTest(command=name), contextlib.redirect_stdout(io.StringIO()) as out:
+                with self.assertRaises(SystemExit) as caught:
+                    parser.parse_args([name, "--help"])
+                self.assertIn(caught.exception.code, (0, None))
+                self.assertIn("usage:", out.getvalue())
+        entry_points = {
+            "the client": [sys.executable, "-m", "robosimstudio_real2sim_agent", "--help"],
+            "the server": [sys.executable, "-m", "robosimstudio_real2sim_agent.serve", "--help"],
+            "scripts/live.py": [sys.executable, str(ROOT / "scripts" / "live.py"), "--help"],
+        }
+        running = {
+            what: subprocess.Popen(line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=ROOT)
+            for what, line in entry_points.items()
+        }
+        for what, proc in running.items():
+            stdout, stderr = proc.communicate(timeout=300)
+            with self.subTest(entry_point=what):
+                self.assertEqual(proc.returncode, 0, stderr[-2000:])
+                if what != "the client":
+                    self.assertIn("--camera-view", stdout)
+                    self.assertIn("--share", stdout)
                     self.assertNotIn(
                         "--live",
-                        done.stdout,
+                        stdout,
                         "the studio's word for its camera view is not this flag",
                     )
 
