@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``twist_turns`` on frames built by hand: a uniform turn reads 1.0, a bend with no roll reads 0.
+"""The rod's shape measures on hand-built geometry: twist about the centreline, winding about an axis.
 
-The measure the twist example's readout rests on, checked without a scene: a
+``twist_turns`` on frames built by hand: a uniform turn reads 1.0, a bend with
+no roll reads 0. The measure the twist example's readout rests on, checked
+without a scene: a
 chain of capsule frames whose axes all point one way and whose roll about
 that axis advances evenly to one turn; the same chain bent round a half
 circle with its frames parallel-transported (no roll); and the two put
@@ -21,6 +23,7 @@ from robosimstudio.core.math import quat_from_axis_angle, quat_multiply
 from robosimstudio_materials.rod.measures import twist_turns
 
 TIER = "fast"
+"""Pure numpy on hand-built frames and curves: no GPU."""
 
 
 def _uniform_twist(n: int, turns: float) -> np.ndarray:
@@ -72,6 +75,41 @@ class TestTwistTurnsOnSyntheticFrames(unittest.TestCase):
             [quat_from_axis_angle((0.0, 0.0, 1.0), 0.0), quat_from_axis_angle((0.0, 0.0, 1.0), 2.0 * math.pi)]
         )
         self.assertAlmostEqual(twist_turns(frames), 0.0, places=6)
+
+
+def _helix(origin, u, v, d, *, turns: float = 2.0, radius: float = 0.03, n: int = 80) -> np.ndarray:
+    t = np.linspace(0.0, 2.0 * np.pi * turns, n)
+    return (
+        np.asarray(origin)
+        + np.outer(radius * np.cos(t), u)
+        + np.outer(radius * np.sin(t), v)
+        + np.outer(np.linspace(-0.02, 0.02, n), d)
+    )
+
+
+class TestWindingIsAboutTheDeclaredAxis(unittest.TestCase):
+    """``rod/measures.py``: a horizontal axis (a hook's) counts its turns."""
+
+    def test_a_horizontal_axis(self) -> None:
+        from robosimstudio_materials.rod import measures
+
+        origin = np.array([0.3, -0.1, 0.2])
+        wrap = _helix(origin, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0]))
+        got = measures._winding_about_axis(wrap, {"origin": origin, "direction": (1.0, 0.0, 0.0)})
+        self.assertAlmostEqual(got["turns"], 2.0, delta=0.05)
+        along = np.array([0.05, 0.0, 0.0])
+        ends = np.stack([origin - along, origin + along])
+        self.assertAlmostEqual(measures._winding_about_rod(wrap, {"axis": ends})["turns"], 2.0, delta=0.05)
+
+    def test_a_vertical_axis_reads_as_before(self) -> None:
+        from robosimstudio_materials.rod import measures
+
+        origin = np.array([0.1, 0.2, 0.05])
+        wrap = _helix(origin, np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]))
+        before = measures.winding_turns(wrap, origin[:2])
+        self.assertEqual(
+            measures._winding_about_axis(wrap, {"origin": origin, "direction": (0, 0, 1)})["turns"], before[0]
+        )
 
 
 if __name__ == "__main__":

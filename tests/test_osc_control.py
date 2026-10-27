@@ -1,13 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The robot library, where it can be tested without a scene.
+"""Operational-space control, where it can be tested without a scene.
 
-Operational-space control, the waypoint runner, and the action spaces a policy
-writes into -- all of them over stub arms, because what is being tested is the
-arithmetic and the contract rather than any particular robot. Anything needing a
-built model belongs to the medium tier.
-
-Split out of ``test_core.py`` when the control stack moved to
-``robosimstudio.solvers``: a test module follows the code it tests.
+The gains, the action law, the controller and the waypoint runner -- all over
+stub arms, because what is being tested is the arithmetic and the contract
+rather than any particular robot. Anything needing a built model belongs to the
+medium tier.
 """
 
 import unittest
@@ -15,7 +12,6 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from robosimstudio.core.env import EnvBase
 from robosimstudio.core.math import quat_from_axis_angle, quat_multiply
 from robosimstudio.solvers import OSC_OUTPUT_MAX, OscController, OscGains, OscWaypoints, Waypoint, osc_action
 
@@ -241,108 +237,6 @@ class TestOscController(unittest.TestCase):
             OscController(_StubArm(), control_dt=0.0)
 
 
-class _RecordingSpace:
-    """An action space that records what was asked of it, and nothing else."""
-
-    per_arm = 3
-
-    def __init__(self, dim: int = 3) -> None:
-        self.action_dim = dim
-        self.resets = 0
-        self.applied: list[list[float]] = []
-
-    def reset(self, state) -> None:
-        del state
-        self.resets += 1
-
-    def apply(self, action, control, state) -> None:
-        del control, state
-        self.applied.append(list(action))
-
-    def hold_action(self, state) -> np.ndarray:
-        del state
-        return np.zeros(self.action_dim, dtype=np.float32)
-
-
-class TestControllerSet(unittest.TestCase):
-    """An arm has several ways to be commanded, and a command names one.
-
-    The behaviour under test is the one the reference runtime's own controller
-    swap documents: a controller carries a *setpoint*, so handing the arm to one
-    that still holds a stale setpoint drags the arm back there on the first step.
-    Selecting a mode therefore re-seeds it.
-    """
-
-    def _env(self, **kwargs):
-        pipeline = SimpleNamespace(
-            model=SimpleNamespace(particle_count=0, body_count=1),
-            state=_stub_state(np.zeros(3)),
-            control=None,
-            sim_time=0.0,
-            step_count=0,
-            step=lambda: None,
-        )
-        return EnvBase(pipeline, **kwargs)
-
-    def test_a_single_space_still_works(self):
-        """The old one-space construction is the one-entry case of the new one."""
-        space = _RecordingSpace()
-        env = self._env(action_space=space)
-        self.assertIs(env.action_space, space)
-        self.assertEqual(env.action_dim, 3)
-
-    def test_the_declared_mode_starts_active(self):
-        spaces = {"joint_position": _RecordingSpace(), "osc_pose": _RecordingSpace(7)}
-        env = self._env(action_space=spaces, control_mode="osc_pose")
-        self.assertEqual(env.control_mode, "osc_pose")
-        self.assertEqual(env.action_dim, 7)
-
-    def test_an_unsupported_declared_mode_raises_at_construction(self):
-        with self.assertRaises(ValueError):
-            self._env(action_space={"joint_position": _RecordingSpace()}, control_mode="osc_pose")
-
-    def test_naming_a_mode_switches_and_reseeds_it(self):
-        """The load-bearing behaviour: a handover re-seeds the incoming setpoint."""
-        joint, osc = _RecordingSpace(), _RecordingSpace(7)
-        env = self._env(action_space={"joint_position": joint, "osc_pose": osc}, control_mode="joint_position")
-        before = osc.resets
-        env.apply_action([0.0] * 7, mode="osc_pose")
-        self.assertEqual(env.control_mode, "osc_pose")
-        self.assertEqual(osc.resets, before + 1)
-        self.assertEqual(len(osc.applied), 1)
-        self.assertEqual(joint.applied, [])
-
-    def test_renaming_the_active_mode_does_not_reseed(self):
-        """So a caller may tag every command without paying for it."""
-        osc = _RecordingSpace(7)
-        env = self._env(action_space={"osc_pose": osc}, control_mode="osc_pose")
-        seeded = osc.resets
-        for _ in range(3):
-            env.apply_action([0.0] * 7, mode="osc_pose")
-        self.assertEqual(osc.resets, seeded)
-        self.assertEqual(len(osc.applied), 3)
-
-    def test_an_unknown_mode_names_what_there_is(self):
-        env = self._env(action_space={"joint_position": _RecordingSpace()})
-        with self.assertRaises(KeyError) as caught:
-            env.use_control("osc_pose")
-        self.assertIn("joint_position", str(caught.exception))
-
-    def test_an_omitted_mode_keeps_the_active_one(self):
-        joint, osc = _RecordingSpace(), _RecordingSpace(7)
-        env = self._env(action_space={"joint_position": joint, "osc_pose": osc}, control_mode="joint_position")
-        env.apply_action([0.0, 0.0, 0.0])
-        self.assertEqual(env.control_mode, "joint_position")
-        self.assertEqual(len(joint.applied), 1)
-
-    def test_idle_action_may_be_asked_of_a_mode_without_switching(self):
-        """Asking what a hold looks like elsewhere is not asking to hand over."""
-        joint, osc = _RecordingSpace(), _RecordingSpace(7)
-        env = self._env(action_space={"joint_position": joint, "osc_pose": osc}, control_mode="joint_position")
-        env.idle_action("osc_pose")
-        self.assertEqual(env.control_mode, "joint_position")
-
-
 class TestOscWaypoints(unittest.TestCase):
     """The reference's ``go_to`` loop, as a sequencer."""
 
@@ -393,41 +287,44 @@ class TestOscWaypoints(unittest.TestCase):
         self.assertEqual(run.current.label, "approach")
 
 
+def _counting_state(position=(0.0, 0.0, 0.0)):
+    """A ``State`` stand-in that counts host copies of each array."""
+    body_q = np.array([[*position, 0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+    body_qd = np.zeros((1, 6), dtype=np.float64)
+    counts = {"body_q": 0, "body_qd": 0}
+
+    def copy(name, array):
+        def numpy():
+            counts[name] += 1
+            return array
+
+        return numpy
+
+    state = SimpleNamespace(
+        body_q=SimpleNamespace(numpy=copy("body_q", body_q)),
+        body_qd=SimpleNamespace(numpy=copy("body_qd", body_qd)),
+    )
+    return state, counts
+
+
+class TestOscAdvanceReadsTheStateOnce(unittest.TestCase):
+    def test_advance_makes_one_body_q_copy_and_no_body_qd_copy(self):
+        controller = OscController(_StubArm(), control_dt=1.0 / 20.0)
+        state, counts = _counting_state()
+        controller.reset(state)
+        counts.update(body_q=0, body_qd=0)
+        controller.advance([1.0, 0.0, 0.0, 0.0, 0.0, 0.0], state)
+        self.assertEqual(counts, {"body_q": 1, "body_qd": 0})
+
+    def test_goal_is_unchanged(self):
+        controller = OscController(_StubArm(), control_dt=1.0 / 20.0)
+        state, _ = _counting_state((0.4, 0.1, 0.3))
+        pos, quat, _, _ = controller.measure(state)
+        goal_pos, goal_quat = controller.goal([0.5, 0.0, 0.0, 0.0, 0.0, 0.2], state)
+        expected_pos, expected_quat = controller._goal_from(pos, quat, [0.5, 0.0, 0.0, 0.0, 0.0, 0.2])
+        np.testing.assert_allclose(goal_pos, expected_pos)
+        np.testing.assert_allclose(goal_quat, expected_quat)
+
+
 if __name__ == "__main__":
     unittest.main()
-
-
-class _DeltaArm:
-    """The three things ``ActionEEDelta`` asks of an ``ArmIK``, recorded."""
-
-    def __init__(self, pos, quat) -> None:
-        self.home_pose = (np.asarray(pos, dtype=np.float64), np.asarray(quat, dtype=np.float64))
-        self.target = None
-
-    def ee_pose(self, state):
-        return self.home_pose
-
-    def set_target(self, pos, quat) -> None:
-        self.target = (np.asarray(pos), np.asarray(quat))
-
-    def solve_into(self, joint_q, joint_target_q) -> None:
-        pass
-
-
-class TestEEDeltaToolConvention(unittest.TestCase):
-    """``"tool"`` is ManiSkill's ``ee`` frame: ``prev_pose * delta``, translating along the pre-step axes."""
-
-    def test_a_combined_move_translates_along_the_pre_step_orientation(self):
-        from robosimstudio.solvers import ActionEEDelta
-
-        arm = _DeltaArm((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
-        space = ActionEEDelta([(arm, None)], convention="tool")
-        # 10 cm along the tool's x while turning a quarter about its z.
-        space.apply(
-            [0.1, 0.0, 0.0, 0.0, 0.0, np.pi / 2, 0.0],
-            SimpleNamespace(joint_target_q=None),
-            SimpleNamespace(joint_q=None),
-        )
-        pos, quat = arm.target
-        np.testing.assert_allclose(pos, [0.1, 0.0, 0.0], atol=1e-9)
-        np.testing.assert_allclose(np.abs(quat), np.abs(quat_from_axis_angle([0, 0, 1], np.pi / 2)), atol=1e-9)
