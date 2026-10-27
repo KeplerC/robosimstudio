@@ -1002,6 +1002,25 @@ class UnreadThings(unittest.TestCase):
         self.assertEqual(physics.unread_things(sim, ["box"]), {"box": "its solver could not be placed"})
 
 
+class OwnParticles(unittest.TestCase):
+    """Each deformable is read by its own particles, not the whole model's cloud its probe is over."""
+
+    def _probe(self):
+        from robosimstudio.core.probes.particle import ParticleProbe
+
+        probe = ParticleProbe(types.SimpleNamespace(particle_count=4), {"pouch": [0, 1], "scrunchie": [2, 3]})
+        probe.update_arrays(np.array([[0, 0, 0], [0, 0, 0.2], [1, 0, 0], [1, 0, 0]]), np.zeros((4, 3)))
+        return probe
+
+    def test_each_thing_reads_its_own_set(self) -> None:
+        probe = self._probe()
+        np.testing.assert_allclose(physics._own_points(probe, "pouch").mean(0), [0, 0, 0.1])
+        np.testing.assert_allclose(physics._own_points(probe, "scrunchie").mean(0), [1, 0, 0])
+
+    def test_a_probe_without_the_set_reads_every_particle(self) -> None:
+        self.assertEqual(len(physics._own_points(self._probe(), "towel")), 4)
+
+
 class StudyLines(unittest.TestCase):
     """The lines the physics study added: model, settle, a lasting flight, drop, plain, and drift that is elasticity."""
 

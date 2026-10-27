@@ -1039,6 +1039,11 @@ def _turn_deg(q0: np.ndarray, q1: np.ndarray) -> float:
     return math.degrees(2 * math.acos(min(1.0, d)))
 
 
+def _own_points(probe: Any, name: str) -> np.ndarray:
+    """Deformable ``name``'s own particles: its probe is over the whole model, with the thing's set by its name."""
+    return np.asarray(probe.points(name if name in getattr(probe, "sets", {}) else None))
+
+
 class Broken(BaseException):
     """The replay's own hold failed inside a step: a broken replay, not a reading of the routine."""
 
@@ -1393,7 +1398,7 @@ class Replay:
         for name, p in (sim.particle_probes() or {}).items() if sampled else ():
             try:
                 p.update(sim.state, None)
-                pts = np.asarray(p.points())
+                pts = _own_points(p, name)
             except Exception:
                 continue
             if len(pts):
