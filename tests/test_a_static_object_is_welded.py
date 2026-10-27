@@ -185,6 +185,8 @@ class TestAnEpisodeThatMovesAStaticObjectIsRefused(_ThreePaths):
             _fleet({"box": entity})._check_statics([STAYS, MOVED], [None, None])
         for refusal in (serial.exception, wave.exception):
             self.assertTrue(str(refusal).endswith(entity.move_remedy), str(refusal))
+            # A second copy pasted ahead of the appended one would still end right; it would not count once.
+            self.assertEqual(1, str(refusal).count("(:model-key-fields"), str(refusal))
         self.assertIn("(:model-key-fields ...)", entity.move_remedy, "the remedy names the way out")
 
 

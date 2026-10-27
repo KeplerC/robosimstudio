@@ -91,16 +91,13 @@ class TestAnEngineOnARoot(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.processes = Processes()
+        cls.addClassCleanup(cls.processes.close)
         _start(cls.processes, "on a root", REPORT + PATH_REPORT, _engine_root(cls.processes))
         cls.first, cls.second = (
             _engine_root(cls.processes, "probe_dup_engine"),
             _engine_root(cls.processes, "probe_dup_engine"),
         )
         _start(cls.processes, "two roots", "import robosimstudio.engines", cls.first, cls.second)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.processes.close()
 
     def test_a_bundle_on_a_root_registers_and_is_reachable_as_ours(self) -> None:
         proc = self.processes.result("on a root")

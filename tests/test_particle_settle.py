@@ -13,45 +13,16 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from tests.fixtures.settle import particle_thing
+
 TIER = "fast"
 """Stand-in things and a stand-in pipeline, and the two tutorial kinds imported without a build: no GPU."""
-
-
-def _thing(name: str = "towel", log: list | None = None, run: tuple[int, int] | None = None):
-    """A particle thing; ``run`` is the ``(settle_frames, settle_substeps)`` its spec states.
-
-    And the run it joined the settle with, as ``join_settle`` keeps it, until it joins again.
-    """
-    from robosimstudio.domains.capabilities import ParticleMixin
-
-    class _Stub(ParticleMixin):
-        def __init__(self) -> None:
-            self.name = name
-            self.settles = 0
-            self.snapshots = 0
-            if run is not None:
-                self.spec = SimpleNamespace(settle_frames=run[0], settle_substeps=run[1])
-            self.settle_run = run
-
-        def settle(self, pipeline) -> None:
-            del pipeline
-            self.settles += 1
-            if log is not None:
-                log.append(f"settle {self.name}")
-
-        def snapshot_rest(self, pipeline) -> None:
-            del pipeline
-            self.snapshots += 1
-            if log is not None:
-                log.append(f"snapshot {self.name}")
-
-    return _Stub()
 
 
 class TestJoinSettle(unittest.TestCase):
     def test_a_run_settles_once_and_every_thing_snapshots_after_each_join(self) -> None:
         pipeline = SimpleNamespace()
-        sheet, block, cable = _thing(), _thing(), _thing()
+        sheet, block, cable = particle_thing(), particle_thing(), particle_thing()
         sheet.join_settle(pipeline, (10, 4))
         block.join_settle(pipeline, (10, 4))
         cable.join_settle(pipeline)
@@ -62,7 +33,7 @@ class TestJoinSettle(unittest.TestCase):
 
     def test_a_different_run_settles_again(self) -> None:
         pipeline = SimpleNamespace()
-        a, b = _thing(), _thing()
+        a, b = particle_thing(), particle_thing()
         a.join_settle(pipeline, (10, 4))
         b.join_settle(pipeline, (20, 4))
         self.assertEqual((1, 1), (a.settles, b.settles))
@@ -75,7 +46,7 @@ TUTORIALS = (
 )
 
 
-def _tutorial_thing(path: Path):
+def _tutorialparticle_thing(path: Path):
     """The tutorial's own particle kind, made without a build: its ``snapshot_rest`` counts, and nothing else stands in."""
     import importlib.util
 
@@ -106,7 +77,7 @@ class TestTutorialsJoinSettle(unittest.TestCase):
         for path in TUTORIALS:
             with self.subTest(path=path.name):
                 pipeline = SimpleNamespace()
-                sheet, mine, later = _thing(), _tutorial_thing(path), _thing()
+                sheet, mine, later = particle_thing(), _tutorialparticle_thing(path), particle_thing()
                 sheet.join_settle(pipeline, (10, 4))
                 mine.on_scene_ready(pipeline)
                 self.assertIn(mine, pipeline.particle_settles["things"], "on the scene's one settle record")

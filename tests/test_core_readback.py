@@ -18,6 +18,7 @@ import numpy as np
 import warp as wp
 
 from robosimstudio.core.readback import HostSnapshot, Readback, launch_finite_check
+from tests.fixtures.models import tiny_model
 
 TIER = "fast"
 """No GPU: Warp's CPU device runs the flag kernels, and the model is two bodies and two particles."""
@@ -41,15 +42,8 @@ def _flags(worlds: int) -> wp.array:
 
 
 def _model(worlds: int = 2):
-    """One free body with a box and one particle per world: 7 coordinates, 6 dofs, 1 particle a world."""
-    import newton
-
-    builder = newton.ModelBuilder()
-    for world in range(worlds):
-        body = builder.add_body(xform=wp.transform((0.0, 0.0, 1.0 + world), wp.quat_identity()))
-        builder.add_shape_box(body, hx=0.1, hy=0.1, hz=0.1)
-        builder.add_particle((0.0, 0.0, 2.0 + world), (0.0, 0.0, 0.0), 0.1)
-    return builder.finalize(device="cpu")
+    """One free body with a box and one particle per world, replicated: 7 coordinates, 6 dofs, 1 particle a world."""
+    return tiny_model((("body", (0.0, 0.0, 1.0)),), particles=[(0.0, 0.0, 2.0)], worlds=worlds)
 
 
 class TestTheFiniteCheckChargesTheRightWorld(unittest.TestCase):

@@ -206,13 +206,10 @@ class TestAKindMayLiveOutsideTheCheckout(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.processes = Processes()
+        cls.addClassCleanup(cls.processes.close)
         _start(cls.processes, "ours", REPORT, _kind_root(cls.processes))
         cls.first, cls.second = _kind_root(cls.processes, "probe_dup"), _kind_root(cls.processes, "probe_dup")
         _start(cls.processes, "two roots", "import robosimstudio.domains", cls.first, cls.second)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.processes.close()
 
     def test_it_registers_and_reads_as_ours(self) -> None:
         proc = self.processes.result("ours")
@@ -268,6 +265,7 @@ class TestARootMayHoldAModuleOrAnExampleFolder(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.processes = processes = Processes()
+        cls.addClassCleanup(processes.close)
         _start(processes, "module", REPORT, _kind_root(processes, module=True))
         cls.pairs = {}
         for order in ("module first", "package first"):
@@ -286,10 +284,6 @@ class TestARootMayHoldAModuleOrAnExampleFolder(unittest.TestCase):
         first = _kind_root(processes, module=True, scripts=("00_intro.py",))
         second = _kind_root(processes, module=True, scripts=("01_other.py",))
         _start(processes, "one pack twice", "import robosimstudio.domains", first, second)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.processes.close()
 
     def test_a_single_module_on_a_root_registers_and_reads_as_ours(self) -> None:
         proc = self.processes.result("module")

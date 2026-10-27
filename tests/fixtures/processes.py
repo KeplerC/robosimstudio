@@ -8,7 +8,9 @@ Run one after another, each pays for importing the library, and two modules
 that did that spent 25 s of a tier meant to take seconds. Nothing makes them
 wait for each other, so :class:`Processes` starts every one a class needs in
 ``setUpClass`` and each test reads its own: the class costs its slowest
-process, not the sum.
+process, not the sum. At most :attr:`Processes.limit` run at once: a class
+with seven, in a tier already run sixteen modules wide, would otherwise be
+dozens of cold imports of the whole library racing for the same cores.
 """
 
 from __future__ import annotations
@@ -31,17 +33,24 @@ ROOT = Path(__file__).resolve().parents[2]
 class Processes:
     """Named interpreters running at once, and the temporary directories they read."""
 
-    def __init__(self) -> None:
+    def __init__(self, limit: int = 4) -> None:
+        self.limit = limit
         self._stack = ExitStack()
         self._running: dict[str, subprocess.Popen] = {}
         self._done: dict[str, subprocess.CompletedProcess] = {}
+        self._timed_out: dict[str, str] = {}
 
     def directory(self) -> Path:
         """A fresh directory that lives until :meth:`close`."""
         return Path(self._stack.enter_context(TemporaryDirectory()))
 
     def start(self, key: str, script: str, *, env: dict[str, str] | None = None) -> None:
-        """Run ``python -c script`` from the checkout, GPUs hidden, with ``env`` over this process's own."""
+        """Run ``python -c script`` from the checkout, GPUs hidden, with ``env`` over this process's own.
+
+        With :attr:`limit` already running, the oldest is waited for first.
+        """
+        while len(self._running) >= self.limit:
+            self._finish(next(iter(self._running)))
         self._running[key] = subprocess.Popen(
             [sys.executable, "-c", script],
             cwd=ROOT,
@@ -52,17 +61,28 @@ class Processes:
         )
 
     def result(self, key: str, timeout: float = 600.0) -> subprocess.CompletedProcess:
-        """What the process ``key`` printed and returned, waiting for it to end."""
-        if key not in self._done:
-            proc = self._running.pop(key)
-            try:
-                out, err = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                out, err = proc.communicate()
-                raise AssertionError(f"{key!r} ran past {timeout} s:\n{err[-2000:]}") from None
-            self._done[key] = subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+        """What the process ``key`` printed and returned, waiting for it to end.
+
+        A process that ran past ``timeout`` is killed and every later ask for it
+        fails with the same message, not with a ``KeyError`` that hides why.
+        """
+        if key in self._running:
+            self._finish(key, timeout)
+        if key in self._timed_out:
+            raise AssertionError(self._timed_out[key])
         return self._done[key]
+
+    def _finish(self, key: str, timeout: float = 600.0) -> None:
+        proc = self._running[key]
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            _, err = proc.communicate()
+            self._timed_out[key] = f"{key!r} ran past {timeout} s:\n{err[-2000:]}"
+        else:
+            self._done[key] = subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+        del self._running[key]
 
     def close(self) -> None:
         """Stop whatever no test read, and remove the directories."""
