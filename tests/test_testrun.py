@@ -105,11 +105,18 @@ class TestSelection(unittest.TestCase):
                 def test_looks_like_one(self): pass
             class _ProbeEntity(ImportedEntity):
                 def step(self): pass
+            class TestAsync(unittest.IsolatedAsyncioTestCase):
+                async def test_awaits(self): pass
         """
         with tree({"test_x": body}):
             self.assertEqual(
                 run.classes("tests.test_x"),
-                ["tests.test_x.TestOnTheHelper", "tests.test_x.TestMixedIn", "tests.test_x.TestOnAnImportedBase"],
+                [
+                    "tests.test_x.TestOnTheHelper",
+                    "tests.test_x.TestMixedIn",
+                    "tests.test_x.TestOnAnImportedBase",
+                    "tests.test_x.TestAsync",
+                ],
             )
 
     def test_a_module_with_no_test_case_runs_whole(self) -> None:
@@ -165,6 +172,12 @@ class TestRefusals(unittest.TestCase):
         code, err = self._main("--tier", "medium", "--gpus", "0,0")
         self.assertEqual(code, 2)
         self.assertIn("twice", err)
+
+    def test_flags_the_serial_run_cannot_honour_are_named(self) -> None:
+        out = io.StringIO()
+        with tree({"test_a": PASSING}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(run.main(["--tier", "fast", "--by-class", "--timeout", "60"]), 0)
+        self.assertIn("--by-class and --timeout need -j or --gpus", out.getvalue())
 
     def test_cards_are_refused_for_a_tier_that_hides_them(self) -> None:
         code, err = self._main("--tier", "fast", "--gpus", "0,1")
@@ -224,6 +237,34 @@ class TestRunningInParallel(unittest.TestCase):
         self.assertFalse(outcomes[0].ok)
         self.assertIn("got this far", outcomes[0].output)
         self.assertIn("killed after 3 s", outcomes[0].output)
+
+    def test_a_timeout_takes_down_what_the_module_started(self) -> None:
+        orphan = """
+            import subprocess, sys, time, unittest
+            TIER = "fast"
+            class TestServer(unittest.TestCase):
+                def test_serves(self):
+                    subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+                    time.sleep(120)
+        """
+        with tree({"test_orphan": orphan}):
+            start = time.monotonic()
+            outcomes = run.run_parallel(["tests.test_orphan"], 1, None, [], stream=io.StringIO(), timeout=3.0)
+        self.assertLess(time.monotonic() - start, 30.0, "a grandchild holding the pipe must not hold the run")
+        self.assertEqual(outcomes[0].code, run.TIMED_OUT)
+
+    def test_a_run_that_cannot_start_is_a_failure_not_a_gap(self) -> None:
+        with tree({"test_a": PASSING}), mock.patch.object(run.subprocess, "Popen", side_effect=OSError("no fork")):
+            outcomes = run.run_parallel(["tests.test_a"], 1, None, [], stream=io.StringIO())
+        self.assertEqual(len(outcomes), 1)
+        self.assertFalse(outcomes[0].ok)
+        self.assertIn("no fork", outcomes[0].output)
+
+    def test_fewer_outcomes_than_runs_asked_for_fails(self) -> None:
+        clean = run.read_outcome("tests.test_a", 0, 0.1, "Ran 1 test in 0.1s\n\nOK\n")
+        out = io.StringIO()
+        self.assertEqual(run.report([clean], 1.0, 0, stream=out, expected=2), 1)
+        self.assertIn("2 runs were asked for and 1 reported", out.getvalue())
 
     def test_classes_run_as_their_own_processes(self) -> None:
         with tree({"test_a": PASSING}):
