@@ -268,7 +268,12 @@ def _palette_segment(arr: np.ndarray, query: str, max_results: int) -> dict[str,
 
     binary = mask.astype(np.uint8) * 255
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    # The opening by a 2x2 kernel, as its two halves. OpenCV anchors an even
+    # kernel at (1, 1) for both, so ``MORPH_OPEN`` moved every mask, and its box,
+    # one pixel down and to the right; the dilation anchored at (0, 0) undoes
+    # the erosion's shift exactly.
+    opening = np.ones((2, 2), np.uint8)
+    binary = cv2.dilate(cv2.erode(binary, opening), opening, anchor=(0, 0))
     count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
     found: list[tuple[float, int, np.ndarray, list[float]]] = []
     for label in range(1, count):
