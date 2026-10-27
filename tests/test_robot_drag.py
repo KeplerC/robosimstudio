@@ -247,7 +247,7 @@ class TestADragOnARealPageActuallyMoves(unittest.TestCase):
         scene.add(rss.box(name="cube", half=(0.03,) * 3, at=(0.0, 0.0, 0.10)))
         scene.add(rss.sheet(name="towel", size=(0.25, 0.25), cells=(12, 12), at=(-0.125, -0.125, 0.45)))
         cls.sim = scene.build(control_mode="joint_position")
-        cls.session = StudioSession(cls.sim, config=StudioConfig(port=8937, panels="drive"))
+        cls.session = StudioSession(cls.sim, config=StudioConfig(port=0, panels="drive"))
 
     @classmethod
     def tearDownClass(cls) -> None:

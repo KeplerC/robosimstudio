@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """``robosimstudio_real2sim_agent``'s page itself: a scene file built on a GPU and driven the way ``ctl`` does.
 
-:mod:`tests.test_agent` is the half with no page. This is the other half, with
+:mod:`tests.test_real2sim_server` and :mod:`tests.test_real2sim_ctl` are the half with no page. This is the other half, with
 the loop driven a pass at a time rather than by ``serve`` -- so a test can say
 what happens *between* two passes, which is where every command lands:
 
@@ -188,7 +188,7 @@ class TestAResetThatFails(unittest.TestCase):
 
         scene = rss.Scene(cell="void", name="reset-fails")
         scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.1)))
-        session = StudioSession(scene.build(), config=StudioConfig(port=9332, panels="drive"))
+        session = StudioSession(scene.build(), config=StudioConfig(port=0, panels="drive"))
         try:
 
             def boom():

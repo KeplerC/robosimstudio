@@ -84,29 +84,40 @@ class Reading:
         return f"{body}  ({self.note})" if self.note else body
 
 
-def _positions(entity: Any, state: Any) -> np.ndarray:
-    """This cloth's particle positions, on the mid-surface for a slab.
+def _sheet(entity: Any, particle_q: Any) -> np.ndarray:
+    """This cloth's points out of a whole particle array, as the cloth reads itself.
 
     A slab has a particle on each face, so a raw z would read whichever face
-    happened to be sampled and swing by a thickness. The mid-surface is what the
-    membrane's single sheet already is, and what a droop should be measured on.
+    happened to be sampled and swing by a thickness; the cloth's own
+    ``mid_surface_of`` says where its single sheet is, and is the one place
+    that rule lives. One reading for the positions now and the rest layout
+    they are compared with: read on the mid-surface one side and on both faces
+    the other, a slab's two arrays differed in length and every reading that
+    compares them refused it. A thing with no such method is read as its
+    particles are.
     """
-    if hasattr(entity, "mid_surface_positions"):
+    read = getattr(entity, "mid_surface_of", None)
+    if read is not None:
         try:
-            mid = entity.mid_surface_positions(state)
+            mid = read(particle_q)
             if mid is not None and len(mid):
                 return np.asarray(mid, dtype=np.float64)
         except (AttributeError, ValueError, TypeError):
             pass
-    return np.asarray(state.particle_q.numpy(), dtype=np.float64)[entity.particles]
+    return np.asarray(particle_q, dtype=np.float64)[entity.particles]
+
+
+def _positions(entity: Any, state: Any) -> np.ndarray:
+    """This cloth's particle positions now, as :func:`_sheet` reads them."""
+    return _sheet(entity, state.particle_q.numpy())
 
 
 def _rest_positions(entity: Any) -> np.ndarray | None:
-    """The settled rest layout this cloth resets to, or ``None``."""
+    """The settled rest layout this cloth resets to, as :func:`_sheet` reads it, or ``None``."""
     rest = getattr(entity, "rest", None)
     if not rest or "particle_q" not in rest:
         return None
-    return np.asarray(rest["particle_q"], dtype=np.float64)[entity.particles]
+    return _sheet(entity, rest["particle_q"])
 
 
 def settle_speed(entity: Any, state: Any, *, percentile: float = 95.0) -> Reading:

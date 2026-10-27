@@ -21,17 +21,57 @@ thing under test, and it will agree with the real one right up until it matters.
 
 from __future__ import annotations
 
+import numpy as np
+
+
+class _StubEvent:
+    """What viser hands a callback: the handle on ``target``, and no browser behind it."""
+
+    def __init__(self, target, phase: str = "update") -> None:
+        self.target = target
+        self.client = None
+        self.client_id = None
+        self.phase = phase
+
 
 class _StubWidget:
-    """A viser widget: a value, a disabled flag, and callbacks a test may fire."""
+    """A viser widget: a value, a disabled flag, and the callbacks viser would call.
 
-    def __init__(self, value=None) -> None:
-        self.value = value
+    As viser 1.1.1 does (``_gui_handles.py``, the ``value`` setter): assigning a
+    *changed* value calls every ``on_update`` callback, at once, on the thread
+    that assigned it, and assigning the same value calls none -- except on a
+    button, which is called every time. A panel that writes its own slider from
+    ``drain`` therefore hears its own callback, here as in the browser, and a
+    stub that only called back on :meth:`fire` hid exactly that.
+    """
+
+    def __init__(self, value=None, *, is_button: bool = False, color: bool = False) -> None:
+        self._value = value
+        self.is_button = bool(is_button)
+        self.color = bool(color)
+        """An RGB or RGBA picker, whose assigned value goes through viser's colour hook first."""
         self.disabled = False
+        self.visible = True
         self.removed = False
         self.parent = None
         """The folder it was built in, which is how a test asks whether a hidden folder hides it."""
         self.callbacks: list = []
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, value) -> None:
+        value = _assigned(self._value, _colors_to_int_tuple(value) if self.color else value)
+        if not self.is_button and _same(self._value, value):
+            return
+        self._value = value
+        self._notify()
+
+    def _notify(self) -> None:
+        for fn in list(self.callbacks):
+            fn(_StubEvent(self))
 
     def on_update(self, fn):
         self.callbacks.append(fn)
@@ -42,14 +82,72 @@ class _StubWidget:
         return fn
 
     def fire(self, value=None) -> None:
-        """What the browser does: set the value, then tell the server."""
-        if value is not None:
-            self.value = value
-        for fn in list(self.callbacks):
-            fn(self)
+        """What the browser does: send a value, which viser takes only if it changed (a button, always).
+
+        With no value it is a press: the callbacks are called whatever the value is.
+        """
+        if value is None:
+            self._notify()
+            return
+        value = _sent(self._value, value)
+        if not self.is_button and _same(self._value, value):
+            return
+        self._value = value
+        self._notify()
 
     def remove(self) -> None:
         self.removed = True
+
+
+def _assigned(current, value):
+    """``value`` as viser 1.1.1's ``value`` setter makes it before comparing (``_gui_handles.py``).
+
+    An array becomes a tuple, each element in the type of the one it replaces
+    where the lengths agree -- rounded, not truncated, into an int -- or a tuple
+    of its own elements where they do not; then the whole is
+    ``type(current)(value)``, so a list or a tuple keeps its own elements. A
+    widget with no value yet takes what it is given.
+    """
+    if current is None or value is None:
+        return value
+    if isinstance(value, np.ndarray):
+        elems = value.tolist()
+        if isinstance(current, tuple) and len(current) == len(elems):
+            value = tuple(
+                type(c)(round(e)) if type(c) is int and isinstance(e, float) else type(c)(e)
+                for c, e in zip(current, elems, strict=True)
+            )
+        else:
+            value = tuple(elems)
+    return type(current)(value)
+
+
+def _sent(current, value):
+    """``value`` as viser 1.1.1's update handler casts what the browser sent (``_gui_api.py``).
+
+    A tuple-valued widget takes every element in its first element's type --
+    ``int(127.9)`` is 127 -- and anything else is ``type(current)(value)``.
+    """
+    if current is None or value is None:
+        return value
+    if isinstance(current, tuple):
+        if current:
+            return tuple(type(current[0])(v) for v in value)
+        return tuple(value)
+    return type(current)(value)
+
+
+def _colors_to_int_tuple(value) -> tuple[int, ...]:
+    """An RGB or RGBA colour as viser's colour hook makes it: int channels as they are, float ones on [0, 1]."""
+    return tuple(max(0, min(255, int(v) if np.issubdtype(type(v), np.integer) else int(v * 255))) for v in tuple(value))
+
+
+def _same(a, b) -> bool:
+    """``a == b`` as viser asks it, where an array compared to a tuple is not an error but a difference."""
+    try:
+        return bool(a == b)
+    except (TypeError, ValueError):
+        return False
 
 
 class _StubImage(_StubWidget):
@@ -84,10 +182,12 @@ class _StubFolder:
     ``visible`` is kept as viser keeps it, and a panel may reassign it.
     """
 
-    def __init__(self, label=None, parent=None, gui=None, visible=True) -> None:
+    def __init__(self, label=None, parent=None, gui=None, visible=True, expand_by_default=True) -> None:
         self.label = label
         self.parent = parent
         self.visible = bool(visible)
+        self.expand_by_default = bool(expand_by_default)
+        """Whether it opens unrolled: viser's default is True, and a panel that says False is making a claim."""
         self.removed = False
         self._gui = gui
 
@@ -116,12 +216,14 @@ class _StubGui:
         self._open: list[_StubFolder] = []
         """The folders a build is currently inside, innermost last."""
 
-    def _widget(self, label, value, *, disabled: bool = False, **_ignored) -> _StubWidget:
+    def _widget(
+        self, label, value, *, disabled: bool = False, is_button: bool = False, color: bool = False, **_ignored
+    ) -> _StubWidget:
         """One widget under ``label``. ``disabled`` is kept, as viser keeps it:
         a panel that builds a switch greyed out is making a claim a test may
         read, and a stub that dropped the keyword answered "enabled" for every
         widget whatever the panel had said."""
-        handle = _StubWidget(value)
+        handle = _StubWidget(value, is_button=is_button, color=color)
         handle.disabled = bool(disabled)
         handle.parent = self._open[-1] if self._open else None
         self.widgets.append((str(label), handle))
@@ -131,8 +233,14 @@ class _StubGui:
         """The widget a panel built under this label, for a test to drive."""
         return next(w for name, w in self.widgets if name == label)
 
-    def add_folder(self, label=None, *, visible=True, **kwargs):
-        folder = _StubFolder(label, self._open[-1] if self._open else None, gui=self, visible=visible)
+    def add_folder(self, label=None, *, visible=True, expand_by_default=True, **kwargs):
+        folder = _StubFolder(
+            label,
+            self._open[-1] if self._open else None,
+            gui=self,
+            visible=visible,
+            expand_by_default=expand_by_default,
+        )
         self.folders.append(folder)
         return folder
 
@@ -157,19 +265,35 @@ class _StubGui:
         panel's callback reads -- so a test presses a button by naming it, the
         way the browser does, rather than by setting the state behind it.
         """
-        return self._widget(label, options[0] if options else None, **kwargs)
+        return self._widget(label, options[0] if options else None, is_button=True, **kwargs)
 
     def add_number(self, label, initial_value=0, **kwargs):
         return self._widget(label, initial_value, **kwargs)
 
     def add_slider(self, label, min=0.0, max=1.0, step=0.1, initial_value=0.0, **kwargs):
-        return self._widget(label, initial_value, **kwargs)
+        handle = self._widget(label, initial_value, **kwargs)
+        handle.min, handle.max, handle.step = min, max, step
+        return handle
+
+    def add_vector3(self, label, initial_value=(0.0, 0.0, 0.0), **kwargs):
+        return self._widget(label, tuple(initial_value), **kwargs)
+
+    def add_rgb(self, label, initial_value=(0, 0, 0), **kwargs):
+        return self._widget(label, _colors_to_int_tuple(initial_value), color=True, **kwargs)
+
+    def add_rgba(self, label, initial_value=(0, 0, 0, 255), **kwargs):
+        return self._widget(label, _colors_to_int_tuple(initial_value), color=True, **kwargs)
+
+    def add_multi_slider(self, label, min=0.0, max=1.0, step=0.1, initial_value=(0.0, 1.0), **kwargs):
+        handle = self._widget(label, tuple(initial_value), **kwargs)
+        handle.min, handle.max, handle.step = min, max, step
+        return handle
 
     def add_text(self, label, initial_value="", **kwargs):
         return self._widget(label, initial_value, **kwargs)
 
     def add_button(self, label, **kwargs):
-        return self._widget(label, label, **kwargs)
+        return self._widget(label, label, is_button=True, **kwargs)
 
     def add_image(self, image, label=None, **kwargs):
         handle = _StubImage(image, label)
@@ -177,35 +301,68 @@ class _StubGui:
         return handle
 
 
-class _StubNode(_StubWidget):
-    """A scene node handle: a pose, a visibility, and a way to give it back."""
+class _StubNode:
+    """A scene node handle: a pose, a visibility, what it was added with, and the callbacks a drag calls.
 
-    def __init__(self, name: str) -> None:
-        super().__init__()
+    ``fire`` is the browser moving it: a gizmo dragged to ``position`` and
+    ``quat`` (xyzw, the library's order; the handle keeps viser's wxyz), then
+    every ``on_update`` callback called with an event whose ``target`` is this
+    node and whose ``phase`` is the drag's -- ``"start"``, ``"update"`` or
+    ``"end"`` -- which is what a transform control's callback is handed.
+    """
+
+    def __init__(self, name: str, **kwargs) -> None:
         self.name = name
-        self.position = (0.0, 0.0, 0.0)
-        self.wxyz = (1.0, 0.0, 0.0, 0.0)
-        self.visible = False
+        self.kwargs = dict(kwargs)
+        """Everything it was added with, for a test to read back."""
+        self.position = tuple(kwargs.get("position", (0.0, 0.0, 0.0)))
+        self.wxyz = tuple(kwargs.get("wxyz", (1.0, 0.0, 0.0, 0.0)))
+        self.visible = bool(kwargs.get("visible", True))
+        self.color = kwargs.get("color")
+        self.text = kwargs.get("text")
+        self.removed = False
+        self.callbacks: list = []
+        """The ``on_update`` handlers: what a drag calls."""
+        self.click_handlers: list = []
+        """The ``on_click`` handlers: what a click calls, and a drag does not."""
+
+    def on_update(self, fn):
+        self.callbacks.append(fn)
+        return fn
+
+    def on_click(self, fn):
+        self.click_handlers.append(fn)
+        return fn
+
+    def click(self) -> None:
+        """What a click on it in the browser does: every ``on_click`` handler, and no ``on_update`` one."""
+        for fn in list(self.click_handlers):
+            fn(_StubEvent(self, "click"))
+
+    def fire(self, position=None, quat=None, phase: str = "update") -> None:
+        """What the browser does: move the node, then tell the server about it."""
+        if position is not None:
+            self.position = tuple(float(v) for v in position)
+        if quat is not None:
+            x, y, z, w = (float(v) for v in quat)
+            self.wxyz = (w, x, y, z)
+        for fn in list(self.callbacks):
+            fn(_StubEvent(self, phase))
+
+    def remove(self) -> None:
+        self.removed = True
 
 
 class _StubFrustum(_StubNode):
     """A camera frustum handle: a pose, an image, a colour and a click callback."""
 
     def __init__(self, name: str, **kwargs) -> None:
-        super().__init__(name)
-        self.visible = True
+        super().__init__(name, **kwargs)
         self.fov = kwargs.get("fov")
         self.aspect = kwargs.get("aspect")
         self.scale = kwargs.get("scale")
         self.color = kwargs.get("color")
         self.image = kwargs.get("image")
-        self.position = kwargs.get("position", (0.0, 0.0, 0.0))
-        self.wxyz = kwargs.get("wxyz", (1.0, 0.0, 0.0, 0.0))
-        self.clicked = []
-
-    def on_click(self, fn):
-        self.clicked.append(fn)
-        return fn
 
 
 class _StubScene:
@@ -218,31 +375,69 @@ class _StubScene:
         # keep the furniture. Stubbed under its real name on purpose: a rename
         # upstream should fail a test here rather than quietly draw nothing.
         self._handle_from_node_name: dict[str, _StubNode] = {}
+        self.environment: dict = {}
+        """What ``configure_environment_map`` was last told."""
+        self.lights: dict[str, dict] = {}
+        """Each light by name, with what it was added with: a light added again under its name replaces it."""
 
-    def _node(self, name: str, visible: bool = False) -> _StubNode:
-        node = _StubNode(name)
-        node.visible = bool(visible)
+    def _node(self, name: str, visible: bool = False, **kwargs) -> _StubNode:
+        return self._put(_StubNode(name, **{**kwargs, "visible": visible}))
+
+    def _put(self, node: _StubNode) -> _StubNode:
+        """Add ``node``, replacing one added before under its name, as viser's node table does."""
+        before = self._handle_from_node_name.get(node.name)
+        if before is not None:
+            self.nodes = [n for n in self.nodes if n is not before]
         self.nodes.append(node)
-        self._handle_from_node_name[name] = node
+        self._handle_from_node_name[node.name] = node
         return node
 
     def set_background_image(self, image, **kwargs):
         self.background = image
 
     def add_camera_frustum(self, name, **kwargs):
-        node = _StubFrustum(name, **kwargs)
-        self.nodes.append(node)
-        self._handle_from_node_name[name] = node
-        return node
+        return self._put(_StubFrustum(name, **kwargs))
 
     def add_transform_controls(self, name, **kwargs):
-        return self._node(name, kwargs.get("visible", True))
+        return self._node(name, kwargs.pop("visible", True), **kwargs)
 
     def add_mesh_simple(self, name, **kwargs):
-        return self._node(name, kwargs.get("visible", False))
+        return self._node(name, kwargs.pop("visible", False), **kwargs)
 
     def add_icosphere(self, name, **kwargs):
-        return self._node(name, kwargs.get("visible", True))
+        return self._node(name, kwargs.pop("visible", True), **kwargs)
+
+    def add_label(self, name, text="", **kwargs):
+        return self._node(name, kwargs.pop("visible", True), text=text, **kwargs)
+
+    def add_box(self, name, **kwargs):
+        return self._node(name, kwargs.pop("visible", True), **kwargs)
+
+    def add_frame(self, name, **kwargs):
+        return self._node(name, kwargs.pop("visible", True), **kwargs)
+
+    def add_point_cloud(self, name, points=(), colors=(), **kwargs):
+        return self._node(name, kwargs.pop("visible", True), points=points, colors=colors, **kwargs)
+
+    def add_line_segments(self, name, points=(), colors=(), **kwargs):
+        return self._node(name, kwargs.pop("visible", True), points=points, colors=colors, **kwargs)
+
+    def add_spline_catmull_rom(self, name, positions=(), **kwargs):
+        return self._node(name, kwargs.pop("visible", True), positions=positions, **kwargs)
+
+    def configure_environment_map(self, **kwargs) -> None:
+        self.environment = dict(kwargs)
+
+    def add_light_ambient(self, name, **kwargs):
+        self.lights[name] = dict(kwargs)
+        return self._node(name, kwargs.pop("visible", True), **kwargs)
+
+    def add_light_directional(self, name, **kwargs):
+        self.lights[name] = dict(kwargs)
+        return self._node(name, kwargs.pop("visible", True), **kwargs)
+
+    def add_glb(self, name, glb_data=b"", **kwargs):
+        return self._node(name, kwargs.pop("visible", True), glb_data=glb_data, **kwargs)
 
     def on_click(self, *args, **kwargs):
         def register(fn):
@@ -286,6 +481,7 @@ class _StubSession:
 
 
 __all__ = [
+    "_StubEvent",
     "_StubFolder",
     "_StubFrustum",
     "_StubGui",

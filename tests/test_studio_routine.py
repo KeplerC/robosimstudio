@@ -6,7 +6,10 @@ claim the page makes about it is the same one it makes about a person: the
 gizmo moves, the arm follows it, and a thing comes up because the fingers
 closed on it. So the routine here is a pick written against the page's own
 helpers, run on the hello-world example by pressing its button, and held to the
-numbers the hand-driven grasp test holds.
+numbers the hand-driven grasp test holds. What the Run panel does around a
+routine -- a hand that never arrives, a routine that drives the scene itself,
+Stop and Reset -- is bookkeeping, and is :mod:`tests.test_studio_routine_steps`'
+over fake arm panels.
 """
 
 from __future__ import annotations
@@ -36,23 +39,18 @@ def _pick(sim, session):
     yield from reach(session, "right", over(0.15))
 
 
-def _lost(sim, session):
+def _out_of_reach(sim, session):
     from robosimstudio_studio.routine import reach
 
     yield from reach(session, "right", (5.0, 5.0, 5.0), speed=10.0, settle=0.2)
-
-
-def _hands_off(sim):
-    for _ in range(25):
-        yield
 
 
 class TestARoutinePlaysFromItsButton(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.sim, kwargs = _run("00_getting_started/00_hello_world.py")
-        cls.session = open_session(cls.sim, 8965, kwargs.get("page"))
-        cls.session.add_routines({"Pick": _pick, "Lost": _lost, "Hands off": _hands_off})
+        cls.session = open_session(cls.sim, 0, kwargs.get("page"))
+        cls.session.add_routines({"Pick": _pick})
         cls.panel = cls.session.panels[-1]
         tick(cls.session, 50)
 
@@ -69,7 +67,7 @@ class TestARoutinePlaysFromItsButton(unittest.TestCase):
             steps += 1
         return steps
 
-    def test_1_the_pick_lifts_the_cube_by_its_fingers(self) -> None:
+    def test_the_pick_lifts_the_cube_by_its_fingers(self) -> None:
         lying = np.asarray(self.sim["cube"].position, dtype=np.float64)
         self._play("Pick")
         self.assertIn("done", self._said())
@@ -77,33 +75,40 @@ class TestARoutinePlaysFromItsButton(unittest.TestCase):
         self.assertGreater(rose, 0.13, "the cube stayed on the bench")
         self.assertAlmostEqual(0.05, self.sim.gripper("right").width(self.sim.state), delta=0.004)
 
-    def test_2_a_hand_that_cannot_arrive_stops_the_routine_and_says_so(self) -> None:
-        self._play("Lost", limit=600)
-        self.assertIsNone(self.panel.gen)
-        self.assertIn("short of where it was sent", self._said())
-
-    def test_3_a_routine_that_drives_the_scene_itself_has_the_panels_held_off(self) -> None:
-        self.panel.requested = "Hands off"
-        tick(self.session, 1)
-        self.assertTrue(all(p.suspended for p in self.session.arms.values()))
-        while self.panel.gen is not None:
-            tick(self.session, 1)
-        self.assertFalse(any(p.suspended for p in self.session.arms.values()), "the hands were not given back")
-
-    def test_4_stop_and_reset_end_it_where_it_is(self) -> None:
-        self.panel.requested = "Pick"
-        tick(self.session, 5)
-        self.panel.stop_requested = True
-        tick(self.session, 1)
-        self.assertIsNone(self.panel.gen)
-        self.panel.requested = "Pick"
-        tick(self.session, 5)
-        self.session.reset_requested = True
-        tick(self.session, 1)
-        self.assertIsNone(self.panel.gen)
-
     def _said(self) -> str:
         return str(self.panel._status.value)
+
+
+class TestAHandThatCannotArrive(unittest.TestCase):
+    """The arrival check on a real arm: its IK, its setpoint law and a target five metres out of reach.
+
+    Its own page, so it asks nothing of what another test left the arm doing.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.sim, kwargs = _run("00_getting_started/00_hello_world.py")
+        cls.session = open_session(cls.sim, 0, kwargs.get("page"))
+        cls.session.add_routines({"Out of reach": _out_of_reach})
+        cls.panel = cls.session.panels[-1]
+        tick(cls.session, 20)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.session.teardown()
+
+    def test_a_hand_that_cannot_arrive_stops_the_routine_and_says_so(self) -> None:
+        self.panel.requested = "Out of reach"
+        tick(self.session, 1)
+        for _ in range(600):
+            if self.panel.gen is None:
+                break
+            tick(self.session, 1)
+        self.assertIsNone(self.panel.gen, "the routine waited on a hand that was never coming")
+        said = str(self.panel._status.value)
+        self.assertIn("short of where it was sent", said)
+        self.assertRegex(said, r"stopped \d+ mm short", "with how far short, in millimetres")
+        self.assertFalse(any(arm.suspended for arm in self.session.arms.values()), "and the arms are the page's again")
 
 
 if __name__ == "__main__":

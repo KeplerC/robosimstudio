@@ -1252,13 +1252,20 @@ def _join_points(argv: list[str]) -> list[str]:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(_join_points(list(sys.argv[1:] if argv is None else argv)))
-    sock = socket_path(args.run_dir, args.sock)
+    # The commands that never talk to the page, before the socket is worked out: they need none.
     if args.cmd == "new":
         return cmd_new(args)
     if args.cmd == "camera":
         return cmd_camera(args)
     if args.cmd == "ref" and args.op == "plate":
         return cmd_plate(args)
+    try:
+        sock: Path | None = socket_path(args.run_dir, args.sock)
+    except OSError as exc:  # a run directory too deep for any socket path: one line, and how to name one
+        if not (args.cmd == "ref" and args.op == "frames"):
+            print(f"ctl: {exc}", file=sys.stderr)
+            return 2
+        sock = None  # stills are cut without a page when there is none, and with no socket there is none
     if args.cmd == "physics":
         return cmd_physics(args, sock)
     if args.cmd == "up":
@@ -1272,6 +1279,8 @@ def main(argv=None) -> int:
     log = server_log(sock, Path(args.run_dir)) if streams else Path()
     offset = _log_size(log) if streams else 0
     try:
+        if sock is None:
+            raise NoServer("no socket path fits")
         if args.cmd == "status" and waiting:
             reply = wait_until_free(sock, args.wait_limit)
             if reply.get("ok"):

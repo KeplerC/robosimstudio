@@ -18,6 +18,7 @@ import numpy as np
 from robosimstudio_real2sim_agent import ctl, physics
 from robosimstudio_real2sim_agent.server import LiveServer
 from robosimstudio_real2sim_agent.wire import ROUTINE_PLAYING
+from tests.fixtures.live_server import bare_live_server
 
 TIER = "fast"
 
@@ -815,11 +816,8 @@ class Layout(unittest.TestCase):
 
 
 def _server(root: Path) -> LiveServer:
-    live = LiveServer.__new__(LiveServer)
-    live.script, live.scene_id, live.run_dir = [], "abc", root
-    live.physics, live.physics_model, live.physics_scene = {}, {}, ""
-    live.ns = {"routine": lambda sim, session: iter(())}
-    return live
+    """A server whose run directory is ``root``, over scene ``abc`` with a routine that does nothing."""
+    return bare_live_server(root, run_dir=root, scene_id="abc", ns={"routine": lambda sim, session: iter(())})
 
 
 class Refusals(unittest.TestCase):
@@ -1283,6 +1281,426 @@ class StudyLines(unittest.TestCase):
         )
         self.assertAlmostEqual(physics._shape_volume(m, 0), 0.048)
         self.assertAlmostEqual(physics._shape_volume(m, 1), 4.0 / 3.0 * np.pi * 0.125)
+
+
+# --------------------------------------------------------------------------- model_facts on a CPU model
+
+
+def _box(b, body: int, name: str, density: float = 500.0, half: float = 0.05, **kw) -> int:
+    """A 100 mm box on ``body`` (one litre at the default half-size), labelled ``name/box``."""
+    cfg = kw.pop("cfg", None) or _shape_cfg(density=density)
+    return b.add_shape_box(body, hx=half, hy=half, hz=half, cfg=cfg, label=f"{name}/box", **kw)
+
+
+def _shape_cfg(**kw):
+    import newton
+
+    return newton.ModelBuilder.ShapeConfig(**kw)
+
+
+def _builder(*attach):
+    """A builder holding a robot: one link with a box, welded to the world, as body 0. Returns it and that link.
+
+    Each of ``attach`` adds to the robot's own articulation -- a joint from its link to something -- and returns
+    the joint: Newton joins nothing to a link of one articulation from another.
+    """
+    import newton
+
+    b = newton.ModelBuilder()
+    robot = b.add_link(label="robot/base")
+    _box(b, robot, "robot")
+    joints = [b.add_joint_fixed(-1, robot, label="robot/root")]
+    joints += [fn(b, robot) for fn in attach]
+    b.add_articulation(joints)
+    return b, robot
+
+
+def _facts(b, things: dict[str, tuple[int, ...]], robot: tuple[int, ...] = (0,), equalities=None) -> dict:
+    """``physics.model_facts`` over the built model, ``things`` naming each thing's bodies (and so its shapes).
+
+    ``equalities`` are ``(body1, body2, label, on)`` rows, or ``(body1, body2, label, on, objtype, type)``; they
+    go where Newton 1.7 keeps them, on ``model.mujoco``. The start-overlap read, a collision pass, is stood in by
+    one that finds nothing: it is the settle line's, not what these tests are about.
+    """
+    from tests.fixtures.arrays import host
+
+    m = b.finalize(device="cpu")
+    shape_body = m.shape_body.numpy()
+    handles = {
+        name: types.SimpleNamespace(
+            body=bodies[0], bodies=tuple(bodies), static=False, shapes=np.flatnonzero(np.isin(shape_body, bodies))
+        )
+        for name, bodies in things.items()
+    }
+    if equalities is not None:
+        rows = [(*row, 1, 1)[:6] if len(row) == 4 else row for row in equalities]
+        m.mujoco = types.SimpleNamespace(
+            equality_constraint_count=len(rows),
+            equality_constraint_body1=host([r[0] for r in rows], dtype=np.int32),
+            equality_constraint_body2=host([r[1] for r in rows], dtype=np.int32),
+            equality_constraint_label=[r[2] for r in rows],
+            equality_constraint_enabled=host([r[3] for r in rows], dtype=bool),
+            equality_constraint_objtype=host([r[4] for r in rows], dtype=np.int32),
+            equality_constraint_type=host([r[5] for r in rows], dtype=np.int32),
+        )
+    robot_shapes = np.flatnonzero(np.isin(shape_body, robot))
+    sim = types.SimpleNamespace(
+        model=m,
+        state=m.state(),
+        control=m.control(),
+        scene=types.SimpleNamespace(
+            embodiment=types.SimpleNamespace(spec=types.SimpleNamespace(name="probe"), bodies=tuple(robot)),
+            handles=types.SimpleNamespace(objects=handles, arms={}, robot_shapes=robot_shapes),
+        ),
+    )
+    with mock.patch.object(physics, "_SideContacts", _NoContacts):
+        return physics.model_facts(sim)
+
+
+class _NoContacts:
+    """A start-overlap read that finds nothing."""
+
+    overflowed = False
+
+    def __init__(self, sim) -> None:
+        del sim
+
+    @classmethod
+    def of(cls, sim) -> _NoContacts:
+        return cls(sim)
+
+    def read(self):
+        return np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0)
+
+
+class ModelTies(unittest.TestCase):
+    """A joint or a row between a thing and the robot ties it, whatever it is called."""
+
+    def test_a_joint_from_a_thing_to_the_robot_is_a_tie_whatever_it_is_called(self) -> None:
+        for label in ("lid/hinge", "weld_to_world", None):
+            with self.subTest(label=label):
+
+                def hinge(b, robot, label=label):
+                    lid = b.add_link(label="lid/body")
+                    _box(b, lid, "lid")
+                    return b.add_joint_revolute(robot, lid, axis=(0, 0, 1), label=label)
+
+                b, _robot = _builder(hinge)
+                facts = _facts(b, {"lid": (1,)})
+                self.assertEqual(["lid by a revolute joint to the robot"], facts["ties"])
+                self.assertEqual(["lid"], facts["tie_things"])
+                self.assertEqual([], facts["welds"], "a tie is not also a weld")
+
+    def test_a_robot_link_hung_off_a_thing_is_the_same_tie_the_other_way(self) -> None:
+        b, robot = _builder()
+        cube = b.add_link(label="cube/body")
+        _box(b, cube, "cube")
+        flange = b.add_link(label="robot/flange")
+        _box(b, flange, "flange", half=0.01)
+        b.add_articulation([b.add_joint_revolute(-1, cube, axis=(0, 0, 1)), b.add_joint_fixed(cube, flange)])
+        facts = _facts(b, {"cube": (cube,)}, robot=(robot, flange))
+        self.assertEqual(["cube by a fixed joint to the robot"], facts["ties"])
+
+    def test_a_joint_built_off_holds_nothing(self) -> None:
+        def off(b, robot):  # an MJCF weld with active="false"
+            tab = b.add_link(label="cube/tab")
+            _box(b, tab, "tab", half=0.01)
+            return b.add_joint_fixed(robot, tab, enabled=False)
+
+        b, _robot = _builder(off)
+        cube = b.add_link(label="cube/body")
+        _box(b, cube, "cube")
+        b.add_articulation([b.add_joint_fixed(-1, cube, enabled=False)])
+        facts = _facts(b, {"cube": (cube, 1)})
+        self.assertEqual(([], []), (facts["ties"], facts["welds"]))
+
+
+class ModelWelds(unittest.TestCase):
+    """A thing welded to the world or to another thing is noted; a hinge or a slide to the world is a mechanism."""
+
+    def _one(self, joint: str, **kw) -> dict:
+        b, _robot = _builder()
+        lid = b.add_link(label="lid/body") if joint != "free" else b.add_body(label="lid/body", **kw)
+        _box(b, lid, "lid")
+        if joint == "fixed":
+            b.add_articulation([b.add_joint_fixed(-1, lid)])
+        elif joint == "revolute":
+            b.add_articulation([b.add_joint_revolute(-1, lid, axis=(0, 0, 1))])
+        elif joint == "prismatic":
+            b.add_articulation([b.add_joint_prismatic(-1, lid, axis=(1, 0, 0))])
+        return _facts(b, {"lid": (lid,)})
+
+    def test_a_fixed_joint_to_the_world_is_a_weld(self) -> None:
+        self.assertEqual(["lid welded to the world"], self._one("fixed")["welds"])
+
+    def test_a_hinge_or_a_slide_to_the_world_is_a_mechanism_not_a_weld(self) -> None:
+        for joint in ("revolute", "prismatic"):
+            with self.subTest(joint=joint):
+                facts = self._one(joint)
+                self.assertEqual(([], []), (facts["welds"], facts["ties"]))
+
+    def test_a_free_body_is_held_by_nothing(self) -> None:
+        facts = self._one("free")
+        self.assertEqual(([], [], [], []), (facts["ties"], facts["welds"], facts["drives"], facts["kinematic"]))
+
+    def test_a_body_flagged_kinematic_is_kinematic(self) -> None:
+        facts = self._one("free", is_kinematic=True)
+        self.assertEqual(["lid"], facts["kinematic"])
+        self.assertTrue(facts["things"]["lid"]["kinematic"])
+
+    def test_a_thing_fixed_to_another_is_welded_to_it_by_name(self) -> None:
+        b, _robot = _builder()
+        base, lid = b.add_link(label="base/body"), b.add_link(label="lid/body")
+        _box(b, base, "base")
+        _box(b, lid, "lid")
+        b.add_articulation([b.add_joint_revolute(-1, base, axis=(0, 0, 1)), b.add_joint_fixed(base, lid)])
+        self.assertEqual(["lid welded to base"], _facts(b, {"base": (base,), "lid": (lid,)})["welds"])
+
+    def test_a_things_own_parts_fixed_together_are_no_weld(self) -> None:
+        b, _robot = _builder()
+        base, handle = b.add_link(label="pot/body"), b.add_link(label="pot/handle")
+        _box(b, base, "pot")
+        _box(b, handle, "handle", half=0.01)
+        b.add_articulation([b.add_joint_revolute(-1, base, axis=(0, 0, 1)), b.add_joint_fixed(base, handle)])
+        self.assertEqual([], _facts(b, {"pot": (base, handle)})["welds"])
+
+
+class ModelDrives(unittest.TestCase):
+    """A stiff joint on a thing is a drive, and the replay watches the rows its targets sit in."""
+
+    def test_a_stiff_joint_is_a_drive_named_with_its_stiffness(self) -> None:
+        b, _robot = _builder()
+        lid = b.add_link(label="lid/body")
+        _box(b, lid, "lid")
+        b.add_articulation([b.add_joint_revolute(-1, lid, axis=(0, 0, 1), target_ke=50.0)])
+        facts = _facts(b, {"lid": (lid,)})
+        self.assertEqual(["lid's revolute joint 1 (ke 50)"], facts["drives"])
+        self.assertEqual(["lid"], facts["drive_things"])
+
+    def test_a_limp_joint_is_no_drive(self) -> None:
+        b, _robot = _builder()
+        lid = b.add_link(label="lid/body")
+        _box(b, lid, "lid")
+        b.add_articulation([b.add_joint_revolute(-1, lid, axis=(0, 0, 1), target_ke=0.0)])
+        facts = _facts(b, {"lid": (lid,)})
+        self.assertEqual(([], []), (facts["drives"], facts["drive_rows"]))
+
+    def test_a_drives_row_is_where_its_target_sits_not_its_dof(self) -> None:
+        """Behind a free body the two differ: its seven coordinates against its six DOFs."""
+        b, _robot = _builder()
+        cube = b.add_body(label="cube/body")
+        _box(b, cube, "cube")
+        lid = b.add_link(label="lid/body")
+        _box(b, lid, "lid")
+        b.add_articulation([b.add_joint_revolute(-1, lid, axis=(0, 0, 1), target_ke=50.0)])
+        facts = _facts(b, {"cube": (cube,), "lid": (lid,)})
+        self.assertEqual(([], ["lid"]), (facts["welds"], facts["drive_things"]))
+        self.assertEqual([0 + 7], facts["drive_rows"], "after the robot's none and the cube's seven")
+
+    def test_a_stiff_joint_past_a_things_first_body_is_an_elastic_part(self) -> None:
+        b, _robot = _builder()
+        base, stem = b.add_link(label="plant/pot"), b.add_link(label="plant/stem")
+        _box(b, base, "pot")
+        _box(b, stem, "stem", half=0.01)
+        b.add_articulation(
+            [
+                b.add_joint_revolute(-1, base, axis=(0, 0, 1), target_ke=10.0),
+                b.add_joint_revolute(base, stem, axis=(1, 0, 0), target_ke=10.0),
+            ]
+        )
+        facts = _facts(b, {"plant": (base, stem)})
+        self.assertEqual(["plant#1"], facts["elastic_parts"], "the stem bends; the pot's own spring is not a part's")
+
+
+class ModelEqualities(unittest.TestCase):
+    """An equality row welds a thing only while it is on, and one to the robot is named whether on or not."""
+
+    def _rows(self, *rows) -> dict:
+        b, robot = _builder()
+        cube, tab = b.add_body(label="cube/body"), b.add_body(label="cube/tab")
+        _box(b, cube, "cube")
+        _box(b, tab, "tab", half=0.01)
+        self.robot, self.cube, self.tab = robot, cube, tab
+        return _facts(b, {"cube": (cube, tab)}, robot=(robot,), equalities=[r(self) for r in rows])
+
+    def test_a_row_to_the_world_welds_only_while_it_is_on(self) -> None:
+        on = self._rows(lambda s: (s.cube, -1, "pin", True))
+        self.assertEqual(["cube by equality constraint 0"], on["welds"])
+        off = self._rows(lambda s: (s.cube, -1, "pin", False))
+        self.assertEqual([], off["welds"])
+
+    def test_a_row_to_the_robot_is_named_on_or_off_and_is_no_weld(self) -> None:
+        for enabled in (True, False):
+            with self.subTest(on=enabled):
+                facts = self._rows(lambda s, e=enabled: (s.robot, s.cube, "suction", e))
+                self.assertEqual({"0": "suction"}, facts["robot_equalities"])
+                self.assertEqual({"0": "cube"}, facts["robot_equality_things"])
+                self.assertEqual([], facts["welds"])
+
+    def test_a_row_closing_a_loop_within_a_thing_is_no_weld(self) -> None:
+        self.assertEqual([], self._rows(lambda s: (s.cube, s.tab, "loop", True))["welds"])
+
+    def test_a_row_coupling_joints_is_not_a_body_pair(self) -> None:
+        facts = self._rows(lambda s: (s.cube, -1, "gear", True, 3, 2))  # mjOBJ_JOINT, mjEQ_JOINT
+        self.assertEqual(([], {}), (facts["welds"], facts["robot_equalities"]))
+
+
+class ModelDensity(unittest.TestCase):
+    """A thing's density is its mass over its colliders' volume, and the largest collider alone bounds it."""
+
+    def _crate(self, density: float, boxes: int = 1) -> dict:
+        b, _robot = _builder()
+        crate = b.add_body(label="crate/body")
+        for _ in range(boxes):  # boxes on one spot: colliders that overlap
+            _box(b, crate, "crate", density=density)
+        return _facts(b, {"crate": (crate,)})["things"]["crate"]
+
+    def test_a_things_density_is_its_mass_over_its_colliders_volume(self) -> None:
+        crate = self._crate(700.0)
+        self.assertAlmostEqual(1.0, crate["volume_l"], places=4)
+        self.assertAlmostEqual(0.7, crate["mass_kg"], places=4)
+        self.assertAlmostEqual(700.0, crate["density"], places=1)
+        self.assertEqual(crate["density"], crate["density_max"])
+
+    def test_overlapping_colliders_count_twice_in_the_sum_and_once_in_the_bound(self) -> None:
+        crate = self._crate(500.0, boxes=2)
+        self.assertAlmostEqual(2.0, crate["volume_l"], places=4)
+        self.assertAlmostEqual(500.0, crate["density"], places=1)
+        self.assertAlmostEqual(1000.0, crate["density_max"], places=1)
+
+    def test_a_collider_that_collides_with_nothing_is_no_volume(self) -> None:
+        b, _robot = _builder()
+        crate = b.add_body(label="crate/body")
+        _box(b, crate, "crate", density=500.0)
+        _box(
+            b, crate, "crate_look", cfg=_shape_cfg(density=0.0, has_shape_collision=False, has_particle_collision=False)
+        )
+        crate = _facts(b, {"crate": (crate,)})["things"]["crate"]
+        self.assertAlmostEqual(1.0, crate["volume_l"], places=4)
+
+    def test_the_bounds_read_a_featherweight_by_its_largest_collider(self) -> None:
+        """25 kg/m³ over two overlapping litres is 50 by either one alone: lighter than EPS only by the sum."""
+        lo, _hi = physics.DENSITY
+        for density, boxes, note in ((20.0, 1, True), (25.0, 2, False), (lo + 1.0, 1, False)):
+            with self.subTest(density=density, boxes=boxes):
+                model = {**CLEAN, "gravity": physics.GRAVITY, "things": {"crate": self._crate(density, boxes)}}
+                words = _words(physics.verdict(model, _clean_runs()))
+                self.assertIs(None if note else True, words["model"])
+
+    def test_gravity_is_read_off_the_model(self) -> None:
+        b, _robot = _builder()
+        self.assertAlmostEqual(9.81, _facts(b, {})["gravity"], places=4)
+
+
+def _shapes(*rows) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``_round_axis``'s tables from ``(kind, position, quaternion xyzw)`` rows, every one a collider."""
+    import newton
+
+    kind = np.array([int(getattr(newton.GeoType, k)) for k, _, _ in rows])
+    xf = np.array([[*p, *q] for _, p, q in rows], dtype=np.float64)
+    flags = np.full(len(rows), int(newton.ShapeFlags.COLLIDE_SHAPES))
+    return kind, xf, flags
+
+
+UP = (0.0, 0.0, 0.0, 1.0)
+SIDEWAYS = (0.0, np.sin(np.pi / 4), 0.0, np.cos(np.pi / 4))
+"""A quarter turn about y: a cylinder's own z along the world's x."""
+
+
+class RoundAxis(unittest.TestCase):
+    """The axis a thing is round about, about which a bottle spun ends the same; ``None`` for anything else."""
+
+    def _axis(self, *rows, shapes=None):
+        tables = _shapes(*rows)
+        return physics._round_axis(None, list(range(len(rows))) if shapes is None else shapes, tables)
+
+    def test_a_cylinder_is_round_about_its_own_axis(self) -> None:
+        self.assertEqual([0.0, 0.0, 1.0], self._axis(("CYLINDER", (0, 0, 0), UP)))
+        self.assertEqual([1.0, 0.0, 0.0], self._axis(("CYLINDER", (0, 0, 0), SIDEWAYS)))
+
+    def test_a_capsule_and_a_cone_on_one_line_are_round_about_it(self) -> None:
+        self.assertEqual(
+            [0.0, 0.0, 1.0],
+            self._axis(("CAPSULE", (0, 0, 0), UP), ("CONE", (0, 0, 0.2), UP), ("SPHERE", (0, 0, -0.1), UP)),
+        )
+
+    def test_two_cylinders_side_by_side_are_not(self) -> None:
+        self.assertIsNone(self._axis(("CYLINDER", (0, 0, 0), UP), ("CYLINDER", (0.05, 0, 0), UP)))
+
+    def test_a_cylinder_and_a_crossing_one_are_not(self) -> None:
+        self.assertIsNone(self._axis(("CYLINDER", (0, 0, 0), UP), ("CYLINDER", (0, 0, 0), SIDEWAYS)))
+
+    def test_a_box_anywhere_makes_it_not_round(self) -> None:
+        self.assertIsNone(self._axis(("CYLINDER", (0, 0, 0), UP), ("BOX", (0, 0, 0), UP)))
+
+    def test_a_sphere_off_the_axis_makes_it_not_round(self) -> None:
+        self.assertIsNone(self._axis(("CYLINDER", (0, 0, 0), UP), ("SPHERE", (0.03, 0, 0), UP)))
+
+    def test_spheres_alone_are_round_about_every_axis_when_they_share_a_centre(self) -> None:
+        self.assertEqual([0.0, 0.0, 0.0], self._axis(("SPHERE", (0, 0, 0.1), UP), ("SPHERE", (0, 0, 0.1), UP)))
+        self.assertIsNone(self._axis(("SPHERE", (0, 0, 0), UP), ("SPHERE", (0, 0, 0.1), UP)))
+
+    def test_a_shape_that_does_not_collide_is_not_asked(self) -> None:
+        kind, xf, flags = _shapes(("CYLINDER", (0, 0, 0), UP), ("BOX", (0, 0, 0), UP))
+        flags[1] = 0
+        self.assertEqual([0.0, 0.0, 1.0], physics._round_axis(None, [0, 1], (kind, xf, flags)))
+
+    def test_the_model_facts_carry_a_bottles_axis(self) -> None:
+        b, _robot = _builder()
+        bottle = b.add_body(label="bottle/body")
+        b.add_shape_cylinder(bottle, radius=0.03, half_height=0.1, label="bottle/glass")
+        self.assertEqual([0.0, 0.0, 1.0], _facts(b, {"bottle": (bottle,)})["things"]["bottle"]["round_axis"])
+
+
+def _hidden(shapes, *, objects=None, robot=()) -> dict[int, str]:
+    """``_hidden_colliders`` over shapes given as ``(label, body, visible, collides, kind)`` rows."""
+    import newton
+
+    from tests.fixtures.arrays import host
+
+    visible, collide = int(newton.ShapeFlags.VISIBLE), int(newton.ShapeFlags.COLLIDE_SHAPES)
+    flags = [(visible if v else 0) | (collide if c else 0) for _, _, v, c, _ in shapes]
+    model = types.SimpleNamespace(
+        shape_flags=host(flags, dtype=np.int32),
+        shape_body=host([b for _, b, _, _, _ in shapes], dtype=np.int32),
+        shape_type=host([int(getattr(newton.GeoType, k)) for *_, k in shapes], dtype=np.int32),
+        shape_label=[label for label, *_ in shapes],
+    )
+    robot_shapes = np.array([i for i, (_, b, *_) in enumerate(shapes) if b in robot], dtype=np.int64)
+    handles = types.SimpleNamespace(objects=objects or {}, arms={}, robot_shapes=robot_shapes)
+    sim = types.SimpleNamespace(
+        model=model, scene=types.SimpleNamespace(handles=handles, embodiment=types.SimpleNamespace(bodies=robot))
+    )
+    return physics._hidden_colliders(sim)
+
+
+class HiddenColliders(unittest.TestCase):
+    """A collider nothing draws, owned by no thing and not the robot's, in a group with nothing drawn."""
+
+    def test_an_invisible_prop_is_hidden_and_named_by_its_group(self) -> None:
+        self.assertEqual({0: "shelf"}, _hidden([("shelf/board", -1, False, True, "BOX")]))
+
+    def test_a_visible_table_with_a_separate_invisible_collider_hides_nothing(self) -> None:
+        shapes = [("table/top", -1, True, False, "MESH"), ("table_collision_03/box", -1, False, True, "BOX")]
+        self.assertEqual({}, _hidden(shapes))
+
+    def test_the_ground_plane_is_not_a_prop(self) -> None:
+        self.assertEqual({}, _hidden([("ground", -1, False, True, "PLANE")]))
+
+    def test_a_shape_that_collides_with_nothing_is_not_a_collider(self) -> None:
+        self.assertEqual({}, _hidden([("marker/dot", -1, False, False, "SPHERE")]))
+
+    def test_a_things_own_and_the_robots_own_colliders_are_not_props(self) -> None:
+        shapes = [("cube/hull", 1, False, True, "BOX"), ("robot/pad", 2, False, True, "BOX")]
+        cube = types.SimpleNamespace(body=1, bodies=(1,), static=False, shapes=[0])
+        self.assertEqual({}, _hidden(shapes, objects={"cube": cube}, robot=(2,)))
+        self.assertEqual({0: "cube/hull", 1: "robot/pad"}, _hidden(shapes), "and without them, both are")
+
+    def test_a_welded_body_is_its_own_group(self) -> None:
+        drawn = [("cabinet/door", 4, True, False, "MESH"), ("cabinet/door_hull", 4, False, True, "BOX")]
+        self.assertEqual({}, _hidden(drawn))
+        alone = [("cabinet/door", 5, True, False, "MESH"), ("cabinet/door_hull", 4, False, True, "BOX")]
+        self.assertEqual({1: "cabinet/door_hull"}, _hidden(alone), "drawn on another body is drawn elsewhere")
 
 
 if __name__ == "__main__":

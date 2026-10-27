@@ -11,59 +11,15 @@ the wrench then lifts the box is physics, and lives in ``tests.test_robot_drag``
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 
 import numpy as np
 
-from robosimstudio.core.math import quat_from_axis_angle, quat_to_mat, quat_xyzw_to_wxyz
+from robosimstudio.core.math import quat_from_axis_angle, quat_to_mat
 from robosimstudio_studio.handles import HandleSet
+from tests.fixtures.viser_stubs import _StubScene
 
 TIER = "fast"
 """No GPU. Gates every commit."""
-
-
-class _StubNode:
-    """A viser scene node that remembers its callbacks, so a drag can be faked."""
-
-    def __init__(self, name: str, visible: bool) -> None:
-        self.name = name
-        self.position = (0.0, 0.0, 0.0)
-        self.wxyz = (1.0, 0.0, 0.0, 0.0)
-        self.visible = bool(visible)
-        self.removed = False
-        self.callbacks: list = []
-
-    def on_update(self, fn):
-        self.callbacks.append(fn)
-        return fn
-
-    def remove(self) -> None:
-        self.removed = True
-
-    def fire(self, position=None, quat=None, phase: str = "update") -> None:
-        """What the browser does: move the node, then tell the server about it."""
-        if position is not None:
-            self.position = tuple(float(v) for v in position)
-        if quat is not None:
-            self.wxyz = tuple(float(v) for v in quat_xyzw_to_wxyz(quat))
-        for fn in list(self.callbacks):
-            fn(SimpleNamespace(target=self, phase=phase))
-
-
-class _StubScene:
-    def __init__(self) -> None:
-        self.nodes: list[_StubNode] = []
-
-    def _node(self, name, visible) -> _StubNode:
-        node = _StubNode(name, visible)
-        self.nodes.append(node)
-        return node
-
-    def add_transform_controls(self, name, **kwargs):
-        return self._node(name, kwargs.get("visible", True))
-
-    def add_icosphere(self, name, **kwargs):
-        return self._node(name, kwargs.get("visible", True))
 
 
 def _set(handles: HandleSet, count: int = 2, **kwargs) -> HandleSet:

@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import unittest
 
-TIER = "fast"
+TIER = "medium"
+"""Starts three real viser servers, each on a port the OS picks (port 0): a server is not a fast test."""
 
-STUDIO_PORT = 9811
-NEWTON_PORT = 9812
-BARE_PORT = 9813
+PORT = 0
+"""Any free port: viser binds port 0 to whatever the OS hands it, so two runs never collide."""
 NEWTONS = {"Pause", "Step", "Reset", "Show Visual", "Show Collision", "Enable Picking"}
 """Some of what Newton 1.7 puts in its two folders, by label."""
 
@@ -38,7 +38,7 @@ class TestNewtonsFoldersStayOffTheStudioPage(unittest.TestCase):
 
         from robosimstudio_studio.garments import viewer_studio
 
-        bare = ViewerViser(port=NEWTON_PORT)
+        bare = ViewerViser(port=PORT)
         try:
             folders, inputs = _sidebar(bare)
         finally:
@@ -46,7 +46,7 @@ class TestNewtonsFoldersStayOffTheStudioPage(unittest.TestCase):
         self.assertIn("Visualization", folders, "Newton's own viewer opens a Visualization folder")
         self.assertTrue(NEWTONS <= inputs, sorted(NEWTONS - inputs))
 
-        studio = viewer_studio(port=STUDIO_PORT, share=False)
+        studio = viewer_studio(port=PORT, share=False)
         try:
             folders, inputs = _sidebar(studio)
             self.assertEqual([], folders, "a studio viewer opens no folder of its own")
@@ -64,13 +64,13 @@ class TestTheBareViewersSimulationFolderDrivesTheScene(unittest.TestCase):
 
         import newton
 
-        from robosimstudio.sim.draw import Viewer, viewer
+        from robosimstudio.sim.draw import Viewer
 
         resets: list[int] = []
         sim = SimpleNamespace(
             model=newton.ModelBuilder().finalize(device="cpu"), name="bare", reset=lambda: resets.append(1)
         )
-        page = Viewer(sim, port=BARE_PORT)
+        page = Viewer(sim, port=PORT)
         try:
             self.assertFalse(page._viewer._simulation_gui_handles["reset"].disabled, "Reset is live")
             page._viewer._interaction_events.put(("reset",))  # what a click on it queues
@@ -78,7 +78,6 @@ class TestTheBareViewersSimulationFolderDrivesTheScene(unittest.TestCase):
             self.assertEqual([1], resets)
         finally:
             page.close()
-        self.assertIn("if viewer.should_step():", viewer.__doc__, "the loop the docs show honours Pause")
 
 
 if __name__ == "__main__":

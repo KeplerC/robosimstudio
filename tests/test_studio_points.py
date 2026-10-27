@@ -203,7 +203,7 @@ class TestThePageDrawsThePoints(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.sim = build("points")
-        cls.session = _session(cls.sim, 8975)
+        cls.session = _session(cls.sim, 0)
         cls.viewer = cls.session.viewer
         cls.key = cls.viewer._qualify("/model/garments/heap/points")
 
@@ -260,7 +260,7 @@ class TestThePageDrawsTheSurface(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.sim = build("surface")
-        cls.session = _session(cls.sim, 8976)
+        cls.session = _session(cls.sim, 0)
         cls.viewer = cls.session.viewer
         cls.key = cls.viewer._qualify("/model/garments/heap/surface")
 
