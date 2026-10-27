@@ -7,7 +7,7 @@ Run with `uv run python scripts/<name>.py`; each takes `--help`.
 | script | what it does |
 | --- | --- |
 | `live.py` | Open the live page on a `scene.py` and rebuild it on every save (`examples/live/ctl up` runs it detached). |
-| `testrun.py` | Run one tier of the test suite: `--tier fast` needs no GPU, `--tier medium` builds and steps scenes. |
+| `testrun.py` | Run one tier of the test suite: `--tier fast` needs no GPU, `--tier medium` builds and steps scenes; `-j N` and `--gpus` run it in parallel, `--coverage` measures it. |
 | `example_readmes.py` | Write each example folder's README sections from its scripts' docstrings; `--check` says whether they are up to date. |
 | `check_renderers.py` | Which renderers draw on this machine (`rtx`, `blender`, `gl`, `tiled`), how fast, and how far each one's depth is from the tiled tracer's; the frames go to `outputs/check_renderers/`. Run it first on a Mac. |
 | `bench_run.py` | Run a policy over a task's episodes and write a run directory: one results row per episode and the success rate. `--task-root` adds a folder of your tasks, `--num-worlds` runs them side by side. |

@@ -19,6 +19,8 @@ uvx pre-commit install                                  # ruff on every commit
 uv run python scripts/testrun.py --tier fast     # no GPU; CI runs this
 uv run --extra cpu --no-group rtx python scripts/testrun.py --tier cpu   # no GPU; real scenes on a CPU; CI runs this
 uv run --extra gap python scripts/testrun.py --tier medium   # needs the GPU; builds and steps scenes
+uv run python scripts/testrun.py --tier fast -j 16   # the same tier, a process per module, 16 at once
+uv run --extra gap python scripts/testrun.py --tier medium --gpus 0,1,2,3   # one card per worker
 uvx ruff@0.16.1 check . && uvx ruff@0.16.1 format . --check
 ```
 
@@ -27,6 +29,11 @@ Every test module declares `TIER = "fast" | "medium" | "slow" | "cpu"`;
 build a scene on a GPU are `medium`, and tests that build one on a CPU are `cpu`
 (the runner hides every GPU for `fast` and `cpu`, as CI's runners have none). CI runs `fast` and `cpu`, so run
 `medium` on a GPU before changing simulation code.
+
+With `-j` or `--gpus` the runner prints a failing module's output, the slowest
+modules and the totals. A GPU tier runs in parallel only with `--gpus`: two
+scenes sharing a card change each other's contact outcomes. `--coverage` (the
+`dev` extra) measures line coverage of the library while the tier runs.
 
 ## Where things go
 

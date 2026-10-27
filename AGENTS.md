@@ -41,6 +41,8 @@ do not run the tiers for it, and do not add its tests to `tests/`.
   GPU; builds and steps scenes on a CPU (MuJoCo's C library, SuperDex).
 - `uv run --extra gap python scripts/testrun.py --tier medium`: needs the GPU;
   builds and steps scenes.
+- `-j 16` runs a no-GPU tier a process per module, and `--gpus 0,1,...` a GPU
+  tier on one card per worker; `--coverage` measures line coverage.
 - `uvx ruff@0.16.1 check . && uvx ruff@0.16.1 format . --check`.
 - `examples/live/run/` and `examples/live/twins/` are not committed. A commit message is a lowercase
   `area:` prefix and one declarative sentence
