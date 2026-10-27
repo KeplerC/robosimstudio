@@ -824,5 +824,81 @@ class TakeProbe(unittest.TestCase):
         self.assertIsNone(rec.captured[-1], "filmed afresh")
 
 
+def _gate_line(name: str, sim: GateSim, **kwargs) -> dict:
+    """One of the gate's lines, with the contact probe answering "no overlap"."""
+    with mock.patch.object(checks, "_penetration", return_value=(0.0, [])):
+        result = checks.gate(gate_server(sim), steps=1, **kwargs)
+    return next(c for c in result["checks"] if c["name"] == name)
+
+
+PHONE = CameraSpec(name="phone", width=1280, height=720, fov_y=50.0, eye=(1.0, 0.0, 1.0), look_at=(0.0, 0.0, 0.0))
+"""A 16:9 camera, 1.778 wide per unit of height."""
+
+
+class TheCameraLine(unittest.TestCase):
+    """The camera the comparison renders through must have the clip's shape: within 2% of its aspect."""
+
+    def _camera(self, width: int = 0, height: int = 0, **kwargs) -> dict:
+        timeline = {"width": width, "height": height} if width or height else None
+        return _gate_line("camera", GateSim(cameras=(PHONE,)), timeline=timeline, **kwargs)
+
+    def test_a_clip_of_the_cameras_own_shape_passes_and_is_named(self) -> None:
+        line = self._camera(1920, 1080)
+        self.assertTrue(line["ok"], line["detail"])
+        self.assertEqual("phone 1280x720, fov 50 deg; clip 1920x1080", line["detail"])
+
+    def test_a_clip_within_two_percent_passes(self) -> None:
+        line = self._camera(1300, 720)  # 1.6% wider
+        self.assertTrue(line["ok"], line["detail"])
+
+    def test_a_clip_three_percent_off_fails_saying_by_how_much(self) -> None:
+        line = self._camera(1320, 720)  # 3.1% wider
+        self.assertFalse(line["ok"])
+        self.assertIn("aspect off by 3%", line["detail"])
+
+    def test_a_portrait_clip_on_a_landscape_camera_fails(self) -> None:
+        line = self._camera(1080, 1920)  # 0.5625 against 1.778: off by 68%
+        self.assertFalse(line["ok"])
+        self.assertIn("clip 1080x1920 -- aspect off by 68%", line["detail"])
+
+    def test_with_no_clip_size_the_aspect_is_not_asked(self) -> None:
+        for timeline in (None, {"width": 0, "height": 1080}):
+            with self.subTest(timeline=timeline):
+                line = _gate_line("camera", GateSim(cameras=(PHONE,)), timeline=timeline)
+                self.assertTrue(line["ok"])
+                self.assertNotIn("clip", line["detail"])
+
+    def test_a_camera_the_scene_does_not_declare_fails_naming_the_ones_it_does(self) -> None:
+        line = _gate_line("camera", GateSim(cameras=(PHONE,)), camera="overhead")
+        self.assertFalse(line["ok"])
+        self.assertEqual("no camera 'overhead' declared; the scene has ['phone']", line["detail"])
+
+
+class TheRestBar(unittest.TestCase):
+    """``rest`` passes a thing that drifted as far as the bar and fails one that drifted further."""
+
+    def _rest(self, drift_m: float, settle_mm: float = 2.0) -> dict:
+        where = {"cube": np.zeros(3)}
+        sim = GateSim(
+            names=["cube"],
+            positions={"cube": lambda: where["cube"]},
+            on_run=lambda steps: where.update(cube=np.array([drift_m, 0.0, 0.0])),
+        )
+        return _gate_line("rest", sim, settle_mm=settle_mm)
+
+    def test_a_drift_exactly_at_the_bar_passes(self) -> None:
+        line = self._rest(0.002)
+        self.assertTrue(line["ok"], line["detail"])
+        self.assertEqual("nothing moved more than 2.00 mm in 1 steps (bar 2 mm)", line["detail"])
+
+    def test_a_drift_just_past_the_bar_fails(self) -> None:
+        line = self._rest(0.0021)
+        self.assertFalse(line["ok"])
+        self.assertIn("cube drifted 2.10 mm in 1 steps left alone (bar 2 mm)", line["detail"])
+
+    def test_the_bar_is_the_one_asked_for(self) -> None:
+        self.assertTrue(self._rest(0.0021, settle_mm=2.5)["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()

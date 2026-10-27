@@ -313,6 +313,10 @@ class _StubScene:
         # keep the furniture. Stubbed under its real name on purpose: a rename
         # upstream should fail a test here rather than quietly draw nothing.
         self._handle_from_node_name: dict[str, _StubNode] = {}
+        self.environment: dict = {}
+        """What ``configure_environment_map`` was last told."""
+        self.lights: dict[str, dict] = {}
+        """Each light by name, with what it was added with: a light added again under its name replaces it."""
 
     def _node(self, name: str, visible: bool = False, **kwargs) -> _StubNode:
         node = _StubNode(name, **{**kwargs, "visible": visible})
@@ -355,6 +359,17 @@ class _StubScene:
 
     def add_spline_catmull_rom(self, name, positions=(), **kwargs):
         return self._node(name, kwargs.pop("visible", True), positions=positions, **kwargs)
+
+    def configure_environment_map(self, **kwargs) -> None:
+        self.environment = dict(kwargs)
+
+    def add_light_ambient(self, name, **kwargs):
+        self.lights[name] = dict(kwargs)
+        return self._node(name, kwargs.pop("visible", True), **kwargs)
+
+    def add_light_directional(self, name, **kwargs):
+        self.lights[name] = dict(kwargs)
+        return self._node(name, kwargs.pop("visible", True), **kwargs)
 
     def add_glb(self, name, glb_data=b"", **kwargs):
         return self._node(name, kwargs.pop("visible", True), glb_data=glb_data, **kwargs)

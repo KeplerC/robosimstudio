@@ -25,6 +25,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
+
 from robosimstudio_real2sim_agent import ctl, wire
 from tests.fixtures.live_server import FakePage, FakeStatus
 from tests.fixtures.real2sim_clips import flat_clip
@@ -749,6 +751,194 @@ class TwinFolder(unittest.TestCase):
             code = ctl.main(["--run-dir", str(self.run_dir), "up", "--timeout", "1"])
         self.assertEqual(code, 2)
         self.assertIn(str(self.live / "scene.py"), printed[0])
+
+
+def _ctl(argv: list[str]) -> tuple[int, str, str]:
+    """``ctl.main(argv)`` with what it printed on stdout and on stderr."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = ctl.main(argv)
+    return code, out.getvalue(), err.getvalue()
+
+
+class TestTheBusyNote(unittest.TestCase):
+    """The clause a timeout is followed by: what the page is busy with, if it is, and what to do about it."""
+
+    def setUp(self) -> None:
+        self.sock = self.enterContext(short_dir("busy-")) / "ctl.sock"
+
+    def _page(self, **status) -> None:
+        self.addCleanup(FakePage(self.sock, status).close)
+
+    def test_no_page_is_no_note(self) -> None:
+        self.assertEqual("", ctl.busy_note(self.sock))
+
+    def test_a_free_page_is_no_note(self) -> None:
+        self._page(busy="", busy_seconds=0.0)
+        self.assertEqual("", ctl.busy_note(self.sock))
+
+    def test_a_busy_page_says_with_what_for_how_long_and_how_to_wait_it_out(self) -> None:
+        self._page(busy="rendering a still", busy_seconds=12.4)
+        self.assertEqual(
+            "; the page is busy rendering a still (12 s so far) and carries on -- `status --wait` returns when it is done",
+            ctl.busy_note(self.sock),
+        )
+
+    def test_a_routines_step_is_the_page_at_work_and_status_wait_would_not_wait_it_out(self) -> None:
+        self._page(busy="playing one step of a routine", busy_routine=True, busy_seconds=3.0)
+        note = ctl.busy_note(self.sock)
+        self.assertIn("a routine is playing, one of its steps 3 s so far", note)
+        self.assertNotIn("status --wait", note)
+
+
+class TestTheServersLog(unittest.TestCase):
+    """Where the page's output goes: as it says, else the note ``up`` left for that page's pid, else serve.log."""
+
+    def setUp(self) -> None:
+        self.run_dir = self.enterContext(short_dir("log-"))
+        self.sock = self.run_dir / "ctl.sock"
+
+    def _page(self, **status) -> None:
+        self.addCleanup(FakePage(self.sock, status).close)
+
+    def test_the_page_names_its_log(self) -> None:
+        self._page(server_log="/x/elsewhere.log", pid=7)
+        (self.run_dir / "serve.log.path").write_text("7 /x/noted.log\n")
+        self.assertEqual(Path("/x/elsewhere.log"), ctl.server_log(self.sock, self.run_dir))
+
+    def test_the_note_is_read_for_the_page_its_pid_still_is(self) -> None:
+        self._page(pid=7)
+        (self.run_dir / "serve.log.path").write_text("7 /x/noted.log\n")
+        self.assertEqual(Path("/x/noted.log"), ctl.server_log(self.sock, self.run_dir))
+
+    def test_a_note_left_by_another_page_is_not_trusted(self) -> None:
+        self._page(pid=8)
+        (self.run_dir / "serve.log.path").write_text("7 /x/noted.log\n")
+        self.assertEqual(self.run_dir / "serve.log", ctl.server_log(self.sock, self.run_dir))
+
+    def test_with_no_page_and_no_note_it_is_serve_log_in_the_run_dir(self) -> None:
+        self.assertEqual(self.run_dir / "serve.log", ctl.server_log(self.sock, self.run_dir))
+
+
+class TestCameraFitOnTheCommandLine(unittest.TestCase):
+    """``camera fit`` prints a CameraSpec that is that camera, and refuses in one line what it cannot fit."""
+
+    def setUp(self) -> None:
+        from robosimstudio.core.cameras import CameraSpec
+
+        self.CameraSpec = CameraSpec
+        self.cam = CameraSpec(
+            name="c", width=1280, height=720, fov_y=48, eye=(1.9, -0.7, 1.6), look_at=(0.6, 0.1, 0.75)
+        )
+        rng = np.random.default_rng(3)
+        self.world = np.c_[rng.uniform(0.2, 1.0, 10), rng.uniform(-0.6, 0.6, 10), rng.uniform(0.75, 1.1, 10)]
+        self.pixels = self.cam.project(self.world)[0]
+        self.run_dir = str(self.enterContext(short_dir("cam-")))
+
+    def _points(self, pixels=None) -> list[str]:
+        pixels = self.pixels if pixels is None else pixels
+        out = []
+        for (x, y, z), (u, v) in zip(self.world, pixels, strict=True):
+            out += ["--point", f"{x},{y},{z}={u},{v}"]
+        return out
+
+    def test_the_printed_camera_puts_the_points_back_on_their_pixels(self) -> None:
+        argv = ["--run-dir", self.run_dir, "--json", "camera", "fit", *self._points(), "--size", "1280X720"]
+        code, out, err = _ctl([*argv, "--fov", "48", "--name", "phone"])
+        self.assertEqual(0, code, err)
+        reply = json.loads(out)
+        self.assertNotIn("warning", reply)
+        spec = eval(reply["camera"], {"rss": types.SimpleNamespace(CameraSpec=self.CameraSpec)})
+        self.assertEqual(("phone", 1280, 720), (spec.name, spec.width, spec.height))
+        self.assertLess(np.abs(spec.project(self.world)[0] - self.pixels).max(), 0.5)
+
+    def test_a_point_read_off_wrong_draws_the_warning(self) -> None:
+        pixels = self.pixels.copy()
+        pixels[4] += (300.0, 0.0)
+        argv = ["--run-dir", self.run_dir, "--json", "camera", "fit", *self._points(pixels), "--size", "1280x720"]
+        code, out, _ = _ctl([*argv, "--fov", "48"])
+        self.assertEqual(0, code)
+        self.assertIn("is no camera", json.loads(out)["warning"])
+
+    def test_no_size_and_no_still_is_refused(self) -> None:
+        code, _, err = _ctl(["--run-dir", self.run_dir, "camera", "fit", *self._points(), "--fov", "48"])
+        self.assertEqual(1, code)
+        self.assertEqual("ctl: give --ref (the still the pixels came from) or --size WxH\n", err)
+
+    def test_a_point_with_no_pixel_is_refused_in_one_line(self) -> None:
+        argv = ["--run-dir", self.run_dir, "camera", "fit", "--point", "0.6,0.3,0.75", "--size", "640x480"]
+        code, _, err = _ctl(argv)
+        self.assertEqual(1, code)
+        self.assertTrue(err.startswith("ctl: a point is x,y,z=u,v"), err)
+        self.assertEqual(1, err.count("\n"))
+
+    def test_too_few_points_are_refused_saying_how_many_it_needs(self) -> None:
+        argv = ["--run-dir", self.run_dir, "camera", "fit", *self._points()[:6], "--size", "1280x720", "--fov", "48"]
+        code, _, err = _ctl(argv)
+        self.assertEqual(1, code)
+        self.assertIn("3 points; this fit needs at least 4", err)
+
+
+class TestRefPlateWithoutAPage(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = self.enterContext(short_dir("plate-"))
+        self.enterContext(contextlib.chdir(self.tmp))  # no scene.py here either
+
+    def test_no_clip_is_refused(self) -> None:
+        code, _, err = _ctl(["--run-dir", str(self.tmp / "run"), "ref", "plate"])
+        self.assertEqual((2, "ctl: ref plate needs the clip\n"), (code, err))
+
+    def test_nowhere_to_put_the_plate_is_refused(self) -> None:
+        code, _, err = _ctl(["--run-dir", str(self.tmp / "run"), "ref", "plate", "clip.mov"])
+        self.assertEqual(2, code)
+        self.assertIn("give --out", err)
+
+    def test_a_clip_that_will_not_open_is_one_line_and_exit_1(self) -> None:
+        clip = self.tmp / "clip.mov"
+        clip.write_bytes(b"not a clip")
+        code, _, err = _ctl(["--run-dir", str(self.tmp / "run"), "ref", "plate", str(clip), "--out", "plates"])
+        self.assertEqual(1, code)
+        self.assertTrue(err.startswith("ctl: "), err)
+        self.assertFalse((self.tmp / "plates" / "plate_clip.png").exists())
+
+
+class TestPhysicsExitCodes(unittest.TestCase):
+    def test_no_page_exits_2_and_says_how_to_start_one(self) -> None:
+        with short_dir("phys-") as tmp:
+            code, _, err = _ctl(["--run-dir", str(tmp), "physics"])
+        self.assertEqual(2, code)
+        self.assertIn("no server at", err)
+        self.assertIn(ctl.START_HINT, err)
+
+    def test_a_page_that_stops_answering_exits_1_saying_what_it_is_busy_with(self) -> None:
+        def page(sock, req, timeout):
+            if req["cmd"] == "status" and timeout == 5.0:  # the busy note's own light status
+                return {"ok": True, "busy": "rebuilding the scene file", "busy_seconds": 40.0}
+            raise wire.NoReply("the page did not answer within 30 s")
+
+        with mock.patch.object(ctl, "request", side_effect=page):
+            code, _, err = _ctl(["physics"])
+        self.assertEqual(1, code)
+        self.assertIn("ctl: the page did not answer within 30 s; the page is busy rebuilding the scene file", err)
+
+    def test_a_page_that_refuses_a_replay_exits_1_and_is_resumed(self) -> None:
+        asked = []
+
+        def page(sock, req, timeout):
+            asked.append(req["cmd"] + (":" + req["op"] if req.get("op") else ""))
+            if req["cmd"] == "physics":
+                return {"ok": False, "error": "the scene binds no `routine`"}
+            return {"ok": True, "playing": 0, "paused": False, "resets": len([a for a in asked if a == "reset"])}
+
+        with (
+            mock.patch.object(ctl, "request", side_effect=page),
+            mock.patch.object(ctl, "poll", return_value={"ok": True}),
+            mock.patch.object(ctl, "wait_until_free", return_value={"ok": True}),
+        ):
+            code, _, err = _ctl(["physics"])
+        self.assertEqual(1, code)
+        self.assertIn("binds no `routine`", err)
+        self.assertEqual("resume", asked[-1], "a page that was running is left running")
 
 
 if __name__ == "__main__":

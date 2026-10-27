@@ -265,6 +265,59 @@ class TaskMenu(unittest.TestCase):
         panel.drain()
         self.assertEqual(panel.session.load_request[1], 5)
 
+    def test_an_episode_picked_is_a_reset_and_not_a_load(self) -> None:
+        panel = self._panel("fam", episode_id=0)
+        panel.select_requested = False
+        panel.episode_changed = True
+        panel._episode = SimpleNamespace(value=3)
+        panel.session.reset_requested = False
+        panel.drain()
+        self.assertEqual((3, True), (panel.session.episode_id, panel.session.reset_requested))
+        self.assertIsNone(panel.session.load_request)
+
+    def test_run_is_handed_to_the_policy_runner_on_the_same_step(self) -> None:
+        panel = self._panel("fam", episode_id=0)
+        panel.select_requested = False
+        panel.run_requested = True
+        panel.session.driver = SimpleNamespace(start_requested=False)
+        panel.drain()
+        self.assertTrue(panel.session.driver.start_requested)
+        self.assertFalse(panel.run_requested)
+
+    def test_a_family_picked_offers_its_variants_and_loads_the_first(self) -> None:
+        panel = self._panel("other", episode_id=2)
+        panel.select_requested = False
+        panel.family_changed = True
+        panel._families = {"other": ["x", "y"], "fam": ["a"]}
+        panel._variant = SimpleNamespace(value="a", options=("a",))
+        panel.drain()
+        self.assertEqual(("x", "y"), panel._variant.options)
+        self.assertEqual(("other/x", 0), panel.session.load_request[:2])
+
+    def test_a_dropdown_that_changed_nothing_loads_nothing(self) -> None:
+        panel = self._panel("fam", episode_id=5)
+        panel.drain()
+        self.assertIsNone(panel.session.load_request)
+        self.assertFalse(panel.select_requested)
+
+
+class TheMenusLabels(unittest.TestCase):
+    def test_a_value_starts_on_its_own_label_and_an_unknown_one_on_the_first(self) -> None:
+        from robosimstudio_studio.bench_panels import _label
+
+        options = {"panda (declared)": "panda", "yam  (untried)": "yam"}
+        self.assertEqual("yam  (untried)", _label(options, "yam"))
+        self.assertEqual("panda (declared)", _label(options, "ur5e"))
+
+    def test_a_task_id_is_its_suite_and_its_variant_in_registry_order(self) -> None:
+        from robosimstudio_studio import bench_panels
+
+        tasks = ["fold/towel", "peel/label", "fold/shirt", "cut/tofu/half"]
+        with mock.patch.object(bench_panels, "list_tasks", return_value=tasks):
+            families = bench_panels._families()
+        self.assertEqual({"fold": ["towel", "shirt"], "peel": ["label"], "cut": ["tofu/half"]}, families)
+        self.assertEqual(["fold", "peel", "cut"], list(families))
+
 
 def _task(**kw):
     native = Binding(scene="bench_0728", embodiment="panda", graphs=("pick",))
