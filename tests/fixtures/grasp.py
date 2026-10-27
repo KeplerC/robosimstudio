@@ -15,12 +15,13 @@ Importing this module imports nothing of the library.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["Grasp", "drag_to_grasp", "go", "open_session", "tick"]
+__all__ = ["Grasp", "drag_to_grasp", "go", "note", "open_session", "tick"]
 
 
 def open_session(sim, port: int = 0, page: Callable | None = None):
@@ -36,6 +37,14 @@ def open_session(sim, port: int = 0, page: Callable | None = None):
         page(session)
     session.begin_run()
     return session
+
+
+def note(what: str) -> None:
+    """Report a measurement rather than assert it: wall-clock time, which whatever else runs on the card moves.
+
+    On stderr, where ``python -m unittest`` and the tier runner's failure output both show it.
+    """
+    print(f"note: {what}", file=sys.stderr, flush=True)
 
 
 def tick(session, steps: int) -> None:

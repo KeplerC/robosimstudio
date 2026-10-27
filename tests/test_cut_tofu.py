@@ -22,7 +22,7 @@ import unittest
 import numpy as np
 
 from tests.fixtures.examples import _run
-from tests.fixtures.grasp import go, open_session, tick
+from tests.fixtures.grasp import go, note, open_session, tick
 
 TIER = "medium"
 """One GPU: the example built three times, twice driven through its page at about 11 ms a control step."""
@@ -149,6 +149,7 @@ class TestTheHandCutsTheTofu(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.got = _drive(PORT, dull=False)
+        note(f"cutting the tofu: {cls.got['drive_ms']:.1f} ms per control step")
 
     def test_the_right_hand_starts_over_the_handle_and_gets_there(self) -> None:
         self.assertLess(self.got["home_to_handle"], 0.006, "one straight drag down reaches the handle")
@@ -178,9 +179,6 @@ class TestTheHandCutsTheTofu(unittest.TestCase):
         # Tofu's 3 N/m over the edge in the block: about 0.13 N while cutting.
         self.assertGreater(max(self.got["pushes"]), 0.05)
         self.assertLess(self.got["slip"], 0.005, f"knife slip {self.got['slip'] * 1e3:.1f} mm")
-
-    def test_the_scene_steps_inside_an_interactive_budget(self) -> None:
-        self.assertLess(self.got["drive_ms"], 60.0, f"{self.got['drive_ms']:.1f} ms per control step cutting")
 
     def test_a_replay_draws_the_block_each_step_drew(self) -> None:
         """Whole at the first step, before the knife went in, and in two at the last; nothing elsewhere."""
