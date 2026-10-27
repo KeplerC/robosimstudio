@@ -81,6 +81,29 @@ class TestPyrokisLogMap(_LogMapLaw, unittest.TestCase):
         return np.stack([_rotvec(r) for r in rotations])
 
 
+class TestARotationReadBackInFloat32(unittest.TestCase):
+    """A rotation off a float32 ``body_q``: its entries carry 6e-8 of noise, which the log map must not magnify.
+
+    Just above the near-half-turn branch the angle used to come from an arccos over
+    ``2 sin``, which multiplies that noise by about ``pi / sin``: a turn of
+    ``pi - 1.001e-3`` read 0.1 rad off.
+    """
+
+    def test_turns_near_a_half_turn_read_their_angle_to_the_noise(self) -> None:
+        from robosimstudio.solvers.ik.fleet_dls import _rotvecs
+
+        rng = np.random.default_rng(3)
+        for short in (1.001e-3, 1.5e-3, 3.0e-3, 1.0e-2, 0.1, 9.99e-4, 1.0e-5):
+            for _ in range(8):
+                axis = rng.normal(size=3)
+                axis /= np.linalg.norm(axis)
+                rotation = _exp(axis * (np.pi - short)).astype(np.float32).astype(np.float64)
+                rotvec = _rotvecs(rotation[None])[0]
+                with self.subTest(short_of_a_half_turn=short):
+                    self.assertAlmostEqual(np.pi - short, float(np.linalg.norm(rotvec)), delta=1.0e-5)
+                    np.testing.assert_allclose(_exp(rotvec), rotation, atol=1.0e-5)
+
+
 class TestAHalfTurnLeftOpenIsSeen(unittest.TestCase):
     """What the log map is for: the polish measures a wrist half a turn out as half a turn, not as closed."""
 
