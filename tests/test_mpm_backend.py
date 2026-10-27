@@ -8,7 +8,9 @@ its parameters are and what changing each costs -- so these claims are checked
 against the registry, on the CPU, with no solver constructed. The one object
 that is constructed is :class:`~robosimstudio.engines.newton.mpm.SolverMPM`
 asked for a parameter it does not have, which it refuses before it touches a
-model. ``tests/test_mpm_island`` builds the island on a GPU.
+model. Newton's own solver is built once, on the CPU over four particles, to
+show the two parameters set by ``setattr`` are its instance attributes.
+``tests/test_mpm_island`` builds the island on a GPU.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from __future__ import annotations
 import unittest
 
 TIER = "fast"
-"""No GPU: registries and one constructor that raises before it needs one."""
+"""No GPU: registries, one constructor that raises before it needs one, and Newton's MPM built on the CPU."""
 
 
 class TestTheRegistration(unittest.TestCase):
@@ -105,14 +107,27 @@ class TestTheRegistration(unittest.TestCase):
         self.assertEqual(60.0, defaults["step_hz"])
 
     def test_the_max_iterations_and_tolerance_are_plain_attributes_of_the_solver(self) -> None:
-        """``attr:`` application sets them with ``setattr``; the class must read them as instance attributes."""
+        """``attr:`` application sets them with ``setattr``; the class must read them as instance attributes.
+
+        Newton's solver, built on the CPU over four particles: what its config said
+        is in the instance's own ``__dict__``, and no class-level descriptor stands
+        in front of it to swallow a ``setattr``.
+        """
         import inspect
 
+        import newton
         from newton.solvers import SolverImplicitMPM
 
-        source = inspect.getsource(SolverImplicitMPM.__init__)
-        self.assertIn("self.max_iterations = config.max_iterations", source)
-        self.assertIn("self.tolerance = float(config.tolerance)", source)
+        builder = newton.ModelBuilder()
+        SolverImplicitMPM.register_custom_attributes(builder)
+        for i in range(4):
+            builder.add_particle(pos=(0.01 * i, 0.0, 0.1), vel=(0.0, 0.0, 0.0), mass=1.0e-3, radius=2.0e-3)
+        config = SolverImplicitMPM.Config(max_iterations=7, tolerance=3.0e-3)
+        solver = SolverImplicitMPM(builder.finalize(device="cpu"), config)
+        self.assertEqual(7, vars(solver)["max_iterations"])
+        self.assertEqual(3.0e-3, vars(solver)["tolerance"])
+        for name in ("max_iterations", "tolerance"):
+            self.assertFalse(hasattr(inspect.getattr_static(SolverImplicitMPM, name, None), "__set__"), name)
 
 
 class TestTheAdapterRefusesWhatItDoesNotKnow(unittest.TestCase):
