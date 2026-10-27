@@ -32,14 +32,13 @@ import unittest
 
 import numpy as np
 
-from robosimstudio.core.math import quat_from_axis_angle, quat_multiply, quat_to_mat
+from robosimstudio.core.math import mat_to_axis_angle, quat_from_axis_angle, quat_multiply, quat_to_mat
 from robosimstudio.solvers.ik.fleet_dls import (
     POLISH_MAX_MOVE,
     POLISH_MAX_STEP,
     POLISH_POS_SLACK,
     POLISH_ROT_WEIGHT,
     _quat_to_mats,
-    _rotvecs,
     polish_pose_batched,
     pose_errors_batched,
     solve_q_batched,
@@ -132,7 +131,7 @@ def _wave(seed: int, worlds: int = 8):
 def _weighted(fk: _Arm, q: np.ndarray, position: np.ndarray, rotation: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """The polish's own measure: ``(position error [W], weighted 6-D error [W])``."""
     pos, quat = fk.poses(q)
-    turn = _rotvecs(rotation @ np.transpose(_quat_to_mats(quat), (0, 2, 1)))
+    turn = mat_to_axis_angle(rotation @ np.transpose(_quat_to_mats(quat), (0, 2, 1)))
     gap = position - pos
     return np.linalg.norm(gap, axis=1), np.linalg.norm(np.concatenate([gap, POLISH_ROT_WEIGHT * turn], axis=1), axis=1)
 

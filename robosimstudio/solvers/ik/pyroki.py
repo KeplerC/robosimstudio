@@ -28,7 +28,7 @@ from typing import Any
 
 import numpy as np
 
-from robosimstudio.core.math import quat_multiply, quat_to_mat
+from robosimstudio.core.math import mat_to_axis_angle, quat_multiply, quat_to_mat
 
 from .arm import ArmKinematics
 from .solver import Roll, pose_errors
@@ -67,18 +67,6 @@ def _transform(position: Any, quat_xyzw: Any) -> np.ndarray:
     m[:3, :3] = quat_to_mat(np.asarray(quat_xyzw, dtype=np.float64))
     m[:3, 3] = np.asarray(position, dtype=np.float64)
     return m
-
-
-def _rotvec(rot: np.ndarray) -> np.ndarray:
-    """A rotation matrix as axis times angle: the batched solver's log map, on one matrix.
-
-    Its own copy read the axis off the skew part, which vanishes at a half
-    turn: a joint that turned the tool half way round read as a random short
-    vector there.
-    """
-    from .fleet_dls import _rotvecs
-
-    return _rotvecs(np.asarray(rot, dtype=np.float64).reshape(1, 3, 3))[0]
 
 
 def _wxyz_xyz(row: np.ndarray) -> np.ndarray:
@@ -184,7 +172,7 @@ class IKSolverPyroki:
         for i in range(1, len(probes)):
             a = world[i] @ np.linalg.inv(world[0])
             b = links[i] @ np.linalg.inv(links[0])
-            ra, rb = _rotvec(a[:3, :3]), _rotvec(b[:3, :3])
+            ra, rb = mat_to_axis_angle(a[:3, :3]), mat_to_axis_angle(b[:3, :3])
             if np.linalg.norm(ra) < 1.0e-6 or np.linalg.norm(rb) < 1.0e-6:
                 continue  # a joint that moves nothing says nothing about the frame
             a_axes.append(ra / np.linalg.norm(ra))

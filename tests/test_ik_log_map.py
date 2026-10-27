@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The rotation log maps the IK solvers read their orientation errors with: ``|log R|`` is the angle, for every ``R``.
+"""The rotation log map the IK solvers read their orientation errors with: ``|log R|`` is the angle, for every ``R``.
 
-Two of them: :func:`robosimstudio.solvers.ik.fleet_dls._rotvecs`, batched, which
-the full-pose polish measures its rotation residual with, and
-:func:`robosimstudio.solvers.ik.pyroki._rotvec`, which PyRoKi's root-frame
-measurement reads each joint's turn with. The property is the definition: the
+:func:`robosimstudio.core.math.mat_to_axis_angle`, which the batched full-pose
+polish (:mod:`robosimstudio.solvers.ik.fleet_dls`) measures its rotation
+residual with, over a stack, and PyRoKi's root-frame measurement reads each
+joint's turn with, one matrix at a time. The property is the definition: the
 vector's length is the rotation's angle and the exponential of the vector is
 the rotation, on random rotations and on the ones a log map is easy to get
 wrong at -- no turn, a tiny one, and a half turn, approached to within 1e-9 rad
@@ -17,6 +17,8 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
+
+from robosimstudio.core.math import mat_to_axis_angle
 
 TIER = "fast"
 """Pure numpy over 3x3 matrices: no GPU."""
@@ -64,41 +66,40 @@ class _LogMapLaw:
 
 
 class TestTheBatchedLogMap(_LogMapLaw, unittest.TestCase):
-    """``fleet_dls._rotvecs``: what the full-pose polish measures the orientation it closes with."""
+    """Over a stack ``[n, 3, 3]``: what the full-pose polish measures the orientation it closes with."""
 
     def log(self, rotations: np.ndarray) -> np.ndarray:
-        from robosimstudio.solvers.ik.fleet_dls import _rotvecs
-
-        return _rotvecs(rotations)
+        return mat_to_axis_angle(rotations)
 
 
-class TestPyrokisLogMap(_LogMapLaw, unittest.TestCase):
-    """``pyroki._rotvec``: how far each probe turned the tool, when PyRoKi measures the arm's root frame."""
+class TestOneMatrixAtATime(_LogMapLaw, unittest.TestCase):
+    """On one ``[3, 3]``: how far each probe turned the tool, when PyRoKi measures the arm's root frame."""
 
     def log(self, rotations: np.ndarray) -> np.ndarray:
-        from robosimstudio.solvers.ik.pyroki import _rotvec
+        return np.stack([mat_to_axis_angle(r) for r in rotations])
 
-        return np.stack([_rotvec(r) for r in rotations])
+    def test_one_matrix_reads_as_its_row_of_a_stack(self) -> None:
+        _, rotations = _rotations(2)
+        np.testing.assert_array_equal(mat_to_axis_angle(rotations), self.log(rotations))
+        self.assertEqual((3,), mat_to_axis_angle(np.eye(3)).shape)
 
 
 class TestARotationReadBackInFloat32(unittest.TestCase):
     """A rotation off a float32 ``body_q``: its entries carry 6e-8 of noise, which the log map must not magnify.
 
-    Just above the near-half-turn branch the angle used to come from an arccos over
-    ``2 sin``, which multiplies that noise by about ``pi / sin``: a turn of
-    ``pi - 1.001e-3`` read 0.1 rad off.
+    Just short of where it read the axis off the symmetric part, the angle came
+    from an arccos over ``2 sin``, which multiplies that noise by about
+    ``pi / sin``: a turn of ``pi - 1.001e-3`` read 0.1 rad off.
     """
 
     def test_turns_near_a_half_turn_read_their_angle_to_the_noise(self) -> None:
-        from robosimstudio.solvers.ik.fleet_dls import _rotvecs
-
         rng = np.random.default_rng(3)
         for short in (1.001e-3, 1.5e-3, 3.0e-3, 1.0e-2, 0.1, 9.99e-4, 1.0e-5):
             for _ in range(8):
                 axis = rng.normal(size=3)
                 axis /= np.linalg.norm(axis)
                 rotation = _exp(axis * (np.pi - short)).astype(np.float32).astype(np.float64)
-                rotvec = _rotvecs(rotation[None])[0]
+                rotvec = mat_to_axis_angle(rotation)
                 with self.subTest(short_of_a_half_turn=short):
                     self.assertAlmostEqual(np.pi - short, float(np.linalg.norm(rotvec)), delta=1.0e-5)
                     np.testing.assert_allclose(_exp(rotvec), rotation, atol=1.0e-5)
@@ -108,13 +109,11 @@ class TestAHalfTurnLeftOpenIsSeen(unittest.TestCase):
     """What the log map is for: the polish measures a wrist half a turn out as half a turn, not as closed."""
 
     def test_the_polish_error_of_a_half_turn_is_pi(self) -> None:
-        from robosimstudio.solvers.ik.fleet_dls import _rotvecs
-
         half = np.diag([1.0, -1.0, -1.0])  # a half turn about x: the tool upside down
         for off in (0.0, 1.0e-7):
             with self.subTest(short_of_a_half_turn_by=off):
                 turn = _exp(np.array([np.pi - off, 0.0, 0.0])) if off else half
-                self.assertAlmostEqual(np.pi - off, float(np.linalg.norm(_rotvecs(turn[None])[0])), places=6)
+                self.assertAlmostEqual(np.pi - off, float(np.linalg.norm(mat_to_axis_angle(turn))), places=6)
 
 
 if __name__ == "__main__":
