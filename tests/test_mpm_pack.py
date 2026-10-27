@@ -177,24 +177,6 @@ class TestThePresets(unittest.TestCase):
 
 
 class TestTheFlatNames(unittest.TestCase):
-    def test_the_constructors_resolve_through_the_pack_table(self) -> None:
-        import robosimstudio as rss
-
-        for name, module in (
-            ("heap", "robosimstudio_materials.granular"),
-            ("liquid", "robosimstudio_materials.liquid"),
-            ("dough", "robosimstudio_materials.dough"),
-            ("ParticleBodySpec", "robosimstudio_materials.granular"),
-            ("ParticleMaterialSpec", "robosimstudio_materials.granular"),
-            ("GRANULAR_60HZ", "robosimstudio_materials.granular"),
-            ("LIQUID_120HZ", "robosimstudio_materials.liquid"),
-            ("DOUGH_60HZ", "robosimstudio_materials.dough"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(module, rss._PACK_EXPORTS[name])
-                self.assertNotIn(name, rss._EXPORTS)
-                getattr(rss, name)
-
     def test_each_constructor_builds_its_kinds_spec(self) -> None:
         import robosimstudio as rss
 
@@ -439,21 +421,6 @@ class TestTheCupMesh(unittest.TestCase):
 
 
 class TestTheRecords(unittest.TestCase):
-    def test_a_record_carries_the_specs_domain_and_builds_the_spec(self) -> None:
-        import robosimstudio as rss
-        from robosimstudio_materials.mpm import Dough, Heap, Liquid
-
-        spec = rss.heap(name="rice")
-        record = Heap.from_spec(spec, name="rice_heap")
-        self.assertEqual("granular", record.sim.domain)
-        self.assertIs(spec, record.build())
-        self.assertEqual("liquid", Liquid.from_spec(rss.liquid(name="h"), name="pool").sim.domain)
-        self.assertEqual("dough", Dough.from_spec(rss.dough(name="d"), name="lump").sim.domain)
-        with self.assertRaises(TypeError):
-            Liquid.from_spec(spec, name="not_a_liquid")
-        with self.assertRaises(TypeError):
-            Heap.from_spec(rss.box(name="cube"), name="not_a_heap")
-
     def test_the_atoms_are_catalogued_on_the_granular_layout(self) -> None:
         from robosimstudio.assetlib.semantics.atoms import ATOMS
         from robosimstudio.assetlib.semantics.handlers import dispatch

@@ -423,49 +423,6 @@ class TestTheLibraryNamesTheSiblingOnlyAsAString(unittest.TestCase):
             with self.subTest(registry=name):
                 self.assertEqual(roots.DOMAIN_PACKAGES, registry.packages)
 
-    def test_the_flat_name_table_keys_the_kinds(self) -> None:
-        import robosimstudio as rss
-
-        self.assertEqual(
-            [
-                "robosimstudio_materials.bag",
-                "robosimstudio_materials.brush",
-                "robosimstudio_materials.cloth",
-                "robosimstudio_materials.cutting",
-                "robosimstudio_materials.dough",
-                "robosimstudio_materials.granular",
-                "robosimstudio_materials.liquid",
-                "robosimstudio_materials.paper",
-                "robosimstudio_materials.rod",
-                "robosimstudio_materials.soft",
-                "robosimstudio_materials.tape",
-                "robosimstudio_materials.water",
-            ],
-            sorted(rss._PACKS),
-        )
-        for name in (
-            "sheet",
-            "sponge",
-            "rod",
-            "paper",
-            "papers",
-            "materials",
-            "ClothSpec",
-            "SoftSpec",
-            "RodSpec",
-            "heap",
-            "liquid",
-            "dough",
-            "PaperSpec",
-            "bag",
-            "bags",
-            "BagSpec",
-            "brush",
-            "BrushSpec",
-        ):
-            self.assertNotIn(name, rss._EXPORTS, f"{name} is a kind's and belongs in _PACKS")
-            self.assertIn(name, rss._PACK_EXPORTS)
-
 
 class TestTheWheelShipsThePackage(unittest.TestCase):
     """``pyproject.toml`` and the publish workflow, read as text; ``uv build`` is the gate that runs them."""

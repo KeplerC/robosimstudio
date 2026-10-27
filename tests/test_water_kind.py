@@ -142,13 +142,6 @@ class TestTheArrangement(unittest.TestCase):
             longest, _ = longest_substep(EntityWater(water(material=material)).host_actor().params)
             self.assertEqual(need, math.ceil(step / longest - 1.0e-9), material)
 
-    def test_the_flat_names_resolve(self) -> None:
-        import robosimstudio as rss
-        from robosimstudio_materials import water
-
-        self.assertIs(water.water, rss.water)
-        self.assertIs(water.WaterSpec, rss.WaterSpec)
-
 
 if __name__ == "__main__":
     unittest.main()

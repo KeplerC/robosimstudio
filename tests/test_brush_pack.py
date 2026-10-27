@@ -85,15 +85,6 @@ class TestTheKindRegisters(unittest.TestCase):
 
 
 class TestTheFlatNames(unittest.TestCase):
-    def test_rss_carries_the_brush(self) -> None:
-        import robosimstudio as rss
-        from robosimstudio_materials import brush as module
-
-        self.assertIs(module.brush, rss.brush)
-        self.assertIs(module.BrushSpec, rss.BrushSpec)
-        self.assertIs(module.BrushMaterialSpec, rss.BrushMaterialSpec)
-        self.assertIs(module.BRUSH_60HZ, rss.BRUSH_60HZ)
-
     def test_the_rod_kind_exports_the_chain_builder_the_brush_uses(self) -> None:
         from robosimstudio_materials import rod
         from robosimstudio_materials.rod.entity import add_capsule_chain

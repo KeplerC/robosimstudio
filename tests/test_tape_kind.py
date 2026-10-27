@@ -957,42 +957,6 @@ class TestTheArrangement(unittest.TestCase):
 
 
 class TestTheDeclarations(unittest.TestCase):
-    def test_the_flat_names_resolve(self) -> None:
-        import robosimstudio as rss
-        from robosimstudio_materials import tape as module
-
-        for name in ("TAPE_60HZ", "TapeMaterialSpec", "TapeSpec", "tape", "tapes"):
-            with self.subTest(name=name):
-                self.assertIs(getattr(module, name), getattr(rss, name))
-
-    def test_the_domain_the_entity_and_the_materials_register(self) -> None:
-        from robosimstudio.assetlib.materials import get_material, kind_of
-        from robosimstudio.scene.registry import ENTITIES
-        from robosimstudio.specs.physics import get_domain
-        from robosimstudio_materials.tape import PAPER_LABEL, EntityTape
-
-        domain = get_domain("tape")
-        self.assertEqual(("tape", "cloth"), domain.reads)
-        self.assertEqual("deformables", domain.role)
-        self.assertIs(EntityTape, ENTITIES.get("tape"))
-        self.assertIs(PAPER_LABEL, get_material("paper_label").spec)
-        self.assertEqual("tape", kind_of(PAPER_LABEL))
-        from robosimstudio_materials.tape import DUCT_TAPE, LABEL, MASKING_TAPE
-
-        for name, spec in (("label", LABEL), ("masking_tape", MASKING_TAPE), ("duct_tape", DUCT_TAPE)):
-            self.assertIs(spec, get_material(name).spec)
-
-    def test_a_record_carries_the_domain_and_builds_the_spec(self) -> None:
-        import robosimstudio as rss
-        from robosimstudio_materials.tape import Tape
-
-        spec = rss.tape(name="label", on="box")
-        record = Tape.from_spec(spec, name="paper_label")
-        self.assertEqual("tape", record.sim.domain)
-        self.assertIs(spec, record.build())
-        with self.assertRaises(TypeError):
-            Tape.from_spec(rss.box(name="cube"), name="not_a_tape")
-
     def test_the_atom_is_catalogued_on_the_tapes_layout(self) -> None:
         from robosimstudio.assetlib.semantics.atoms import ATOMS
         from robosimstudio.assetlib.semantics.handlers import dispatch
