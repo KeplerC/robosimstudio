@@ -173,6 +173,39 @@ class TestASheet(unittest.TestCase):
         self.assertEqual(0.0, _named(measure_sheet(entity, state))["height"].value)
 
 
+def _mid_of_two_faces(state) -> np.ndarray:
+    """A slab's mid-surface, as a slab cloth reads it: the average of the particle on each face."""
+    q = np.asarray(state.particle_q.numpy(), dtype=np.float64)
+    half = len(q) // 2
+    return 0.5 * (q[:half] + q[half:])
+
+
+def _slab(rest: np.ndarray, now: np.ndarray) -> tuple:
+    """A 4 mm slab over a mid-surface laid out at ``rest`` and now at ``now``: a particle on each face."""
+    up = np.array([0.0, 0.0, 0.002])
+    entity, state = _cloth(np.concatenate([rest - up, rest + up]), np.concatenate([now - up, now + up]))
+    entity.mid_surface_positions = _mid_of_two_faces
+    return entity, state
+
+
+class TestASlab(unittest.TestCase):
+    """A slab is read on its mid-surface, and so is the rest layout it is held against."""
+
+    def test_a_slab_as_laid_out_has_spread_one(self) -> None:
+        x, y = np.meshgrid(np.linspace(0.0, 0.2, 5), np.linspace(0.0, 0.1, 4), indexing="ij")
+        rest = np.c_[x.ravel(), y.ravel(), np.full(x.size, 0.3)]
+        got = _named(measure_sheet(*_slab(rest, rest.copy())))
+        self.assertIn("spread", got, "the rest layout was held against the mid-surface face for face")
+        self.assertAlmostEqual(1.0, got["spread"].value)
+
+    def test_a_slab_on_the_cantilever_rig_is_measured(self) -> None:
+        rest = _strip()
+        with mock.patch.object(metrics, "bending_length_from_droop", return_value=0.05):
+            got = _named(measure_cantilever(*_slab(rest, _drooped(rest, 0.5)), overhang=OVERHANG, clamp_x=CLAMP_X))
+        self.assertIn("droop / overhang", got, got)
+        self.assertAlmostEqual(0.5, got["droop / overhang"].value, places=9)
+
+
 class TestTheSettleSpeed(unittest.TestCase):
     def test_it_is_the_95th_percentile_so_one_squeezed_particle_does_not_hold_it_up(self) -> None:
         qd = np.zeros((100, 3))
