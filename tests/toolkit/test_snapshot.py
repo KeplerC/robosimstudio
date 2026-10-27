@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -147,6 +148,94 @@ class TestItIsJsonAble(unittest.TestCase):
         """
         snap = {"task": {"step": 1}, "finite": True, "worst_penetration_mm": 0.1, "bodies": []}
         self.assertEqual(snap, json.loads(json.dumps(snap)))
+
+
+def _arr(values):
+    return SimpleNamespace(numpy=lambda: np.asarray(values, dtype=float))
+
+
+class TestSnapshotSpeedsAreNorms(unittest.TestCase):
+    def test_a_diagonal_velocity_is_its_magnitude(self) -> None:
+        from robosimstudio.scene.snapshot import _objects
+
+        env = SimpleNamespace(
+            state=SimpleNamespace(
+                body_q=_arr([[0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0]]),
+                body_qd=_arr([[0.1, 0.1, 0.1, 3.0, 4.0, 0.0]]),
+            ),
+            handles=SimpleNamespace(objects={"cube": SimpleNamespace(body=0, static=False)}),
+        )
+        (row,) = _objects(env, SimpleNamespace(body_mass=_arr([0.1])))
+        self.assertAlmostEqual(0.1 * np.sqrt(3.0), row["linear_speed"], places=6)
+        self.assertAlmostEqual(5.0, row["angular_speed"], places=6)
+
+
+class TestPenetrationCopiesShapeBodyOnce(unittest.TestCase):
+    def test_many_pairs_one_copy(self) -> None:
+        from robosimstudio.scene.snapshot import _penetration
+
+        copies = []
+
+        def shape_body():
+            copies.append(1)
+            return np.arange(6)
+
+        model = SimpleNamespace(shape_body=SimpleNamespace(numpy=shape_body), shape_label=[f"s{i}" for i in range(6)])
+        probe = SimpleNamespace(update=lambda: None, penetrations=lambda: [(0, 1, 0.01), (2, 3, 0.02), (4, 5, 0.03)])
+        out = _penetration(SimpleNamespace(contacts=probe), model, {0: "cube"})
+        self.assertEqual(3, len(out))
+        self.assertEqual(["cube", "s1"], out[0]["between"])
+        self.assertEqual(1, len(copies))
+
+
+class _Array:
+    def __init__(self, values):
+        self._values = np.asarray(values)
+
+    def numpy(self):
+        return self._values
+
+
+class _Probe:
+    def __init__(self, rows):
+        self.rows = rows
+        self.updated = 0
+
+    def update(self):
+        self.updated += 1
+
+    def penetrations(self):
+        return self.rows
+
+
+def _env(probe):
+    model = SimpleNamespace(shape_body=_Array([0, 1, -1]), shape_label=["arena/a", "arena/cube_geom", "arena/floor"])
+    handles = SimpleNamespace(objects={"cube": SimpleNamespace(body=1), "loose": SimpleNamespace()})
+    return SimpleNamespace(contacts=probe, model=model, handles=handles)
+
+
+class TestPenetrationRows(unittest.TestCase):
+    def test_rows_are_named_worst_first(self):
+        from robosimstudio.scene.snapshot import penetration_rows
+
+        probe = _Probe([(1, 2, 0.004), (0, 1, 0.001)])
+        rows = penetration_rows(_env(probe))
+        self.assertEqual(probe.updated, 1)
+        self.assertEqual(rows[0]["depth_mm"], 4.0)
+        self.assertEqual(rows[0]["between"], ["cube", "floor"])
+        self.assertEqual(rows[1]["between"], ["a", "cube"])
+
+    def test_no_probe_is_no_rows(self):
+        from robosimstudio.scene.snapshot import penetration_rows
+
+        self.assertEqual(penetration_rows(_env(None)), [])
+
+    def test_checks_reads_the_public_rows(self):
+        from robosimstudio_real2sim_agent.checks import _penetration
+
+        self.assertEqual(_penetration(_env(_Probe([(1, 2, 0.004)]))), (4.0, ["cube and floor"]))
+        self.assertEqual(_penetration(_env(_Probe([]))), (0.0, []))
+        self.assertEqual(_penetration(_env(None)), (0.0, []))
 
 
 if __name__ == "__main__":

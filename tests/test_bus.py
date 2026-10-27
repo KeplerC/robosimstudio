@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""An interrupted node is not a failed node.
+"""The sim bus: a worker's request is serviced, withdrawn or released, and says which.
 
 When an episode ends, ``SolutionGraph`` closes the bus, and ``SimBus.close``
 releases every in-flight worker with an error. The graph runtime turns that into
@@ -15,7 +15,8 @@ something was too slow, a close means the episode simply finished. Anything
 scanning traces for real failures needs the distinction, and matching on a
 message string is not a way to have it.
 
-No GPU: the bus is plain threading.
+A request its caller gave up on is withdrawn, never run behind its back, and an
+interrupt raised on the owner's thread is the owner's, not the worker's.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ import unittest
 from robosimstudio.core.bus import BusClosed, BusTimeout, SimBus
 
 TIER = "fast"
-"""No GPU. Gates every commit."""
+"""No GPU: the bus is plain threading."""
 
 
 class TestClosingIsNotTimingOut(unittest.TestCase):
@@ -109,6 +110,46 @@ class CallWithin(unittest.TestCase):
         bus.pump()  # taken in time, and runs past the 0.1 s
         worker.join(5)
         self.assertEqual(result, ["done"], "never a timeout for something that ran")
+
+
+class TestABusRequestThatTimedOutNeverRuns(unittest.TestCase):
+    def test_a_late_pump_skips_it(self) -> None:
+        from robosimstudio.core.bus import BusTimeout, SimBus
+
+        bus = SimBus(timeout=0.05)
+        bus.owner_thread = -1  # never this thread, so the call really queues
+        ran: list[int] = []
+        with self.assertRaises(BusTimeout):
+            bus.call(lambda: ran.append(1))
+        self.assertEqual(bus.pump(), 0, "a withdrawn request is not serviced")
+        self.assertEqual(ran, [], "the caller was told it timed out, so it must not run behind its back")
+
+    def test_an_interrupt_on_the_owner_propagates_and_releases_the_worker(self) -> None:
+        from robosimstudio.core.bus import BusClosed, SimBus
+
+        bus = SimBus(timeout=5.0)
+        bus.owner_thread = -1
+        caught: list[BaseException] = []
+
+        def interrupt() -> None:
+            raise KeyboardInterrupt
+
+        def worker() -> None:
+            try:
+                bus.call(interrupt)
+            except BaseException as exc:
+                caught.append(exc)
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        while bus._queue.empty():
+            time.sleep(0.001)
+        with self.assertRaises(KeyboardInterrupt):
+            bus.pump()
+        thread.join(2.0)
+        self.assertEqual(len(caught), 1)
+        self.assertIsInstance(caught[0], BusClosed, "the worker must not be handed the owner's interrupt")
+        self.assertTrue(bus.closed)
 
 
 if __name__ == "__main__":

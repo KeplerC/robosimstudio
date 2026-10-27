@@ -185,7 +185,7 @@ class TestNoBundleImportsItsEngine(unittest.TestCase):
 
     The law the whole three-tier install rests on: a base checkout imports the
     library, sees every backend alias resolve, and pays for no engine wheel.
-    ``tests/test_genesis_absent.py`` made this claim for one engine and made it
+    ``tests/test_genesis_registration.py`` made this claim for one engine and made it
     with an assertion that could not fail (``'genesis' not in sys.modules or
     sys.modules['genesis'] is not None`` is true either way). This is the claim
     for **every** bundle, including any added later, against the same banned

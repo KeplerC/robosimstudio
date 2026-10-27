@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Particle things share one settle per pipeline through ``ParticleMixin.join_settle``,
-and the studio's re-settle runs the settle of every thing on that record that has one and
-re-baselines every thing on it, not only the cloth -- each distinct run once, as the build does,
-and naming as re-settled only the things whose run stepped.
+"""The studio's **Re-settle** runs what the build ran, and re-baselines every thing on the record.
 
-No GPU: stand-in things and a stand-in pipeline.
+It runs the settle of every thing on the pipeline's settle record that has one --
+each distinct run once, as the build does -- re-baselines every thing on it, not
+only the cloth, and names as re-settled only the things whose run stepped.
 """
 
 from __future__ import annotations
@@ -13,59 +12,10 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from tests.test_particle_settle import _thing
+
 TIER = "fast"
-"""Stand-ins only: no GPU."""
-
-
-def _thing(name: str = "towel", log: list | None = None, run: tuple[int, int] | None = None):
-    """A particle thing; ``run`` is the ``(settle_frames, settle_substeps)`` its spec states.
-
-    And the run it joined the settle with, as ``join_settle`` keeps it, until it joins again.
-    """
-    from robosimstudio.domains.capabilities import ParticleMixin
-
-    class _Stub(ParticleMixin):
-        def __init__(self) -> None:
-            self.name = name
-            self.settles = 0
-            self.snapshots = 0
-            if run is not None:
-                self.spec = SimpleNamespace(settle_frames=run[0], settle_substeps=run[1])
-            self.settle_run = run
-
-        def settle(self, pipeline) -> None:
-            del pipeline
-            self.settles += 1
-            if log is not None:
-                log.append(f"settle {self.name}")
-
-        def snapshot_rest(self, pipeline) -> None:
-            del pipeline
-            self.snapshots += 1
-            if log is not None:
-                log.append(f"snapshot {self.name}")
-
-    return _Stub()
-
-
-class TestJoinSettle(unittest.TestCase):
-    def test_a_run_settles_once_and_every_thing_snapshots_after_each_join(self) -> None:
-        pipeline = SimpleNamespace()
-        sheet, block, cable = _thing(), _thing(), _thing()
-        sheet.join_settle(pipeline, (10, 4))
-        block.join_settle(pipeline, (10, 4))
-        cable.join_settle(pipeline)
-        self.assertEqual((1, 0, 0), (sheet.settles, block.settles, cable.settles))
-        self.assertEqual({(10, 4)}, pipeline.particle_settles["runs"])
-        self.assertEqual([sheet, block, cable], pipeline.particle_settles["things"])
-        self.assertEqual((3, 2, 1), (sheet.snapshots, block.snapshots, cable.snapshots))
-
-    def test_a_different_run_settles_again(self) -> None:
-        pipeline = SimpleNamespace()
-        a, b = _thing(), _thing()
-        a.join_settle(pipeline, (10, 4))
-        b.join_settle(pipeline, (20, 4))
-        self.assertEqual((1, 1), (a.settles, b.settles))
+"""Stand-in things and a stand-in pipeline under the real readings panel: no GPU."""
 
 
 def _panel(pipeline):

@@ -9,6 +9,9 @@ walk over four of those tables for a bare name, which ``Ref.handle`` and
 ``Sim.__getitem__`` each carried a copy of. :meth:`SceneHandles.find` is that
 walk, written once, and this pins what it answers.
 
+A handle reads its own pose too: a body's from ``body_q``, and a static with no
+body from the transform it was placed at.
+
 Structural: stub handles, no scene, no GPU.
 """
 
@@ -16,6 +19,8 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+
+import numpy as np
 
 from robosimstudio.scene.handles import ArmHandle, DeformableHandle, EntityHandle, RegionHandle, SceneHandles
 from robosimstudio.scene.ref import Ref
@@ -74,6 +79,19 @@ class TestRefHandleReadsThroughFind(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIs(Ref(scene, name).handle, handles.find(name))
         self.assertIsNone(Ref(scene, "nothing").handle)
+
+
+class BodilessStaticPoseTest(unittest.TestCase):
+    def test_static_without_a_body_reads_its_xform(self) -> None:
+        handle = EntityHandle(name="pegboard", body=-1, static=True, xform=(0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 1.0))
+        body_q = np.array([[9.0, 9.0, 9.0, 0.0, 0.0, 0.0, 1.0]])
+        np.testing.assert_allclose(handle.pose(body_q), [0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 1.0])
+        np.testing.assert_allclose(handle.position(body_q), [0.1, 0.2, 0.3])
+
+    def test_body_handle_reads_body_q(self) -> None:
+        handle = EntityHandle(name="cube", body=0)
+        body_q = np.array([[9.0, 8.0, 7.0, 0.0, 0.0, 0.0, 1.0]])
+        np.testing.assert_allclose(handle.position(body_q), [9.0, 8.0, 7.0])
 
 
 if __name__ == "__main__":
