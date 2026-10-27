@@ -62,9 +62,10 @@ SUN_PATH_MAX = 100
 
 SOCKET_DIRS = ("/tmp",)
 """Where a run directory too deep for its own socket gets one, before the temp directory: the first that is a
-directory and leaves the path short enough. ``/tmp`` first because it is short and the same for every process,
-where ``TMPDIR`` is neither: an agent's session can set one 150 bytes deep, and a client started from another
-shell would look for the socket somewhere else."""
+directory this process may write to and leaves the path short enough. ``/tmp`` first because it is short and the
+same for every process, where ``TMPDIR`` is neither: an agent's session can set one 150 bytes deep, and a client
+started from another shell would look for the socket somewhere else. A sandbox that lets a process write only
+under ``TMPDIR`` passes ``/tmp`` over for it."""
 
 
 def socket_path(run_dir: str | os.PathLike | None, sock: str | os.PathLike | None = None) -> Path:
@@ -74,7 +75,9 @@ def socket_path(run_dir: str | os.PathLike | None, sock: str | os.PathLike | Non
     ``sockaddr_un`` -- a worktree under a session's scratch directory did it --
     is given a short path in :data:`SOCKET_DIRS` or the temp directory instead,
     named by a hash of the run directory so the server and every client resolve
-    the same one.
+    the same one. ``/tmp`` is shared and that name can be worked out by anyone
+    who knows the run directory, so a page that must not be reachable that way
+    is started with ``--sock`` naming a socket in a directory of its own.
 
     Raises:
         OSError: When no such directory leaves the path short enough; ``--sock`` names one.
@@ -92,10 +95,11 @@ def socket_path(run_dir: str | os.PathLike | None, sock: str | os.PathLike | Non
     roots = (*SOCKET_DIRS, tempfile.gettempdir())
     for root in roots:
         short = Path(root) / name
-        if len(os.fsencode(short)) <= SUN_PATH_MAX and os.path.isdir(root):
+        if len(os.fsencode(short)) <= SUN_PATH_MAX and os.path.isdir(root) and os.access(root, os.W_OK | os.X_OK):
             return short
     raise OSError(
-        f"no directory short enough for the control socket of {full.parent} (tried {', '.join(roots)}): "
+        f"no directory short enough for the control socket of {full.parent} that can be written "
+        f"(tried {', '.join(roots)}): "
         f"give --sock a path of at most {SUN_PATH_MAX} bytes"
     )
 

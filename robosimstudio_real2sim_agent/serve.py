@@ -66,9 +66,14 @@ def main(argv=None) -> int:
     from .server import LiveServer
 
     args = create_parser().parse_args(argv)
+    try:
+        sock = socket_path(args.run_dir, args.sock)
+    except OSError as exc:  # a run directory too deep for any socket path: one line, as `ctl` says it
+        print(f"serve: {exc}", file=sys.stderr)
+        return 2
     server = LiveServer(
         scene_path=Path(args.scene),
-        sock_path=socket_path(args.run_dir, args.sock),
+        sock_path=sock,
         run_dir=Path(args.run_dir),
         config=config_from_args(args),
         watch=not args.no_watch,
