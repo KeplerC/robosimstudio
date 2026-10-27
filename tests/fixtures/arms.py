@@ -30,6 +30,7 @@ __all__ = [
     "analytic_arm",
     "analytic_fk",
     "cpu_arm",
+    "fleet_arm",
     "reachable",
     "urdf_arm",
 ]
@@ -92,16 +93,10 @@ def analytic_arm(*, base: np.ndarray | None = None, urdf: str = "", base_xform=N
     )
 
 
-def cpu_arm(*, iterations: int = 8):
-    """The arm as a finalized Newton model on the CPU, with its :class:`ArmIK`: ``(model, arm_ik)``.
-
-    No URDF, so every solve runs this tree's own damped least squares over
-    Newton's forward kinematics, never PyRoKi.
-    """
+def _builder():
+    """The arm in a ``newton.ModelBuilder``: ``(builder, tool body)``."""
     import newton
     import warp as wp
-
-    from robosimstudio.solvers.ik.arm_ik import ArmIK
 
     builder = newton.ModelBuilder()
     parent, joints = -1, []
@@ -120,6 +115,20 @@ def cpu_arm(*, iterations: int = 8):
         )
         parent = body
     builder.add_articulation(joints)
+    return builder, parent
+
+
+def cpu_arm(*, iterations: int = 8):
+    """The arm as a finalized Newton model on the CPU, with its :class:`ArmIK`: ``(model, arm_ik)``.
+
+    No URDF, so every solve runs this tree's own damped least squares over
+    Newton's forward kinematics, never PyRoKi.
+    """
+    import newton
+
+    from robosimstudio.solvers.ik.arm_ik import ArmIK
+
+    builder, tool = _builder()
     model = builder.finalize(device="cpu")
     state = model.state()
     newton.eval_fk(model, model.joint_q, model.joint_qd, state)
@@ -128,12 +137,30 @@ def cpu_arm(*, iterations: int = 8):
         model,
         arm_coords=list(range(n)),
         arm_dofs=list(range(n)),
-        ee_body=parent,
+        ee_body=tool,
         home_state=state,
         ee_offset=TOOL,
         iterations=iterations,
     )
     return model, arm
+
+
+def fleet_arm(worlds: int):
+    """The arm replicated into ``worlds`` worlds on the CPU: ``(template, model, world_map, tool body)``.
+
+    The template is the one-world model the replication was made from, as a
+    fleet's compiler holds both; the tool body is the template's index.
+    """
+    import newton
+
+    from robosimstudio.core.worlds import WorldMap
+
+    builder, tool = _builder()
+    template = builder.finalize(device="cpu")
+    fleet = newton.ModelBuilder()
+    fleet.replicate(builder, int(worlds))
+    model = fleet.finalize(device="cpu")
+    return template, model, WorldMap.of(template, model, int(worlds)), tool
 
 
 def urdf_arm(directory: Path, *, scale: float = 1.0) -> Path:
