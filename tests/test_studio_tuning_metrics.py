@@ -120,10 +120,8 @@ class TestTheCantilever(unittest.TestCase):
 
     def test_a_rig_without_a_rest_layout_or_an_overhang_is_not_measurable(self) -> None:
         rest = _strip()
-        fewer = _cloth(rest, rest.copy(), mid_surface_positions=lambda state: rest[:-3])
         for entity_state, overhang in (
             (_cloth(None, rest.copy()), OVERHANG),
-            (fewer, OVERHANG),  # the points read are not the layout's: nothing to pair them with
             (_cloth(rest, rest.copy()), 0.0),
         ):
             (only,) = measure_cantilever(*entity_state, overhang=overhang, clamp_x=CLAMP_X)

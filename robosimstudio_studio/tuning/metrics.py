@@ -17,6 +17,7 @@ says "out of band" is worth more than a plausible figure that is wrong.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -102,11 +103,17 @@ def _positions(entity: Any, state: Any) -> np.ndarray:
 
 
 def _rest_positions(entity: Any) -> np.ndarray | None:
-    """The settled rest layout this cloth resets to, or ``None``."""
+    """The settled rest layout this cloth resets to, read as :func:`_positions` reads it now, or ``None``.
+
+    On the mid-surface for a slab, as its positions are: held against both
+    faces' particles, a slab's rest layout was twice as long as what it is
+    compared with, so every reading that compares the two refused it.
+    """
     rest = getattr(entity, "rest", None)
     if not rest or "particle_q" not in rest:
         return None
-    return np.asarray(rest["particle_q"], dtype=np.float64)[entity.particles]
+    laid_out = np.asarray(rest["particle_q"], dtype=np.float64)
+    return _positions(entity, SimpleNamespace(particle_q=SimpleNamespace(numpy=lambda: laid_out)))
 
 
 def settle_speed(entity: Any, state: Any, *, percentile: float = 95.0) -> Reading:
