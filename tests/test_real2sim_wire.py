@@ -9,6 +9,8 @@ says NoServer or NoReply, never a traceback, whatever the other end does.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import socket
@@ -17,6 +19,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -158,6 +161,51 @@ class TestTheSocketPath(unittest.TestCase):
         path = wire.socket_path(padded)
         self.assertLessEqual(len(os.fsencode(path)), wire.SUN_PATH_MAX, "the path returned can be bound")
         self.assertEqual(path, wire.socket_path(short / "run"))
+
+
+DEEP_TEMP = "/tmp/" + "t" * 150
+"""A session's temp dir as deep as an agent's scratch directory is: a socket's name alone does not fit under it."""
+
+
+class TestASocketThatFitsWhateverTheTempDir(unittest.TestCase):
+    """A run directory too deep for its own socket gets a short one, and short means short wherever ``TMPDIR`` is."""
+
+    def deep_run_dir(self) -> Path:
+        return self.enterContext(short_dir("w-")) / ("d" * 60) / ("e" * 60) / "run"
+
+    def test_a_deep_run_dir_under_a_deep_temp_dir_still_gets_a_path_that_fits(self) -> None:
+        with mock.patch.object(tempfile, "tempdir", DEEP_TEMP):
+            path = wire.socket_path(self.deep_run_dir())
+        self.assertLessEqual(len(os.fsencode(path)), wire.SUN_PATH_MAX, f"{path} cannot be bound")
+
+    def test_the_server_and_a_client_under_another_temp_dir_agree(self) -> None:
+        deep = self.deep_run_dir()
+        with mock.patch.object(tempfile, "tempdir", DEEP_TEMP):
+            server = wire.socket_path(deep)
+        with mock.patch.object(tempfile, "tempdir", "/var/tmp"):
+            client = wire.socket_path(deep)
+        self.assertEqual(server, client)
+
+    def test_nowhere_short_enough_is_refused_saying_how_to_name_one(self) -> None:
+        with (
+            mock.patch.object(tempfile, "tempdir", DEEP_TEMP),
+            mock.patch.object(wire, "SOCKET_DIRS", (DEEP_TEMP,), create=True),
+            self.assertRaisesRegex(OSError, "--sock"),
+        ):
+            wire.socket_path(self.deep_run_dir())
+
+    def test_ctl_says_so_in_one_line(self) -> None:
+        from robosimstudio_real2sim_agent import ctl
+
+        err = io.StringIO()
+        with (
+            mock.patch.object(tempfile, "tempdir", DEEP_TEMP),
+            mock.patch.object(wire, "SOCKET_DIRS", (DEEP_TEMP,), create=True),
+            contextlib.redirect_stderr(err),
+        ):
+            code = ctl.main(["--run-dir", str(self.deep_run_dir()), "status"])
+        self.assertEqual(2, code)
+        self.assertTrue(err.getvalue().startswith("ctl: no directory short enough"), err.getvalue())
 
 
 class TestTheBind(unittest.TestCase):
