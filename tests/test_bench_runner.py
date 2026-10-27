@@ -88,7 +88,7 @@ class TestOneRollout(unittest.TestCase):
     def test_an_exhausted_budget_is_truncated(self):
         from robosimstudio_bench.run.runner import rollout
 
-        env, policy = taskdocs.FakeEnv([(0.1, False, False, {})]), _Policy()
+        env, policy = taskdocs.ScriptedEnv([(0.1, False, False, {})]), _Policy()
         result = rollout(env, policy, max_steps=3)
         self.assertEqual(env.actions, [0, 1, 2])
         self.assertEqual((result.row["close_kind"], result.row["episode_length"]), ("truncated", 3))
@@ -98,7 +98,7 @@ class TestOneRollout(unittest.TestCase):
         from robosimstudio_bench.run.runner import rollout
 
         steps = [(0.0, False, False, {}), (1.0, True, False, {"success": True, "close_kind": "success"})]
-        row = rollout(taskdocs.FakeEnv(steps), _Policy(), max_steps=10).row
+        row = rollout(taskdocs.ScriptedEnv(steps), _Policy(), max_steps=10).row
         self.assertEqual(
             (row["close_kind"], row["success"], row["reward"], row["episode_length"]), ("success", True, 1.0, 2)
         )
@@ -107,7 +107,7 @@ class TestOneRollout(unittest.TestCase):
         from robosimstudio_bench.run.runner import rollout
 
         info = {"close_kind": "policy_request", "termination_reason": "graph finished", "metrics": {"depth": 0.2}}
-        row = rollout(taskdocs.FakeEnv([(0.0, True, False, info)]), _Policy(), episode_id=4).row
+        row = rollout(taskdocs.ScriptedEnv([(0.0, True, False, info)]), _Policy(), episode_id=4).row
         self.assertEqual(row["termination_reason"], "graph finished")
         self.assertEqual(row["metrics"], {"depth": 0.2})
         self.assertEqual(row["graph_nodes"], 7)
@@ -117,15 +117,15 @@ class TestOneRollout(unittest.TestCase):
         from robosimstudio_bench.run.runner import rollout
 
         self.assertEqual(
-            rollout(taskdocs.FakeEnv([(0.0, False, False, {})], max_steps=2), _Policy()).row["episode_length"], 2
+            rollout(taskdocs.ScriptedEnv([(0.0, False, False, {})], max_steps=2), _Policy()).row["episode_length"], 2
         )
-        env = taskdocs.FakeEnv([(0.0, False, False, {})], max_steps=2)
+        env = taskdocs.ScriptedEnv([(0.0, False, False, {})], max_steps=2)
         self.assertEqual(rollout(env, _Policy(), max_steps=5).row["episode_length"], 5)
 
     def test_the_recorders_observer_is_removed_even_when_a_step_raises(self):
         from robosimstudio_bench.run.runner import rollout
 
-        env = taskdocs.FakeEnv([(0.0, False, False, {})], raise_at=1)
+        env = taskdocs.ScriptedEnv([(0.0, False, False, {})], raise_at=1)
         with self.assertRaisesRegex(RuntimeError, "blew up"):
             rollout(env, _Policy(), recorder=_Recorder(), max_steps=5)
         self.assertEqual(env.observers, [])
@@ -133,7 +133,7 @@ class TestOneRollout(unittest.TestCase):
     def test_a_recorded_episode_returns_the_recorders_row_with_the_extras(self):
         from robosimstudio_bench.run.runner import rollout
 
-        env = taskdocs.FakeEnv([(0.0, True, False, {})])
+        env = taskdocs.ScriptedEnv([(0.0, True, False, {})])
         row = rollout(env, _Policy(), recorder=_Recorder()).row
         self.assertEqual(row, {"recorded": True, "graph_nodes": 7})
         self.assertEqual(env.observers, [])

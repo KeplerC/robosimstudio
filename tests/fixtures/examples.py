@@ -189,13 +189,14 @@ def _load(rel: str):
     return module
 
 
-SCRIPTS = ROOT / "scripts"
+SCRIPTS_DIR = ROOT / "scripts"
+"""The checkout's ``scripts/``; not :data:`SCRIPTS`, which names the example scripts."""
 
 
 def _under_scripts(module) -> bool:
     """Whether a module was loaded from ``scripts/``: its file, or a package's search path, lies there."""
     places = [getattr(module, "__file__", None) or "", *list(getattr(module, "__path__", []) or [])]
-    return any(place and Path(place).resolve().is_relative_to(SCRIPTS) for place in places)
+    return any(place and Path(place).resolve().is_relative_to(SCRIPTS_DIR) for place in places)
 
 
 @contextlib.contextmanager
@@ -211,7 +212,7 @@ def scripts_modules(*names: str):
     block a module may import its siblings lazily, as ``recording.lockstep`` does;
     a test that runs such code holds the block open (``cls.enterClassContext``).
     """
-    scripts = str(SCRIPTS)
+    scripts = str(SCRIPTS_DIR)
     # A package of the same top-level name loaded from elsewhere would answer the
     # import instead of scripts/: it steps aside for the block and comes back after.
     tops = {name.split(".")[0] for name in names}

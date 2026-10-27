@@ -135,6 +135,20 @@ class TestWaits(unittest.TestCase):
             pass
 
 
+class TestTheExampleLists(unittest.TestCase):
+    """``fixtures.examples`` names the examples by lists that medium modules iterate; a later
+    name of the same spelling once shadowed one with a path, and only the GPU tier saw it."""
+
+    def test_each_list_is_a_tuple_of_script_names(self) -> None:
+        from tests.fixtures import examples
+
+        for name in ("SCRIPTS", "SCENES", "DEMOS"):
+            listed = getattr(examples, name)
+            self.assertIsInstance(listed, tuple, name)
+            self.assertTrue(all(isinstance(item, str) for item in listed), name)
+        self.assertTrue(examples.SCRIPTS, "the numbered examples are listed")
+
+
 class TestShortDirectories(unittest.TestCase):
     def test_a_socket_fits_under_a_short_dir_whatever_tmpdir_is(self) -> None:
         deep = "/tmp/" + "d" * 150

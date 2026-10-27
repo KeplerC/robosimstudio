@@ -300,7 +300,7 @@ class TestTheDoNothingFloor(unittest.TestCase):
     """``do_nothing_floor``: what the idle action is paid, read as the most it was ever paid."""
 
     def test_the_floor_is_the_largest_reward_not_the_last(self):
-        env = taskdocs.FakeEnv([(0.0, False, False, {}), (0.4, False, False, {}), (0.1, False, False, {})])
+        env = taskdocs.ScriptedEnv([(0.0, False, False, {}), (0.4, False, False, {}), (0.1, False, False, {})])
         stage = gauntlet.do_nothing_floor(env, steps=3)
         self.assertEqual(stage.data, {"steps": 3, "floor": 0.4, "final": 0.1})
         self.assertEqual(env.actions, ["idle"] * 3)
@@ -308,7 +308,7 @@ class TestTheDoNothingFloor(unittest.TestCase):
         self.assertEqual([(f.kind, f.severity) for f in stage.findings], [("do-nothing-reward", "note")])
 
     def test_a_goal_the_idle_action_meets_fails_and_names_the_step(self):
-        env = taskdocs.FakeEnv([(0.0, False, False, {}), (1.0, False, False, {"success": True})])
+        env = taskdocs.ScriptedEnv([(0.0, False, False, {}), (1.0, False, False, {"success": True})])
         stage = gauntlet.do_nothing_floor(env, steps=4)
         self.assertEqual(stage.status, "fail")
         (finding,) = stage.findings
@@ -316,21 +316,21 @@ class TestTheDoNothingFloor(unittest.TestCase):
         self.assertIn("at step 2", finding.detail)
 
     def test_a_task_that_pays_nothing_for_nothing_has_nothing_to_say(self):
-        stage = gauntlet.do_nothing_floor(taskdocs.FakeEnv([(0.0, False, False, {})]), steps=5)
+        stage = gauntlet.do_nothing_floor(taskdocs.ScriptedEnv([(0.0, False, False, {})]), steps=5)
         self.assertEqual((stage.status, stage.findings, stage.data["floor"]), ("pass", (), 0.0))
 
     def test_it_stops_where_the_episode_ends(self):
-        env = taskdocs.FakeEnv([(0.0, False, False, {}), (0.0, True, False, {}), (0.9, False, False, {})])
+        env = taskdocs.ScriptedEnv([(0.0, False, False, {}), (0.0, True, False, {}), (0.9, False, False, {})])
         self.assertEqual(gauntlet.do_nothing_floor(env, steps=10).data["steps"], 2)
 
     def test_it_resets_only_when_asked(self):
-        env = taskdocs.FakeEnv([(0.0, False, False, {})])
+        env = taskdocs.ScriptedEnv([(0.0, False, False, {})])
         gauntlet.do_nothing_floor(env, steps=1)
         gauntlet.do_nothing_floor(env, steps=1, reset=False)
         self.assertEqual(env.resets, 1)
 
     def test_an_env_that_raises_fails_the_stage_rather_than_the_caller(self):
-        stage = gauntlet.do_nothing_floor(taskdocs.FakeEnv([(0.0, False, False, {})], raise_at=0), steps=3)
+        stage = gauntlet.do_nothing_floor(taskdocs.ScriptedEnv([(0.0, False, False, {})], raise_at=0), steps=3)
         self.assertEqual(stage.status, "fail")
         self.assertIn("RuntimeError", stage.findings[0].detail)
 
