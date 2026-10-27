@@ -68,5 +68,37 @@ class TestThePaletteFindsWhatItWasPaintedWith(unittest.TestCase):
             _segment(_picture(), "a red mug")
 
 
+def _reference_opening(binary: np.ndarray) -> np.ndarray:
+    """The opening by a 2x2 square, by its definition: the union of every 2x2 block wholly inside the mask."""
+    inside = binary > 0
+    fits = inside[:-1, :-1] & inside[1:, :-1] & inside[:-1, 1:] & inside[1:, 1:]
+    out = np.zeros_like(inside)
+    for dy in (0, 1):
+        for dx in (0, 1):
+            out[dy : dy + fits.shape[0], dx : dx + fits.shape[1]] |= fits
+    return out
+
+
+@unittest.skipUnless(HAS_CV2, "opencv is not installed")
+class TestTheOpeningIsTheSameAtEveryEdge(unittest.TestCase):
+    """The off-image pixels are background: a strip one pixel wide is removed wherever it lies."""
+
+    def test_a_one_pixel_strip_is_removed_in_column_zero_as_in_column_nine(self):
+        for column in (0, 9):
+            with self.subTest(column=column):
+                picture = _picture()
+                picture[10:90, column] = (255, 140, 0)
+                self.assertEqual(_segment(picture, "orange")["masks"], [])
+
+    def test_random_masks_open_to_the_reference(self):
+        from robosimstudio_policy_agent.perception_tools import _opened
+
+        rng = np.random.default_rng(0)
+        for trial in range(50):
+            binary = (rng.random((24, 32)) < 0.6).astype(np.uint8) * 255
+            with self.subTest(trial=trial):
+                np.testing.assert_array_equal(_opened(binary) > 0, _reference_opening(binary))
+
+
 if __name__ == "__main__":
     unittest.main()
