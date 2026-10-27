@@ -6,6 +6,7 @@ cuRobo is not a test dependency, so the few names these paths import are stubbed
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import types
@@ -46,10 +47,9 @@ class _Planner:
 
 
 def _yaml(path):
-    import yaml
-
+    """cuRobo's ``load_yaml``, for the JSON these tests write: JSON is YAML, and needs no ``pyyaml``."""
     with open(path) as f:
-        return yaml.safe_load(f)
+        return json.load(f)
 
 
 def _curobo_stubs(configs_dir: str = "/nonexistent") -> dict:
@@ -130,10 +130,10 @@ class CollisionSpheresTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "spheres").mkdir()
             (Path(tmp) / "spheres" / "arm.yml").write_text(
-                "collision_spheres:\n  link0:\n    - {center: [0, 0, 0], radius: 0.05}\n"
+                json.dumps({"collision_spheres": {"link0": [{"center": [0, 0, 0], "radius": 0.05}]}})
             )
             config = Path(tmp) / "robot.yml"
-            config.write_text("robot_cfg: {}\n")
+            config.write_text(json.dumps({"robot_cfg": {}}))
             kinematics = {"collision_spheres": "spheres/arm.yml"}
             with mock.patch.dict(sys.modules, _curobo_stubs()):
                 spheres = self._backend(str(config))._inline_collision_spheres(kinematics)
@@ -143,7 +143,7 @@ class CollisionSpheresTest(unittest.TestCase):
     def test_a_path_resolves_in_curobos_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "spheres").mkdir()
-            (Path(tmp) / "spheres" / "franka.yml").write_text("collision_spheres:\n  hand: []\n")
+            (Path(tmp) / "spheres" / "franka.yml").write_text(json.dumps({"collision_spheres": {"hand": []}}))
             kinematics = {"collision_spheres": "spheres/franka.yml"}
             with mock.patch.dict(sys.modules, _curobo_stubs(tmp)):
                 spheres = self._backend("franka.yml")._inline_collision_spheres(kinematics)
