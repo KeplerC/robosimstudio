@@ -64,7 +64,7 @@ class TestBothPolicyBasesHoldWhatTheyAreGiven(unittest.TestCase):
         from robosimstudio_bench.solutions.base import SolutionCommon, SolutionIdle
         from robosimstudio_bench.solutions.fleet import FleetSolution
 
-        self.assertIs(type(SolutionIdle).__mro__ and SolutionCommon in SolutionIdle.__mro__, True)
+        self.assertIn(SolutionCommon, SolutionIdle.__mro__)
         self.assertIn(SolutionCommon, FleetSolution.__mro__)
         self.assertTrue(SolutionIdle("E").name.endswith(".SolutionIdle"))
         self.assertTrue(FleetSolutionIdle("F").name.endswith(".FleetSolutionIdle"))
@@ -124,17 +124,34 @@ class TestBothFacadesAreOneContract(unittest.TestCase):
 
         return EnvFacade
 
+    def _disagreements(self, implementation) -> dict[str, str]:
+        """Each protocol member the implementation lacks, or declares with another signature."""
+        import inspect
+
+        protocol = self._protocol()
+        out: dict[str, str] = {}
+        for name in sorted(_protocol_attrs(protocol)):
+            declared = inspect.getattr_static(protocol, name, None)
+            if declared is None:  # an annotated attribute, not a method
+                if not isinstance(getattr(implementation, name, None), str):
+                    out[name] = "missing, or not a str"
+                continue
+            mine = inspect.getattr_static(implementation, name, None)
+            if mine is None:
+                out[name] = "missing"
+            elif inspect.signature(mine) != inspect.signature(declared):
+                out[name] = f"{inspect.signature(mine)} against {inspect.signature(declared)}"
+        return out
+
     def test_the_single_world_facade_satisfies_it(self) -> None:
         from robosimstudio_policy_agent.facade import GapEnvFacade
 
-        missing = [n for n in _protocol_attrs(self._protocol()) if not hasattr(GapEnvFacade, n)]
-        self.assertEqual(missing, [])
+        self.assertEqual(self._disagreements(GapEnvFacade), {})
 
     def test_a_world_facade_satisfies_it_too(self) -> None:
         from robosimstudio_policy_agent.fleet.world_facade import WorldFacade
 
-        missing = [n for n in _protocol_attrs(self._protocol()) if not hasattr(WorldFacade, n)]
-        self.assertEqual(missing, [])
+        self.assertEqual(self._disagreements(WorldFacade), {})
 
     def test_what_is_outside_the_contract_is_outside_on_purpose(self) -> None:
         """``reset`` and ``publish_step`` are the single-world facade's, because

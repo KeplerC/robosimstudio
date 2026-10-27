@@ -23,10 +23,18 @@ TIER = "fast"
 
 class SharedOrientationLawTest(unittest.TestCase):
     def test_stepper_uses_the_servo_helpers(self) -> None:
-        self.assertIs(stepper.solver_goal, servo.solver_goal)
-        self.assertIs(stepper.rotation_error, servo.rotation_error)
-        self.assertFalse(hasattr(stepper, "_solver_goal"))
-        self.assertFalse(hasattr(stepper.StepService, "_rotation_error"))
+        """What the fleet stepper reads for a servo goal and its arrival is the serial servo's, sample by sample."""
+        rng = np.random.default_rng(11)
+        for honours_roll in (False, True):
+            for _ in range(20):
+                a, b = rng.normal(size=4), rng.normal(size=4)
+                a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
+                np.testing.assert_allclose(
+                    stepper.solver_goal(a, b, honours_roll), servo.solver_goal(a, b, honours_roll), atol=1e-12
+                )
+                self.assertAlmostEqual(
+                    stepper.rotation_error(a, b, honours_roll), servo.rotation_error(a, b, honours_roll), places=12
+                )
 
     def test_servo_methods_wrap_the_helpers(self) -> None:
         rng = np.random.default_rng(3)

@@ -132,15 +132,13 @@ def _job(**kw):
 
 class TestABatchedUnitThatRaises(unittest.TestCase):
     def test_partial_rows_are_sent_and_the_rest_are_errors(self):
-        from robosimstudio_bench.run import pool
+        from robosimstudio_bench.run import fleet, pool
 
         job = _job()
         sent_row = {"task": "suite/t", "episode_id": 0, "success": True, "episode_length": 5}
 
-        class Runner:
-            def __init__(self):
-                self.rows = []
-                self.summary = SimpleNamespace(waves=[])
+        class Runner(_FakeRunner):
+            """Scores its wave's first world, then raises, as a wave that blew up part way does."""
 
             def run_work(self, fleet, policy, pairs):
                 self.rows.append(sent_row)
@@ -150,25 +148,12 @@ class TestABatchedUnitThatRaises(unittest.TestCase):
         work.put((0, (("", 0), ("", 1))))
         work.put((0, (("", 0), ("", 1))))
         work.put(None)
-        built = []
-
-        def prebuilt(self, job_, *a):
-            built.append(1)
-            self.key = pool._env_key(job_)
-            self.runner = Runner()
-            self.task, self.job, self.fleet, self.policy = SimpleNamespace(full_name="suite/t"), job_, None, None
-            self._docs = {}
-
-        real_run = pool._FleetWorker.run
-
-        def run(self, job_, work_, root, index, results_, job_index):
-            if self.key != pool._env_key(job_):
-                prebuilt(self, job_)
-            return real_run(self, job_, work_, root, index, results_, job_index)
+        _FakeRunner.instances = []
 
         with (
             tempfile.TemporaryDirectory() as tmp,
-            mock.patch.object(pool._FleetWorker, "run", run),
+            mock.patch.object(fleet, "RunnerFleet", Runner),
+            mock.patch.object(fleet, "plan_mixed_waves", lambda work, n: [[(doc, ("ep", i)) for doc, i in work]]),
             mock.patch.object(pool, "job_task", return_value=SimpleNamespace(full_name="suite/t")),
         ):
             pool._worker(0, [job], tmp, work, results, device="", stagger=0.0, preload="")
@@ -178,9 +163,10 @@ class TestABatchedUnitThatRaises(unittest.TestCase):
         kinds = [m[0] for m in messages]
         self.assertNotIn("error", kinds)
         rows = [m[3] for m in messages if m[0] == "row"]
-        # Both units ran (the worker went on after the first raised), each
-        # sending its scored row and an error row for the episode it lost.
-        self.assertEqual(len(built), 2)
+        # Both units ran (the worker went on after the first raised, and built
+        # afresh), each sending its scored row and an error row for the episode it lost.
+        self.assertEqual(len(_FakeRunner.instances), 2)
+        self.assertEqual(kinds.count("ready"), 2)
         self.assertEqual(
             sorted((row["episode_id"], row.get("close_kind", "")) for row in rows),
             [(0, ""), (0, ""), (1, "error"), (1, "error")],

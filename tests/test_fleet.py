@@ -20,6 +20,7 @@ from robosimstudio.core.env import CLOSE_PRECEDENCE, beats
 from robosimstudio.core.worlds import WorldMap
 from robosimstudio.scene import compiler
 from robosimstudio.scene.compiler import CannotReplicate
+from robosimstudio.scene.entity import Entity
 from robosimstudio.specs import EpisodeSpec, JobSpec, TaskSpec
 from robosimstudio_bench.goals.context import EvalResult
 from robosimstudio_bench.run.fleet import (
@@ -37,6 +38,24 @@ TIER = "fast"
 
 def _task(**kwargs: Any) -> TaskSpec:
     return TaskSpec(name="t", **kwargs)
+
+
+class _Publisher(Entity):
+    """An entity that publishes a state, as a peel's film or a gear board does."""
+
+    def published_states(self, snapshot) -> dict[str, float]:
+        return {"bond_fraction": 0.0}
+
+
+class _WorldAwarePublisher(_Publisher):
+    world_aware = True
+
+
+class _Hooked(Entity):
+    """An entity that puts kernels in the substep block, written for one world."""
+
+    def contribute_hooks(self, hooks) -> None:
+        pass
 
 
 class TestWorldMap(unittest.TestCase):
@@ -370,18 +389,23 @@ class TestCannotReplicate(unittest.TestCase):
     """
 
     def test_it_is_a_kind_of_not_implemented_error(self):
-        self.assertTrue(issubclass(CannotReplicate, NotImplementedError))
-        with self.assertRaises(NotImplementedError):
-            raise CannotReplicate("towel")
+        """A wave the fleet refuses is caught by a handler written for ``NotImplementedError``."""
+        from robosimstudio_bench.envs.fleet import FleetEnv
+
+        fleet = FleetEnv.__new__(FleetEnv)
+        fleet.build_task = _task(control_mode="joint_position")
+        with self.assertRaises(NotImplementedError) as caught:
+            fleet._check_documents([fleet.build_task, _task(control_mode="ee_delta")])
+        self.assertIsInstance(caught.exception, CannotReplicate)
 
     def test_it_does_not_catch_unrelated_failures(self):
-        # An inadmissible pairing or a missing asset is not fixed by narrowing
-        # the grid, so those must not be answered the way this one is.
-        for other in (ValueError("inadmissible pairing"), KeyError("no such asset"), RuntimeError("boom")):
-            self.assertNotIsInstance(other, CannotReplicate)
+        # An inadmissible pairing is not fixed by narrowing the grid, so it must
+        # not be answered the way this one is.
+        from robosimstudio_bench.envs.fleet import FleetEnv
 
-    def test_it_is_exported(self):
-        self.assertIn("CannotReplicate", compiler.__all__)
+        with self.assertRaises(KeyError) as caught:
+            FleetEnv(TaskSpec(name="t", scene="bench_a", embodiment="franka"), num_worlds=2, scene="bench_b")
+        self.assertNotIsInstance(caught.exception, CannotReplicate)
 
 
 class TestTheEmptyContextIsCoveredByTheRefusal(unittest.TestCase):
@@ -393,27 +417,27 @@ class TestTheEmptyContextIsCoveredByTheRefusal(unittest.TestCase):
     a `published_states` that reads `WorldState.world`). Lifting the rest with
     `entities` short would take every published state with it: `bind._published`
     reads that dict, so a peel would raise `BindError` on every episode.
-    Structural on purpose: reading the source keeps this in the fast tier.
+    Both refusals are pure functions of the entities, so they are asked here of
+    entities that were never built.
     """
-
-    def _refusal_source(self) -> str:
-        import inspect
-
-        from robosimstudio_bench.envs import fleet
-
-        return inspect.getsource(fleet.scoring_refusal)
 
     def test_the_refusal_still_declines_scenes_with_deformables(self):
         """It asks what a thing *is*, not which view held it.
 
         The clause read ``scene.deformables`` -- a bin -- so a publisher that
         owned a handle sat in ``objects`` and slipped past it. Both halves ask
-        the entity now, which is what this pins."""
-        source = self._refusal_source()
-        self.assertIn("carries_particles", source)
-        self.assertIn("published_states", source)
+        the entity now, which is what this pins: the scene below has no bins at
+        all, only ``by_name``."""
+        from robosimstudio_bench.envs.fleet import scoring_refusal
+
+        towel = Entity(SimpleNamespace(name="towel"))
+        towel.range.particles = (0, 64)
+        self.assertIn("made of particles (towel)", scoring_refusal(SimpleNamespace(by_name={"towel": towel})))
+        film = _Publisher(SimpleNamespace(name="film"))
+        self.assertIn("publishing states (film)", scoring_refusal(SimpleNamespace(by_name={"film": film})))
         # And the one way through: a publisher that answers per world says so.
-        self.assertIn("world_aware", source)
+        board = _WorldAwarePublisher(SimpleNamespace(name="board"))
+        self.assertEqual(scoring_refusal(SimpleNamespace(by_name={"board": board})), "")
 
     def test_the_compilers_refusal_is_about_the_physics_alone(self):
         """The two refusals answer different questions and must stay apart.
@@ -424,11 +448,13 @@ class TestTheEmptyContextIsCoveredByTheRefusal(unittest.TestCase):
         class's problem, and saying so twice would leave the fleet's own gap
         depending on the compiler remembering it.
         """
-        import inspect
-
-        source = inspect.getsource(compiler._replication_refusal)
-        self.assertIn("contribute_hooks", source)
-        self.assertNotIn("base.deformables", source)
+        towel = Entity(SimpleNamespace(name="towel"))
+        towel.range.particles = (0, 64)
+        no_physics = SimpleNamespace(physics=None)
+        self.assertEqual(compiler._replication_refusal(SimpleNamespace(entities=[towel]), no_physics), "")
+        hooked = _Hooked(SimpleNamespace(name="cutter"))
+        refusal = compiler._replication_refusal(SimpleNamespace(entities=[towel, hooked]), no_physics)
+        self.assertIn("substep physics written for one world: cutter", refusal)
 
     def test_a_cutting_block_is_refused_for_what_its_goal_reads(self):
         """The cutter's published ``pieces``, not the eight corners its block is drawn at.
@@ -452,16 +478,6 @@ class TestTheEmptyContextIsCoveredByTheRefusal(unittest.TestCase):
         refusal = scoring_refusal(SimpleNamespace(by_name={"tofu": tofu}))
         self.assertIn("publishing states (tofu)", refusal)
         self.assertNotIn("replicates correctly", refusal)
-
-    def test_the_context_says_what_must_land_with_a_per_world_probe(self):
-        """If someone fills `particles` here, this points at `entities` too."""
-        import inspect
-
-        from robosimstudio_bench.envs.fleet import FleetEnv
-
-        doc = inspect.getdoc(FleetEnv.context) or ""
-        self.assertIn("entities", doc)
-        self.assertIn("scoring_refusal", doc)
 
 
 class TestTheWorldViewAnswersWhatTheToolsAsk(unittest.TestCase):
@@ -545,10 +561,6 @@ class TestTheWorldViewAnswersWhatTheToolsAsk(unittest.TestCase):
                 self.assertEqual(elsewhere, [], f"{name!r} is exempt as driver-only but is read in {elsewhere}")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestOneEpisodeGetsOneLabel(unittest.TestCase):
     """Why an episode ended may not depend on how many worlds it ran in.
 
@@ -572,14 +584,29 @@ class TestOneEpisodeGetsOneLabel(unittest.TestCase):
         self.assertFalse(beats("truncated", "success"))
 
     def test_the_batched_path_closes_in_that_same_order(self) -> None:
-        """Read off ``score_world``'s source, because the order *is* the
-        if-chain -- there is no value to assert, only a sequence of branches,
-        and a chain reordered by a well-meaning edit is exactly the regression
-        this pins."""
-        import inspect
-        import re
+        """Every combination of the four reasons holding at once closes on the strongest.
 
-        from robosimstudio_bench.run import fleet as fleet_module
+        The order *is* ``score_world``'s if-chain, and a chain reordered by a
+        well-meaning edit is exactly the regression this pins -- so each of the
+        fifteen ways two or more reasons can coincide is played through it."""
+        import itertools
 
-        written = re.findall(r'info\["close_kind"\] = "([a-z_]+)"', inspect.getsource(fleet_module.score_world))
-        self.assertEqual(written, list(CLOSE_PRECEDENCE))
+        for held in itertools.product((False, True), repeat=4):
+            if not any(held):
+                continue
+            diverged, request, success, truncated = held
+            slot = WorldSlot(world=0, episode=plan_waves(_task(), [0], 1)[0][0])
+            result = EvalResult(success=success, reward=0.0, metrics={})
+            fleet = SimpleNamespace(evaluate=lambda *a, result=result, **k: result)
+            snapshot = SimpleNamespace(diverged=np.array([diverged]))
+            done, info = score_world(
+                slot, fleet, snapshot, step=100 if truncated else 5, limit=100, request="stop" if request else ""
+            )
+            expected = next(reason for reason, on in zip(CLOSE_PRECEDENCE, held, strict=True) if on)
+            with self.subTest(held=dict(zip(CLOSE_PRECEDENCE, held, strict=True))):
+                self.assertTrue(done)
+                self.assertEqual(info["close_kind"], expected)
+
+
+if __name__ == "__main__":
+    unittest.main()

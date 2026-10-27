@@ -10,9 +10,10 @@ closing) are what a wave's correctness rests on. Nothing here needs a device.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import threading
-import time
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -27,9 +28,12 @@ from robosimstudio_policy_agent.fleet import (
     SnapshotTable,
     StepWaiter,
     WorldBus,
+    world_bus,
 )
 from robosimstudio_policy_agent.fleet.barrier import ParkTable
 from robosimstudio_policy_agent.fleet.world_bus import ServiceQueue, _Request
+from tests.fixtures.fleet import GivesUpOnceStarted
+from tests.fixtures.waits import wait_until
 
 TIER = "fast"
 """No GPU. Gates every commit."""
@@ -432,10 +436,16 @@ class ServiceQueueTimeoutTest(unittest.TestCase):
             release.wait(2.0)
             return "late"
 
-        pumper = threading.Thread(target=lambda: (time.sleep(0.01), queue.pump()))
+        # The fleet pumps until it has served the request; the poster gives up
+        # once it is running, which is the moment this is about.
+        pumper = threading.Thread(target=lambda: wait_until(queue.pump, what="the posted request"))
         pumper.start()
+        done = GivesUpOnceStarted(started)
         try:
-            with self.assertRaises(BusTimeout):
+            with (
+                mock.patch.object(world_bus, "_Request", functools.partial(world_bus._Request, done=done)),
+                self.assertRaises(BusTimeout),
+            ):
                 queue.post(0, slow, (), {}, timeout=0.1)
             self.assertTrue(started.is_set())
             with parks.parked(0):
