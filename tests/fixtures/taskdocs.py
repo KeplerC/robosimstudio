@@ -14,7 +14,7 @@ say their tests "hand in a five-line fake". This is that fake, written once:
 * :class:`FakeCatalog` -- both catalogs a document meets: the typechecker's
   four-method protocol and :mod:`~robosimstudio_bench.goals.simcheck`'s record
   lookup, from one table of assets.
-* :class:`FakeEnv` -- what :func:`~robosimstudio_bench.run.runner.rollout` and
+* :class:`ScriptedEnv` -- what :func:`~robosimstudio_bench.run.runner.rollout` and
   the do-nothing floor drive, scripted step by step.
 """
 
@@ -39,7 +39,7 @@ __all__ = [
     "TWO",
     "Asset",
     "FakeCatalog",
-    "FakeEnv",
+    "ScriptedEnv",
     "cube_asset",
     "doc",
     "register_cube",
@@ -163,7 +163,7 @@ class FakeCatalog:
         return None if asset is None else SimpleNamespace(name=name, sim=asset.sim)
 
 
-class FakeEnv:
+class ScriptedEnv:
     """An env that plays back ``steps`` -- ``(reward, terminated, truncated, info)`` -- one per call.
 
     It records what it was asked: the actions stepped with, how often it was

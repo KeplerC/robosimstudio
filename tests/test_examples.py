@@ -9,7 +9,8 @@ Each scene script assembles something and hands it to
 headless switch to flip. ``view`` is replaced instead, and what it was handed is
 the thing worth asserting on: an example's claim is *what it put in the scene*,
 and the interaction over that scene is the studio's and is tested with the
-studio (``tests/test_studio_panels.py``, ``tests/test_robot_drag.py``).
+studio (``tests/test_studio_panels.py``, ``tests/test_studio_page.py``,
+``tests/test_robot_drag.py``).
 
 So the assertions here are about the scene rather than about the page. A towel
 that stopped being built would still open a page; it would just be a page with

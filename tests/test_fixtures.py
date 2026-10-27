@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import ast
 import os
+import pathlib
 import sys
 import threading
 import time
@@ -20,7 +22,9 @@ from tests.fixtures.sockets import chdir, short_dir
 from tests.fixtures.waits import fake_clock, wait_until
 
 TIER = "fast"
-"""No GPU: numpy, a throwaway registry, a thread and the temp directory."""
+"""No GPU: numpy, a throwaway registry, a thread, the temp directory, and the fixture modules read as text."""
+
+FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
 
 
 class TestHostArrays(unittest.TestCase):
@@ -133,6 +137,60 @@ class TestWaits(unittest.TestCase):
         self._module("probe_clock_none", "x = 1\n")
         with self.assertRaisesRegex(AttributeError, "probe_clock_none"), fake_clock("probe_clock_none"):
             pass
+
+
+class TestTheExampleLists(unittest.TestCase):
+    """``fixtures.examples`` names the examples by lists that medium modules iterate; a later
+    name of the same spelling once shadowed one with a path, and only the GPU tier saw it."""
+
+    def test_each_list_is_a_tuple_of_script_names(self) -> None:
+        from tests.fixtures import examples
+
+        for name in ("SCRIPTS", "SCENES", "DEMOS"):
+            listed = getattr(examples, name)
+            self.assertIsInstance(listed, tuple, name)
+            self.assertTrue(all(isinstance(item, str) for item in listed), name)
+        self.assertTrue(examples.SCRIPTS, "the numbered examples are listed")
+
+    def test_every_listed_script_is_a_file(self) -> None:
+        from tests.fixtures import examples
+
+        for name in ("SCRIPTS", "SCENES"):
+            for rel in getattr(examples, name):
+                self.assertTrue(examples._path(rel).is_file(), f"{name} lists {rel}, which is not there")
+
+
+class TestTheFixturesThemselves(unittest.TestCase):
+    """The shadowing above had one cause, a module-level name bound twice; these hold every fixture to that."""
+
+    @staticmethod
+    def _top_level(path: pathlib.Path) -> list[tuple[str, str]]:
+        """``(name, kind)`` for every name a fixture module binds at its top level."""
+        bound = []
+        for node in ast.parse(path.read_text()).body:
+            if isinstance(node, ast.Assign):
+                bound += [(t.id, "name") for t in node.targets if isinstance(t, ast.Name)]
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+                bound.append((node.target.id, "name"))
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                bound.append((node.name, "function"))
+            elif isinstance(node, ast.ClassDef):
+                bound.append((node.name, "class"))
+        return bound
+
+    def test_no_fixture_module_binds_a_name_twice(self) -> None:
+        for path in sorted(FIXTURES.glob("*.py")):
+            names = [name for name, _ in self._top_level(path)]
+            twice = sorted({name for name in names if names.count(name) > 1})
+            self.assertEqual([], twice, f"{path.name} binds these more than once")
+
+    def test_no_two_fixture_modules_define_a_class_of_one_name(self) -> None:
+        owners: dict[str, list[str]] = {}
+        for path in sorted(FIXTURES.glob("*.py")):
+            for name, kind in self._top_level(path):
+                if kind == "class":
+                    owners.setdefault(name, []).append(path.name)
+        self.assertEqual({}, {name: where for name, where in owners.items() if len(where) > 1})
 
 
 class TestShortDirectories(unittest.TestCase):
