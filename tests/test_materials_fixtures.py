@@ -34,10 +34,15 @@ class TestOnce(unittest.TestCase):
             calls.append(1)
             raise TimeoutError("the interpreters did not answer")
 
+        causes = []
         for _ in range(3):
-            with self.assertRaisesRegex(TimeoutError, "did not answer"):
+            with self.assertRaisesRegex(RuntimeError, "did not answer") as raised:
                 fresh()
+            causes.append(raised.exception.__cause__)
         self.assertEqual(1, len(calls))
+        self.assertIsInstance(causes[0], TimeoutError)
+        self.assertTrue(all(cause is causes[0] for cause in causes), "every ask chains the one kept failure")
+        self.assertIsNot(causes[0], None)
 
     def test_an_answer_is_kept(self) -> None:
         calls = []

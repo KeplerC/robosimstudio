@@ -210,7 +210,8 @@ def mat_to_axis_angle(rotation: np.ndarray) -> np.ndarray:
     out = skew * scale[:, None]
     far = cos < 0.0
     if far.any():
-        symmetric = 0.5 * (m[far] + np.transpose(m[far], (0, 2, 1)))
+        mf = m[far]
+        symmetric = 0.5 * (mf + np.transpose(mf, (0, 2, 1)))
         outer = (symmetric - cos[far, None, None] * np.eye(3)) / (1.0 - cos[far])[:, None, None]
         # The column of a a^T through the axis's largest component, over its square root, is the axis.
         pick = np.argmax(np.diagonal(outer, axis1=1, axis2=2), axis=1)

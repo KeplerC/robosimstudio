@@ -164,9 +164,10 @@ def in_parallel[T, R](fn: Callable[[T], R], items: Iterable[T]) -> list[R]:
 
     For the claims that are each about a fresh *process*: every one still gets
     a process of its own, but several run at once rather than one after
-    another. Bounded -- at most eight, and a quarter of the machine's CPUs --
-    because a tier already runs a module per worker, and a module that started
-    all of its eighteen interpreters together would be eighteen more.
+    another. Bounded -- a quarter of the machine's CPUs, never fewer than two
+    nor more than eight -- because a tier already runs a module per worker, and
+    a module that started all of its eighteen interpreters together would be
+    eighteen more.
     """
     items = list(items)
     if not items:
@@ -194,7 +195,9 @@ def once[R](fn: Callable[[], R]) -> Callable[[], R]:
                 kept.append((False, exc))
         ok, value = kept[0]
         if not ok:
-            raise value
+            # A new exception each time, chained to the kept one: raising the kept
+            # object again would grow its traceback with every test that asks.
+            raise RuntimeError(f"{fn.__name__} failed on its first call: {value!r}") from value
         return value
 
     return wrapper

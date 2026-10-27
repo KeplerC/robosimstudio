@@ -212,16 +212,28 @@ def scripts_modules(*names: str):
     a test that runs such code holds the block open (``cls.enterClassContext``).
     """
     scripts = str(SCRIPTS)
+    # A package of the same top-level name loaded from elsewhere would answer the
+    # import instead of scripts/: it steps aside for the block and comes back after.
+    tops = {name.split(".")[0] for name in names}
+    aside = {
+        key: module
+        for key, module in sys.modules.items()
+        if key.split(".")[0] in tops and module is not None and not _under_scripts(module)
+    }
+    for key in aside:
+        del sys.modules[key]
     before = set(sys.modules)
     sys.path.insert(0, scripts)
     try:
         yield tuple(importlib.import_module(name) for name in names)
     finally:
-        sys.path.remove(scripts)
+        if scripts in sys.path:
+            sys.path.remove(scripts)
         for name in set(sys.modules) - before:
             module = sys.modules.get(name)
             if module is not None and _under_scripts(module):
                 del sys.modules[name]
+        sys.modules.update(aside)
 
 
 def scripts_module(name: str):

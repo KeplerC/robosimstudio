@@ -56,7 +56,9 @@ class _Log:
         cannot answer would otherwise go unseen, so the exception is the test's.
         """
         ran = 0
-        while ran < len(self.callbacks) and ran < limit:
+        while ran < len(self.callbacks):
+            if ran == limit:
+                raise AssertionError(f"more than {limit} callbacks registered: the page keeps registering more")
             path, fn = self.callbacks[ran]
             required = [
                 p
