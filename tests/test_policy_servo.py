@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from robosimstudio.core.math import quat_from_axis_angle, quat_multiply, quat_to_mat
 from robosimstudio_policy_agent import servo
 from robosimstudio_policy_agent.fleet import stepper
 from robosimstudio_policy_agent.servo import CartesianServo
@@ -71,6 +72,50 @@ class ServoRollContract(unittest.TestCase):
         servo.ik = types.SimpleNamespace(honours_roll=True)
         servo.honours_roll = False
         self.assertFalse(servo.honours_roll)
+
+
+def _unit_quats(seed: int, count: int = 25) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    quats = rng.normal(size=(count, 4))
+    return quats / np.linalg.norm(quats, axis=1, keepdims=True)
+
+
+def _approach(quat) -> np.ndarray:
+    return quat_to_mat(np.asarray(quat, dtype=np.float64))[:, 2]
+
+
+class TestTheOrientationLawsProperties(unittest.TestCase):
+    """``solver_goal`` and ``rotation_error`` checked against what they claim, not against themselves."""
+
+    def test_a_roll_free_goal_points_the_tool_where_the_goal_does(self):
+        for measured, goal in zip(_unit_quats(1), _unit_quats(2), strict=True):
+            np.testing.assert_allclose(_approach(servo.solver_goal(measured, goal, False)), _approach(goal), atol=1e-9)
+
+    def test_it_turns_the_measured_pose_by_no_more_than_the_axes_are_apart(self):
+        """The shortest arc: the turn is the angle between the approach axes, so no roll is added."""
+        for measured, goal in zip(_unit_quats(3), _unit_quats(4), strict=True):
+            restated = servo.solver_goal(measured, goal, False)
+            turned = servo.rotation_error(measured, restated, True)
+            apart = float(np.arccos(np.clip(np.dot(_approach(measured), _approach(goal)), -1.0, 1.0)))
+            self.assertAlmostEqual(turned, apart, places=6)
+
+    def test_a_roll_honouring_goal_is_the_goal_and_an_aligned_one_is_the_measurement(self):
+        measured, goal = _unit_quats(5, 2)
+        np.testing.assert_array_equal(servo.solver_goal(measured, goal, True), goal)
+        rolled = quat_multiply(measured, quat_from_axis_angle((0.0, 0.0, 1.0), 0.7))
+        np.testing.assert_array_equal(servo.solver_goal(measured, rolled, False), measured)
+
+    def test_q_and_minus_q_are_one_rotation(self):
+        for quat in _unit_quats(6):
+            for honours_roll in (False, True):
+                with self.subTest(honours_roll=honours_roll):
+                    self.assertAlmostEqual(servo.rotation_error(quat, -quat, honours_roll), 0.0, places=6)
+
+    def test_a_roll_about_the_approach_axis_counts_only_when_the_roll_is_honoured(self):
+        for quat in _unit_quats(7, 10):
+            rolled = quat_multiply(quat, quat_from_axis_angle((0.0, 0.0, 1.0), 0.5))
+            self.assertAlmostEqual(servo.rotation_error(quat, rolled, False), 0.0, places=6)
+            self.assertAlmostEqual(servo.rotation_error(quat, rolled, True), 0.5, places=6)
 
 
 if __name__ == "__main__":

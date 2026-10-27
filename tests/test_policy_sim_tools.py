@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """``sim.*`` tools: the collision world keeps the statics, ``check_grasp`` refuses an
-unknown arm, and the grasp heading is square to the long axis."""
+unknown arm, the grasp heading is square to the long axis, and a question asked of
+the scene takes its refs as a graph writes them and comes back refused rather than
+raised."""
 
 from __future__ import annotations
 
@@ -96,6 +98,42 @@ class GraspHeadingIsSquareToTheLongAxis(unittest.TestCase):
         for yaw_deg in (-175, -90, -5, 0, 5, 44, 90, 175):
             with self.subTest(yaw_deg=yaw_deg):
                 self.assertAlmostEqual(_perp(_grasp_heading_deg(math.radians(yaw_deg)), yaw_deg), 90.0, places=9)
+
+
+class TestAGraphCanAskTheSceneAQuestion(unittest.TestCase):
+    """``sim.query`` and ``sim.list_relations`` as a workflow reaches them: keywords only, refusals as answers."""
+
+    def test_refs_are_read_however_an_author_writes_them(self):
+        self.assertEqual(SimTools._refs(None), ())
+        self.assertEqual(SimTools._refs("wrench_1.ring, wrench_hook_1.shank"), ("wrench_1.ring", "wrench_hook_1.shank"))
+        self.assertEqual(SimTools._refs(["a", ["b, c"], " d "]), ("a", "b", "c", "d"))
+        self.assertEqual(SimTools._refs(7), ("7",))
+
+    def test_the_tool_spellings_pass_every_ref_through(self):
+        tools = SimTools.__new__(SimTools)
+        asked: list[tuple] = []
+        tools.query = lambda atom, *refs: asked.append((atom, *refs)) or {}
+        tools.list_relations = lambda *refs: asked.append(refs) or {}
+        tools.query_tool("covers", refs="towel, table")
+        tools.list_relations_tool(refs=["towel", "table"])
+        self.assertEqual(asked, [("covers", "towel", "table"), ("towel", "table")])
+
+    def test_a_question_nothing_answers_is_returned_as_a_refusal_not_raised(self):
+        tools = SimTools.__new__(SimTools)
+        tools.env = SimpleNamespace(make_context=lambda: SimpleNamespace(entities={}), doc=None)
+        tools.bus = SimpleNamespace(call=lambda fn, *a, **k: fn(*a, **k))
+        out = tools.query("no_such_atom_anywhere", "cube")
+        self.assertEqual(list(out), ["refused"])
+        self.assertIn("no_such_atom_anywhere", out["refused"])
+
+    def test_a_failure_reading_the_scene_is_a_refusal_too(self):
+        def gone():
+            raise KeyError("the scene was reset under the question")
+
+        tools = SimTools.__new__(SimTools)
+        tools.env = SimpleNamespace(make_context=gone, doc=None)
+        tools.bus = SimpleNamespace(call=lambda fn, *a, **k: fn(*a, **k))
+        self.assertIn("reset under the question", tools.list_relations("cube")["refused"])
 
 
 if __name__ == "__main__":
