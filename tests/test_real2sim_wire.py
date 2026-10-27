@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from robosimstudio_real2sim_agent import wire
+from tests.fixtures.sockets import chdir, short_dir
 
 TIER = "fast"
 """No GPU and no page: sockets on temp paths, answered by plain functions."""
@@ -28,7 +29,9 @@ TIER = "fast"
 
 class TestTheWire(unittest.TestCase):
     def test_where_the_socket_is(self) -> None:
-        self.assertEqual(wire.socket_path(None), Path("run") / "ctl.sock")
+        with short_dir("w-") as here, chdir(here):  # `run/ctl.sock` is resolved against the cwd, so the cwd is short
+            self.assertEqual(wire.socket_path(None), Path("run") / "ctl.sock")
+            self.assertEqual(wire.socket_path("d"), Path("d") / "ctl.sock")
         deep = Path(tempfile.gettempdir()) / ("d" * 60) / ("e" * 60) / "run"
         short = wire.socket_path(deep)
         self.assertLessEqual(
@@ -46,7 +49,6 @@ class TestTheWire(unittest.TestCase):
             wire.socket_path(deep.with_name("run2")),
             "and a different one per run directory",
         )
-        self.assertEqual(wire.socket_path("d"), Path("d") / "ctl.sock")
         self.assertEqual(wire.socket_path("d", "s.sock"), Path("s.sock"), "an explicit socket wins")
 
     def test_the_ready_line_reads_back(self) -> None:
@@ -71,7 +73,7 @@ class TestTheWire(unittest.TestCase):
         self.assertEqual(reply, {"a": [0, 1, 2], "b": 1.5, "c": "p"})
 
     def test_one_line_in_one_line_out(self) -> None:
-        tmp = Path(tempfile.mkdtemp(prefix="w-"))
+        tmp = self.enterContext(short_dir("w-"))
         path = tmp / "ctl.sock"
 
         def handler(request: dict) -> dict:
@@ -107,7 +109,7 @@ class TestTheWire(unittest.TestCase):
             wire.request(path, {"cmd": "status"}, 1.0)
 
     def test_a_live_socket_is_refused_and_a_stale_one_replaced(self) -> None:
-        path = Path(tempfile.mkdtemp(prefix="w-")) / "ctl.sock"
+        path = self.enterContext(short_dir("w-")) / "ctl.sock"
         first = wire.ControlSocket(path, lambda request: {"ok": True, "who": "first"})
         first.start()
         try:
@@ -136,25 +138,21 @@ class TestTheWire(unittest.TestCase):
 
     def test_a_bind_failure_is_the_callers(self) -> None:
         """Raised by ``start`` on the caller's thread, so the server never prints a ready line over it."""
-        path = Path(tempfile.mkdtemp(prefix="w-")) / ("s" * 200 + ".sock")
+        path = self.enterContext(short_dir("w-")) / ("s" * 200 + ".sock")
         with self.assertRaises(OSError):
             wire.ControlSocket(path, lambda request: {"ok": True}).start()
 
 
 class TestTheSocketPath(unittest.TestCase):
     def test_every_spelling_of_one_run_dir_agrees(self) -> None:
-        deep = Path(tempfile.mkdtemp(prefix="w-")) / ("d" * 60) / ("e" * 40)
+        deep = self.enterContext(short_dir("w-")) / ("d" * 60) / ("e" * 40)
         deep.mkdir(parents=True)
-        here = os.getcwd()
-        os.chdir(deep)
-        try:
+        with chdir(deep):
             self.assertEqual(wire.socket_path("run"), wire.socket_path(deep / "run"))
             self.assertEqual(wire.socket_path("run"), wire.socket_path(os.path.join(".", "run")))
-        finally:
-            os.chdir(here)
 
     def test_a_long_spelling_of_a_short_run_dir_comes_back_short(self) -> None:
-        short = Path(tempfile.mkdtemp(prefix="w-")).resolve()
+        short = self.enterContext(short_dir("w-")).resolve()
         padded = os.path.join(*([".."] * 40), *short.parts[1:], "run")  # from the cwd, past / and back down
         self.assertGreater(len(os.fsencode(padded)), wire.SUN_PATH_MAX)
         path = wire.socket_path(padded)
@@ -164,7 +162,7 @@ class TestTheSocketPath(unittest.TestCase):
 
 class TestTheBind(unittest.TestCase):
     def test_a_regular_file_is_not_deleted(self) -> None:
-        path = Path(tempfile.mkdtemp(prefix="w-")) / "f.txt"
+        path = self.enterContext(short_dir("w-")) / "f.txt"
         path.write_text("precious")
         with self.assertRaises(FileExistsError):
             wire.ControlSocket(path, lambda request: {"ok": True}).bind()
@@ -173,7 +171,7 @@ class TestTheBind(unittest.TestCase):
 
 class TestTheClient(unittest.TestCase):
     def test_a_server_that_drops_the_request_is_no_reply(self) -> None:
-        path = Path(tempfile.mkdtemp(prefix="w-")) / "ctl.sock"
+        path = self.enterContext(short_dir("w-")) / "ctl.sock"
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(str(path))
         server.listen(1)
@@ -193,7 +191,7 @@ class TestTheClient(unittest.TestCase):
             server.close()
 
     def test_a_frozen_server_is_no_reply_not_a_traceback(self) -> None:
-        path = Path(tempfile.mkdtemp(prefix="w-")) / "ctl.sock"
+        path = self.enterContext(short_dir("w-")) / "ctl.sock"
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(str(path))
         server.listen(0)
@@ -205,7 +203,7 @@ class TestTheClient(unittest.TestCase):
             server.close()
 
     def test_an_unreadable_socket_is_no_server(self) -> None:
-        path = Path(tempfile.mkdtemp(prefix="w-")) / "ctl.sock"
+        path = self.enterContext(short_dir("w-")) / "ctl.sock"
         path.write_text("not a socket")
         with self.assertRaises(wire.NoServer):
             wire.request(path, {"cmd": "status"}, 0.5)

@@ -17,7 +17,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import types
 import unittest
@@ -27,6 +26,7 @@ from unittest import mock
 from robosimstudio_real2sim_agent import ctl, wire
 from tests.fixtures.live_server import FakePage, FakeStatus
 from tests.fixtures.real2sim_clips import flat_clip
+from tests.fixtures.sockets import short_dir
 
 TIER = "fast"
 """No GPU and no page: a socket answering from a dict stands in for the page."""
@@ -231,7 +231,7 @@ class TestTheCommandLine(unittest.TestCase):
         )
 
     def test_status_with_no_server_exits_2_and_says_how_to_start_one(self) -> None:
-        tmp = Path(tempfile.mkdtemp(prefix="nosrv-"))
+        tmp = self.enterContext(short_dir("nosrv-"))
         done = subprocess.run(
             [
                 sys.executable,
@@ -255,7 +255,7 @@ class TestTheRunWait(unittest.TestCase):
     """``run N`` waits on the page's word for how that run ended; whatever ends it, the wait ends saying so."""
 
     def setUp(self) -> None:
-        self.path = Path(tempfile.mkdtemp(prefix="run-")) / "ctl.sock"
+        self.path = self.enterContext(short_dir("run-")) / "ctl.sock"
         self.page = FakePage(self.path, {"step": 0, "time": 0.0, "runs_ended": {}})
         self.addCleanup(self.page.close)
         self.run = {"ok": True, "run": 2, "step": 40, "target": 1040}
@@ -296,7 +296,7 @@ class TestTheRunWait(unittest.TestCase):
 
 class TestUp(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(prefix="up-"))
+        self.tmp = self.enterContext(short_dir("up-"))
         self.log = self.tmp / "serve.log"
         self.procs: list[subprocess.Popen] = []
 
@@ -440,7 +440,7 @@ class TestUpOnAFile(unittest.TestCase):
 
         from robosimstudio_real2sim_agent import ctl
 
-        tmp = Path(tempfile.mkdtemp(prefix="w-"))
+        tmp = self.enterContext(short_dir("w-"))
         path, scene = tmp / "f.txt", tmp / "scene.py"
         path.write_text("precious")
         scene.write_text("")
@@ -454,7 +454,7 @@ class TestUpOnAFile(unittest.TestCase):
 
 class CtlWaits(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = Path(tempfile.mkdtemp(dir="/tmp"))
+        self.tmp = self.enterContext(short_dir())
         self.sock = self.tmp / "s.sock"
         self.log = self.tmp / "serve.log"
         self.log.write_text("")
@@ -629,7 +629,7 @@ class CtlWaits(unittest.TestCase):
 
 class TwinInsideAScene(unittest.TestCase):
     def test_a_twin_is_not_made_where_another_scenes_page_would_take_it_for_its_own(self) -> None:
-        live = Path(tempfile.mkdtemp())
+        live = self.enterContext(short_dir())
         (live / "ctl").write_text("")
         outer = live / "twins" / "a"
         outer.mkdir(parents=True)
@@ -644,7 +644,7 @@ class TwinInsideAScene(unittest.TestCase):
 
 class TwinInsideAServedFolder(unittest.TestCase):
     def test_a_folder_a_page_served_from_is_a_scene_whatever_its_file_is_called(self) -> None:
-        live = Path(tempfile.mkdtemp())
+        live = self.enterContext(short_dir())
         (live / "ctl").write_text("")
         served = live / "bench"
         (served / "run").mkdir(parents=True)
@@ -656,7 +656,7 @@ class TwinInsideAServedFolder(unittest.TestCase):
 
 class TwinFolder(unittest.TestCase):
     def setUp(self) -> None:
-        self.live = Path(tempfile.mkdtemp())
+        self.live = self.enterContext(short_dir())
         self.run_dir = self.live / "run"
         self.clip = self.live / "clip.mov"
         self.clip.write_bytes(b"not really a clip")
@@ -693,7 +693,7 @@ class TwinFolder(unittest.TestCase):
         import subprocess
 
         ctl.main(["--run-dir", str(self.run_dir), "new", "lid"])
-        moved = Path(tempfile.mkdtemp()) / "lid"
+        moved = self.enterContext(short_dir()) / "lid"
         shutil.copytree(self.live / "twins" / "lid", moved)
         env = {**os.environ, "PYTHON": sys.executable}
         done = subprocess.run(

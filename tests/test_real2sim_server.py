@@ -37,6 +37,7 @@ from robosimstudio_real2sim_agent.scenefile import (
 )
 from robosimstudio_real2sim_agent.server import LiveServer
 from tests.fixtures.live_server import FakePage
+from tests.fixtures.sockets import short_dir
 
 TIER = "fast"
 """No GPU and no page: the server's state machine over stand-in sessions and sims."""
@@ -1186,7 +1187,7 @@ class TestResetUnderARun(unittest.TestCase):
         self.assertEqual(host.last_run, {})
 
     def test_the_wait_says_the_run_was_reset(self) -> None:
-        path = Path(tempfile.mkdtemp(prefix="run-")) / "ctl.sock"
+        path = self.enterContext(short_dir("run-")) / "ctl.sock"
         ended = {"serial": 1, "how": "cut short: reset", "step": 0, "target": 10, "finite": None}
         page = FakePage(path, {"step": 0, "time": 0.0, "runs_ended": {"1": ended}})
         self.addCleanup(page.close)
