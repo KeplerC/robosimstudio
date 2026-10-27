@@ -45,9 +45,11 @@ class _StubWidget:
     stub that only called back on :meth:`fire` hid exactly that.
     """
 
-    def __init__(self, value=None, *, is_button: bool = False) -> None:
+    def __init__(self, value=None, *, is_button: bool = False, color: bool = False) -> None:
         self._value = value
         self.is_button = bool(is_button)
+        self.color = bool(color)
+        """An RGB or RGBA picker, whose assigned value goes through viser's colour hook first."""
         self.disabled = False
         self.visible = True
         self.removed = False
@@ -61,7 +63,7 @@ class _StubWidget:
 
     @value.setter
     def value(self, value) -> None:
-        value = _cast(self._value, value)
+        value = _assigned(self._value, _colors_to_int_tuple(value) if self.color else value)
         if not self.is_button and _same(self._value, value):
             return
         self._value = value
@@ -87,7 +89,7 @@ class _StubWidget:
         if value is None:
             self._notify()
             return
-        value = _cast(self._value, value)
+        value = _sent(self._value, value)
         if not self.is_button and _same(self._value, value):
             return
         self._value = value
@@ -97,28 +99,47 @@ class _StubWidget:
         self.removed = True
 
 
-def _cast(current, value):
-    """``value`` in ``current``'s type, as viser casts an assigned value and one the browser sent.
+def _assigned(current, value):
+    """``value`` as viser 1.1.1's ``value`` setter makes it before comparing (``_gui_handles.py``).
 
-    An array or a list becomes a tuple, each element in the type of the one it
-    replaces where the lengths agree; anything else is ``type(current)(value)``.
-    So ``(0.0, 0.0, 1.0)`` set as ``np.array([0, 0, 1])`` is the same value, and
-    no change. A widget with no value yet takes whatever it is given.
+    An array becomes a tuple, each element in the type of the one it replaces
+    where the lengths agree -- rounded, not truncated, into an int -- or a tuple
+    of its own elements where they do not; then the whole is
+    ``type(current)(value)``, so a list or a tuple keeps its own elements. A
+    widget with no value yet takes what it is given.
     """
     if current is None or value is None:
         return value
     if isinstance(value, np.ndarray):
-        value = value.tolist()
-    if isinstance(current, tuple):
-        if not isinstance(value, (list, tuple)):
-            return value
-        if len(value) == len(current):
-            return tuple(type(c)(v) for c, v in zip(current, value, strict=True))
-        return tuple(value)
-    try:
-        return type(current)(value)
-    except (TypeError, ValueError):
+        elems = value.tolist()
+        if isinstance(current, tuple) and len(current) == len(elems):
+            value = tuple(
+                type(c)(round(e)) if type(c) is int and isinstance(e, float) else type(c)(e)
+                for c, e in zip(current, elems, strict=True)
+            )
+        else:
+            value = tuple(elems)
+    return type(current)(value)
+
+
+def _sent(current, value):
+    """``value`` as viser 1.1.1's update handler casts what the browser sent (``_gui_api.py``).
+
+    A tuple-valued widget takes every element in its first element's type --
+    ``int(127.9)`` is 127 -- and anything else is ``type(current)(value)``.
+    """
+    if current is None or value is None:
         return value
+    if isinstance(current, tuple):
+        if current:
+            return tuple(type(current[0])(v) for v in value)
+        return tuple(value)
+    return type(current)(value)
+
+
+def _colors_to_int_tuple(value) -> tuple[int, ...]:
+    """An RGB or RGBA colour as viser's colour hook makes it: int channels as they are, float ones on [0, 1]."""
+    return tuple(max(0, min(255, int(v) if np.issubdtype(type(v), np.integer) else int(v * 255))) for v in tuple(value))
 
 
 def _same(a, b) -> bool:
@@ -195,12 +216,14 @@ class _StubGui:
         self._open: list[_StubFolder] = []
         """The folders a build is currently inside, innermost last."""
 
-    def _widget(self, label, value, *, disabled: bool = False, is_button: bool = False, **_ignored) -> _StubWidget:
+    def _widget(
+        self, label, value, *, disabled: bool = False, is_button: bool = False, color: bool = False, **_ignored
+    ) -> _StubWidget:
         """One widget under ``label``. ``disabled`` is kept, as viser keeps it:
         a panel that builds a switch greyed out is making a claim a test may
         read, and a stub that dropped the keyword answered "enabled" for every
         widget whatever the panel had said."""
-        handle = _StubWidget(value, is_button=is_button)
+        handle = _StubWidget(value, is_button=is_button, color=color)
         handle.disabled = bool(disabled)
         handle.parent = self._open[-1] if self._open else None
         self.widgets.append((str(label), handle))
@@ -256,7 +279,15 @@ class _StubGui:
         return self._widget(label, tuple(initial_value), **kwargs)
 
     def add_rgb(self, label, initial_value=(0, 0, 0), **kwargs):
-        return self._widget(label, tuple(initial_value), **kwargs)
+        return self._widget(label, _colors_to_int_tuple(initial_value), color=True, **kwargs)
+
+    def add_rgba(self, label, initial_value=(0, 0, 0, 255), **kwargs):
+        return self._widget(label, _colors_to_int_tuple(initial_value), color=True, **kwargs)
+
+    def add_multi_slider(self, label, min=0.0, max=1.0, step=0.1, initial_value=(0.0, 1.0), **kwargs):
+        handle = self._widget(label, tuple(initial_value), **kwargs)
+        handle.min, handle.max, handle.step = min, max, step
+        return handle
 
     def add_text(self, label, initial_value="", **kwargs):
         return self._widget(label, initial_value, **kwargs)
