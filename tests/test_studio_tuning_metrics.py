@@ -48,6 +48,13 @@ def _cloth(rest: np.ndarray | None, now: np.ndarray, qd: np.ndarray | None = Non
     return entity, state
 
 
+def _as_a_slab(entity, surface_count: int):
+    """``entity`` as a slab cloth is: a slab material, and a particle on each face of ``surface_count`` vertices."""
+    entity.spec = SimpleNamespace(material=SimpleNamespace(is_slab=True))
+    entity.surface_count = surface_count
+    return entity
+
+
 def _drooped(rest: np.ndarray, ratio: float) -> np.ndarray:
     """The strip bent down linearly past the clamp, its tip ``ratio`` of the overhang below the clamp."""
     now = rest.copy()
@@ -167,23 +174,16 @@ class TestASheet(unittest.TestCase):
         rest = self._grid()
         up = np.array([0.0, 0.0, 0.001])
         faces = np.concatenate([rest, rest + 4.0 * up])  # a 4 mm slab, a particle on each face
-        entity, state = _cloth(None, faces, mid_surface_positions=lambda state: rest + 2.0 * up)
+        entity, state = _cloth(None, faces)
+        _as_a_slab(entity, len(rest))
         self.assertEqual(0.0, _named(measure_sheet(entity, state))["height"].value)
-
-
-def _mid_of_two_faces(state) -> np.ndarray:
-    """A slab's mid-surface, as a slab cloth reads it: the average of the particle on each face."""
-    q = np.asarray(state.particle_q.numpy(), dtype=np.float64)
-    half = len(q) // 2
-    return 0.5 * (q[:half] + q[half:])
 
 
 def _slab(rest: np.ndarray, now: np.ndarray) -> tuple:
     """A 4 mm slab over a mid-surface laid out at ``rest`` and now at ``now``: a particle on each face."""
     up = np.array([0.0, 0.0, 0.002])
     entity, state = _cloth(np.concatenate([rest - up, rest + up]), np.concatenate([now - up, now + up]))
-    entity.mid_surface_positions = _mid_of_two_faces
-    return entity, state
+    return _as_a_slab(entity, len(rest)), state
 
 
 class TestASlab(unittest.TestCase):

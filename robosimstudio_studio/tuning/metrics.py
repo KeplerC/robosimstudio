@@ -17,11 +17,11 @@ says "out of band" is worth more than a plausible figure that is wrong.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 
+from robosimstudio.core.shell import mid_surface
 from robosimstudio_materials.cloth import DROOP_BAND, bending_length_from_droop, resembles
 
 __all__ = ["Reading", "measure_cantilever", "measure_sheet", "relax", "settle_speed"]
@@ -85,35 +85,37 @@ class Reading:
         return f"{body}  ({self.note})" if self.note else body
 
 
-def _positions(entity: Any, state: Any) -> np.ndarray:
-    """This cloth's particle positions, on the mid-surface for a slab.
+def _sheet(entity: Any, particle_q: Any) -> np.ndarray:
+    """This cloth's points out of a whole particle array, on the mid-surface for a slab.
 
     A slab has a particle on each face, so a raw z would read whichever face
     happened to be sampled and swing by a thickness. The mid-surface is what the
     membrane's single sheet already is, and what a droop should be measured on.
+    One rule for the positions now and the rest layout they are compared with:
+    read on the mid-surface one side and on both faces the other, a slab's two
+    arrays differed in length and every reading that compares them refused it.
     """
-    if hasattr(entity, "mid_surface_positions"):
+    q = np.asarray(particle_q, dtype=np.float64)[entity.particles]
+    material = getattr(getattr(entity, "spec", None), "material", None)
+    if getattr(material, "is_slab", False):
         try:
-            mid = entity.mid_surface_positions(state)
-            if mid is not None and len(mid):
-                return np.asarray(mid, dtype=np.float64)
-        except (AttributeError, ValueError, TypeError):
+            return mid_surface(q, entity.surface_count)
+        except (AttributeError, ValueError):  # faces that do not pair are read as they are
             pass
-    return np.asarray(state.particle_q.numpy(), dtype=np.float64)[entity.particles]
+    return q
+
+
+def _positions(entity: Any, state: Any) -> np.ndarray:
+    """This cloth's particle positions now, as :func:`_sheet` reads them."""
+    return _sheet(entity, state.particle_q.numpy())
 
 
 def _rest_positions(entity: Any) -> np.ndarray | None:
-    """The settled rest layout this cloth resets to, read as :func:`_positions` reads it now, or ``None``.
-
-    On the mid-surface for a slab, as its positions are: held against both
-    faces' particles, a slab's rest layout was twice as long as what it is
-    compared with, so every reading that compares the two refused it.
-    """
+    """The settled rest layout this cloth resets to, as :func:`_sheet` reads it, or ``None``."""
     rest = getattr(entity, "rest", None)
     if not rest or "particle_q" not in rest:
         return None
-    laid_out = np.asarray(rest["particle_q"], dtype=np.float64)
-    return _positions(entity, SimpleNamespace(particle_q=SimpleNamespace(numpy=lambda: laid_out)))
+    return _sheet(entity, rest["particle_q"])
 
 
 def settle_speed(entity: Any, state: Any, *, percentile: float = 95.0) -> Reading:
