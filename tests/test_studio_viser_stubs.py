@@ -66,6 +66,42 @@ class TestAValueIsCastAsViserCastsIt(unittest.TestCase):
         self.assertEqual(1, len(heard))
 
 
+class TestTheCastsAreViserOwn(unittest.TestCase):
+    """Case by case as ``GuiInputHandle.value``'s setter, its colour hook and ``_handle_gui_updates`` cast."""
+
+    def test_an_int_tuple_set_from_a_float_array_is_rounded_not_truncated(self) -> None:
+        widget = _StubGui().add_multi_slider("Range", min=0, max=255, step=1, initial_value=(0, 0, 0))
+        widget.value = np.array([127.9, 0.0, 0.0])
+        self.assertEqual((128, 0, 0), widget.value)
+        self.assertIs(int, type(widget.value[0]))
+
+    def test_an_rgb_reads_float_channels_on_zero_to_one_and_int_channels_as_they_are(self) -> None:
+        widget = _StubGui().add_rgb("Tint", initial_value=(0, 0, 0))
+        widget.value = np.array([127.9, 0.0, 0.0])
+        self.assertEqual((255, 0, 0), widget.value, "a float channel over 1 is clamped to white, as viser warns")
+        widget.value = (0.5, 0.0, 1.0)
+        self.assertEqual((127, 0, 255), widget.value)
+        widget.value = np.array([128, 0, 0])
+        self.assertEqual((128, 0, 0), widget.value)
+
+    def test_a_float_tuple_on_a_float_widget_stays_floats(self) -> None:
+        widget = _StubGui().add_vector3("Where", initial_value=(0.0, 0.0, 0.0))
+        widget.value = (1.5, 2.0, 3.0)
+        self.assertEqual((1.5, 2.0, 3.0), widget.value)
+        self.assertEqual([float] * 3, [type(v) for v in widget.value])
+
+    def test_a_list_assigned_is_a_tuple_of_its_own_elements(self) -> None:
+        """Only an array is cast element by element on assignment; a list or tuple is taken as it is."""
+        widget = _StubGui().add_vector3("Where", initial_value=(0.0, 0.0, 0.0))
+        widget.value = [1, 2, 3]
+        self.assertEqual([int] * 3, [type(v) for v in widget.value])
+
+    def test_what_the_browser_sends_takes_the_first_elements_type_and_truncates(self) -> None:
+        widget = _StubGui().add_multi_slider("Range", min=0, max=255, step=1, initial_value=(0, 0, 0))
+        widget.fire([127.9, 0, 0])
+        self.assertEqual((127, 0, 0), widget.value)
+
+
 class TestANodesClickIsNotItsDrag(unittest.TestCase):
     def test_a_drag_calls_the_update_handlers_alone(self) -> None:
         node = _StubScene().add_camera_frustum("/cams/front", fov=1.0, aspect=1.5)
