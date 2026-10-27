@@ -22,10 +22,12 @@ interrupt raised on the owner's thread is the owner's, not the worker's.
 from __future__ import annotations
 
 import threading
-import time
 import unittest
+from unittest import mock
 
+from robosimstudio.core import bus as bus_module
 from robosimstudio.core.bus import BusClosed, BusTimeout, SimBus
+from tests.fixtures.waits import wait_until
 
 TIER = "fast"
 """No GPU: the bus is plain threading."""
@@ -59,8 +61,7 @@ class TestClosingIsNotTimingOut(unittest.TestCase):
 
         thread = threading.Thread(target=worker)
         thread.start()
-        while bus._queue.empty():
-            pass
+        wait_until(lambda: not bus._queue.empty(), what="the worker's request on the queue")
         bus.close()
         thread.join(timeout=5.0)
         self.assertEqual(len(caught), 1)
@@ -94,21 +95,43 @@ class CallWithin(unittest.TestCase):
         self.assertEqual(ran, [], "withdrawn when its caller stopped waiting, not run behind its back")
 
     def test_a_call_started_in_time_runs_to_its_end_and_answers(self) -> None:
-        bus = SimBus(timeout=30.0)
-        bus.owner_thread = -1
+        """The caller's window closes while the call is running, by construction rather than by a race.
+
+        The request's ``done`` is one whose timed wait -- the caller's window --
+        ends only once a pump has started the call, and the call itself returns
+        only once its caller has stopped timing it. Nothing here depends on how
+        fast either thread is scheduled.
+        """
+        running, untimed = threading.Event(), threading.Event()
+
+        class _WindowClosesWhileRunning(threading.Event):
+            def wait(self, timeout: float | None = None) -> bool:
+                if timeout is None:
+                    untimed.set()
+                    return super().wait()
+                running.wait(5.0)
+                return self.is_set()
+
+        class _Request(bus_module._Request):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.done = _WindowClosesWhileRunning()
 
         def slow() -> str:
-            time.sleep(0.4)
+            running.set()
+            wait_until(untimed.is_set, what="the caller to stop timing the call")
             return "done"
 
+        bus = SimBus(timeout=30.0)
+        bus.owner_thread = -1
         result: list[str] = []
-        worker = threading.Thread(target=lambda: result.append(bus.call_starting_within(0.1, slow)))
-        worker.start()
-        while bus._queue.empty():
-            time.sleep(0.01)
-        bus.owner_thread = None
-        bus.pump()  # taken in time, and runs past the 0.1 s
-        worker.join(5)
+        with mock.patch.object(bus_module, "_Request", _Request):
+            worker = threading.Thread(target=lambda: result.append(bus.call_starting_within(0.1, slow)))
+            worker.start()
+            wait_until(lambda: not bus._queue.empty(), what="the worker's request on the queue")
+            bus.owner_thread = None
+            bus.pump()  # taken in time, and runs past the window
+            worker.join(5)
         self.assertEqual(result, ["done"], "never a timeout for something that ran")
 
 
@@ -142,8 +165,7 @@ class TestABusRequestThatTimedOutNeverRuns(unittest.TestCase):
 
         thread = threading.Thread(target=worker)
         thread.start()
-        while bus._queue.empty():
-            time.sleep(0.001)
+        wait_until(lambda: not bus._queue.empty(), what="the worker's request on the queue")
         with self.assertRaises(KeyboardInterrupt):
             bus.pump()
         thread.join(2.0)

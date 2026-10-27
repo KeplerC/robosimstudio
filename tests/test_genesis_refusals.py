@@ -19,16 +19,10 @@ import unittest
 
 import numpy as np
 
+from tests.fixtures.arrays import host
+
 TIER = "fast"
 """No GPU, no engine, no scene: CPU models, and the engine patched to say it was asked for."""
-
-
-class _Arr:
-    def __init__(self, a) -> None:
-        self._a = np.asarray(a)
-
-    def numpy(self) -> np.ndarray:
-        return self._a
 
 
 def _model(particles, *, tris=(), shapes=(), mass=0.0):
@@ -42,15 +36,15 @@ def _model(particles, *, tris=(), shapes=(), mass=0.0):
     shapes = list(shapes)
     tris = np.asarray(tris, dtype=np.int64).reshape(-1, 3)
     return SimpleNamespace(
-        particle_q=_Arr(np.asarray(particles, dtype=np.float32)),
-        particle_mass=_Arr(np.full(len(particles), mass, dtype=np.float32)),
+        particle_q=host(particles, np.float32),
+        particle_mass=host(np.full(len(particles), mass, dtype=np.float32)),
         tri_count=len(tris),
-        tri_indices=_Arr(tris.reshape(-1)),
-        shape_type=_Arr([int(kind) for kind, _, _ in shapes]),
-        shape_scale=_Arr(np.asarray([half for _, half, _ in shapes], dtype=np.float32).reshape(-1, 3)),
-        shape_transform=_Arr(np.asarray([pose for _, _, pose in shapes], dtype=np.float32).reshape(-1, 7)),
-        shape_body=_Arr(np.full(len(shapes), -1)),
-        shape_material_mu=_Arr(np.full(len(shapes), 0.5)),
+        tri_indices=host(tris.reshape(-1)),
+        shape_type=host([int(kind) for kind, _, _ in shapes], int),
+        shape_scale=host(np.asarray([half for _, half, _ in shapes], dtype=np.float32).reshape(-1, 3)),
+        shape_transform=host(np.asarray([pose for _, _, pose in shapes], dtype=np.float32).reshape(-1, 7)),
+        shape_body=host(np.full(len(shapes), -1)),
+        shape_material_mu=host(np.full(len(shapes), 0.5)),
     )
 
 
@@ -454,7 +448,7 @@ class TestOnlyTheParticlesNewtonWeighsAreWeighed(unittest.TestCase):
         0, and the refusal divided by it, a ZeroDivisionError for the ValueError meant."""
         corners = [[0.0, 0, 0.1], [0.1, 0, 0.1], [0.0, 0.1, 0.1], [0.1, 0.1, 0.1]]
         model = _model([*corners, [0.3, 0, 0.1], [0.4, 0, 0.1]], tris=[[0, 1, 2], [1, 3, 2]])
-        model.particle_mass = _Arr(np.array([0.0, 0.0, 0.0, 0.0, 1.0e-3, 2.0e-3], dtype=np.float32))
+        model.particle_mass = host(np.array([0.0, 0.0, 0.0, 0.0, 1.0e-3, 2.0e-3], dtype=np.float32))
         record = {"kind": "shell", "name": "strip", "particle_start": 0, "particle_count": 6, "lumping": "mesh"}
         with self.assertRaises(ValueError) as caught:
             self._open(model, {**record, "params": {"areal_density": 0.3}})

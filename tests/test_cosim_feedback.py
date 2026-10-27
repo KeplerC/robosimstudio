@@ -20,6 +20,8 @@ import unittest
 
 import numpy as np
 
+from tests.fixtures.arrays import host
+
 TIER = "fast"
 """Pure numpy. No GPU, no engine, no scene."""
 
@@ -83,17 +85,10 @@ def _ref_shape(raw, ema, mass, alpha, dv_max, dt):
 class _Model:
     """The three arrays ``WrenchAccumulator`` reads off a finalized model."""
 
-    class _Arr:
-        def __init__(self, a):
-            self._a = a
-
-        def numpy(self):
-            return self._a
-
     def __init__(self, com, mass):
         self.body_count = len(mass)
-        self.body_com = self._Arr(com)
-        self.body_mass = self._Arr(mass)
+        self.body_com = host(com)
+        self.body_mass = host(mass)
 
 
 def _unit_quat(rng):

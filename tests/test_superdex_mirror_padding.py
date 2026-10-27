@@ -25,25 +25,17 @@ TIER = "fast"
 """A stub model and a stand-in engine. No GPU, no wheel, no scene."""
 
 
-class _Arr:
-    def __init__(self, a):
-        self._a = np.asarray(a)
-
-    def numpy(self):
-        return self._a
-
-
 class _Model:
     """A bench (a world-fixed box), the ground plane and a fingertip capsule on body 3."""
 
     def __init__(self):
         from newton import GeoType
 
-        self.shape_type = _Arr([int(GeoType.PLANE), int(GeoType.BOX), int(GeoType.CAPSULE)])
-        self.shape_scale = _Arr([[0.0, 0.0, 0.0], [0.3, 0.65, 0.375], [0.005, 0.01, 0.0]])
-        self.shape_transform = _Arr(np.tile([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0], (3, 1)))
-        self.shape_body = _Arr([-1, -1, 3])
-        self.shape_material_mu = _Arr([1.0, 1.0, 0.8])
+        self.shape_type = host([int(GeoType.PLANE), int(GeoType.BOX), int(GeoType.CAPSULE)], int)
+        self.shape_scale = host([[0.0, 0.0, 0.0], [0.3, 0.65, 0.375], [0.005, 0.01, 0.0]])
+        self.shape_transform = host(np.tile([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0], (3, 1)))
+        self.shape_body = host([-1, -1, 3], int)
+        self.shape_material_mu = host([1.0, 1.0, 0.8])
         self.shape_source = [None, None, None]
 
 

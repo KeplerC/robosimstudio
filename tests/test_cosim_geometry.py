@@ -20,37 +20,30 @@ import unittest
 
 import numpy as np
 
+from tests.fixtures.arrays import host
 from tests.fixtures.registries import restored
 
 TIER = "fast"
 """A stub model. No GPU, no engine, no scene."""
 
 
-class _Arr:
-    def __init__(self, a):
-        self._a = np.asarray(a)
-
-    def numpy(self):
-        return self._a
-
-
 class _Source:
     """What ``model.shape_source`` holds for a mesh: warp-ish arrays."""
 
     def __init__(self, vertices, indices):
-        self.vertices = _Arr(vertices)
-        self.indices = _Arr(indices)
+        self.vertices = host(vertices)
+        self.indices = host(indices, int)
 
 
 class _Model:
     """The six things :func:`read_shape_geometry` asks a finalized model for."""
 
     def __init__(self, types, scales, transforms, bodies, mus, sources):
-        self.shape_type = _Arr(types)
-        self.shape_scale = _Arr(scales)
-        self.shape_transform = _Arr(transforms)
-        self.shape_body = _Arr(bodies)
-        self.shape_material_mu = _Arr(mus)
+        self.shape_type = host(types, int)
+        self.shape_scale = host(scales)
+        self.shape_transform = host(transforms)
+        self.shape_body = host(bodies, int)
+        self.shape_material_mu = host(mus)
         self.shape_source = sources
 
 
@@ -228,12 +221,12 @@ class _DeformableModel:
     """The particle/connectivity half of a finalized model, as an actor reader sees it."""
 
     def __init__(self, *, particles, tris=(), tets=(), tet_materials=()):
-        self.particle_q = _Arr(np.asarray(particles, dtype=np.float64))
-        self.tri_indices = _Arr(np.asarray(tris, dtype=np.int64).reshape(-1))
+        self.particle_q = host(particles, np.float64)
+        self.tri_indices = host(np.asarray(tris, dtype=np.int64).reshape(-1))
         self.tri_count = len(np.asarray(tris, dtype=np.int64).reshape(-1, 3)) if len(tris) else 0
-        self.tet_indices = _Arr(np.asarray(tets, dtype=np.int64).reshape(-1))
+        self.tet_indices = host(np.asarray(tets, dtype=np.int64).reshape(-1))
         self.tet_count = len(np.asarray(tets, dtype=np.int64).reshape(-1, 4)) if len(tets) else 0
-        self.tet_materials = _Arr(
+        self.tet_materials = host(
             np.asarray(tet_materials, dtype=np.float64).reshape(-1, 3) if len(tet_materials) else np.zeros((0, 3))
         )
 

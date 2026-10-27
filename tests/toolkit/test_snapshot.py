@@ -27,6 +27,7 @@ import numpy as np
 
 from robosimstudio.core.probes.contact import ContactView
 from robosimstudio.scene.snapshot import FLAGGED_PENETRATION, summarise
+from tests.fixtures.arrays import host
 
 TIER = "fast"
 """No GPU: numpy arrays and a dict. A snapshot of a built scene is not tested here."""
@@ -122,18 +123,15 @@ class TestTheSpeedsAreTheRightHalves(unittest.TestCase):
 
         from robosimstudio.scene.snapshot import _objects
 
-        def arr(values):
-            return SimpleNamespace(numpy=lambda: np.asarray(values, dtype=float))
-
         env = SimpleNamespace(
             state=SimpleNamespace(
-                body_q=arr([[0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0]]),
+                body_q=host([[0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0]]),
                 # Sliding at 0.3 m/s, spinning at 5 rad/s.
-                body_qd=arr([[0.3, 0.0, 0.0, 0.0, 0.0, 5.0]]),
+                body_qd=host([[0.3, 0.0, 0.0, 0.0, 0.0, 5.0]]),
             ),
             handles=SimpleNamespace(objects={"cube": SimpleNamespace(body=0, static=False)}),
         )
-        (row,) = _objects(env, SimpleNamespace(body_mass=arr([0.1])))
+        (row,) = _objects(env, SimpleNamespace(body_mass=host([0.1])))
         self.assertAlmostEqual(0.3, row["linear_speed"])
         self.assertAlmostEqual(5.0, row["angular_speed"])
 
@@ -150,22 +148,18 @@ class TestItIsJsonAble(unittest.TestCase):
         self.assertEqual(snap, json.loads(json.dumps(snap)))
 
 
-def _arr(values):
-    return SimpleNamespace(numpy=lambda: np.asarray(values, dtype=float))
-
-
 class TestSnapshotSpeedsAreNorms(unittest.TestCase):
     def test_a_diagonal_velocity_is_its_magnitude(self) -> None:
         from robosimstudio.scene.snapshot import _objects
 
         env = SimpleNamespace(
             state=SimpleNamespace(
-                body_q=_arr([[0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0]]),
-                body_qd=_arr([[0.1, 0.1, 0.1, 3.0, 4.0, 0.0]]),
+                body_q=host([[0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0]]),
+                body_qd=host([[0.1, 0.1, 0.1, 3.0, 4.0, 0.0]]),
             ),
             handles=SimpleNamespace(objects={"cube": SimpleNamespace(body=0, static=False)}),
         )
-        (row,) = _objects(env, SimpleNamespace(body_mass=_arr([0.1])))
+        (row,) = _objects(env, SimpleNamespace(body_mass=host([0.1])))
         self.assertAlmostEqual(0.1 * np.sqrt(3.0), row["linear_speed"], places=6)
         self.assertAlmostEqual(5.0, row["angular_speed"], places=6)
 
@@ -188,14 +182,6 @@ class TestPenetrationCopiesShapeBodyOnce(unittest.TestCase):
         self.assertEqual(1, len(copies))
 
 
-class _Array:
-    def __init__(self, values):
-        self._values = np.asarray(values)
-
-    def numpy(self):
-        return self._values
-
-
 class _Probe:
     def __init__(self, rows):
         self.rows = rows
@@ -209,7 +195,7 @@ class _Probe:
 
 
 def _env(probe):
-    model = SimpleNamespace(shape_body=_Array([0, 1, -1]), shape_label=["arena/a", "arena/cube_geom", "arena/floor"])
+    model = SimpleNamespace(shape_body=host([0, 1, -1], int), shape_label=["arena/a", "arena/cube_geom", "arena/floor"])
     handles = SimpleNamespace(objects={"cube": SimpleNamespace(body=1), "loose": SimpleNamespace()})
     return SimpleNamespace(contacts=probe, model=model, handles=handles)
 

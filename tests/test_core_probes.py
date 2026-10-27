@@ -18,6 +18,7 @@ from robosimstudio.core.probes.clearance import ClearanceProbe, _segment_segment
 from robosimstudio.core.probes.contact import FleetContactProbe
 from robosimstudio.core.probes.particle import ParticleProbe
 from robosimstudio.core.streams import stream_lock
+from tests.fixtures.arrays import host
 
 TIER = "fast"
 """No GPU: probes over bare arrays and stand-in models."""
@@ -103,16 +104,6 @@ class TestCoverage(unittest.TestCase):
             self._probe(flat, flat).covered_area(cell=0.0)
 
 
-class _Arr:
-    """The one thing a probe wants of a model array: ``.numpy()``."""
-
-    def __init__(self, values, dtype=None):
-        self._values = np.asarray(values, dtype=dtype)
-
-    def numpy(self):
-        return self._values
-
-
 class TestSegmentDistance(unittest.TestCase):
     """The kernel under :class:`ClearanceProbe`: segment to segment, in bulk."""
 
@@ -161,13 +152,13 @@ class TestClearanceProbe(unittest.TestCase):
         flags = [int(newton.ShapeFlags.COLLIDE_SHAPES) if on else 0 for on in collide]
         return SimpleNamespace(
             shape_count=2,
-            shape_body=_Arr([0, 1], np.int32),
-            shape_flags=_Arr(flags, np.int32),
-            shape_type=_Arr([capsule, capsule], np.int32),
-            shape_scale=_Arr([[self.RADIUS, self.HALF, 0.0]] * 2),
+            shape_body=host([0, 1], np.int32),
+            shape_flags=host(flags, np.int32),
+            shape_type=host([capsule, capsule], np.int32),
+            shape_scale=host([[self.RADIUS, self.HALF, 0.0]] * 2),
             # Identity local transforms: the shapes sit at their bodies.
-            shape_transform=_Arr([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]] * 2),
-            shape_collision_radius=_Arr([self.HALF + self.RADIUS] * 2),
+            shape_transform=host([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]] * 2),
+            shape_collision_radius=host([self.HALF + self.RADIUS] * 2),
             shape_collision_filter_pairs=set(filtered),
         )
 
@@ -213,8 +204,8 @@ class TestClearanceProbe(unittest.TestCase):
     def test_a_box_is_bounded_rather_than_missed(self):
         """A box becomes a capsule around its longest axis -- never optimistic."""
         model = self._model()
-        model.shape_type = _Arr([int(newton.GeoType.BOX), int(newton.GeoType.BOX)], np.int32)
-        model.shape_scale = _Arr([[0.01, 0.02, 0.10]] * 2)
+        model.shape_type = host([int(newton.GeoType.BOX), int(newton.GeoType.BOX)], np.int32)
+        model.shape_scale = host([[0.01, 0.02, 0.10]] * 2)
         probe = ClearanceProbe(model)
         # Long axes side by side across x: the true surface gap is 0.5 - 2*0.01,
         # and the bound thickens each by hypot(0.01, 0.02) instead.
@@ -269,7 +260,7 @@ class TestFleetContactProbe(unittest.TestCase):
     def test_a_view_before_the_first_read_is_empty(self):
         k = 3
         solver = SimpleNamespace(
-            mjc_geom_to_newton_shape=SimpleNamespace(numpy=lambda: np.arange(k, dtype=np.int32).reshape(1, k)),
+            mjc_geom_to_newton_shape=host(np.arange(k, dtype=np.int32).reshape(1, k)),
             mjw_data=SimpleNamespace(contact=SimpleNamespace(geom=np.zeros((4, 2)))),
         )
         probe = FleetContactProbe(
