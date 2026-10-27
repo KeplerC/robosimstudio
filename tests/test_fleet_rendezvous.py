@@ -32,6 +32,7 @@ from robosimstudio_policy_agent.fleet import (
     StallTimeout,
     StallWatch,
 )
+from robosimstudio_policy_agent.fleet.barrier import ParkTable, Rendezvous
 from robosimstudio_policy_agent.fleet.ik_backend import IKBackendFleet, solve_group
 
 TIER = "fast"
@@ -462,6 +463,48 @@ class TestTheSolveGroup(unittest.TestCase):
         ]
 
         self.assertEqual(solve_group(asks), [[0.0], [1.0]])
+
+
+class RendezvousTimeoutTest(unittest.TestCase):
+    def test_timed_out_ask_is_withdrawn(self) -> None:
+        parks = ParkTable(1)
+        rendezvous = Rendezvous(parks=parks)
+        calls: list[list] = []
+        rendezvous.register("solve", lambda group: calls.append(group) or [None] * len(group))
+        with parks.parked(0), self.assertRaises(BusTimeout):
+            rendezvous.post(0, "solve", "stale", timeout=0.02)
+        self.assertFalse(rendezvous.pending())
+        with parks.parked(0):
+            self.assertEqual(rendezvous.dispatch(), 0)
+            self.assertEqual(calls, [])
+            self.assertTrue(parks.parked_mask()[0])
+
+    def test_late_settle_leaves_the_next_park_alone(self) -> None:
+        parks = ParkTable(1)
+        rendezvous = Rendezvous(parks=parks)
+        started = threading.Event()
+        release = threading.Event()
+
+        def adapter(group):
+            started.set()
+            release.wait(2.0)
+            return ["late"] * len(group)
+
+        rendezvous.register("solve", adapter)
+        fleet = threading.Thread(target=lambda: (time.sleep(0.01), rendezvous.dispatch()))
+        fleet.start()
+        try:
+            with parks.parked(0), self.assertRaises(BusTimeout):
+                rendezvous.post(0, "solve", "slow", timeout=0.1)
+            self.assertTrue(started.is_set())
+            with parks.parked(0):
+                release.set()
+                fleet.join(2.0)
+                self.assertFalse(fleet.is_alive())
+                self.assertTrue(parks.parked_mask()[0])
+        finally:
+            release.set()
+            fleet.join(2.0)
 
 
 if __name__ == "__main__":

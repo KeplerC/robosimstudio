@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""cuRobo world loading: the TSDF's frame, a TSDF with every mesh filtered, sphere paths.
+"""cuRobo world loading -- the TSDF's frame, a TSDF with every mesh filtered, sphere paths --
+and a move too short to have a direction planned free.
 
-cuRobo is not a test dependency, so the few names these paths import are stubbed.
-"""
+cuRobo is not a test dependency, so the few names these paths import are stubbed."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import numpy as np
 from robosimstudio_policy_agent.planners.curobo import MotionBackendCuRobo
 
 TIER = "fast"
+"""Backends built bare with stubbed cuRobo modules: no GPU, no cuRobo."""
 
 
 class _Feature(np.ndarray):
@@ -147,6 +148,26 @@ class CollisionSpheresTest(unittest.TestCase):
             with mock.patch.dict(sys.modules, _curobo_stubs(tmp)):
                 spheres = self._backend("franka.yml")._inline_collision_spheres(kinematics)
         self.assertEqual(spheres, {"hand": []})
+
+
+def _pose(x: float) -> dict:
+    return {"position": {"x": x, "y": 0.0, "z": 0.0}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}
+
+
+class TestCuroboShortMove(unittest.TestCase):
+    def test_a_rotation_in_place_is_planned_free(self):
+        planner = object.__new__(MotionBackendCuRobo)
+        calls = []
+        planner._import = lambda: (None, None, None, None, None, None)
+        planner._orientation_held = lambda *a, **k: False
+
+        def plan(position, quat, arm_id, seed, criteria, num_waypoints, **kwargs):
+            calls.append(criteria)
+            return {"waypoints": ["free"]}
+
+        planner._plan = plan
+        self.assertEqual(planner.plan_linear(_pose(0.0), _pose(0.0)), {"waypoints": ["free"]})
+        self.assertEqual(calls, [None])
 
 
 if __name__ == "__main__":
