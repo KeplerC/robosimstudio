@@ -281,13 +281,13 @@ class TestThePageCanTakeHoldOfIt(unittest.TestCase):
     unclickable while every stubbed test passed.
     """
 
-    PORT = 8981
+    PORT = 0
+    """Any free port: each page binds its own, so two shards can never ask for one."""
 
     def _page(self, name: str):
         from robosimstudio_studio.session import StudioConfig, StudioSession
 
         sim, kwargs = _run(name)
-        TestThePageCanTakeHoldOfIt.PORT += 1
         session = StudioSession(sim, config=StudioConfig(port=self.PORT, panels=kwargs.get("panels", "drive")))
         if kwargs.get("page"):
             kwargs["page"](session)

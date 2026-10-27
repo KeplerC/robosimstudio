@@ -100,5 +100,17 @@ class TestNamesAgreeWithGetitem(unittest.TestCase):
         self.assertEqual(["cube", "goal", "post"], sim.names())
 
 
+class TestTwoWaysToSayWhere(unittest.TestCase):
+    def test_at_and_a_binding_mount_together_are_refused(self) -> None:
+        import robosimstudio as rss
+        from robosimstudio.specs import Binding
+
+        binding = Binding(scene="bench_075", embodiment="panda", mount=(0.0, 0.0, 0.9, 0.0, 0.0, 0.0, 1.0))
+        scene = rss.Scene(cell="bench_075", binding=binding)
+        scene.add(rss.robot("panda", at=(-0.5, 0.0, 0.0)))
+        with self.assertRaisesRegex(ValueError, "both say where the robot stands"):
+            _ = scene.request
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,25 +4,27 @@
 The GPU tiers run sharded, a module per process across the cards, so two modules
 that claim one port are two pages that cannot both come up when the shards meet.
 ``tests.test_cut_tofu`` took ``ALL_PORT = 9843``, which was already
-``tests.test_cut_tofu_scored``'s ``PORT``. There is no ledger beside the tests:
-this reads every claim -- a ``PORT``-named constant, at module or class level, a
-number or a tuple of them, a ``port=`` given as a number, and one derived from
-such a constant by adding a number to it (``PORT + 1``, as
-``tests.test_material_sliders`` hands ``_open`` its pages, 9802 to 9805) or by
-counting it up (``TestThePageCanTakeHoldOfIt.PORT += 1`` in ``tests.test_examples``)
--- off the source.
+``tests.test_cut_tofu_scored``'s ``PORT``. A page that asks for port 0 gets any
+free one and claims nothing, which is what a test should do; for one that still
+names a number there is no ledger beside the tests: this reads every claim -- a
+``PORT``-named constant, at module or class level, a number or a tuple of them, a
+``port=`` given as a number, and one derived from such a constant by adding a
+number to it (``PORT + 1``) or by counting it up (``Cls.PORT += 1``) -- off the
+source.
 
 What it cannot see is how far a counter runs: that is the number of pages the
-module opens at run time, so the scan claims the counter's first port alone (8982
-for ``tests.test_examples``, which opens one per example it walks; the nearest
-claim above it is 9210). And a derived port is read only where its constant has
-one value in its module; where it has several, the scan raises rather than guess.
+module opens at run time, so the scan claims the counter's first port alone. And
+a derived port is read only where its constant has one value in its module;
+where it has several, the scan raises rather than guess. The reader itself is
+checked on trees of its own, so what it finds does not depend on which modules
+still name a number.
 """
 
 from __future__ import annotations
 
 import ast
 import re
+import tempfile
 import unittest
 from collections import defaultdict
 from pathlib import Path
@@ -62,11 +64,11 @@ def _derived(node: ast.AST, stated: dict[str, set[int]], where: object) -> tuple
     return label, base + step
 
 
-def claims() -> dict[int, list[str]]:
-    """Each port a test module claims, and where."""
+def claims(root: Path = TESTS) -> dict[int, list[str]]:
+    """Each port a test module under ``root`` claims, and where."""
     found: dict[int, list[str]] = defaultdict(list)
-    for path in sorted(TESTS.rglob("*.py")):
-        tree, where = ast.parse(path.read_text()), path.relative_to(TESTS)
+    for path in sorted(root.rglob("*.py")):
+        tree, where = ast.parse(path.read_text()), path.relative_to(root)
         # Each PORT-named constant's numbers in this module, for what is derived from it.
         stated: dict[str, set[int]] = defaultdict(set)
         for node in ast.walk(tree):
@@ -90,7 +92,7 @@ def claims() -> dict[int, list[str]]:
             for name in named:
                 for value in values:
                     if isinstance(value, ast.Constant) and isinstance(value.value, int) and value.value:
-                        found[value.value].append(f"{path.relative_to(TESTS)}:{node.lineno} {name}")
+                        found[value.value].append(f"{where}:{node.lineno} {name}")
     return found
 
 
@@ -99,17 +101,37 @@ class TestEveryPortIsClaimedOnce(unittest.TestCase):
         shared = {port: where for port, where in claims().items() if len(where) > 1}
         self.assertEqual({}, shared)
 
-    def test_the_cutting_pages_are_found(self) -> None:
-        """The reader finds what it is for: the cutting tests' four pages."""
-        found = claims()
-        self.assertTrue(all(found.get(port) for port in (9841, 9842, 9843, 9844)), "the scan missed a cutting page")
+    def test_every_way_of_stating_a_port_is_found(self) -> None:
+        """The reader finds what it is for, on a tree of its own: a module's ``PORT``, a class's tuple of
+        ``PORTS``, and a ``port=`` keyword -- and a port of 0, which asks for any free one, claims nothing."""
+        found = self._scan(
+            a="PORT = 9841\nANY_PORT = 0\n",
+            b="class T:\n    PAGE_PORTS = (9842, 9843)\n\nopen_page(port=9844)\nopen_page(port=0)\n",
+        )
+        self.assertEqual(
+            {9841: ["a.py:1 PORT"], 9842: ["b.py:2 PAGE_PORTS"], 9843: ["b.py:2 PAGE_PORTS"], 9844: ["b.py:4 port="]},
+            found,
+        )
 
     def test_the_derived_ports_are_found(self) -> None:
         """``PORT + 1`` handed to a page, and a class counter's ``PORT += 1``: neither is an ``Assign`` or a ``port=``."""
-        found = claims()
-        sliders = [found.get(port, []) for port in (9802, 9803, 9804, 9805)]
-        self.assertTrue(all("test_material_sliders.py" in " ".join(w) for w in sliders), sliders)
-        self.assertIn("PORT += 1", " ".join(found.get(8982, [])), "tests.test_examples' counter")
+        found = self._scan(
+            sliders="PORT = 9801\n_open('a', PORT + 1)\n_open('b', 2 + PORT)\n",
+            examples="class T:\n    PORT = 8981\n\n    def page(self):\n        T.PORT += 1\n",
+        )
+        self.assertEqual(["sliders.py:2 PORT + 1"], found[9802])
+        self.assertEqual(["sliders.py:3 PORT + 2"], found[9803])
+        self.assertIn("PORT += 1", " ".join(found.get(8982, [])), "a counter's first page")
+
+    def test_two_modules_on_one_port_are_both_named(self) -> None:
+        found = self._scan(one="PORT = 9843\n", two="ALL_PORT = 9843\n")
+        self.assertEqual(["one.py:1 PORT", "two.py:1 ALL_PORT"], found[9843])
+
+    def _scan(self, **modules: str) -> dict[int, list[str]]:
+        with tempfile.TemporaryDirectory() as root:
+            for name, source in modules.items():
+                (Path(root) / f"{name}.py").write_text(source)
+            return dict(claims(Path(root)))
 
     def test_a_derived_port_on_a_claimed_one_is_caught(self) -> None:
         """What the reader is for, on a module of its own: ``PORT + 1`` landing on another page's ``PORT``."""
