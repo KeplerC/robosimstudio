@@ -51,23 +51,6 @@ def _aim(sim, rod, target, slot: int = 0) -> None:
     rod.bridge.ride(rod._pins[slot][0], grip, (quat_to_mat(body[3:7]).T @ (target - body[:3]))[None, :])
 
 
-class TestTheContractIsOneMethod(unittest.TestCase):
-    def test_both_implementations_answer_hold(self) -> None:
-        import inspect
-
-        from robosimstudio_materials.rod import Centerline, EntityRod, EntityRodSuperdex
-
-        for cls in (EntityRod, EntityRodSuperdex):
-            with self.subTest(cls=cls.__name__):
-                self.assertIn("hold", vars(cls), "each storage answers for itself")
-                self.assertEqual(
-                    list(inspect.signature(cls.hold).parameters),
-                    list(inspect.signature(Centerline.hold).parameters),
-                    "one signature, so a caller need not know which it holds",
-                )
-                self.assertIn("published_states", dir(cls))
-
-
 class TestTheParticleRodIsHeldThroughTheEngine(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

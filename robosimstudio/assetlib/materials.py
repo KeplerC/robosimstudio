@@ -222,7 +222,18 @@ def _build(cls: type, data: dict[str, Any], where: str) -> Any:
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(f"{where}: unknown field(s) {unknown}; {cls.__name__} has {sorted(known)}")
-    return cls(**data)
+    # JSON has no tuple, and a frozen spec holds no list: a colour read back as
+    # one is a spec unequal to the one written, and one that cannot be hashed.
+    return cls(**{key: _tuples(value) for key, value in data.items()})
+
+
+def _tuples(value: Any) -> Any:
+    """``value`` with every list in it, at any depth and inside dicts too, a tuple."""
+    if isinstance(value, list):
+        return tuple(_tuples(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _tuples(item) for key, item in value.items()}
+    return value
 
 
 def material_from_dict(data: dict[str, Any], *, where: str = "material") -> MaterialRecord:
@@ -247,13 +258,7 @@ def material_from_dict(data: dict[str, Any], *, where: str = "material") -> Mate
 
     calibration = data.get("calibration")
     if calibration is not None:
-        calibration = dict(calibration)
-        for key in ("target_cm", "sweep"):
-            if calibration.get(key) is not None:
-                calibration[key] = (
-                    tuple(tuple(row) for row in calibration[key]) if key == "sweep" else tuple(calibration[key])
-                )
-        calibration = _build(CalibrationSpec, calibration, f"{where}.calibration")
+        calibration = _build(CalibrationSpec, dict(calibration), f"{where}.calibration")
 
     return MaterialRecord(
         name=str(data["name"]),

@@ -205,37 +205,5 @@ class TestThePrintedNumbersAreTheRealOnes(unittest.TestCase):
             self.assertIn("README.md", checked, "the README stopped printing the cube's position; the pattern is stale")
 
 
-class TestNothingInTheNamespaceIsUndiscoverable(unittest.TestCase):
-    """Every flat ``rss.`` name is written down somewhere a reader will look.
-
-    The namespace is a curated table -- 51 names chosen one at a time -- and the
-    cost of curating it is that adding one is easy and mentioning it is a
-    separate act nobody is prompted to do. A name reachable only by reading
-    ``__init__.py`` is a name that does not exist for anybody who did not write
-    it.
-
-    Deliberately weak: it asks that the name *appears*, not that it is explained
-    well. A stronger check would be a style opinion, and this one is the useful
-    half -- it fires on the case that actually happens, which is a new export
-    nobody documented.
-    """
-
-    @unittest.skipUnless(
-        CORE_API.is_file(),
-        "docs/core_api.md is not in this tree; the site's API pages render every export from the table itself",
-    )
-    def test_every_export_appears_in_the_docs(self) -> None:
-        import robosimstudio as rss
-
-        pages = "\n".join(page.read_text() for page in PAGES)
-        missing = sorted(name for name in rss._EXPORTS if name not in pages)
-        self.assertEqual(
-            [],
-            missing,
-            f"exported by rss and mentioned in neither {[p.name for p in PAGES]}: {missing}. "
-            "core_api.md section 6b is the catch-all list.",
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

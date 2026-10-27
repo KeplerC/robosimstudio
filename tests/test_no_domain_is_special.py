@@ -29,6 +29,8 @@ import ast
 import unittest
 from pathlib import Path
 
+from tests.fixtures.registries import restored
+
 TIER = "fast"
 """No GPU. Gates every commit."""
 
@@ -114,7 +116,7 @@ class TestEveryDomainDeclaresItsBehaviour(unittest.TestCase):
         from robosimstudio.scene.physics.interactions import default_contacts
         from robosimstudio.specs.physics import DOMAINS, register_domain
 
-        try:
+        with restored(DOMAINS):
             register_domain(
                 "probe_granular",
                 state=("particles",),
@@ -125,9 +127,6 @@ class TestEveryDomainDeclaresItsBehaviour(unittest.TestCase):
             )
             rules = default_contacts("probe_granular")
             self.assertEqual(("surface", "hands"), tuple(r.with_ for r in rules))
-        finally:
-            DOMAINS._items.pop("probe_granular", None)
-            DOMAINS._origins.pop("probe_granular", None)
 
 
 if __name__ == "__main__":

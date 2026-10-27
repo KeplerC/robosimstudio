@@ -32,6 +32,7 @@ from tests.fixtures.leader_session import FakeEnv as _FakeEnv
 from tests.fixtures.leader_session import FakeSession as _FakeSession
 from tests.fixtures.leader_session import InstantWaits
 from tests.fixtures.leader_session import Loop as _Loop
+from tests.fixtures.waits import wait_until
 
 TIER = "fast"
 """No GPU, no scene, no serial port; the one real thread is joined inside its test."""
@@ -349,12 +350,17 @@ class TestTeleoperation(_Instant):
         session = self._session()
         with self._teleop(session, _leaders("left"), feedback=False) as teleop:
             loop = teleop.loops["left"]
-            deadline = time.monotonic() + 2.0
-            while loop.latest_leader() is None and time.monotonic() < deadline:
-                time.sleep(0.002)
+            bus = self.buses["/dev/fake-left"]
+            wait_until(lambda: loop.latest_leader() is not None, timeout=2.0, what="the first leader reading")
             loop.publish_follower([3.0, 3.0, 1.0], time.monotonic())
-            time.sleep(0.05)
-        bus = self.buses["/dev/fake-left"]
+            # Three reads after the publish are three ticks that held a follower pose deep in contact:
+            # "nothing was energized" is then an answer, not a thread that had not run yet.
+            after = len(bus.calls)
+            wait_until(
+                lambda: sum(call[0] == "sync_read" for call in bus.calls[after:]) >= 3,
+                timeout=2.0,
+                what="three ticks after the follower pose",
+            )
         self.assertNotIn("enable_torque", [call[0] for call in bus.calls])
         written = {call[1] for call in bus.calls if call[0] in ("write", "sync_write")}
         self.assertEqual(written, {"Torque_Limit"})

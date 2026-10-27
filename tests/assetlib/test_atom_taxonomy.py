@@ -18,16 +18,36 @@ duck-typed design exists to prevent, so it is refused mechanically.
 from __future__ import annotations
 
 import ast
+import contextlib
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
+
+import numpy as np
 
 import robosimstudio.assetlib.vocabulary
 import robosimstudio.domains
 from robosimstudio.assetlib.semantics.atom import Atom, Property, Relation, SpatialRelation, family_of, leaves_of
-from robosimstudio.assetlib.semantics.atoms import ArgSpec, get_atom, list_atoms
+from robosimstudio.assetlib.semantics.atoms import ATOMS, ArgSpec, get_atom, list_atoms
+from robosimstudio.assetlib.semantics.snapshot import Snapshot
+from tests.fixtures.registries import restored
 
 TIER = "fast"
 """No GPU. Gates every commit."""
+
+
+@contextlib.contextmanager
+def _minted() -> Iterator[None]:
+    """Mint atoms for one test: the registry and the family lists are put back on the way out."""
+    from robosimstudio.assetlib.semantics import atom
+
+    families = {name: list(leaves) for name, leaves in atom._FAMILIES.items()}
+    with restored(ATOMS):
+        try:
+            yield
+        finally:
+            atom._FAMILIES.clear()
+            atom._FAMILIES.update(families)
 
 
 class TestAFamilyDescribesAndALeafRegisters(unittest.TestCase):
@@ -40,31 +60,28 @@ class TestAFamilyDescribesAndALeafRegisters(unittest.TestCase):
                 self.assertNotIn(family.__name__.lower(), registered)
 
     def test_a_leaf_registers_by_existing(self) -> None:
-        class _Probe(Property):
-            name = "probe_taxonomy_leaf"
-            summary = "A leaf minted by a test."
-            args = (ArgSpec(name="thing"),)
-            returns = ("value",)
+        with _minted():
 
-        try:
+            class _Probe(Property):
+                name = "probe_taxonomy_leaf"
+                summary = "A leaf minted by a test."
+                args = (ArgSpec(name="thing"),)
+                returns = ("value",)
+
             self.assertIn("probe_taxonomy_leaf", list_atoms())
             self.assertEqual(get_atom("probe_taxonomy_leaf").summary, _Probe.summary)
             self.assertIs(_Probe.spec, get_atom("probe_taxonomy_leaf"))
-        finally:
-            _unregister("probe_taxonomy_leaf")
 
     def test_a_leaf_lands_in_its_family(self) -> None:
-        class _Probe(SpatialRelation):
-            name = "probe_taxonomy_family"
-            summary = "A spatial leaf minted by a test."
-            args = (ArgSpec(name="a"), ArgSpec(name="b"))
+        with _minted():
 
-        try:
+            class _Probe(SpatialRelation):
+                name = "probe_taxonomy_family"
+                summary = "A spatial leaf minted by a test."
+                args = (ArgSpec(name="a"), ArgSpec(name="b"))
+
             self.assertEqual(family_of(_Probe), "SpatialRelation")
             self.assertIn(_Probe, leaves_of("SpatialRelation"))
-        finally:
-            _unregister("probe_taxonomy_family")
-            leaves_of("SpatialRelation").remove(_Probe) if _Probe in leaves_of("SpatialRelation") else None
 
     def test_a_leaf_without_a_summary_is_refused(self) -> None:
         """The catalog is read by people and by models; a blank line helps neither."""
@@ -98,13 +115,29 @@ class TestSubsumptionIsAClaimAndIsChecked(unittest.TestCase):
         ``on``'s handler delegates its touching half to ``Contact.measure``
         rather than reading the contact set again, so the two cannot disagree
         about what touching means. That delegation *is* the implication, and this
-        asserts it rather than trusting the comment above it.
+        asserts it rather than trusting the comment above it: an item resting on
+        its support reads ``on``, and once ``Contact`` is made to say "not
+        touching" over the very same contact set, ``on`` must say so too.
         """
-        from robosimstudio.domains.rigid.measures import placement
+        from unittest import mock
 
-        source = Path(placement.__file__).read_text()
-        body = source[source.index("def _rigid_on(") :]
-        self.assertIn("Contact.measure(", body, "on must delegate its touching half, not re-read the contact set")
+        from robosimstudio.domains.rigid.measures.placement import Contact, On
+        from robosimstudio.scene.handles import EntityHandle, SceneHandles
+        from tests.fixtures.snapshots import contact_view, ctx
+
+        handles = SceneHandles(
+            objects={"item": EntityHandle(name="item", body=0, collision_shapes=np.array([0]))},
+            statics={"bin": EntityHandle(name="bin", static=True, collision_shapes=np.array([1]))},
+        )
+        resting = contact_view([(1, 0, (0.0, 0.0, 0.01))])  # the bin pushes the item straight up
+        snapshot = Snapshot(ctx=ctx(handles=handles, body_qd=np.zeros((1, 6)), contacts=resting))
+        both = ("rigid", "rigid")
+        self.assertEqual(1.0, On.measure(snapshot, "item", "bin", substrates=both)["on"])
+        self.assertEqual(1.0, Contact.measure(snapshot, "item", "bin", substrates=both)["touching"])
+        with mock.patch.object(Contact, "measure", return_value={"touching": 0.0, "force": 0.0}) as asked:
+            reading = On.measure(snapshot, "item", "bin", substrates=both)
+        asked.assert_called_once_with(snapshot, "item", "bin", substrates=both)
+        self.assertEqual((0.0, 0.0), (reading["touching"], reading["on"]), "on must take touching from contact")
 
 
 class TestInheritanceDoesNotReachDispatch(unittest.TestCase):
@@ -166,14 +199,6 @@ def _handler_sources() -> list[tuple[str, Path]]:
         seen.add(resolved)
         found.append((path.relative_to(base).as_posix(), path))
     return found
-
-
-def _unregister(name: str) -> None:
-    """Drop a test-minted atom. The registry has no public removal, by design."""
-    from robosimstudio.assetlib.semantics.atoms import ATOMS
-
-    ATOMS._items.pop(name, None)
-    ATOMS._origins.pop(name, None)
 
 
 class TestObservationsStayStructured(unittest.TestCase):

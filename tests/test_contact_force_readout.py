@@ -21,6 +21,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from tests.fixtures.arrays import host
+
 TIER = "fast"
 """Warp on the CPU and numpy; no scene is built."""
 
@@ -107,9 +109,7 @@ class TestTheCouplerSumsTheLiveRecordsByShape(unittest.TestCase):
 def _scene(solver, *, stain=(10, 11, 12, 13)):
     """The least of a sim that :class:`ForceGatedWipe` reads: a hand of shapes 1 and 2 on bodies 5 and 6."""
     robot = SimpleNamespace(arms={"right": None}, gripper_bodies=lambda arm: [5, 6])
-    model = SimpleNamespace(
-        shape_body=SimpleNamespace(numpy=lambda: np.array([-1, 5, 6, 7])), shape_label=["table", "a", "b", "c"]
-    )
+    model = SimpleNamespace(shape_body=host(np.array([-1, 5, 6, 7])), shape_label=["table", "a", "b", "c"])
     towel = SimpleNamespace(entity=SimpleNamespace(sets={"towel/stain": np.asarray(stain)}))
     return SimpleNamespace(
         scene=SimpleNamespace(embodiment=robot),
@@ -291,7 +291,7 @@ class TestTheWipeIsGatedOnThePush(unittest.TestCase):
 
         sim = _Sim(**vars(_scene(_coupler([((10,), 1, (0.0, 0.0, 30.0))], capacity=8))))
         body_q = np.zeros((8, 7), dtype=np.float32)
-        sim.state = SimpleNamespace(body_q=SimpleNamespace(numpy=body_q.copy))
+        sim.state = SimpleNamespace(body_q=host(body_q, copy=True))
         wipe = ForceGatedWipe(sim, "towel", "stain", "right", (20.0, 60.0), window=1)
         np.testing.assert_array_equal(wipe.bodies, [5, 6])
         self.assertEqual(wipe.update()["wiped"], 0.0, "the first reading has nothing to compare with")
@@ -307,7 +307,7 @@ class TestTheWipeIsGatedOnThePush(unittest.TestCase):
 
         sim = _Sim(**vars(_scene(_coupler([((10,), 1, (0.0, 0.0, 30.0))], capacity=8))), step_count=40)
         body_q = np.zeros((8, 7), dtype=np.float32)
-        sim.state = SimpleNamespace(body_q=SimpleNamespace(numpy=body_q.copy))
+        sim.state = SimpleNamespace(body_q=host(body_q, copy=True))
         wipe = ForceGatedWipe(sim, "towel", "stain", "right", (20.0, 60.0), window=1)
         wipe.update()
 
