@@ -39,21 +39,6 @@ class TestRegistrationImportsNothing(unittest.TestCase):
         proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
-    def test_importing_the_bundle_does_not_import_the_engine(self):
-        """The registration is a dotted-path string, so it costs no engine."""
-        code = (
-            "import sys, robosimstudio.engines.genesis as bundle\n"
-            # Was `'genesis' not in sys.modules or sys.modules['genesis'] is not
-            # None`, which is true whether or not the engine was imported. The
-            # generic form of this law is TestNoBundleImportsItsEngine in
-            # tests/test_engine_roots.py, over every bundle and every SDK.
-            "assert 'genesis' not in sys.modules, 'the bundle imported the engine at module scope'\n"
-            "assert bundle.BACKEND.host_engine\n"
-            "import robosimstudio.engines.genesis.bridge  # the adapter too\n"
-        )
-        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-
     @unittest.skipIf(importlib.util.find_spec("genesis") is not None, "genesis is installed here")
     def test_a_missing_wheel_is_refused_by_name(self):
         from robosimstudio.engines.genesis.runtime import ensure_initialized

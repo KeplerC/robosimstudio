@@ -21,21 +21,18 @@ difference decides whether it should be kept or cut. This is the test.
 
 Run in a subprocess with the variable in the environment, like its two siblings,
 because ``__path__`` is extended at import time and there is no honest way to
-re-do that inside a live interpreter.
+re-do that inside a live interpreter. A class's processes start together, and
+one process answers every claim made about the same root.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
 import unittest
-from contextlib import ExitStack
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from robosimstudio import roots
+from tests.fixtures.processes import Processes, last_json
 
 TIER = "fast"
 
@@ -69,34 +66,46 @@ print(json.dumps({
 """
 
 
-class TestAnEngineOnARoot(unittest.TestCase):
-    def _root(self, stack: ExitStack, name: str = "probe_engine") -> Path:
-        root = Path(stack.enter_context(TemporaryDirectory()))
-        (root / name).mkdir()
-        (root / name / "__init__.py").write_text(BUNDLE)
-        return root
+PATH_REPORT = """
+import json
+import robosimstudio.engines as engines
+print(json.dumps(sorted(p.split("/")[-1] for p in engines.__path__)))
+"""
 
-    def _run(self, script: str, *rootpaths: Path) -> subprocess.CompletedProcess:
-        env = {
-            **os.environ,
-            roots.ENGINE_ROOTS_ENV: os.pathsep.join(str(r) for r in rootpaths),
-            "CUDA_VISIBLE_DEVICES": "",
-        }
-        return subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=Path(__file__).resolve().parents[1],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=False,
+
+def _engine_root(processes: Processes, name: str = "probe_engine") -> Path:
+    root = processes.directory()
+    (root / name).mkdir()
+    (root / name / "__init__.py").write_text(BUNDLE)
+    return root
+
+
+def _start(processes: Processes, key: str, script: str, *rootpaths: Path) -> None:
+    """A fresh interpreter with ``rootpaths`` as its engine roots."""
+    processes.start(key, script, env={roots.ENGINE_ROOTS_ENV: os.pathsep.join(str(r) for r in rootpaths)})
+
+
+class TestAnEngineOnARoot(unittest.TestCase):
+    """One process holds the bundle on a root and answers both claims about it; a second holds two roots of one name."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.processes = Processes()
+        _start(cls.processes, "on a root", REPORT + PATH_REPORT, _engine_root(cls.processes))
+        cls.first, cls.second = (
+            _engine_root(cls.processes, "probe_dup_engine"),
+            _engine_root(cls.processes, "probe_dup_engine"),
         )
+        _start(cls.processes, "two roots", "import robosimstudio.engines", cls.first, cls.second)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.processes.close()
 
     def test_a_bundle_on_a_root_registers_and_is_reachable_as_ours(self) -> None:
-        with ExitStack() as stack:
-            proc = self._run(REPORT, self._root(stack))
+        proc = self.processes.result("on a root")
         self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
-        got = json.loads([ln for ln in proc.stdout.splitlines() if ln.startswith("{")][-1])
+        got = last_json(proc)
         self.assertTrue(got["host_engine"], "a bundle on a root did not register as a host engine")
         self.assertEqual(["particles"], got["supports"])
         self.assertEqual(
@@ -107,12 +116,10 @@ class TestAnEngineOnARoot(unittest.TestCase):
 
     def test_the_shipped_bundles_survive_a_root(self) -> None:
         """Extending the path, not replacing it -- the failure the domains test names too."""
-        script = "import robosimstudio.engines as e; import json; print(json.dumps(sorted(p.split('/')[-1] for p in e.__path__)))"
-        with ExitStack() as stack:
-            proc = self._run(script, self._root(stack))
+        proc = self.processes.result("on a root")
         self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
         self.assertGreaterEqual(
-            len(json.loads([ln for ln in proc.stdout.splitlines() if ln.startswith("[")][-1])),
+            len(last_json(proc, "[")),
             2,
             "the library's own engines directory is gone -- the path was replaced, not extended",
         )
@@ -120,13 +127,10 @@ class TestAnEngineOnARoot(unittest.TestCase):
     def test_two_roots_holding_one_name_refuse(self) -> None:
         """``iter_modules`` keeps the first and never imports the second, which
         hides exactly the collision the registries exist to report."""
-        with ExitStack() as stack:
-            first = self._root(stack, "probe_dup_engine")
-            second = self._root(stack, "probe_dup_engine")
-            proc = self._run("import robosimstudio.engines", first, second)
+        proc = self.processes.result("two roots")
         self.assertNotEqual(0, proc.returncode, "a duplicate engine across two roots was accepted")
         self.assertIn("probe_dup_engine", proc.stderr)
-        self.assertIn(str(second), proc.stderr, "the message must name both roots")
+        self.assertIn(str(self.second), proc.stderr, "the message must name both roots")
 
 
 NEWTON_PROOF = """
@@ -160,17 +164,12 @@ class TestTheNewtonBundleIsFoundByTheSameScan(unittest.TestCase):
     """
 
     def test_an_alias_resolves_with_only_the_ir_imported(self) -> None:
-        proc = subprocess.run(
-            [sys.executable, "-c", NEWTON_PROOF],
-            cwd=Path(__file__).resolve().parents[1],
-            env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=False,
-        )
+        processes = Processes()
+        self.addCleanup(processes.close)
+        processes.start("newton", NEWTON_PROOF)
+        proc = processes.result("newton")
         self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
-        got = json.loads([ln for ln in proc.stdout.splitlines() if ln.startswith("{")][-1])
+        got = last_json(proc)
         self.assertEqual("newton.solvers.SolverMuJoCo", got["mujoco_cls"])
         self.assertTrue(got["vbd_maximal"], "vbd's registered facts did not survive the move")
         self.assertTrue(got["bundle_loaded"], "the alias resolved without the scan importing engines/newton")
@@ -230,22 +229,24 @@ class TestNoBundleImportsItsEngine(unittest.TestCase):
     def test_no_bundle_imports_a_banned_module(self) -> None:
         banned = self._banned()
         self.assertIn("superdex", banned, "the list must still name the SDKs this is about")
+        processes = Processes()
+        self.addCleanup(processes.close)
+        for bundle in self._bundles():
+            code = (
+                "import importlib, json, sys\n"
+                f"importlib.import_module('robosimstudio.engines.{bundle}')\n"
+                "try:\n"
+                f"    importlib.import_module('robosimstudio.engines.{bundle}.bridge')\n"
+                "except ModuleNotFoundError:\n"
+                "    pass\n"
+                f"print(json.dumps(sorted(m for m in {banned!r} if m in sys.modules)))\n"
+            )
+            processes.start(bundle, code)  # one fresh interpreter a bundle, all running at once
         for bundle in self._bundles():
             with self.subTest(bundle=bundle):
-                code = (
-                    "import importlib, json, sys\n"
-                    f"importlib.import_module('robosimstudio.engines.{bundle}')\n"
-                    "try:\n"
-                    f"    importlib.import_module('robosimstudio.engines.{bundle}.bridge')\n"
-                    "except ModuleNotFoundError:\n"
-                    "    pass\n"
-                    f"print(json.dumps(sorted(m for m in {banned!r} if m in sys.modules)))\n"
-                )
-                proc = subprocess.run(
-                    [sys.executable, "-c", code], capture_output=True, text=True, timeout=300, check=False
-                )
+                proc = processes.result(bundle, timeout=300)
                 self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
-                pulled = json.loads(proc.stdout.strip().splitlines()[-1])
+                pulled = last_json(proc, "[")
                 self.assertEqual(
                     [],
                     pulled,
