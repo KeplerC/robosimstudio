@@ -20,6 +20,7 @@ built inactive to Newton.
 from __future__ import annotations
 
 import collections
+import contextlib
 import importlib.util
 import json
 import subprocess
@@ -39,12 +40,15 @@ from robosimstudio.scene.physics.islands import partition
 from robosimstudio.specs import ArrangementSpec, PhysicsManifest, SimRequirements, backend, contacts_with
 from robosimstudio.specs.physics import (
     BACKENDS,
+    COUPLERS,
     GENERIC,
     HostActor,
     get_backend,
     register_backend,
     register_coupler,
 )
+from robosimstudio.specs.registries import DOMAINS, ENGINES
+from tests.fixtures.registries import restored
 
 TIER = "fast"
 """No GPU and no SuperDex: composition is index arithmetic plus one stub class."""
@@ -157,6 +161,22 @@ TABLE = SimRequirements(domain="static")
 
 def _register_stub(alias="probe_host"):
     return register_backend(alias, cls=_StubHostSolver, supports=("particles",), host_engine=True)
+
+
+@contextlib.contextmanager
+def _a_stub_host():
+    """The stub host backend registered for the block, and the backends put back as they were after it.
+
+    ``BACKENDS`` is filled by the engine and domain scans, not by a load of its
+    own, so those run first: a snapshot taken before them is an empty registry,
+    and putting it back after a block that ran them empties the registry for
+    good -- the scans are done and will not run again.
+    """
+    ENGINES.load()
+    DOMAINS.load()
+    with restored(BACKENDS):
+        _register_stub()
+        yield
 
 
 # --------------------------------------------------------------------------- specs
@@ -278,6 +298,7 @@ class TestHostIslandComposition(unittest.TestCase):
         from robosimstudio.scene.physics.couplers import CouplerBuild, build_coupled
         from robosimstudio.scene.physics.islands import Island
 
+        self.enterContext(restored(COUPLERS))
         register_coupler("orphaned_kind")
         islands = [
             Island(name="a", backend=backend("mujoco"), solver_class="x"),
@@ -295,8 +316,7 @@ class TestHostIslandComposition(unittest.TestCase):
             build_coupled(ctx)
 
     def test_partition_marks_host_islands_and_keeps_statics_for_newton(self):
-        _register_stub()
-        try:
+        with _a_stub_host():
             arrangement = ArrangementSpec(
                 backends=(
                     ("articulated", backend("mujoco")),
@@ -325,8 +345,6 @@ class TestHostIslandComposition(unittest.TestCase):
             channels = _channels(graph, islands, None, model)
             hosted = {c.destination for c in channels if c.destination == host.name}
             self.assertEqual(hosted, {host.name})
-        finally:
-            BACKENDS._items.pop("probe_host", None)
 
     def test_a_body_on_a_newton_particle_island_is_mirrored_into_the_host_it_touches(self):
         """GENERIC puts a free or static cube on VBD, which integrates particles too.
@@ -338,8 +356,7 @@ class TestHostIslandComposition(unittest.TestCase):
         """
         from robosimstudio.scene.physics import build_graph
 
-        _register_stub()
-        try:
+        with _a_stub_host():
             arrangement = ArrangementSpec(backends=(("soft", backend("probe_host")), ("*", backend("vbd"))))
             model = _model(bodies=1, shapes=2, particles=18)
             cube = SimRequirements(domain="rigid", contacts=contacts_with("surface"))
@@ -363,15 +380,12 @@ class TestHostIslandComposition(unittest.TestCase):
             )
             self.assertIn(1, mirrors, "the table, as before")
             self.assertEqual(["blob"], [a["name"] for a in recipe["actors"]], "the towel is VBD's, not the host's")
-        finally:
-            BACKENDS._items.pop("probe_host", None)
 
     def test_a_host_only_scene_composes_with_no_newton_solver(self):
         """The whole seam, end to end, engine stubbed: split, recipe, schedule
         stage, manifest -- and nothing Newton-side constructed at all."""
-        _register_stub()
-        _StubHostSolver.built = []
-        try:
+        with _a_stub_host():
+            _StubHostSolver.built = []
             arrangement = ArrangementSpec(backends=(("soft", backend("probe_host", substeps=3)),))
             model = _model(bodies=0, shapes=2, particles=9, site_shapes=1)
             lone = SimRequirements(domain="soft", contacts=contacts_with("surface"))
@@ -401,8 +415,6 @@ class TestHostIslandComposition(unittest.TestCase):
             self.assertNotIn("robosimstudio", json.dumps(data))
             again = PhysicsManifest.from_dict(data)
             self.assertEqual(again.island(record.name).host_recipe, recipe)
-        finally:
-            BACKENDS._items.pop("probe_host", None)
 
 
 def _tet_mesh_module():
