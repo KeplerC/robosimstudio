@@ -18,18 +18,10 @@ from robosimstudio_bench.goals.reward import Fraction, Gated, Progress, Scored, 
 from robosimstudio_bench.taskdoc.parse import parse_problem
 from robosimstudio_bench.taskdoc.reader import parse_sexp
 from robosimstudio_bench.taskdoc.typecheck import _check_reward
+from tests.fixtures.taskdocs import TWO
 
 TIER = "fast"
 """Leaves and scripted contexts: no scene, no GPU."""
-
-
-TWO = """
-(define (problem two)
-  (:objects a b - block)
-  (:regions (square (:ranges ((0.05 -0.20 0.15 -0.10)))))
-  (:goal (and (>= (containment a square) 1.0) (>= (containment b square) 1.0)))
-  (:reward (progress (containment REWARDED square) (:gate 1.0) (:gated-by (<= (speed GATED) 0.02)))))
-"""
 
 
 def _fake_bind(condition, doc, catalog, task=""):

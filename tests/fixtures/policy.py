@@ -25,7 +25,7 @@ import numpy as np
 from robosimstudio_policy_agent.ik import IKBackend
 from tests.fixtures.arrays import host
 
-__all__ = ["InlineBus", "StubSolver", "ik_backend", "pose"]
+__all__ = ["InlineBus", "StubSolver", "ik_backend"]
 
 
 class InlineBus:
@@ -43,8 +43,7 @@ class StubSolver:
     """A one-joint IK solver that misses every solve by ``(position_error, rotation_error)``.
 
     It returns its seed unchanged as the answer, so a line it plans is the seed
-    repeated, and ``solves`` keeps each solve's ``roll`` so a test can see
-    which contract it was asked under.
+    repeated.
     """
 
     capabilities = frozenset()
@@ -52,11 +51,9 @@ class StubSolver:
 
     def __init__(self, position_error: float = 0.0, rotation_error: float = 0.0) -> None:
         self.errors = (float(position_error), float(rotation_error))
-        self.solves: list[str] = []
 
     def solve(self, seed, position, quat_xyzw, *, roll="free", active=None, iterations=0):
-        del position, quat_xyzw, active, iterations
-        self.solves.append(roll)
+        del position, quat_xyzw, roll, active, iterations
         seed = np.asarray(seed, dtype=np.float64).reshape(-1, 1)
         return seed, np.tile(self.errors, (seed.shape[0], 1))
 
@@ -99,8 +96,3 @@ def ik_backend(
     )
     backend.prefer_planned = prefer_planned
     return backend
-
-
-def pose(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> dict:
-    """An ``Se3Pose`` at ``(x, y, z)`` with the identity rotation."""
-    return {"position": {"x": x, "y": y, "z": z}, "rotation": {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}}
