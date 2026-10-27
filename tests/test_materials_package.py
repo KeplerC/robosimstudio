@@ -41,7 +41,6 @@ what a fresh *process* sees.
 
 from __future__ import annotations
 
-import functools
 import json
 import os
 import subprocess
@@ -52,7 +51,16 @@ from contextlib import ExitStack
 from pathlib import Path
 from textwrap import dedent
 
-from tests.fixtures.packs import MATERIALS, NEEDS, PYTHON_FLAGS, env_without, imports, in_parallel, materials_without
+from tests.fixtures.packs import (
+    MATERIALS,
+    NEEDS,
+    PYTHON_FLAGS,
+    env_without,
+    imports,
+    in_parallel,
+    materials_without,
+    once,
+)
 
 TIER = "fast"
 """No GPU. Imports the library in subprocesses; the one scene is built on the CPU."""
@@ -524,13 +532,15 @@ class TestTheLibraryIsWholeWithoutThePackage(unittest.TestCase):
         self.assertGreater(self.got["cube_z"], 0.15, "the cube was dropped from 200 mm and stepped five times")
 
 
-@functools.cache
+@once
 def _fresh() -> dict[str, subprocess.CompletedProcess]:
-    """Every fresh process this module reads, by name, all started together the first time a test asks for one.
+    """Every fresh process this module reads, by name, run the first time a test asks for one, and kept.
 
     Each claim still gets a process of its own, since each is about what a fresh
     process sees; seventeen of them one after another cost seventeen imports of
-    the library, and together they cost about one.
+    the library, and :func:`in_parallel` runs several at once. A failure is kept
+    as the answer too (:func:`once`), so one timeout is not relaunched for every
+    test after it.
     """
     import robosimstudio as rss
 

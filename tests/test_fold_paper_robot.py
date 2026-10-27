@@ -27,7 +27,7 @@ import unittest
 
 import numpy as np
 
-from tests.fixtures.examples import _run, scripts_module
+from tests.fixtures.examples import _run, scripts_modules
 from tests.fixtures.grasp import note, open_session, tick
 
 TIER = "medium"
@@ -51,8 +51,9 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         from robosimstudio.assetlib.vocabulary.measures import cloth_fold
         from robosimstudio_materials.paper import crease_angle
 
-        takes = scripts_module("recording.takes")
-        Film = scripts_module("recording.lockstep").Film
+        # Held open for the class: the take's drive imports the recording package's other modules as it runs.
+        takes, lockstep = cls.enterClassContext(scripts_modules("recording.takes", "recording.lockstep"))
+        Film = lockstep.Film
 
         cls.takes = takes
         cls.sim, kwargs = _run("03_materials/05_paper.py")

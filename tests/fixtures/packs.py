@@ -27,6 +27,7 @@ wherever it is installed and does not count when it is only lying somewhere.
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 import os
 import unittest
@@ -35,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 __all__ = [
     "HAS_ROD_PACK",
@@ -47,6 +49,7 @@ __all__ = [
     "in_parallel",
     "materials_without",
     "needs_rod_pack",
+    "once",
 ]
 
 MATERIALS = Path(__file__).resolve().parents[2] / "robosimstudio_materials"
@@ -157,17 +160,44 @@ def imports(path: Path) -> list[tuple[str, int]]:
 
 
 def in_parallel[T, R](fn: Callable[[T], R], items: Iterable[T]) -> list[R]:
-    """``[fn(item) for item in items]``, each on its own thread, in order.
+    """``[fn(item) for item in items]``, a few at a time on threads of their own, in order.
 
     For the claims that are each about a fresh *process*: every one still gets
-    a process of its own, but they start together rather than one after
-    another, so a module of a dozen of them costs about one.
+    a process of its own, but several run at once rather than one after
+    another. Bounded -- at most eight, and a quarter of the machine's CPUs --
+    because a tier already runs a module per worker, and a module that started
+    all of its eighteen interpreters together would be eighteen more.
     """
     items = list(items)
     if not items:
         return []
-    with ThreadPoolExecutor(max_workers=len(items)) as pool:
+    workers = min(len(items), max(2, (os.cpu_count() or 1) // 4), 8)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(fn, items))
+
+
+def once[R](fn: Callable[[], R]) -> Callable[[], R]:
+    """``fn``, run on the first call only, its answer -- or the exception it raised -- kept for every later one.
+
+    ``functools.cache`` keeps an answer but not a failure, so a module whose
+    fresh processes timed out once would start every one of them again for
+    each test that asks.
+    """
+    kept: list[tuple[bool, Any]] = []
+
+    @functools.wraps(fn)
+    def wrapper() -> R:
+        if not kept:
+            try:
+                kept.append((True, fn()))
+            except Exception as exc:
+                kept.append((False, exc))
+        ok, value = kept[0]
+        if not ok:
+            raise value
+        return value
+
+    return wrapper
 
 
 HAS_ROD_PACK = has_pack("rod")

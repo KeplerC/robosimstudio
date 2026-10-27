@@ -32,7 +32,6 @@ No GPU and no scene; the scenes that build and step without the pack are
 from __future__ import annotations
 
 import ast
-import functools
 import json
 import os
 import subprocess
@@ -41,7 +40,7 @@ import unittest
 from contextlib import ExitStack
 from pathlib import Path
 
-from tests.fixtures.packs import MATERIALS, PYTHON_FLAGS, env_without, has_pack, in_parallel
+from tests.fixtures.packs import MATERIALS, PYTHON_FLAGS, env_without, has_pack, in_parallel, once
 
 TIER = "fast"
 """Text, AST and registries. No GPU, no scene."""
@@ -429,13 +428,14 @@ class TestWithThePack(unittest.TestCase):
         self.assertEqual(("rod",), get_kind("point").substrates)
 
 
-@functools.cache
+@once
 def _fresh() -> dict[str, subprocess.CompletedProcess]:
-    """Every fresh process this module reads, by name, all started together the first time a test asks for one.
+    """Every fresh process this module reads, by name, run the first time a test asks for one, and kept.
 
     Each claim is about what a fresh process sees, so each keeps a process of its
-    own; started together, seven of them cost about one import of the library.
-    The questions asked with the pack are asked only of a checkout that carries it.
+    own; :func:`in_parallel` runs several at once, and a failure is kept as the
+    answer too (:func:`once`). The questions asked with the pack are asked only
+    of a checkout that carries it.
     """
     with ExitStack() as stack:
         runs = {"without": (REPORT, env_without(stack, "rod"))}
