@@ -13,11 +13,12 @@ builds it on a GPU; ``tests/test_scrub_bench`` drives the examples' task.
 
 from __future__ import annotations
 
-import ast
 import unittest
 from pathlib import Path
 
 import numpy as np
+
+from tests.fixtures.packs import imports
 
 TIER = "fast"
 """No GPU: registries, dataclasses and lattices on the host."""
@@ -347,26 +348,16 @@ class TestTheCatalogue(unittest.TestCase):
 
 
 class TestTheImportLaw(unittest.TestCase):
-    @staticmethod
-    def _imports(path: Path) -> set[str]:
-        out: set[str] = set()
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Import):
-                out.update(a.name for a in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                out.add(node.module)
-        return out
-
     def test_the_brush_names_the_library_and_the_rod_kind_only(self) -> None:
-        names = self._imports(MATERIALS / "brush.py")
+        names = {name for name, _ in imports(MATERIALS / "brush.py")}
         sibling = {n for n in names if n.startswith("robosimstudio_materials")}
-        self.assertEqual({"robosimstudio_materials.rod"}, sibling)
+        self.assertEqual({"robosimstudio_materials.rod"}, {".".join(n.split(".")[:2]) for n in sibling})
         self.assertFalse({n for n in names if n.split(".")[0].startswith("robosimstudio_") and n not in sibling})
 
     def test_the_rod_kind_never_names_the_brush(self) -> None:
         for path in sorted((MATERIALS / "rod").glob("*.py")):
             with self.subTest(module=path.name):
-                self.assertFalse(any("brush" in n for n in self._imports(path)))
+                self.assertFalse(any("brush" in name for name, _ in imports(path)))
 
 
 if __name__ == "__main__":

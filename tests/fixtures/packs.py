@@ -26,9 +26,12 @@ wherever it is installed and does not count when it is only lying somewhere.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import os
 import unittest
+from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -40,6 +43,8 @@ __all__ = [
     "PYTHON_FLAGS",
     "env_without",
     "has_pack",
+    "imports",
+    "in_parallel",
     "materials_without",
     "needs_rod_pack",
 ]
@@ -111,6 +116,58 @@ def env_without(stack: ExitStack, *names: str) -> dict[str, str]:
         "PYTHONPATH": os.pathsep.join(p for p in (str(site), inherited) if p),
         "CUDA_VISIBLE_DEVICES": "",
     }
+
+
+def _package_of(path: Path) -> list[str]:
+    """The dotted package ``path`` is a module of, as parts: every directory up that holds an ``__init__.py``."""
+    parts: list[str] = []
+    here = path.parent
+    while (here / "__init__.py").is_file():
+        parts.insert(0, here.name)
+        here = here.parent
+    return parts
+
+
+def imports(path: Path) -> list[tuple[str, int]]:
+    """Every module an ``import`` statement in ``path`` names, at any scope, with its line.
+
+    Absolute names, always: a relative import is resolved against the package
+    ``path`` lies in (read off the ``__init__.py`` files above it), so ``from
+    .cloth import resolve_selector`` inside a function of ``soft.py`` reads as
+    ``robosimstudio_materials.cloth`` -- the import the stand-alone law exists to
+    catch, and the one a check that matched only absolute names let through.
+    ``from a import b`` names ``a`` and, since ``b`` may be a module, ``a.b``
+    too: ``from . import cloth`` is an import of the cloth kind.
+    """
+    found: list[tuple[str, int]] = []
+    package = _package_of(path)
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            found.extend((alias.name, node.lineno) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                if node.level > len(package):
+                    raise ValueError(f"{path}:{node.lineno}: a relative import above the top package")
+                base = ".".join([*package[: len(package) - node.level + 1], *filter(None, [node.module])])
+            else:
+                base = node.module or ""
+            found.append((base, node.lineno))
+            found.extend((f"{base}.{alias.name}", node.lineno) for alias in node.names if alias.name != "*")
+    return found
+
+
+def in_parallel[T, R](fn: Callable[[T], R], items: Iterable[T]) -> list[R]:
+    """``[fn(item) for item in items]``, each on its own thread, in order.
+
+    For the claims that are each about a fresh *process*: every one still gets
+    a process of its own, but they start together rather than one after
+    another, so a module of a dozen of them costs about one.
+    """
+    items = list(items)
+    if not items:
+        return []
+    with ThreadPoolExecutor(max_workers=len(items)) as pool:
+        return list(pool.map(fn, items))
 
 
 HAS_ROD_PACK = has_pack("rod")

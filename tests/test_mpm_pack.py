@@ -13,11 +13,12 @@ nothing beside the library and nothing of each other).
 
 from __future__ import annotations
 
-import ast
 import unittest
 from pathlib import Path
 
 import numpy as np
+
+from tests.fixtures.packs import imports
 
 TIER = "fast"
 """No GPU: registries, dataclasses and a lattice sampled on the host."""
@@ -486,26 +487,16 @@ class TestTheRecords(unittest.TestCase):
 class TestTheSiblingLaw(unittest.TestCase):
     """The kinds import the shared package and the library, and nothing else of the materials."""
 
-    @staticmethod
-    def _imports(path: Path) -> list[str]:
-        found: list[str] = []
-        for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Import):
-                found.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                found.append("." * node.level + (node.module or ""))
-        return found
-
     def test_no_particle_kind_imports_another_kind(self) -> None:
         others = ("cloth", "soft", "rod", "paper")
         files = [MATERIALS / f"{kind}.py" for kind in KINDS] + sorted((MATERIALS / "mpm").glob("*.py"))
         for path in files:
             with self.subTest(file=path.name):
-                for module in self._imports(path):
+                for module, _ in imports(path):
                     for other in (*others, *KINDS):
                         self.assertFalse(
-                            module in (f".{other}", f"robosimstudio_materials.{other}")
-                            or module.startswith((f".{other}.", f"robosimstudio_materials.{other}.")),
+                            module == f"robosimstudio_materials.{other}"
+                            or module.startswith(f"robosimstudio_materials.{other}."),
                             f"{path.name} imports {module}",
                         )
                     self.assertFalse(

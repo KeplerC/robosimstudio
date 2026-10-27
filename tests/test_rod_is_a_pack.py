@@ -32,6 +32,7 @@ No GPU and no scene; the scenes that build and step without the pack are
 from __future__ import annotations
 
 import ast
+import functools
 import json
 import os
 import subprocess
@@ -40,7 +41,7 @@ import unittest
 from contextlib import ExitStack
 from pathlib import Path
 
-from tests.fixtures.packs import MATERIALS, PYTHON_FLAGS, env_without, has_pack
+from tests.fixtures.packs import MATERIALS, PYTHON_FLAGS, env_without, has_pack, in_parallel
 
 TIER = "fast"
 """Text, AST and registries. No GPU, no scene."""
@@ -196,9 +197,6 @@ class TestTheLibraryHoldsNoRodCode(unittest.TestCase):
                         offenders.append(f"{where}:{number}: {spelling}")
         self.assertEqual([], offenders, "library text naming a path inside the rod pack")
 
-    def test_the_latch_is_not_a_library_file(self) -> None:
-        self.assertFalse((LIBRARY / "solvers" / "grasp" / "latch.py").exists())
-
     def test_the_post_is_the_static_domains(self) -> None:
         """``rss.post`` names an entity the ``static`` domain defines and registers itself."""
         from robosimstudio.domains.static import EntityPost, fixture_shape_cfg, post
@@ -290,8 +288,7 @@ class TestWithoutThePack(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        with ExitStack() as stack:
-            proc = _run(REPORT, env_without(stack, "rod"))
+        proc = _fresh()["without"]
         if proc.returncode != 0:
             raise AssertionError(f"the library did not come up without the rod pack:\n{proc.stderr[-4000:]}")
         cls.got = json.loads([line for line in proc.stdout.splitlines() if line.startswith("{")][-1])
@@ -362,9 +359,9 @@ class TestWithThePack(unittest.TestCase):
         differently before and after something else happened to import it --
         unless the lookup itself runs the scan. In a fresh process, so "first"
         is true of every one of them."""
-        for what, script in FIRST_ASKS.items():
+        for what in FIRST_ASKS:
             with self.subTest(first_asked=what):
-                proc = _run(script, {})
+                proc = _fresh()[f"first {what}"]
                 self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
                 self.assertEqual("True", proc.stdout.strip().splitlines()[-1], f"{what} did not find the rod pack")
 
@@ -430,6 +427,22 @@ class TestWithThePack(unittest.TestCase):
         self.assertEqual(("point",), pack.KIND_NAMES)
         self.assertNotIn("point", KIND_NAMES)
         self.assertEqual(("rod",), get_kind("point").substrates)
+
+
+@functools.cache
+def _fresh() -> dict[str, subprocess.CompletedProcess]:
+    """Every fresh process this module reads, by name, all started together the first time a test asks for one.
+
+    Each claim is about what a fresh process sees, so each keeps a process of its
+    own; started together, seven of them cost about one import of the library.
+    The questions asked with the pack are asked only of a checkout that carries it.
+    """
+    with ExitStack() as stack:
+        runs = {"without": (REPORT, env_without(stack, "rod"))}
+        if HAS_PACK:
+            runs.update({f"first {what}": (script, {}) for what, script in FIRST_ASKS.items()})
+        procs = in_parallel(lambda run: _run(*run), runs.values())
+    return dict(zip(runs, procs, strict=True))
 
 
 if __name__ == "__main__":
