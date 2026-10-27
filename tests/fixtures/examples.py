@@ -71,6 +71,8 @@ NUMBERED = (
     "03_materials/11_granular.py",
     "03_materials/12_liquid.py",
     "03_materials/13_dough.py",
+    "03_materials/15_box.py",
+    "03_materials/16_carton.py",
     "04_extending/01_new_kind.py",
     "04_extending/02_suction.py",
     "06_tasks/03_granular_scored.py",

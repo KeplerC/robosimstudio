@@ -1,24 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The kinds of deformable thing the library ships: cloth, soft bodies, the rope, paper, bags, the brush, tape, cutting, the particle materials and water.
+"""The kinds of deformable thing the library ships: cloth, soft bodies, the rope, paper, cartons, bags, the brush, tape, cutting, the particle materials and water.
 
 A **kind** is one physical kind of thing, carried as one bundle: the spec that
 says what one is, the entity that builds it, the measures that read it, its
 materials and, where a foreign engine serves it, the variant that runs there.
 Each kind here is one module or one package -- ``cloth.py``, ``soft.py``,
 ``paper.py``, ``bag.py``, ``brush.py``, ``tape.py``, ``granular.py``, ``liquid.py``,
-``dough.py`` and ``water.py`` are read top to bottom, ``rod/`` and ``cutting/`` are packages -- and the base kinds stand alone:
+``dough.py`` and ``water.py`` are read top to bottom, ``rod/``, ``carton/`` and ``cutting/`` are packages -- and the base kinds stand alone:
 none of ``cloth``, ``soft`` and ``rod`` imports another. ``paper``, ``bag``, ``tape``
 and ``brush`` are built on another kind and say so: a sheet of paper is a cloth whose
 bending hinges yield, a bag is a cloth sewn into a pocket and a tape is a cloth stuck
 to a body, so each extends ``cloth.py``, and a brush's bristles are the rope's capsule
-chains on a handle, so it builds them with ``rod``'s own builder; a tree that ships
-paper, the bag or the tape ships cloth, and one that ships the brush ships the rope. The
+chains on a handle, so it builds them with ``rod``'s own builder; a carton's sheet model
+is paper laid out from a die-line, so ``carton`` extends ``paper.py``; a tree that ships
+paper, the bag or the tape ships cloth, one that ships the carton ships paper, and one that
+ships the brush ships the rope. The
 three particle kinds share one implementation in the ``mpm/`` package, which is
 not itself a kind: it registers no domain and no entity. ``cutting/`` carries the solver it
 drives, a vendored walk-on-spheres cage cutter (MIT), in ``cutting/cagecut/``.
 
 The kinds here: ``cloth`` (``rss.sheet``), ``soft`` (``rss.sponge``), ``rod``
-(``rss.rod``), ``paper`` (``rss.paper``), ``bag`` (``rss.bag``, a SuperDex shell
+(``rss.rod``), ``paper`` (``rss.paper``), ``carton`` (``rss.carton``, a box or blank cut to a die-line,
+as rigid panels on yielding crease hinges or as a creased sheet), ``bag`` (``rss.bag``, a SuperDex shell
 that collides with itself), ``brush`` (``rss.brush``), ``tape`` (``rss.tape``, a cloth stuck to a
 body by bonds that let go), ``cutting`` (``rss.cuttable`` and ``rss.knife``, a block a knife parts),
 and the three particle kinds on

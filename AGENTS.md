@@ -4,7 +4,7 @@ RoboSimStudio is a Newton-native simulation toolkit. Packages:
 
 - `robosimstudio/`: the core API; builds and steps scenes.
 - `robosimstudio_materials/`: the shipped kinds of deformable thing -- cloth,
-  soft bodies, the rope, paper, bags, the brush, tape, cutting, the granular, liquid and
+  soft bodies, the rope, paper, cartons, bags, the brush, tape, cutting, the granular, liquid and
   dough materials on the implicit MPM, and water on Genesis's SPH -- one module or
   package each; it imports only `robosimstudio`.
 - `robosimstudio_studio/`: a browser page over any scene.
@@ -23,12 +23,13 @@ RoboSimStudio is a Newton-native simulation toolkit. Packages:
    [`examples/live/REFERENCE.md`](examples/live/REFERENCE.md#frames-and-units)).
 3. `examples/`: numbered scripts, shortest first. `robosimstudio_materials/cloth.py`,
    `robosimstudio_materials/soft.py`, `robosimstudio_materials/rod/`,
-   `robosimstudio_materials/paper.py`, `robosimstudio_materials/bag.py`,
+   `robosimstudio_materials/paper.py`, `robosimstudio_materials/carton/`,
+   `robosimstudio_materials/bag.py`,
    `robosimstudio_materials/brush.py`, `robosimstudio_materials/tape.py`,
    `robosimstudio_materials/cutting/` (over a vendored walk-on-spheres cage cutter),
    `robosimstudio_materials/{granular,liquid,dough}.py` (over the shared
    `robosimstudio_materials/mpm/`) and `robosimstudio_materials/water.py` are the
-   shipped cloth, soft-body, rope, paper, bag, brush, tape, cutting, particle-material and
+   shipped cloth, soft-body, rope, paper, carton, bag, brush, tape, cutting, particle-material and
    water implementations; read them to see how each works.
 
 ## Checks

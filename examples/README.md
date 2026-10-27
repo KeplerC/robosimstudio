@@ -44,6 +44,10 @@
 |---|---|---|
 | <img src="03_materials/media/12_liquid.webp" width="240"> | <img src="03_materials/media/13_dough.webp" width="240"> | <img src="03_materials/media/14_water.webp" width="240"> |
 
+| [Box: cut the tape and open a flap](03_materials/15_box.py) | [Carton: fold a tray wall](03_materials/16_carton.py) | |
+|---|---|---|
+| <img src="03_materials/media/15_box.webp" width="240"> | <img src="03_materials/media/16_carton.webp" width="240"> | |
+
 ## [04 Robots and Kinds of Your Own](04_extending/README.md)
 
 | [Add a robot](04_extending/00_add_a_robot.py) | [A new kind](04_extending/01_new_kind.py) | [Pick up a plate](04_extending/02_suction.py) |

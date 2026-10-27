@@ -474,6 +474,10 @@ WELDS_ELSEWHERE = {
         "a cable's anchored end: a capsule inside the rod's own articulation, tied to the world by a weld "
         "VBD solves, not a static body of its own"
     ),
+    "robosimstudio_materials/carton/panels.py": (
+        "a carton held on a jig: its body is the root of its own crease hinges' articulation, welded at the root, "
+        "where weld_to_world's kinematic body would stand outside it"
+    ),
 }
 """The files that may add a fixed joint from the world themselves, and why."""
 
