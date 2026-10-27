@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The rod held to what it says: the four spawn ranges are independent, a rod
-whose centreline cannot be read does not publish 0 m, the grip shapes are
-found off one copy of ``shape_body``, and winding is measured about the axis
-as declared, not about a vertical line through its origin.
+"""The capsule-chain rod held to what it says, against stand-ins built without a scene.
 
-No GPU: the spawn is numpy and Warp's host quaternions, the entity is a
-stand-in built without a scene, and the measures are pure numpy.
+The four spawn ranges are independent, a rod whose centreline cannot be read
+does not publish 0 m, the grip shapes are found off one copy of
+``shape_body``, and the anchor latches with the hand it posed, and only when
+the rod permits a latch.
+
+No GPU: the spawn is numpy and Warp's host quaternions, and the entity is a
+stand-in for the arm, its solver and the pipeline.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from __future__ import annotations
 import math
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 
@@ -136,39 +139,62 @@ class TestTheBladesAreReadOnce(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
-def _helix(origin, u, v, d, *, turns: float = 2.0, radius: float = 0.03, n: int = 80) -> np.ndarray:
-    t = np.linspace(0.0, 2.0 * np.pi * turns, n)
-    return (
-        np.asarray(origin)
-        + np.outer(radius * np.cos(t), u)
-        + np.outer(radius * np.sin(t), v)
-        + np.outer(np.linspace(-0.02, 0.02, n), d)
+class _Array:
+    """A device array as far as ``_pose_anchor`` reads and writes one."""
+
+    def __init__(self, n: int) -> None:
+        self.values = np.zeros(n)
+
+    def numpy(self) -> np.ndarray:
+        return self.values.copy()
+
+    def assign(self, values) -> None:
+        self.values = np.asarray(values, dtype=np.float64)
+
+
+def _pose(*, allow_grasp_latch: bool, arm: str = "right"):
+    """``EntityRod._pose_anchor`` against a stand-in rod; returns the ``hold_segment`` mock."""
+    from robosimstudio_materials.rod import entity as rod
+
+    ik = SimpleNamespace(
+        solve_q=lambda seed, target, approach: np.zeros(4),
+        fk_ee=lambda q: (np.zeros(3), None),
     )
+    index = SimpleNamespace(arm_coords=(0, 1, 2), gripper_coords=(3,))
+    embodiment = SimpleNamespace(iks={arm: ik}, arms={arm: index})
+    hold = mock.Mock()
+    fake = SimpleNamespace(
+        spec=SimpleNamespace(anchor_grasp=(0.0, 0.0, 0.0), anchor_grip=0.0, allow_grasp_latch=allow_grasp_latch),
+        embodiment=embodiment,
+        worlds=None,
+        _fleet_model=None,
+        _hold_flag=object(),
+        _anchor_arm=lambda: arm,
+        placed=lambda pose: np.asarray(pose, dtype=np.float64),
+        _coord=lambda c, world: int(c),
+        hold_segment=hold,
+    )
+    state = SimpleNamespace(joint_q=_Array(4), joint_qd=None, body_q=None)
+    pipeline = SimpleNamespace(
+        state_0=state,
+        state_1=SimpleNamespace(joint_q=_Array(4), body_q=None),
+        control=SimpleNamespace(joint_target_q=_Array(4)),
+    )
+    with mock.patch.object(rod.newton, "eval_fk"), mock.patch.object(rod.wp, "copy"):
+        rod.EntityRod._pose_anchor(fake, pipeline, world=0)
+    return hold, pipeline
 
 
-class TestWindingIsAboutTheDeclaredAxis(unittest.TestCase):
-    """``rod/measures.py``: a horizontal axis (a hook's) counts its turns."""
+class TestTheAnchorLatchesTheHandItPosed(unittest.TestCase):
+    """``rod/entity.py``: the anchor's latch follows ``_anchor_arm`` and ``allow_grasp_latch``."""
 
-    def test_a_horizontal_axis(self) -> None:
-        from robosimstudio_materials.rod import measures
+    def test_the_latch_is_on_the_resolved_arm(self) -> None:
+        hold, pipeline = _pose(allow_grasp_latch=True, arm="right")
+        hold.assert_called_once_with(True, pipeline.state_0, arm="right", slot=1, world=0)
 
-        origin = np.array([0.3, -0.1, 0.2])
-        wrap = _helix(origin, np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0]))
-        got = measures._winding_about_axis(wrap, {"origin": origin, "direction": (1.0, 0.0, 0.0)})
-        self.assertAlmostEqual(got["turns"], 2.0, delta=0.05)
-        along = np.array([0.05, 0.0, 0.0])
-        ends = np.stack([origin - along, origin + along])
-        self.assertAlmostEqual(measures._winding_about_rod(wrap, {"axis": ends})["turns"], 2.0, delta=0.05)
-
-    def test_a_vertical_axis_reads_as_before(self) -> None:
-        from robosimstudio_materials.rod import measures
-
-        origin = np.array([0.1, 0.2, 0.05])
-        wrap = _helix(origin, np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]))
-        before = measures.winding_turns(wrap, origin[:2])
-        self.assertEqual(
-            measures._winding_about_axis(wrap, {"origin": origin, "direction": (0, 0, 1)})["turns"], before[0]
-        )
+    def test_a_contact_only_cable_is_not_latched(self) -> None:
+        hold, _ = _pose(allow_grasp_latch=False)
+        hold.assert_not_called()
 
 
 if __name__ == "__main__":

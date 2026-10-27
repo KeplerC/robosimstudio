@@ -22,9 +22,24 @@ TIER = "fast"
 """Reads the take table and lists files; imports nothing of the library."""
 
 REPO = Path(__file__).resolve().parents[1]
+# scripts/ holds packages named like libraries (recording, calibration), and a tier
+# runs in one process: its path entry comes off once these are imported. A later
+# lazy import of a sibling still resolves, through the package's own __path__.
 sys.path.insert(0, str(REPO / "scripts"))
+try:
+    from recording.takes import KEPT, TAKES
+finally:
+    sys.path.remove(str(REPO / "scripts"))
 
-from recording.takes import KEPT, TAKES  # noqa: E402
+
+def setUpModule() -> None:
+    """The recorder's own tests import ``record_examples`` as they run: scripts/ is on the path for them alone."""
+    sys.path.insert(0, str(REPO / "scripts"))
+
+
+def tearDownModule() -> None:
+    sys.path.remove(str(REPO / "scripts"))
+
 
 NUMBERED = re.compile(r"^\d\d_\w+$")
 

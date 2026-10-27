@@ -23,10 +23,15 @@ TIER = "medium"
 """Builds twelve example scenes on one GPU, then seven scored scripts beside their materials, and steps none of them."""
 
 REPO = Path(__file__).resolve().parents[1]
+# scripts/ holds packages named like libraries (recording, calibration), and a tier
+# runs in one process: its path entry comes off once these are imported. A later
+# lazy import of a sibling still resolves, through the package's own __path__.
 sys.path.insert(0, str(REPO / "scripts"))
-
-from recording import takes  # noqa: E402
-from recording.beats import At, Drag, DragTo, Top, resolve  # noqa: E402
+try:
+    from recording import takes
+    from recording.beats import At, Drag, DragTo, Top, resolve
+finally:
+    sys.path.remove(str(REPO / "scripts"))
 
 TOLERANCE = 1e-6
 """[m]: the float32 a built body's pose is kept in, and nothing a hand would feel."""

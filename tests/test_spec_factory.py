@@ -146,5 +146,17 @@ class TestTheScoredBandExampleDeclaresItsBandAsAValue(unittest.TestCase):
                     module.main()
 
 
+class TestSpecHintsResolve(unittest.TestCase):
+    def test_get_type_hints_on_the_cloth_and_soft_specs(self) -> None:
+        import typing
+
+        from robosimstudio_materials.cloth import ClothSpec, HeldClothSpec
+        from robosimstudio_materials.soft import SoftSpec
+
+        for spec in (ClothSpec, HeldClothSpec, SoftSpec):
+            with self.subTest(spec=spec.__name__):
+                self.assertIn("name", typing.get_type_hints(spec))
+
+
 if __name__ == "__main__":
     unittest.main()

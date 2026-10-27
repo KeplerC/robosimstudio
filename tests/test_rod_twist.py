@@ -29,6 +29,8 @@ from __future__ import annotations
 import contextlib
 import unittest
 
+import numpy as np
+
 from tests.fixtures.examples import _run
 
 TIER = "medium"
@@ -177,6 +179,127 @@ class TestTheTwistPage(unittest.TestCase):
     def test_a_reset_forgets_the_roll(self) -> None:
         for name, turns in self.after_reset.items():
             self.assertLess(abs(turns), 0.02, name)
+
+
+# ---------------------------------------------------------------- the roll, on a scene of its own
+# The free ends of two hanging cables, one twisting ten times more easily than it
+# bends and one ten times less, are rolled a full turn and let go. Rolled, both
+# carry the same twist in their middle third -- a clamped cable driven at its tip
+# twists uniformly, 7 of 19 joints' worth of the turn, whatever its stiffness --
+# and both stay straight. Released, the stiff cable springs its roll out within
+# half a second and the soft one keeps most of it for seconds: the relaxation time
+# is ``twist_kd / twist_ke`` (0.06 / 0.4 = 0.15 s against 0.06 / 0.004 = 15 s),
+# which is where the twist stiffness shows and the thing a plug on the end of a
+# cable cares about.
+LENGTH = 0.30
+RADIUS = 0.006
+SEGMENTS = 20
+TOP = 0.45
+"""The cables hang from a clamp at this height [m], straight down, so gravity
+tensions them instead of bending them. Clamped level, a 0.3 m cable at
+``bend_ke`` 0.04 droops 156 mm at the tip (straightness 0.974), and rolling the
+tip of a drooped cantilever kinks it rather than twisting it: measured
+straightness 0.83 for both cables and whole-cable turn counts flipping sign
+step to step. Hanging, the roll is a roll."""
+BEND_KE = 0.04
+ROLL_STEPS = 120
+"""A full turn put into the tip over two seconds of scene, as a hand rolling a cable end would."""
+ROLL_UNIFORM_TURNS = 7.0 / (SEGMENTS - 1)
+"""What a full turn at the tip leaves in the middle third of a uniformly
+twisted chain: the 7 joints between capsules 6 and 13 of 19. Measured 0.368 and
+0.369 for the soft and the stiff cable, against 0.3684."""
+ROLL_RELEASE_STEPS = 60
+"""Measured after the release, middle-third turns soft / stiff: 0.367 / 0.243
+at 5 steps, 0.365 / 0.125 at 10, 0.357 / 0.007 at 30, 0.345 / 0.000 at 60,
+0.283 / 0.000 at 240; straightness 1.000 throughout."""
+
+
+def _roll_scene():
+    import robosimstudio as rss
+
+    scene = rss.Scene(cell="void", name="twist")
+    for name, x, twist_ke in (("soft_twist", -0.10, BEND_KE / 10), ("stiff_twist", 0.10, BEND_KE * 10)):
+        scene.add(
+            rss.rod(
+                name=name,
+                length=LENGTH,
+                radius=RADIUS,
+                segments=SEGMENTS,
+                at=(x, 0.0, TOP),
+                along=(0.0, 0.0, -1.0),
+                anchors=("start",),
+                bend_ke=BEND_KE,
+                twist_ke=twist_ke,
+            )
+        )
+    return scene.build()
+
+
+def _roll_tips(sim, rods, angle: float, *, max_step: float) -> None:
+    """Turn each cable's tip capsule about its own axis to ``angle``, through the entity's kinematic hold.
+
+    :meth:`EntityRod.roll` pins the tip -- inverse mass to zero and the kinematic
+    flag in the model and every island -- and writes its pose before each step.
+    A dynamic tip teleported each step instead injects a twist impulse at a
+    capsule whose polar inertia is 1e-8 kg*m^2, and both cables whipped into
+    loops within a quarter turn (measured straightness 0.78 at 30 steps).
+    """
+    for rod in rods:
+        rod.roll(sim.pipeline, angle, max_step=max_step)
+
+
+def _middle_turns(sim, rod) -> float:
+    from robosimstudio_materials.rod.measures import twist_turns
+
+    bodies = rod.bodies
+    middle = bodies[len(bodies) // 3 : 2 * len(bodies) // 3 + 1]
+    return twist_turns(sim.pipeline.state_0.body_q.numpy()[middle, 3:7])
+
+
+class TestARollTravelsAndAStiffTwistSpringsItOut(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        from robosimstudio_materials.rod.measures import straightness
+
+        cls.sim = _roll_scene()
+        cls.rods = [cls.sim.scene.by_name[n] for n in ("soft_twist", "stiff_twist")]
+        cls.sim.run(60).sync()
+        cls.before = [_middle_turns(cls.sim, r) for r in cls.rods]
+        for _ in range(ROLL_STEPS):
+            _roll_tips(cls.sim, cls.rods, 2.0 * np.pi, max_step=2.0 * np.pi / ROLL_STEPS)
+            cls.sim.run(1)
+        cls.sim.sync()
+        body_q = cls.sim.pipeline.state_0.body_q.numpy()
+        cls.rolled = [_middle_turns(cls.sim, r) for r in cls.rods]
+        cls.straight_rolled = [straightness(r.positions(body_q)) for r in cls.rods]
+        for rod in cls.rods:
+            rod.pin(cls.sim.pipeline, on=False)
+        cls.sim.run(ROLL_RELEASE_STEPS).sync()
+        body_q = cls.sim.pipeline.state_0.body_q.numpy()
+        cls.released = [_middle_turns(cls.sim, r) for r in cls.rods]
+        cls.straight_released = [straightness(r.positions(body_q)) for r in cls.rods]
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.sim.close()
+
+    def test_both_start_untwisted(self) -> None:
+        for name, turns in zip(("soft", "stiff"), self.before, strict=True):
+            self.assertLess(abs(turns), 0.02, name)
+
+    def test_the_roll_reaches_the_middle_of_both(self) -> None:
+        """A clamped cable driven at its tip twists uniformly: 7 of 19 joints' worth, whatever its stiffness."""
+        for name, turns in zip(("soft", "stiff"), self.rolled, strict=True):
+            self.assertAlmostEqual(abs(turns), ROLL_UNIFORM_TURNS, delta=0.05, msg=f"{name}: {self.rolled}")
+
+    def test_the_stiff_cable_springs_the_roll_out_and_the_soft_one_keeps_it(self) -> None:
+        soft, stiff = (abs(t) for t in self.released)
+        self.assertLess(stiff, 0.05, f"stiff twist after {ROLL_RELEASE_STEPS} released steps: {stiff:.3f}")
+        self.assertGreater(soft, 0.2, f"soft twist after {ROLL_RELEASE_STEPS} released steps: {soft:.3f}")
+
+    def test_both_stay_straight(self) -> None:
+        for name, value in zip(("soft", "stiff"), [*self.straight_rolled, *self.straight_released], strict=False):
+            self.assertGreater(value, 0.98, f"{name}: rolled {self.straight_rolled}, released {self.straight_released}")
 
 
 if __name__ == "__main__":

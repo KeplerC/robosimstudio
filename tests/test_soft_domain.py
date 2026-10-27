@@ -11,14 +11,23 @@ The stub host solver in this file is the second half of the acceptance story
 the extension-surface test tells: a *foreign engine* backend -- not a Newton
 solver at all -- declared in a test module, registered with ``host_engine=True``,
 composed, scheduled, and recorded, with no library edit beyond the seam itself.
+
+Last, two claims about soft bodies that need no GPU either: the tet-mesh
+example's O-ring is a conforming mesh, and only a body hosted by SuperDex is
+built inactive to Newton.
 """
 
 from __future__ import annotations
 
+import collections
+import contextlib
+import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from typing import ClassVar
 
 import newton
@@ -31,15 +40,20 @@ from robosimstudio.scene.physics.islands import partition
 from robosimstudio.specs import ArrangementSpec, PhysicsManifest, SimRequirements, backend, contacts_with
 from robosimstudio.specs.physics import (
     BACKENDS,
+    COUPLERS,
     GENERIC,
     HostActor,
     get_backend,
     register_backend,
     register_coupler,
 )
+from robosimstudio.specs.registries import DOMAINS, ENGINES
+from tests.fixtures.registries import restored
 
 TIER = "fast"
 """No GPU and no SuperDex: composition is index arithmetic plus one stub class."""
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 # --------------------------------------------------------------------------- stubs
@@ -147,6 +161,22 @@ TABLE = SimRequirements(domain="static")
 
 def _register_stub(alias="probe_host"):
     return register_backend(alias, cls=_StubHostSolver, supports=("particles",), host_engine=True)
+
+
+@contextlib.contextmanager
+def _a_stub_host():
+    """The stub host backend registered for the block, and the backends put back as they were after it.
+
+    ``BACKENDS`` is filled by the engine and domain scans, not by a load of its
+    own, so those run first: a snapshot taken before them is an empty registry,
+    and putting it back after a block that ran them empties the registry for
+    good -- the scans are done and will not run again.
+    """
+    ENGINES.load()
+    DOMAINS.load()
+    with restored(BACKENDS):
+        _register_stub()
+        yield
 
 
 # --------------------------------------------------------------------------- specs
@@ -268,6 +298,7 @@ class TestHostIslandComposition(unittest.TestCase):
         from robosimstudio.scene.physics.couplers import CouplerBuild, build_coupled
         from robosimstudio.scene.physics.islands import Island
 
+        self.enterContext(restored(COUPLERS))
         register_coupler("orphaned_kind")
         islands = [
             Island(name="a", backend=backend("mujoco"), solver_class="x"),
@@ -285,8 +316,7 @@ class TestHostIslandComposition(unittest.TestCase):
             build_coupled(ctx)
 
     def test_partition_marks_host_islands_and_keeps_statics_for_newton(self):
-        _register_stub()
-        try:
+        with _a_stub_host():
             arrangement = ArrangementSpec(
                 backends=(
                     ("articulated", backend("mujoco")),
@@ -315,8 +345,6 @@ class TestHostIslandComposition(unittest.TestCase):
             channels = _channels(graph, islands, None, model)
             hosted = {c.destination for c in channels if c.destination == host.name}
             self.assertEqual(hosted, {host.name})
-        finally:
-            BACKENDS._items.pop("probe_host", None)
 
     def test_a_body_on_a_newton_particle_island_is_mirrored_into_the_host_it_touches(self):
         """GENERIC puts a free or static cube on VBD, which integrates particles too.
@@ -328,8 +356,7 @@ class TestHostIslandComposition(unittest.TestCase):
         """
         from robosimstudio.scene.physics import build_graph
 
-        _register_stub()
-        try:
+        with _a_stub_host():
             arrangement = ArrangementSpec(backends=(("soft", backend("probe_host")), ("*", backend("vbd"))))
             model = _model(bodies=1, shapes=2, particles=18)
             cube = SimRequirements(domain="rigid", contacts=contacts_with("surface"))
@@ -353,15 +380,12 @@ class TestHostIslandComposition(unittest.TestCase):
             )
             self.assertIn(1, mirrors, "the table, as before")
             self.assertEqual(["blob"], [a["name"] for a in recipe["actors"]], "the towel is VBD's, not the host's")
-        finally:
-            BACKENDS._items.pop("probe_host", None)
 
     def test_a_host_only_scene_composes_with_no_newton_solver(self):
         """The whole seam, end to end, engine stubbed: split, recipe, schedule
         stage, manifest -- and nothing Newton-side constructed at all."""
-        _register_stub()
-        _StubHostSolver.built = []
-        try:
+        with _a_stub_host():
+            _StubHostSolver.built = []
             arrangement = ArrangementSpec(backends=(("soft", backend("probe_host", substeps=3)),))
             model = _model(bodies=0, shapes=2, particles=9, site_shapes=1)
             lone = SimRequirements(domain="soft", contacts=contacts_with("surface"))
@@ -391,8 +415,74 @@ class TestHostIslandComposition(unittest.TestCase):
             self.assertNotIn("robosimstudio", json.dumps(data))
             again = PhysicsManifest.from_dict(data)
             self.assertEqual(again.island(record.name).host_recipe, recipe)
-        finally:
-            BACKENDS._items.pop("probe_host", None)
+
+
+def _tet_mesh_module():
+    spec = importlib.util.spec_from_file_location("tet_mesh_example", ROOT / "examples/02_soft/01_tet_mesh.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestTheORingIsConforming(unittest.TestCase):
+    """The same 5-tet split in every segment left 112 interior faces looking like surface."""
+
+    def setUp(self):
+        self.module = _tet_mesh_module()
+
+    def _ring(self, around):
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "ring.npz"
+            self.module.write_o_ring(path, major=0.045, minor=0.011, around=around)
+            data = np.load(path)
+            return data["vertices"], data["tets"]
+
+    def test_only_the_sides_are_surface(self):
+        vertices, tets = self._ring(28)
+        faces = collections.Counter(
+            tuple(sorted(int(i) for i in face))
+            for a, b, c, d in tets
+            for face in ((a, b, c), (a, b, d), (a, c, d), (b, c, d))
+        )
+        # Four side quads a segment, two triangles a quad.
+        self.assertEqual(sum(1 for n in faces.values() if n == 1), 28 * 4 * 2)
+        self.assertTrue(all(n in (1, 2) for n in faces.values()))
+        a, b, c, d = (vertices[tets[:, i]] for i in range(4))
+        volumes = np.einsum("ij,ij->i", np.cross(b - a, c - a), d - a)
+        self.assertTrue(np.all(volumes > 0.0), "every tet keeps a positive rest volume")
+
+    def test_an_odd_loop_is_refused(self):
+        with self.assertRaises(ValueError):
+            self._ring(27)
+
+
+class TestOnlyAHostedBodyIsInactiveToNewton(unittest.TestCase):
+    """EntitySoft cleared ACTIVE whatever the backend; the class the arrangement picks decides now."""
+
+    def _flags(self, solver):
+        import newton
+
+        from robosimstudio.scene.registry import resolve_entity_class
+        from robosimstudio.specs.arrangement import ArrangementSpec, backend
+        from robosimstudio_materials.soft import SoftSpec
+
+        spec = SoftSpec(name="b", size=(0.04, 0.02, 0.01), cells=(4, 2, 2), settle_frames=0)
+        cls = resolve_entity_class(
+            spec, ArrangementSpec(control_hz=60.0, substeps=4, backends=(("soft", backend(solver)),))
+        )
+        builder = newton.ModelBuilder()
+        cls(spec).build(builder, None)
+        return cls, np.asarray(builder.particle_flags) & int(newton.ParticleFlags.ACTIVE)
+
+    def test_vbd_gets_an_active_body(self):
+        cls, active = self._flags("vbd")
+        self.assertEqual(cls.__name__, "EntitySoft")
+        self.assertTrue(np.all(active))
+
+    def test_superdex_gets_an_inactive_one(self):
+        cls, active = self._flags("superdex")
+        self.assertEqual(cls.__name__, "EntitySoftSuperdex")
+        self.assertFalse(np.any(active))
 
 
 if __name__ == "__main__":

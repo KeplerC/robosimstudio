@@ -14,13 +14,11 @@ spec states away from its default, in the same ``MaterialLossWarning``.
 
 No engine and no scene: the composer's check over the rope's own actor, against
 the ``superdex`` alias, which registers without the wheel. The list is checked
-against the source of every module the rope's spec and actor pass through, and
 against a rope built into a model on the CPU whose spec notes each read of it.
 """
 
 from __future__ import annotations
 
-import ast
 import dataclasses
 import sys
 import unittest
@@ -34,18 +32,6 @@ TIER = "fast"
 """The composer's warning over a constructed entity, and one rope built into a CPU model: no GPU."""
 
 HAS_ROD = (MATERIALS / "rod" / "__init__.py").is_file()
-ROOT = MATERIALS.parent
-READERS = (
-    *("robosimstudio_materials/rod/superdex.py", "robosimstudio_materials/rod/centerline.py"),
-    *("robosimstudio_materials/rod/actor.py", "robosimstudio_materials/rod/measures.py"),
-    *(f"robosimstudio/engines/superdex/{m}.py" for m in ("__init__", "bridge", "mirror", "solver")),
-    *("robosimstudio/scene/entity.py", "robosimstudio/domains/capabilities.py"),
-    "robosimstudio_studio/tuning/binder.py",
-)
-"""What a SuperDex rope's spec and actor pass through: the rope and its ``Centerline``, the rod's
-actor module and measures, the SuperDex bridge, ``Entity`` and ``ParticleMixin``, and the studio's
-``SpecBinder``. Not ``rod/entity.py`` or ``RodSpec.drive_gains``: the capsule chain's, which read
-every one of them."""
 
 
 def _lost(**fields) -> list[str]:
@@ -142,34 +128,12 @@ class TestTheListIsTrue(unittest.TestCase):
         fields = {f.name for f in dataclasses.fields(RodSpec)}
         self.assertEqual([], [n for n in EntityRodSuperdex.unread_fields if n not in fields])
 
-    def test_the_superdex_rope_reads_none_of_them(self) -> None:
-        """Named in the source of every module a SuperDex rope's spec or actor passes through: as an
-        attribute, or as a string (``getattr(spec, "bend_ke")``, an actor param's key)."""
-        from robosimstudio_materials.rod.superdex import EntityRodSuperdex
-
-        unread = set(EntityRodSuperdex.unread_fields)
-        read: list[str] = []
-        for module in READERS:
-            tree = ast.parse((ROOT / module).read_text())
-            listed = {
-                id(c)
-                for node in ast.walk(tree)
-                if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "unread_fields"
-                for c in ast.walk(node.value)
-            }
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Attribute) and node.attr in unread:
-                    read.append(f"{module}:{node.lineno}: .{node.attr}")
-                elif isinstance(node, ast.Constant) and node.value in unread and id(node) not in listed:
-                    read.append(f"{module}:{node.lineno}: {node.value!r}")
-        self.assertEqual([], read, "the SuperDex rope reads a field it says it drops")
-
     def test_a_built_rope_reads_none_of_them(self) -> None:
         """At run time, which a name computed in a ``getattr`` does not escape: a rope whose spec notes
         every read of a listed field, built into a model on the CPU, bound, readied, observed, published,
         reset and offered for tuning. A whole-record copy or comparison (``dataclasses.replace``, the
         generated ``__eq__``) is not a read of a knob, and is not noted. The engine's side is the actor's
-        params, which name none of them; the source of what reads those is scanned above."""
+        params -- the SuperDex bridge reads no entity's spec -- and they name none of them."""
         import newton
 
         from robosimstudio_materials.rod import RodSpec

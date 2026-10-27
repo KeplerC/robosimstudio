@@ -55,8 +55,11 @@ class TestTheRollerOwnsItsHandle(unittest.TestCase):
 
 class TestAHandleThatCannotBeBuiltIsRefused(unittest.TestCase):
     def test_the_defaults_build(self) -> None:
-        roller()
-        roller(radius=0.04, grip=0.07)
+        for spec in (roller(), roller(radius=0.04, grip=0.07)):
+            with self.subTest(radius=spec.shape.radius, grip=spec.grip):
+                (centre, half), *_ = handle_boxes(spec.grip)
+                self.assertGreater(centre[2] + half[2], spec.shape.radius, "the shoulder stands clear of the drum")
+                self.assertEqual("roller", spec.entity)
 
     def test_a_grip_that_puts_the_shoulder_under_the_axle(self) -> None:
         with self.assertRaisesRegex(ValueError, "grip"):
