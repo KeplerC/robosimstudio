@@ -518,10 +518,21 @@ class TestIslandCapabilitiesAreRegisteredFacts(unittest.TestCase):
         self.assertTrue(get_backend("mujoco").native_contacts)
         self.assertFalse(get_backend("vbd").native_contacts)
 
-    def test_no_alias_list_remains(self) -> None:
-        from robosimstudio.scene.physics import islands
+    def test_a_third_engine_states_its_facts_where_it_registers(self) -> None:
+        """The ratchet, as behaviour: an island reads a backend's two facts off its registration, so a backend
+        nobody listed anywhere gets the mirroring and the contacts it declared, and neither when it declares neither."""
+        from robosimstudio.scene.physics.islands import Island
 
-        self.assertFalse(hasattr(islands, "MAXIMAL_COORDINATE_ALIASES"), "a registered fact, not a list")
+        joints = np.arange(3, dtype=np.int32)
+        with restored(BACKENDS):
+            for alias, stated in (("probe_maximal", True), ("probe_reduced", False)):
+                register_backend(
+                    alias, cls="newton.solvers.SolverXPBD", maximal_coordinates=stated, native_contacts=stated
+                )
+                island = Island(name=alias, backend=backend(alias), solver_class="x", joints=joints)
+                with self.subTest(alias=alias):
+                    self.assertIs(stated, island.maximal_coordinates)
+                    self.assertIs(stated, island.uses_native_contacts())
 
 
 if __name__ == "__main__":
