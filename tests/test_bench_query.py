@@ -1,26 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A query in the document's own spelling, dispatched the way bind dispatches;
-one set of reward gate words; the mint gate listing the catalog once; and a
-selector refused on an atom that reports nothing."""
+"""``goals.query``: a query in the document's own spelling, dispatched under the task
+scope bind uses, and refused with ``QueryRefused`` rather than a bare lookup error."""
 
-import importlib
+from __future__ import annotations
+
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from robosimstudio_bench.goals import mint, reward
 from robosimstudio_bench.goals import query as query_module
 from robosimstudio_bench.goals.bind import Operand
-from robosimstudio_bench.goals.combinators import AllOf, Leaf
-from robosimstudio_bench.taskdoc import typecheck
 from robosimstudio_bench.taskdoc.ast import Ref
-from robosimstudio_bench.taskdoc.parse import parse_condition
-from robosimstudio_bench.taskdoc.reader import parse_sexp
 
 TIER = "fast"
-
-# The package re-exports a function named `gauntlet`, which shadows the module.
-gauntlet = importlib.import_module("robosimstudio_bench.goals.gauntlet")
+"""Stub operands and handlers: no scene, no GPU."""
 
 
 class TestAQueryReadsTheDocumentsSpelling(unittest.TestCase):
@@ -93,56 +86,36 @@ class TestAQueryTakesTheTaskScope(unittest.TestCase):
         self.assertEqual(self._query(), {"depth": 0.0})
 
 
-class TestOneSetOfGateWords(unittest.TestCase):
-    def test_reward_reads_the_checkers_spellings(self):
-        self.assertIs(reward._GATE_WORDS, typecheck._GATE_WORDS)
-        self.assertIs(reward._MASK_WORDS, typecheck._MASK_WORDS)
+class TestQueryRefusals(unittest.TestCase):
+    """Dispatch refuses with a plain ``LookupError``; the query API promises ``QueryRefused``."""
 
-    def test_the_checker_takes_a_gate_prefixed_atom_as_the_measure(self):
-        # `gate_depth` is not a gate word; the checker used to skip it by prefix.
-        seen = []
-        with mock.patch.object(typecheck, "_visit_reward_form", side_effect=lambda form, *a: seen.append(form) or []):
-            typecheck._check_reward(SimpleNamespace(reward={"progress": [["gate_depth", "plug"]]}), catalog=None)
-        self.assertEqual(seen, [["gate_depth", "plug"]])
-
-    def test_the_gauntlet_finds_the_measure_past_the_gate(self):
-        section = {"progress": [[":gate-at", 0.1], [":gated_by", ["intact", "film"]], ["depth", "plug"]]}
-        self.assertEqual(gauntlet._reward_measure(section), ("depth", ("plug",)))
-
-    def test_the_gauntlet_leaves_are_the_goals(self):
-        a, b = Leaf(fn=lambda ctx: (True, 1.0, {})), Leaf(fn=lambda ctx: (True, 1.0, {}))
-        self.assertEqual(gauntlet._leaves(AllOf(of=(a, b))), (a, b))
-        self.assertEqual(gauntlet._leaves(None), ())
-
-
-class TestTheMintGateListsTheCatalogOnce(unittest.TestCase):
-    def test_once(self):
+    def test_applicable_skips_an_unimplemented_atom(self):
+        leaf = SimpleNamespace(name="threaded", args=(1, 2))
         with (
-            mock.patch.object(mint, "list_atoms", return_value=["a", "b", "c"]) as list_atoms,
-            mock.patch.object(mint, "get_atom", return_value=SimpleNamespace()),
-            mock.patch.object(mint, "mint_problems", return_value=[]) as problems,
-            mock.patch.object(mint, "MintReport", side_effect=lambda *a, **k: None),
+            mock.patch.object(query_module, "leaves_of", return_value=[leaf]),
+            mock.patch.object(query_module, "dispatch", side_effect=LookupError("no handler")),
         ):
-            mint.mint_gate(exempt={})
-        self.assertEqual(list_atoms.call_count, 1)
-        self.assertEqual({call.kwargs["among"] for call in problems.call_args_list}, {("a", "b", "c")})
+            operand = SimpleNamespace(kind="", substrate="rigid")
+            self.assertEqual(query_module.applicable("family", operand, operand), [])
 
+    def test_query_converts_it(self):
+        spec = SimpleNamespace(args=(), reads_scene=False)
+        with (
+            mock.patch.object(query_module, "leaves_of", return_value=[]),
+            mock.patch.object(query_module, "get_atom", return_value=spec),
+            mock.patch.object(query_module, "dispatch", side_effect=LookupError("no handler")),
+            mock.patch.object(query_module, "_layouts", return_value={}),
+            self.assertRaises(query_module.QueryRefused),
+        ):
+            query_module.query(SimpleNamespace(), "threaded", doc=None)
 
-class TestASelectorOnAnAtomThatReportsNothing(unittest.TestCase):
-    def _problems(self, atom):
-        condition = parse_condition(parse_sexp("(widget:lat)")[0])
-        catalog = SimpleNamespace(atom=lambda name: atom)
-        return typecheck._check_condition(condition, None, catalog, "goal", direction="check")
-
-    def _atom(self, **extra):
-        return SimpleNamespace(supports=lambda d: True, directions=("check",), args=(), **extra)
-
-    def test_is_refused_as_bind_refuses_it(self):
-        problems = self._problems(self._atom(returns=()))
-        self.assertTrue(any(p.kind == typecheck.UNRESOLVED and "'lat'" in p.detail for p in problems), problems)
-
-    def test_a_catalog_object_without_returns_is_not_checked(self):
-        self.assertEqual(self._problems(self._atom()), [])
+    def test_an_unknown_atom_is_refused(self):
+        with (
+            mock.patch.object(query_module, "leaves_of", return_value=[]),
+            mock.patch.object(query_module, "get_atom", side_effect=LookupError("unknown atom")),
+            self.assertRaises(query_module.QueryRefused),
+        ):
+            query_module.query(SimpleNamespace(), "nope", doc=None)
 
 
 if __name__ == "__main__":

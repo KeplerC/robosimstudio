@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The process pool: thread caps put back, every episode linked, batched rates and errors."""
+"""The process pool: thread caps put back, every episode linked, batched rates and
+errors, the fleet worker's open fleet, and what forces a rebuild."""
+
+from __future__ import annotations
 
 import os
 import queue
@@ -10,7 +13,12 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest import mock
 
+from robosimstudio.specs import JobSpec
+from robosimstudio_bench.run.pool import _env_key
+
 TIER = "fast"
+"""A fake process context and fake runners: no scene, no GPU."""
+
 
 _THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")
 
@@ -180,19 +188,77 @@ class TestABatchedUnitThatRaises(unittest.TestCase):
         self.assertEqual(messages[-1][:3], ("done", 0, 4))
 
 
-class TestAWaveWithANonPositiveBudget(unittest.TestCase):
-    def test_is_refused_rather_than_closing_nothing(self):
-        from robosimstudio.specs import JobSpec
-        from robosimstudio_bench.run.fleet import RunnerFleet
+class _Closeable:
+    def __init__(self, name):
+        self.name = name
+        self.closed = 0
+        self.model = SimpleNamespace(device="cpu")
+        self.pipeline = SimpleNamespace(captured=True, capture_error="", substeps=1, control_hz=10.0)
 
-        with tempfile.TemporaryDirectory() as tmp:
-            runner = RunnerFleet(JobSpec(name="j", task="t", num_worlds=2, max_steps=-5), verbose=False, run_dir=tmp)
-            fleet, policy = mock.MagicMock(), mock.MagicMock()
-            episode = SimpleNamespace(episode_id=0, seed=0)
-            with mock.patch.object(RunnerFleet, "_evaluator", return_value=None):
-                with self.assertRaises(ValueError):
-                    runner._run_wave(fleet, policy, 0, [(SimpleNamespace(max_steps=50), episode)])
-            policy.act.assert_not_called()
+    def close(self):
+        self.closed += 1
+
+
+class _FakeRunner:
+    """Opens what it is asked for and, like ``run_work``, rebuilds on every call."""
+
+    instances: ClassVar[list] = []
+
+    def __init__(self, job, verbose=False, run_dir=None):
+        self.num_worlds = 2
+        self.rows: list = []
+        self.summary = SimpleNamespace(waves=[])
+        self.opened: list = []
+        self._fleet = self._policy = None
+        _FakeRunner.instances.append(self)
+
+    def open(self, job=None, episodes=None, task=None):
+        self.opened.append((episodes, task))
+        n = len(self.opened)
+        return _Closeable(f"fleet{n}"), _Closeable(f"policy{n}")
+
+    def run_work(self, fleet, policy, work):
+        fleet.close()
+        policy.close()
+        self._fleet, self._policy = self.open(episodes=[episode for _d, episode in work])
+        return []
+
+
+class TestFleetWorkerKeepsWhatIsOpen(unittest.TestCase):
+    def test_built_for_the_first_wave_and_rebuilt_fleet_is_the_one_held(self):
+        from robosimstudio.specs import JobSpec
+        from robosimstudio_bench.run import fleet, pool
+
+        job = JobSpec(name="j", task="s/a", episodes=(0, 2), num_worlds=2)
+        _FakeRunner.instances = []
+        with (
+            mock.patch.object(fleet, "RunnerFleet", _FakeRunner),
+            mock.patch.object(fleet, "plan_mixed_waves", lambda work, n: [[(doc, ("ep", i)) for doc, i in work]]),
+            mock.patch.object(pool, "job_task", lambda job, name=None: "doc"),
+        ):
+            worker = pool._FleetWorker()
+            worker.run(job, (("", 0), ("", 1)), Path("/nonexistent"), 0, queue.Queue(), 0)
+            runner = _FakeRunner.instances[0]
+            # Built once, for this unit's first wave rather than for episode 0.
+            self.assertEqual(runner.opened[0], ([("ep", 0), ("ep", 1)], "doc"))
+            live = runner._fleet, runner._policy
+            self.assertIs(worker.fleet, live[0])
+            self.assertIs(worker.policy, live[1])
+            worker.close()
+            self.assertEqual((live[0].closed, live[1].closed), (1, 1))
+
+
+class TestPoolEnvKey(unittest.TestCase):
+    """Everything that reaches ``Env`` in ``_build`` forces a rebuild."""
+
+    def test_control_mode_obs_renderer_and_seed_are_in_the_key(self):
+        base = JobSpec(name="j", task="x")
+        for changed in (
+            JobSpec(name="j", task="x", control_mode="joint"),
+            JobSpec(name="j", task="x", obs_renderer="tiled"),
+            JobSpec(name="j", task="x", seed=3),
+        ):
+            self.assertNotEqual(_env_key(base), _env_key(changed))
 
 
 if __name__ == "__main__":

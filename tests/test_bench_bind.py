@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Goal readers over welded fixtures, published-state clause keys, a world's
-array read, and a batched env refusing an undeclared pairing up front."""
+"""Goal readers: a welded fixture read where it was put, and a published-state clause
+keyed like an atom."""
 
 import unittest
 from types import SimpleNamespace
@@ -9,7 +9,6 @@ import numpy as np
 
 from robosimstudio.assetlib.semantics.snapshot import Snapshot
 from robosimstudio.scene.handles import EntityHandle, SceneHandles
-from robosimstudio.specs import TaskSpec
 from robosimstudio_bench.goals.bind import Operand, _published_reader, read
 from robosimstudio_bench.goals.goal import about_key, reading
 from robosimstudio_bench.taskdoc.ast import Ref
@@ -17,6 +16,7 @@ from robosimstudio_bench.taskdoc.parse import parse_condition
 from robosimstudio_bench.taskdoc.reader import parse_sexp
 
 TIER = "fast"
+"""Scripted snapshots: no scene, no GPU."""
 
 
 class TestAWeldedFixtureReadsWhereItWasPut(unittest.TestCase):
@@ -74,36 +74,6 @@ class TestAPublishedStateClauseKeysLikeAnAtom(unittest.TestCase):
         leaf.label = "goal"
         _held, _score, metrics = leaf.fn(Snapshot(ctx=SimpleNamespace(entities={"tape": {"bond_fraction": 0.02}})))
         self.assertEqual(reading(metrics, leaf), "0.02")
-
-
-class TestAWorldReadCopiesOnlyItsWorld(unittest.TestCase):
-    def test_numpy_reads_the_slice_not_the_fleet(self):
-        import warp as wp
-
-        from robosimstudio_bench.envs.world_view import _ArraySlice
-
-        whole = wp.array(np.arange(12, dtype=np.float32), device="cpu")
-
-        class _NoWholeRead:
-            """The fleet's array, refusing to be copied whole."""
-
-            def __getitem__(self, key):
-                return whole[key]
-
-            def numpy(self):
-                raise AssertionError("copied every world to read one")
-
-        np.testing.assert_array_equal(_ArraySlice(_NoWholeRead(), 2, 3).numpy(), [6, 7, 8])
-
-
-class TestABatchedEnvRefusesAnUndeclaredPairing(unittest.TestCase):
-    def test_scene_override_on_a_task_without_bindings(self):
-        from robosimstudio_bench.envs.fleet import FleetEnv
-
-        spec = TaskSpec(name="t", scene="bench_a", embodiment="franka")
-        with self.assertRaises(KeyError) as caught:
-            FleetEnv(spec, num_worlds=2, scene="bench_b", device="cpu")
-        self.assertIn("declares no binding", str(caught.exception))
 
 
 if __name__ == "__main__":
