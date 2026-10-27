@@ -26,7 +26,7 @@ from pathlib import Path
 
 from robosimstudio_studio.session import StudioConfig
 
-from .wire import DEFAULT_RUN_DIR, socket_path
+from .wire import DEFAULT_RUN_DIR, SocketRefused, socket_path
 
 __all__ = ["config_from_args", "create_parser", "main"]
 
@@ -82,7 +82,11 @@ def main(argv=None) -> int:
     # Every path is absolute by now. The process works in the scene file's directory, so a file the scene,
     # a helper or `eval` reads or writes by a relative path is beside scene.py wherever `up` was run from.
     os.chdir(server.path.parent)
-    server.serve()
+    try:
+        server.serve()
+    except SocketRefused as exc:  # the bind refused, or another page on the socket: one line, naming --sock
+        print(f"serve: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 

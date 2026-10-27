@@ -101,7 +101,7 @@ from .scenefile import (
     run_scene_file,
     stamp,
 )
-from .wire import ROUTINE_PLAYING, ControlSocket, ready_line
+from .wire import ROUTINE_PLAYING, ControlSocket, SocketRefused, ready_line
 
 __all__ = ["REFRESH_SECONDS", "SCAN_SECONDS", "STABLE_SECONDS", "LiveServer"]
 
@@ -946,8 +946,12 @@ class LiveServer:
             signal.signal(sig, lambda *_: setattr(self.session, "quit_requested", True))
         try:
             # Inside the try, so a socket that cannot be had -- another live
-            # server on it -- closes the page and exits before the ready line.
-            self.socket.start()
+            # server on it, a directory that will not take it -- closes the page
+            # and exits before the ready line, saying so in one line.
+            try:
+                self.socket.start()
+            except OSError as exc:
+                raise SocketRefused(self.sock_path, exc) from exc
             if self.config.share:
                 # Newton's viewer asked for the tunnel at construction; asking again
                 # returns the same URL once it is up, without blocking.
