@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The catalog's JSON forms: a material written and read back, and an asset's requirements as data.
+"""The catalog's JSON forms: a material written and read back, and an asset as an agent reads it.
 
 A material file is what the studio writes when somebody tunes one and what a
 task loads; the claim worth holding is the round trip -- every shipped material
@@ -7,6 +7,10 @@ written to JSON and read back is the record it was, down to its type and its
 hash -- and the three refusals that keep a file from loading as something it
 was not: a schema version the code does not know, a kind nothing registered,
 and a field the spec does not have.
+
+An asset's catalog form is pasted into a model's prompt, so it says what was
+stated and nothing else: an unset part is absent rather than empty, and a
+requirement reads as the same words it was declared in.
 """
 
 from __future__ import annotations
@@ -114,6 +118,52 @@ class TestAFileThatIsNotAMaterialIsRefused(unittest.TestCase):
         data = self._data()
         del data["kind"]
         self.assertEqual("cloth", kind_of(material_from_dict(data).spec))
+
+
+class TestTheCatalogFormSaysOnlyWhatWasStated(unittest.TestCase):
+    def test_a_bare_record_is_four_keys(self) -> None:
+        from robosimstudio.assetlib import AssetRecord, asset_to_dict
+
+        self.assertEqual(
+            {"name": "mug", "substrate": "rigid", "summary": "A mug.", "kinds": []},
+            asset_to_dict(AssetRecord(name="mug", summary="A mug.")),
+        )
+
+    def test_kinds_are_listed_once_each_and_sorted(self) -> None:
+        from robosimstudio.assetlib import AssetRecord, asset_to_dict
+        from robosimstudio.assetlib.semantics import FeatureSpec
+
+        features = tuple(FeatureSpec(name=f"f{i}", kind=kind) for i, kind in enumerate(("set", "grasp", "set")))
+        out = asset_to_dict(AssetRecord(name="x", summary="s", features=features))
+        self.assertEqual(sorted({"set", "grasp"}), out["kinds"])
+        self.assertEqual(["f0", "f1", "f2"], [f["name"] for f in out["features"]])
+
+    def test_requirements_left_unset_are_absent(self) -> None:
+        from robosimstudio.specs import SimRequirements
+        from robosimstudio.specs.declare import sim_to_dict
+
+        self.assertEqual({"domain": "cloth"}, sim_to_dict(SimRequirements(domain="cloth")))
+
+    def test_every_stated_requirement_reads_back_as_it_was_declared(self) -> None:
+        from robosimstudio.specs import SimRequirements, backend, contacts_with
+        from robosimstudio.specs.declare import sim_to_dict
+
+        spec = SimRequirements(
+            domain="cloth",
+            contacts=contacts_with("surface", "hands", coupling="one_way"),
+            contributes_hooks=("bonds",),
+            self_contact=True,
+            backend=backend("vbd", substeps=4, iterations=40),
+            notes="measured",
+        )
+        out = json.loads(json.dumps(sim_to_dict(spec)))
+        self.assertEqual(
+            [{"with": "surface", "coupling": "one_way"}, {"with": "hands", "coupling": "one_way"}], out["contacts"]
+        )
+        self.assertEqual(["bonds"], out["contributes_hooks"])
+        self.assertIs(True, out["self_contact"])
+        self.assertEqual({"solver": "vbd", "params": {"iterations": 40}, "substeps": 4}, out["backend"])
+        self.assertEqual("measured", out["notes"])
 
 
 if __name__ == "__main__":
