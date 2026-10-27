@@ -130,13 +130,17 @@ def fit_camera(
     best, behind, fits = None, None, []
     directions = [np.array(d, dtype=np.float64) for d in _sphere(26)]
 
-    def search(away: bool) -> None:
-        """Fit from cameras all round the points, each looking at their centre -- or, ``away``, from it."""
+    def search(away: bool, settled_below: float = 0.0) -> None:
+        """Fit from cameras all round the points, each looking at their centre -- or, ``away``, from it.
+
+        Away, from the nearer distance alone, and only until a fit from behind comes in under
+        ``settled_below``: one is all the mirrored verdict asks for.
+        """
         nonlocal behind
         for fov in [fov_y] if fov_y else (30.0, 50.0, 75.0):
             f = 0.5 * height / math.tan(math.radians(fov) * 0.5)
             for direction in directions:
-                for distance in (2.5, 5.0):
+                for distance in (2.5,) if away else (2.5, 5.0):
                     eye = centre + direction * spread * distance
                     rot = _look_rotation(eye, 2.0 * eye - centre if away else centre)
                     x0 = np.concatenate(
@@ -148,6 +152,8 @@ def fit_camera(
                     if (depth <= 0).mean() > 0.5:
                         # seen from behind: a fit there means one axis of the points is flipped, or pairs are crossed
                         behind = cost if behind is None else min(behind, cost)
+                        if behind < settled_below:
+                            return
                         continue
                     fits.append((cost, sol.x, int((depth <= 0).sum())))
 
@@ -156,12 +162,15 @@ def fit_camera(
     search(away=False)
     front = min((fit[0] for fit in fits), default=math.inf)
     pixel_spread = float(np.sqrt(np.mean(np.sum((pixels - pixels.mean(axis=0)) ** 2, axis=1))))
-    if (behind is None or behind >= BEHIND_BETTER * front) and math.sqrt(2.0 * front) > MIRROR_MISS * pixel_spread:
-        # A fit that misses as a mirrored set's does, and no start met a better one from behind -- which a
-        # field of view held fixed can leave none of a path to, as no start's points ever cross the image
-        # plane, and a start that drifted behind and stopped short says nothing either way: look for it
-        # from behind, before passing a mirrored set off as a fit some pixels out.
-        search(away=True)
+    settled = behind is not None and behind < BEHIND_BETTER * front
+    if front > 1.0 and not settled and math.sqrt(2.0 * front) > MIRROR_MISS * pixel_spread:
+        # A fit poor enough to be called mirrored, missing as a mirrored set's does, and no start met a better
+        # one from behind -- which a field of view held fixed can leave none of a path to, as no start's points
+        # ever cross the image plane, and a start that drifted behind and stopped short says nothing either
+        # way: look for it from behind, before passing a mirrored set off as a fit some pixels out. One
+        # distance finds it from every one of the 45 mirrored sets MIRROR_MISS was measured on, and the
+        # search stops at the first, so a mirrored set pays a few solves and a poor true one half a search.
+        search(away=True, settled_below=BEHIND_BETTER * front)
     if fits:
         # the lowest error, unless a fit with every point in front is nearly as good: a point that falls behind is
         # a wrong pair to name, not a pose to prefer over a whole set that fits
