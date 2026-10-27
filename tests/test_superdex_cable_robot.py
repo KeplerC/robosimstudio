@@ -33,7 +33,6 @@ TIER = "medium"
 """Two builds of the example on one GPU, each driven through its page for about 6 s of scene time."""
 
 HAS_SUPERDEX = importlib.util.find_spec("superdex") is not None
-PORTS = (9781, 9782)
 GRIP_AMOUNT = 0.80
 """What the example tells a person to slide **Grip amount** to: 0.20 of the jaws' 94 mm is 19 mm."""
 CLOSE_AT = (0.550, -0.011, 0.771)
@@ -43,14 +42,14 @@ LIFT = 0.12
 """How far the hand is dragged up once the jaws are on it [m]."""
 
 
-def _drive(grip: float, port: int, *, ramp: float = 0.8) -> dict:
+def _drive(grip: float, *, ramp: float = 0.8) -> dict:
     """The page's gesture: the gizmo down, the slider to ``grip`` over ``ramp`` s, the gizmo up, held 2 s."""
     from tests.fixtures.examples import _run
     from tests.fixtures.grasp import go, open_session, tick
 
     sim, kwargs = _run("tests/scenes/02_superdex.py")
     cable = sim["cable"]
-    session = open_session(sim, port, kwargs.get("page"))
+    session = open_session(sim, 0, kwargs.get("page"))
     arm = session.arms["right"]
     bridge = cable.entity.bridge
     fingers = {sim.model.body_label.index(n) for n in sim.model.body_label if "right_link_" in n and "finger" in n}
@@ -110,7 +109,7 @@ class TestTheHandLiftsTheSuperdexCable(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.run_ = _drive(GRIP_AMOUNT, PORTS[0])
+        cls.run_ = _drive(GRIP_AMOUNT)
         note(f"the SuperDex cable under the hand: {cls.run_['ms']:.1f} ms a control step")
 
     def test_the_cable_is_on_superdex_and_the_fingers_drive_it_by_pose(self) -> None:
@@ -152,7 +151,7 @@ class TestCloseCutsThroughIt(unittest.TestCase):
     """
 
     def test_close_shuts_the_jaws_through_the_cable(self) -> None:
-        run = _drive(1.0, PORTS[1])
+        run = _drive(1.0)
         self.assertLess(run["width"], 0.003, f"the jaws stopped at {run['width'] * 1e3:.1f} mm")
 
 

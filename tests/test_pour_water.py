@@ -158,7 +158,7 @@ def _pour(sim, session, *, tilt: float = TILT, aside: float = 0.0) -> dict:
     return out
 
 
-def _drive(port: int, example: str = "03_materials/14_water.py", **kw) -> tuple:
+def _drive(example: str = "03_materials/14_water.py", **kw) -> tuple:
     """Build ``example``, time its step, open its page and pour. Returns ``(opened, ms, result)``.
 
     ``opened`` is what the example handed the studio: a ``Sim``, or the scored example's ``Env``.
@@ -172,7 +172,7 @@ def _drive(port: int, example: str = "03_materials/14_water.py", **kw) -> tuple:
     t = time.perf_counter()
     sim.run(60).sync()
     ms = 1e3 * (time.perf_counter() - t) / 60
-    session = open_session(opened, port, kwargs.get("page"))
+    session = open_session(opened, 0, kwargs.get("page"))
     tick(session, 30)
     try:
         result = _pour(sim, session, **kw)
@@ -187,7 +187,7 @@ class TestTheHandPoursTheWater(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, cls.ms_per_step, cls.result = _drive(9671)
+        cls.sim, cls.ms_per_step, cls.result = _drive()
         note(f"the pour: {cls.ms_per_step:.1f} ms per control step")
 
     def test_the_fingers_closed_on_the_cup(self) -> None:
@@ -243,7 +243,7 @@ class TestAShallowTiltPoursNothing(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, _ms, cls.result = _drive(9672, tilt=60.0)
+        cls.sim, _ms, cls.result = _drive(tilt=60.0)
 
     def test_the_water_stayed_in_the_cup(self) -> None:
         r = self.result
@@ -259,7 +259,7 @@ class TestPouringAsideSpillsIt(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.sim, _ms, cls.result = _drive(9673, aside=0.10)
+        cls.sim, _ms, cls.result = _drive(aside=0.10)
 
     def test_the_water_is_on_the_bench_not_in_the_glass(self) -> None:
         r = self.result
@@ -273,7 +273,7 @@ class TestTheTaskGoalTurnsTrue(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.env, cls.ms_per_step, cls.result = _drive(9674, "06_tasks/10_water_scored.py")
+        cls.env, cls.ms_per_step, cls.result = _drive("06_tasks/10_water_scored.py")
 
     def test_the_goal_is_met(self) -> None:
         _, _, info = self.env.evaluate()

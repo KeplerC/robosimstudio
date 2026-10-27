@@ -27,9 +27,6 @@ from tests.fixtures.grasp import go, note, open_session, tick
 TIER = "medium"
 """One GPU: the example built three times, twice driven through its page at about 11 ms a control step."""
 
-PORT = 9841
-DULL_PORT = 9842
-ALL_PORT = 9844
 WORK = np.array([0.6, 0.0, 0.75])
 """``bench_075``'s work-surface origin in world [m]."""
 TOFU_Y = -0.16
@@ -122,11 +119,11 @@ def replay(sim, tofu, frames: list) -> dict:
     return out
 
 
-def _drive(port: int, *, dull: bool) -> dict:
+def _drive(*, dull: bool) -> dict:
     """Build the example and drive its page through the cut, holding 15 mm over the board on the way down."""
     sim, kwargs = _run("03_materials/10_cutting.py")
     tofu, knife = sim["tofu"].entity, sim["knife"]
-    session = open_session(sim, port, kwargs.get("page"))
+    session = open_session(sim, 0, kwargs.get("page"))
     frames: list = []
     session.each_step(
         lambda: frames.append((np.array(session.env.state.particle_q.numpy(), dtype=np.float32), tofu._surface[0]))
@@ -148,7 +145,7 @@ class TestTheHandCutsTheTofu(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.got = _drive(PORT, dull=False)
+        cls.got = _drive(dull=False)
         note(f"cutting the tofu: {cls.got['drive_ms']:.1f} ms per control step")
 
     def test_the_right_hand_starts_over_the_handle_and_gets_there(self) -> None:
@@ -194,7 +191,7 @@ class TestADullBladeDoesNotPartIt(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.got = _drive(DULL_PORT, dull=True)
+        cls.got = _drive(dull=True)
 
     def test_nothing_is_cut(self) -> None:
         self.assertEqual(1, self.got["pieces"])
@@ -222,7 +219,7 @@ class TestTheWholePageOpens(unittest.TestCase):
         from robosimstudio_studio.session import StudioConfig, StudioSession, panel_key
 
         sim, kwargs = _run("03_materials/10_cutting.py")
-        session = StudioSession(sim, config=StudioConfig(port=ALL_PORT, panels="all", speed="max", live=False))
+        session = StudioSession(sim, config=StudioConfig(port=0, panels="all", speed="max", live=False))
         try:
             kwargs["page"](session)
             session.begin_run()

@@ -29,7 +29,6 @@ TIER = "medium"
 BENCH = np.array([0.6, 0.0, 0.728])
 """``bench_0728``'s surface frame in world [m]; the example's numbers are in it."""
 
-FLAP_PORT = 9733
 SPEED = 0.10
 """The cursor's walk [m/s]; the panel's setpoint law paces the hand under it."""
 
@@ -64,7 +63,7 @@ class TestTheHandClosesTheFlap(unittest.TestCase):
         t = time.perf_counter()
         sim.run(60).sync()
         cls.ms_per_step = 1e3 * (time.perf_counter() - t) / 60
-        cls.session = session = open_session(sim, FLAP_PORT, kwargs.get("page"))
+        cls.session = session = open_session(sim, 0, kwargs.get("page"))
         flap = sim["flap"]
         rest = np.asarray(flap.entity.rest["particle_q"], dtype=np.float64)[flap.particles]
         top = np.flatnonzero(rest[:, 2] > rest[:, 2].max() - 0.003)

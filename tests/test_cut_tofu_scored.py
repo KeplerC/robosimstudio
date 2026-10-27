@@ -18,8 +18,6 @@ from tests.test_cut_tofu import cut
 TIER = "medium"
 """One GPU: the task built once and driven through its page, about 11 ms a control step."""
 
-PORT = 9843
-
 
 class TestTheTaskGoalTurnsTrue(unittest.TestCase):
     """The knife taken and pushed through the tofu as in 00: ``evaluate`` reports the goal met."""
@@ -29,7 +27,7 @@ class TestTheTaskGoalTurnsTrue(unittest.TestCase):
         cls.env, kwargs = _run("06_tasks/09_cutting_scored.py")
         sim = getattr(cls.env, "sim", cls.env)
         tofu, knife = sim["tofu"].entity, sim["knife"]
-        cls.session = session = open_session(cls.env, PORT, kwargs.get("page"))
+        cls.session = session = open_session(cls.env, 0, kwargs.get("page"))
         tick(session, 30)
         cls.before = tofu.pieces()
         _, _, cls.unmet = cls.env.evaluate()
