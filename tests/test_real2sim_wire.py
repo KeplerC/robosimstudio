@@ -13,6 +13,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import socket
 import tempfile
 import threading
@@ -232,8 +233,18 @@ class TestASocketThatFitsWhateverTheTempDir(unittest.TestCase):
         self.assertTrue(err.getvalue().startswith("ctl: no directory short enough"), err.getvalue())
 
     def _nowhere(self) -> contextlib.ExitStack:
-        """No root short enough for a socket: the temp dir and every one of :data:`wire.SOCKET_DIRS` too deep."""
+        """No root short enough for a socket: the temp dir and every one of :data:`wire.SOCKET_DIRS` too deep.
+
+        The deep temp dir is made for the block and removed after it: code under
+        test still makes temporary files there (cutting stills does), and a path
+        that exists only because an earlier run left it would pass here and fail
+        on a clean machine.
+        """
         stack = contextlib.ExitStack()
+        deep = Path(DEEP_TEMP)
+        if not deep.exists():
+            deep.mkdir(parents=True)
+            stack.callback(shutil.rmtree, deep, ignore_errors=True)
         stack.enter_context(mock.patch.object(tempfile, "tempdir", DEEP_TEMP))
         stack.enter_context(mock.patch.object(wire, "SOCKET_DIRS", (DEEP_TEMP,)))
         return stack
