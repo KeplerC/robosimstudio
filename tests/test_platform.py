@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
+from tests.fixtures.arrays import host
+
 TIER = "fast"
 """No GPU. Gates every commit."""
 
@@ -685,7 +687,7 @@ class TestWhatANotifyLeavesOutOfTheCModel(unittest.TestCase):
 
         model = mujoco.MjModel.from_xml_string(TestMuJoCosCData.XML)
         friction = np.tile(np.array([[0.05, 0.005, 0.0001]]), (model.ngeom, 1))[None]  # [world, geom, 3]
-        warp_side = types.SimpleNamespace(geom_friction=types.SimpleNamespace(numpy=lambda: friction))
+        warp_side = types.SimpleNamespace(geom_friction=host(friction))
         return types.SimpleNamespace(use_mujoco_cpu=cpu, mj_model=model, mjw_model=warp_side)
 
     def test_a_shape_notify_reaches_the_c_model(self) -> None:

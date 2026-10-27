@@ -20,13 +20,14 @@ No GPU: a fake snapshot, a real camera spec, and the dictionary that comes out.
 
 from __future__ import annotations
 
+import types
 import unittest
 
 import numpy as np
 
 from robosimstudio.core.cameras import CameraSpec
 from robosimstudio_policy_agent.contract import ALLOWED_KEYS
-from robosimstudio_policy_agent.fleet.obs_format import format_runtime_obs
+from robosimstudio_policy_agent.fleet.obs_format import format_runtime_obs, world_observation, world_observations
 
 TIER = "fast"
 """A dict in, a dict out. Gates every commit."""
@@ -155,6 +156,43 @@ class TestAnEyeInHandCameraIsThisWorldsWrist(unittest.TestCase):
         other = format_runtime_obs(_Snapshot({"overhead": _frame()}, body_q=moved), arm_count=1, cameras=[spec])
 
         np.testing.assert_allclose(still["overhead"]["pose"], other["overhead"]["pose"], atol=0)
+
+
+class _Bank:
+    def __init__(self, values):
+        self.values = np.asarray(values, dtype=float)
+        self.calls = 0
+
+    def commands(self):
+        self.calls += 1
+        return self.values.copy()
+
+
+class TestObservingEveryWorldReadsTheBankOnce(unittest.TestCase):
+    def test_one_read_per_bank(self):
+        num_worlds = 6
+        bank = _Bank(np.linspace(0.0, 1.0, num_worlds))
+        embodiment = types.SimpleNamespace(
+            arms={"right": types.SimpleNamespace(arm_coords=list(range(7)), ee_body=0)},
+            grippers={},
+            hands={"right": types.SimpleNamespace(tcp_offset=(0.0, 0.0, 0.0))},
+        )
+        fleet = types.SimpleNamespace(
+            scene=types.SimpleNamespace(embodiment=embodiment),
+            grippers={"right": bank},
+            episodes=[None] * num_worlds,
+            num_worlds=num_worlds,
+        )
+        body = np.zeros((1, 7))
+        body[0, 6] = 1.0
+        snapshot = types.SimpleNamespace(coords=lambda world: np.zeros(8), body=lambda world: body)
+        observed = world_observations(fleet, snapshot)
+        self.assertEqual(bank.calls, 1)
+        self.assertEqual(len(observed), num_worlds)
+        for world, obs in enumerate(observed):
+            self.assertAlmostEqual(obs["proprio"]["right/gripper_command"], bank.values[world])
+            alone = world_observation(fleet, world, snapshot)
+            self.assertAlmostEqual(alone["proprio"]["right/gripper_command"], bank.values[world])
 
 
 if __name__ == "__main__":

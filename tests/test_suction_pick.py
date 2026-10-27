@@ -196,7 +196,6 @@ class TestThePageLiftsThePlate(_Pick, unittest.TestCase):
     """``04_extending/02_suction``: a tilted cup is refused, then the level one seals by weld and carries the plate."""
 
     EXAMPLE = "04_extending/02_suction.py"
-    PORT = 9630
 
     @classmethod
     def before_tilt(cls) -> None:
@@ -243,7 +242,6 @@ class TestTheTaskGoalTurnsTrue(_Pick, unittest.TestCase):
     """``06_tasks/05_suction_scored``: the same pick on the task's page, and ``evaluate`` says success."""
 
     EXAMPLE = "06_tasks/05_suction_scored.py"
-    PORT = 9631
 
     def test_the_goal_is_met(self) -> None:
         _, _, info = self.opened.evaluate()

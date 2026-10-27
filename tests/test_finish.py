@@ -37,6 +37,7 @@ from robosimstudio.core.render.spec import RenderSpec
 from robosimstudio.solvers.render import look_kwargs
 from robosimstudio.specs import EmbodimentSpec, ObjectSpec, StaticSpec
 from robosimstudio_materials.cloth import ClothSpec
+from tests.fixtures.registries import restored
 
 TIER = "fast"
 """No GPU. Gates every commit."""
@@ -135,15 +136,15 @@ class TestTextures(unittest.TestCase):
             previous = os.environ.get("ROBOSIMSTUDIO_CACHE")
             os.environ["ROBOSIMSTUDIO_CACHE"] = tmp
             try:
-                register_texture("_test_probe", generator, version=3)
-                first = texture_path("_test_probe")
-                second = texture_path("_test_probe")
+                with restored(finish_mod.TEXTURES):
+                    register_texture("_test_probe", generator, version=3)
+                    first = texture_path("_test_probe")
+                    second = texture_path("_test_probe")
             finally:
                 if previous is None:
                     del os.environ["ROBOSIMSTUDIO_CACHE"]
                 else:
                     os.environ["ROBOSIMSTUDIO_CACHE"] = previous
-                finish_mod.TEXTURES._items.pop("_test_probe", None)
             self.assertEqual(first, second)
             self.assertTrue(first.endswith("_test_probe_v3.png"))
             self.assertEqual(len(calls), 1, "the second lookup is served from the cache")
@@ -171,14 +172,12 @@ class TestSceneryRegistry(unittest.TestCase):
         def other(kit):
             return None
 
-        try:
+        with restored(SCENERY):
             register_scenery(name, build)
             register_scenery(name, build)
             self.assertIs(get_scenery(name), build)
             with self.assertRaises(ValueError):
                 register_scenery(name, other)
-        finally:
-            SCENERY._items.pop(name, None)
 
     def test_an_unknown_name_is_loud(self) -> None:
         with self.assertRaises(KeyError):

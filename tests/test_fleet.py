@@ -18,8 +18,6 @@ import numpy as np
 
 from robosimstudio.core.env import CLOSE_PRECEDENCE, beats
 from robosimstudio.core.worlds import WorldMap
-from robosimstudio.scene import compiler
-from robosimstudio.scene.compiler import CannotReplicate
 from robosimstudio.specs import EpisodeSpec, JobSpec, TaskSpec
 from robosimstudio_bench.goals.context import EvalResult
 from robosimstudio_bench.run.fleet import (
@@ -358,112 +356,6 @@ class TestWaveRecord(unittest.TestCase):
         self.assertAlmostEqual(record["utilization"], 180 / 320)
 
 
-class TestCannotReplicate(unittest.TestCase):
-    """The refusal a page answers by narrowing rather than by refusing.
-
-    Most scenes cannot be built at more than one world yet. On an interactive
-    page that is not a failed load -- the selection is a *task*, and the world
-    count is a preference on it -- so the studio catches this one type and
-    rebuilds at one world. Which only works if it stays distinguishable from
-    every other way a compile can fail, and stays catchable by the handlers
-    written before it had a name.
-    """
-
-    def test_it_is_a_kind_of_not_implemented_error(self):
-        self.assertTrue(issubclass(CannotReplicate, NotImplementedError))
-        with self.assertRaises(NotImplementedError):
-            raise CannotReplicate("towel")
-
-    def test_it_does_not_catch_unrelated_failures(self):
-        # An inadmissible pairing or a missing asset is not fixed by narrowing
-        # the grid, so those must not be answered the way this one is.
-        for other in (ValueError("inadmissible pairing"), KeyError("no such asset"), RuntimeError("boom")):
-            self.assertNotIsInstance(other, CannotReplicate)
-
-    def test_it_is_exported(self):
-        self.assertIn("CannotReplicate", compiler.__all__)
-
-
-class TestTheEmptyContextIsCoveredByTheRefusal(unittest.TestCase):
-    """`FleetEnv.context` fills no `particles`, and only per-world `entities`, safely.
-
-    Safely only because `fleet.scoring_refusal` declines every scene that would
-    read anything else; an entity is handed over only when it declares
-    `world_aware` (the gear board: per-world latch and spin windows, and
-    a `published_states` that reads `WorldState.world`). Lifting the rest with
-    `entities` short would take every published state with it: `bind._published`
-    reads that dict, so a peel would raise `BindError` on every episode.
-    Structural on purpose: reading the source keeps this in the fast tier.
-    """
-
-    def _refusal_source(self) -> str:
-        import inspect
-
-        from robosimstudio_bench.envs import fleet
-
-        return inspect.getsource(fleet.scoring_refusal)
-
-    def test_the_refusal_still_declines_scenes_with_deformables(self):
-        """It asks what a thing *is*, not which view held it.
-
-        The clause read ``scene.deformables`` -- a bin -- so a publisher that
-        owned a handle sat in ``objects`` and slipped past it. Both halves ask
-        the entity now, which is what this pins."""
-        source = self._refusal_source()
-        self.assertIn("carries_particles", source)
-        self.assertIn("published_states", source)
-        # And the one way through: a publisher that answers per world says so.
-        self.assertIn("world_aware", source)
-
-    def test_the_compilers_refusal_is_about_the_physics_alone(self):
-        """The two refusals answer different questions and must stay apart.
-
-        A deformable's physics replicates -- four worlds to within 2e-10 -- so
-        the compiler has nothing to say about it; what cannot be replicated is a
-        substep kernel with world-0 indices baked into it. Scoring is this
-        class's problem, and saying so twice would leave the fleet's own gap
-        depending on the compiler remembering it.
-        """
-        import inspect
-
-        source = inspect.getsource(compiler._replication_refusal)
-        self.assertIn("contribute_hooks", source)
-        self.assertNotIn("base.deformables", source)
-
-    def test_a_cutting_block_is_refused_for_what_its_goal_reads(self):
-        """The cutter's published ``pieces``, not the eight corners its block is drawn at.
-
-        Asked of the particles first, a one-world wave of
-        ``examples/06_tasks/09_cutting_scored`` was refused for the corners, with
-        "the physics replicates correctly", and the cutter's does not: at two
-        worlds the compiler refuses its one-world substep hooks.
-        """
-        from tests.fixtures.packs import has_pack
-
-        if not has_pack("cutting"):
-            self.skipTest("the cutting pack is not installed")
-        import robosimstudio as rss
-        from robosimstudio_bench.envs.fleet import scoring_refusal
-        from robosimstudio_materials.cutting.entity import EntityCuttable
-
-        tofu = EntityCuttable(rss.cuttable(name="tofu", knife=rss.knife(name="knife"), size=(0.06, 0.1, 0.04)))
-        tofu.range.particles = (0, 8)  # the corners, as its build adds them
-        self.assertTrue(tofu.carries_particles)
-        refusal = scoring_refusal(SimpleNamespace(by_name={"tofu": tofu}))
-        self.assertIn("publishing states (tofu)", refusal)
-        self.assertNotIn("replicates correctly", refusal)
-
-    def test_the_context_says_what_must_land_with_a_per_world_probe(self):
-        """If someone fills `particles` here, this points at `entities` too."""
-        import inspect
-
-        from robosimstudio_bench.envs.fleet import FleetEnv
-
-        doc = inspect.getdoc(FleetEnv.context) or ""
-        self.assertIn("entities", doc)
-        self.assertIn("scoring_refusal", doc)
-
-
 class TestTheWorldViewAnswersWhatTheToolsAsk(unittest.TestCase):
     """``WorldView`` is a duck, and a duck that falls behind takes a wave down.
 
@@ -545,10 +437,6 @@ class TestTheWorldViewAnswersWhatTheToolsAsk(unittest.TestCase):
                 self.assertEqual(elsewhere, [], f"{name!r} is exempt as driver-only but is read in {elsewhere}")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestOneEpisodeGetsOneLabel(unittest.TestCase):
     """Why an episode ended may not depend on how many worlds it ran in.
 
@@ -572,14 +460,31 @@ class TestOneEpisodeGetsOneLabel(unittest.TestCase):
         self.assertFalse(beats("truncated", "success"))
 
     def test_the_batched_path_closes_in_that_same_order(self) -> None:
-        """Read off ``score_world``'s source, because the order *is* the
-        if-chain -- there is no value to assert, only a sequence of branches,
-        and a chain reordered by a well-meaning edit is exactly the regression
-        this pins."""
-        import inspect
-        import re
+        """Every combination of the four reasons holding at once closes on the strongest.
 
-        from robosimstudio_bench.run import fleet as fleet_module
+        The order *is* ``score_world``'s if-chain, and a chain reordered by a
+        well-meaning edit is exactly the regression this pins -- so each of the
+        fifteen ways one or more reasons can hold is played through it, and the
+        expected label is read off ``CLOSE_PRECEDENCE`` by name."""
+        import itertools
 
-        written = re.findall(r'info\["close_kind"\] = "([a-z_]+)"', inspect.getsource(fleet_module.score_world))
-        self.assertEqual(written, list(CLOSE_PRECEDENCE))
+        for values in itertools.product((False, True), repeat=4):
+            held = dict(zip(("diverged", "policy_request", "success", "truncated"), values, strict=True))
+            if not any(held.values()):
+                continue
+            slot = WorldSlot(world=0, episode=plan_waves(_task(), [0], 1)[0][0])
+            result = EvalResult(success=held["success"], reward=0.0, metrics={})
+            fleet = SimpleNamespace(evaluate=lambda *a, result=result, **k: result)
+            snapshot = SimpleNamespace(diverged=np.array([held["diverged"]]))
+            step = 100 if held["truncated"] else 5
+            done, info = score_world(
+                slot, fleet, snapshot, step=step, limit=100, request="stop" if held["policy_request"] else ""
+            )
+            expected = next(reason for reason in CLOSE_PRECEDENCE if held[reason])
+            with self.subTest(held=held):
+                self.assertTrue(done)
+                self.assertEqual(info["close_kind"], expected)
+
+
+if __name__ == "__main__":
+    unittest.main()

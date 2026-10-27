@@ -16,7 +16,7 @@ does not initialise CUDA::
 
 Naming the modules by hand still works and is what ``unittest`` sees either way::
 
-    python -m unittest tests.test_core tests.test_paths -v
+    python -m unittest tests.test_core_math tests.test_paths -v
     python -m unittest tests.test_bare_scenes -v   # needs a GPU
 
 Listing them by hand is what this docstring used to do, and it had drifted from

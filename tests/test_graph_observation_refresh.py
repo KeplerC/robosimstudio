@@ -1,5 +1,6 @@
 """Perception must see current pixels when continuous rendering is disabled."""
 
+import importlib.util
 import json
 import tempfile
 import unittest
@@ -14,16 +15,18 @@ TIER = "fast"
 """Perception sees current pixels when per-step rendering is off; fakes, no renderer. Gates every commit."""
 
 
-class TestObservationRefresh(unittest.TestCase):
-    def setUp(self) -> None:
-        try:
-            from gap import execute
-            from gap_core.tools import ToolRegistry
-        except ImportError:
-            self.skipTest("gap is behind the [gap] extra")
-        self.execute, self.ToolRegistry = execute, ToolRegistry
+HAS_GAP_CORE = importlib.util.find_spec("gap_core") is not None
+"""``_ProprioceptiveFeedback.get_ee_pose`` builds its answer with ``gap_core.types.make_pose``."""
+HAS_GAP = HAS_GAP_CORE and importlib.util.find_spec("gap") is not None
 
+
+class TestObservationRefresh(unittest.TestCase):
+    @unittest.skipUnless(HAS_GAP, "gap is behind the [gap] extra")
     def test_on_demand_runtime_still_executes_explicit_camera_reads(self):
+        from gap import execute
+        from gap_core.tools import ToolRegistry
+
+        self.execute, self.ToolRegistry = execute, ToolRegistry
         reads = []
 
         def camera():
@@ -49,6 +52,7 @@ class TestObservationRefresh(unittest.TestCase):
         self.assertTrue(result.success, result.error)
         self.assertEqual(reads, ["fresh RGB-D"])
 
+    @unittest.skipUnless(HAS_GAP_CORE, "gap_core is behind the [gap] extra")
     def test_motion_feedback_does_not_render_cameras(self):
         reads = []
 

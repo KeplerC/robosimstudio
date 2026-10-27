@@ -14,21 +14,15 @@ stand-in engine, so it runs with no GPU and no ``[superdex]`` wheel.
 
 from __future__ import annotations
 
-import inspect
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
+from tests.fixtures.arrays import host
+
 TIER = "fast"
 """A stub model and a stand-in engine. No GPU, no wheel, no scene."""
-
-
-class _Arr:
-    def __init__(self, a):
-        self._a = np.asarray(a)
-
-    def numpy(self):
-        return self._a
 
 
 class _Model:
@@ -37,11 +31,11 @@ class _Model:
     def __init__(self):
         from newton import GeoType
 
-        self.shape_type = _Arr([int(GeoType.PLANE), int(GeoType.BOX), int(GeoType.CAPSULE)])
-        self.shape_scale = _Arr([[0.0, 0.0, 0.0], [0.3, 0.65, 0.375], [0.005, 0.01, 0.0]])
-        self.shape_transform = _Arr(np.tile([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0], (3, 1)))
-        self.shape_body = _Arr([-1, -1, 3])
-        self.shape_material_mu = _Arr([1.0, 1.0, 0.8])
+        self.shape_type = host([int(GeoType.PLANE), int(GeoType.BOX), int(GeoType.CAPSULE)], int)
+        self.shape_scale = host([[0.0, 0.0, 0.0], [0.3, 0.65, 0.375], [0.005, 0.01, 0.0]])
+        self.shape_transform = host(np.tile([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0], (3, 1)))
+        self.shape_body = host([-1, -1, 3], int)
+        self.shape_material_mu = host([1.0, 1.0, 0.8])
         self.shape_source = [None, None, None]
 
 
@@ -161,11 +155,26 @@ class TestTheBackendOption(unittest.TestCase):
             bridge.SuperdexBridge = real
 
     def test_the_bridge_hands_it_to_the_mirrors(self):
-        from robosimstudio.engines.superdex.bridge import SuperdexBridge
+        """Built over a stand-in engine with no actors: what reaches ``build_mirror_actors`` is the option."""
+        from unittest import mock
 
-        self.assertEqual(0.0, inspect.signature(SuperdexBridge).parameters["mirror_padding"].default)
-        source = inspect.getsource(SuperdexBridge.__init__)
-        self.assertIn("contact_padding=self.mirror_padding", source)
+        import robosimstudio.engines.superdex.bridge as bridge
+
+        handed: list[dict] = []
+
+        def build(physics, scenes, model, **options):
+            handed.append(options)
+            return []
+
+        model = SimpleNamespace(particle_q=host(np.zeros((0, 3))), tet_count=0)
+        with (
+            mock.patch.object(bridge, "ensure_initialized", return_value=mock.MagicMock()),
+            mock.patch.object(bridge, "build_mirror_actors", side_effect=build),
+        ):
+            bridge.SuperdexBridge(model, {"mirrors": RECORDS}, mirror_padding=0.0015)
+            bridge.SuperdexBridge(model, {"mirrors": RECORDS})
+        self.assertEqual([0.0015, 0.0], [options["contact_padding"] for options in handed])
+        self.assertEqual([RECORDS, RECORDS], [options["shapes"] for options in handed])
 
 
 if __name__ == "__main__":
