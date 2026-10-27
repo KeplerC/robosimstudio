@@ -168,7 +168,12 @@ DEEP_TEMP = "/tmp/" + "t" * 150
 
 
 class TestASocketThatFitsWhateverTheTempDir(unittest.TestCase):
-    """A run directory too deep for its own socket gets a short one, and short means short wherever ``TMPDIR`` is."""
+    """A run directory too deep for its own socket gets a short one, chosen by length alone.
+
+    The temp directory when the path fits there -- private where ``TMPDIR`` is --
+    else ``/tmp``, else a refusal naming ``--sock``. Never by whether a directory
+    can be written: a client only connects, and must resolve what the server bound.
+    """
 
     def deep_run_dir(self) -> Path:
         return self.enterContext(short_dir("w-")) / ("d" * 60) / ("e" * 60) / "run"
@@ -177,14 +182,33 @@ class TestASocketThatFitsWhateverTheTempDir(unittest.TestCase):
         with mock.patch.object(tempfile, "tempdir", DEEP_TEMP):
             path = wire.socket_path(self.deep_run_dir())
         self.assertLessEqual(len(os.fsencode(path)), wire.SUN_PATH_MAX, f"{path} cannot be bound")
+        self.assertEqual(Path("/tmp"), path.parent, "a temp dir too deep falls to /tmp")
 
-    def test_the_server_and_a_client_under_another_temp_dir_agree(self) -> None:
+    def test_a_temp_dir_that_fits_keeps_the_socket(self) -> None:
+        """Where it always was, and private where ``TMPDIR`` is, though ``/tmp`` would fit too."""
+        private = self.enterContext(short_dir("own-"))
+        with mock.patch.object(tempfile, "tempdir", str(private)):
+            path = wire.socket_path(self.deep_run_dir())
+        self.assertEqual(private, path.parent)
+
+    def test_the_server_and_its_clients_in_one_environment_agree(self) -> None:
         deep = self.deep_run_dir()
-        with mock.patch.object(tempfile, "tempdir", DEEP_TEMP):
-            server = wire.socket_path(deep)
-        with mock.patch.object(tempfile, "tempdir", "/var/tmp"):
-            client = wire.socket_path(deep)
-        self.assertEqual(server, client)
+        deep.parent.mkdir(parents=True)
+        for temp in (DEEP_TEMP, str(self.enterContext(short_dir("own-")))):
+            with self.subTest(temp=temp[:20]), mock.patch.object(tempfile, "tempdir", temp):
+                server = wire.socket_path(deep)
+                with chdir(deep.parent):
+                    client = wire.socket_path("run")  # the same run dir, spelled from where the client stands
+                self.assertEqual(server, client)
+
+    def test_where_the_socket_goes_does_not_ask_what_can_be_written(self) -> None:
+        """A client only connects: one that cannot write ``/tmp`` must still find the server's socket there."""
+        with (
+            mock.patch.object(tempfile, "tempdir", DEEP_TEMP),
+            mock.patch.object(os, "access", lambda *a, **k: False),
+        ):
+            path = wire.socket_path(self.deep_run_dir())
+        self.assertEqual(Path("/tmp"), path.parent)
 
     def test_nowhere_short_enough_is_refused_saying_how_to_name_one(self) -> None:
         with (
@@ -206,20 +230,6 @@ class TestASocketThatFitsWhateverTheTempDir(unittest.TestCase):
             code = ctl.main(["--run-dir", str(self.deep_run_dir()), "status"])
         self.assertEqual(2, code)
         self.assertTrue(err.getvalue().startswith("ctl: no directory short enough"), err.getvalue())
-
-    def test_a_root_it_cannot_write_is_passed_over_for_the_next(self) -> None:
-        """A sandbox may leave ``/tmp`` a directory and only ``TMPDIR`` writable: a path there could not be bound."""
-        if os.geteuid() == 0:
-            self.skipTest("root writes into any directory")
-        locked, open_ = self.enterContext(short_dir("ro-")), self.enterContext(short_dir("rw-"))
-        os.chmod(locked, 0o500)
-        self.addCleanup(os.chmod, locked, 0o700)
-        with (
-            mock.patch.object(wire, "SOCKET_DIRS", (str(locked),)),
-            mock.patch.object(tempfile, "tempdir", str(open_)),
-        ):
-            path = wire.socket_path(self.deep_run_dir())
-        self.assertEqual(open_, path.parent)
 
     def _nowhere(self) -> contextlib.ExitStack:
         """No root short enough for a socket: the temp dir and every one of :data:`wire.SOCKET_DIRS` too deep."""
@@ -263,6 +273,54 @@ class TestASocketThatFitsWhateverTheTempDir(unittest.TestCase):
             code = ctl.main(argv)
         self.assertEqual(0, code)
         self.assertTrue((here / "ref" / "timeline.json").exists())
+
+    def test_a_socket_the_server_cannot_bind_is_one_line_naming_sock(self) -> None:
+        """Refused by the directory, or held by another page: the same one line, and no traceback."""
+        from robosimstudio_real2sim_agent import serve, server
+
+        for refusal in (PermissionError(13, "Permission denied"), FileExistsError("a server is already listening")):
+
+            class Page:
+                def __init__(self, **kwargs) -> None:
+                    self.path = Path(kwargs["scene_path"]).resolve()
+                    self.sock_path = kwargs["sock_path"]
+
+                def serve(self, refusal=refusal) -> None:
+                    raise wire.SocketRefused(self.sock_path, refusal)
+
+            err = io.StringIO()
+            here = self.enterContext(short_dir("bind-"))
+            with (
+                self.subTest(refusal=type(refusal).__name__),
+                mock.patch.object(server, "LiveServer", Page),
+                chdir(here),
+                contextlib.redirect_stderr(err),
+            ):
+                code = serve.main(["--scene", str(here / "scene.py"), "--run-dir", str(here / "run")])
+                self.assertEqual(2, code)
+                self.assertIn("--sock", err.getvalue())
+                self.assertEqual(1, len(err.getvalue().strip().splitlines()), err.getvalue())
+
+    def test_the_page_turns_a_bind_it_was_refused_into_that_refusal(self) -> None:
+        from unittest import mock as _mock
+
+        from tests.fixtures.live_server import bare_live_server
+
+        if os.geteuid() == 0:
+            self.skipTest("root binds in any directory")
+        locked = self.enterContext(short_dir("ro-"))
+        os.chmod(locked, 0o500)
+        self.addCleanup(os.chmod, locked, 0o700)
+        live = bare_live_server(session=_mock.MagicMock())
+        live.socket = wire.ControlSocket(locked / "ctl.sock", lambda request: {"ok": True})
+        live.sock_path = locked / "ctl.sock"
+        live.open_page = lambda: None  # type: ignore[method-assign]
+        with (
+            _mock.patch("signal.signal"),
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(wire.SocketRefused, "--sock"),
+        ):
+            live.serve()
 
     def test_the_server_says_so_in_one_line_too(self) -> None:
         from robosimstudio_real2sim_agent import serve
