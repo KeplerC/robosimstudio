@@ -38,7 +38,7 @@ class TestSheetsShareOneSettle(unittest.TestCase):
 
     def test_the_studio_resettle_steps_the_one_run_once(self):
         """The ``Readings`` folder's button ran each sheet's settle: 120 steps on ``(60, 10)``, 2.53 s of blocked
-        page loop, where the build ran the one run's 60 (``tests.test_fix_followup_settle`` on stand-ins)."""
+        page loop, where the build ran the one run's 60 (``tests.test_studio_tuning_settle`` on stand-ins)."""
         from types import SimpleNamespace
         from unittest import mock
 
