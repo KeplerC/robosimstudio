@@ -175,8 +175,9 @@ class TestTheFrustums(unittest.TestCase):
         panel.drain()
         self.assertEqual("front", panel._selected_name(), "on all, the first camera until one is clicked")
         browser = _browser()
-        for fn in _frustums(session)["wrist"].clicked:
-            fn(SimpleNamespace(client=browser))
+        wrist = _frustums(session)["wrist"]
+        for fn in wrist.click_handlers:
+            fn(SimpleNamespace(target=wrist, client=browser))  # a click from that browser
         panel.drain()
         self.assertEqual("wrist", panel._selected_name())
         self.assertEqual(WRIST.eye, browser.camera.position, "and the browser flies to it")

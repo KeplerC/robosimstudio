@@ -21,6 +21,8 @@ thing under test, and it will agree with the real one right up until it matters.
 
 from __future__ import annotations
 
+import numpy as np
+
 
 class _StubEvent:
     """What viser hands a callback: the handle on ``target``, and no browser behind it."""
@@ -59,6 +61,7 @@ class _StubWidget:
 
     @value.setter
     def value(self, value) -> None:
+        value = _cast(self._value, value)
         if not self.is_button and _same(self._value, value):
             return
         self._value = value
@@ -84,6 +87,7 @@ class _StubWidget:
         if value is None:
             self._notify()
             return
+        value = _cast(self._value, value)
         if not self.is_button and _same(self._value, value):
             return
         self._value = value
@@ -91,6 +95,30 @@ class _StubWidget:
 
     def remove(self) -> None:
         self.removed = True
+
+
+def _cast(current, value):
+    """``value`` in ``current``'s type, as viser casts an assigned value and one the browser sent.
+
+    An array or a list becomes a tuple, each element in the type of the one it
+    replaces where the lengths agree; anything else is ``type(current)(value)``.
+    So ``(0.0, 0.0, 1.0)`` set as ``np.array([0, 0, 1])`` is the same value, and
+    no change. A widget with no value yet takes whatever it is given.
+    """
+    if current is None or value is None:
+        return value
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(current, tuple):
+        if not isinstance(value, (list, tuple)):
+            return value
+        if len(value) == len(current):
+            return tuple(type(c)(v) for c, v in zip(current, value, strict=True))
+        return tuple(value)
+    try:
+        return type(current)(value)
+    except (TypeError, ValueError):
+        return value
 
 
 def _same(a, b) -> bool:
@@ -263,14 +291,22 @@ class _StubNode:
         self.text = kwargs.get("text")
         self.removed = False
         self.callbacks: list = []
+        """The ``on_update`` handlers: what a drag calls."""
+        self.click_handlers: list = []
+        """The ``on_click`` handlers: what a click calls, and a drag does not."""
 
     def on_update(self, fn):
         self.callbacks.append(fn)
         return fn
 
     def on_click(self, fn):
-        self.callbacks.append(fn)
+        self.click_handlers.append(fn)
         return fn
+
+    def click(self) -> None:
+        """What a click on it in the browser does: every ``on_click`` handler, and no ``on_update`` one."""
+        for fn in list(self.click_handlers):
+            fn(_StubEvent(self, "click"))
 
     def fire(self, position=None, quat=None, phase: str = "update") -> None:
         """What the browser does: move the node, then tell the server about it."""
@@ -296,11 +332,6 @@ class _StubFrustum(_StubNode):
         self.scale = kwargs.get("scale")
         self.color = kwargs.get("color")
         self.image = kwargs.get("image")
-        self.clicked = []
-
-    def on_click(self, fn):
-        self.clicked.append(fn)
-        return fn
 
 
 class _StubScene:
@@ -319,19 +350,22 @@ class _StubScene:
         """Each light by name, with what it was added with: a light added again under its name replaces it."""
 
     def _node(self, name: str, visible: bool = False, **kwargs) -> _StubNode:
-        node = _StubNode(name, **{**kwargs, "visible": visible})
+        return self._put(_StubNode(name, **{**kwargs, "visible": visible}))
+
+    def _put(self, node: _StubNode) -> _StubNode:
+        """Add ``node``, replacing one added before under its name, as viser's node table does."""
+        before = self._handle_from_node_name.get(node.name)
+        if before is not None:
+            self.nodes = [n for n in self.nodes if n is not before]
         self.nodes.append(node)
-        self._handle_from_node_name[name] = node
+        self._handle_from_node_name[node.name] = node
         return node
 
     def set_background_image(self, image, **kwargs):
         self.background = image
 
     def add_camera_frustum(self, name, **kwargs):
-        node = _StubFrustum(name, **kwargs)
-        self.nodes.append(node)
-        self._handle_from_node_name[name] = node
-        return node
+        return self._put(_StubFrustum(name, **kwargs))
 
     def add_transform_controls(self, name, **kwargs):
         return self._node(name, kwargs.pop("visible", True), **kwargs)
