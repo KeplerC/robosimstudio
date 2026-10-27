@@ -32,7 +32,7 @@ TIER = "slow"
 
 FOLDER = Path(__file__).resolve().parents[1] / "examples" / "08_demos" / "wipe_the_bar"
 SCRIPT = FOLDER / "wipe_the_bar.py"
-PORT = 9341
+PORT = 0
 CLEANED = 0.9
 """The share of the stripe the job must clean."""
 

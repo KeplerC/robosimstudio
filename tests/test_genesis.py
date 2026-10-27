@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """The Genesis co-simulation, with libuipc actually in the loop.
 
-The half of the story ``test_genesis_absent.py`` cannot tell: a cloth built into
+The half of the story ``test_genesis_registration.py``, ``test_genesis_refusals.py``
+and ``test_genesis_coupling.py`` cannot tell: a cloth built into
 the Newton model, simulated by Genesis's IPC coupler, read back through the
 ordinary particle arrays, and pressing on a Newton body hard enough to measure.
 
@@ -27,8 +28,8 @@ The extra is deliberately **not** installed in the main environment --- it moves
 twenty packages there for an engine most runs never build. So this module skips
 by default and is run against a sibling venv instead, with the checkout on the
 path; ``pyproject.toml``'s ``[genesis]`` comment carries the exact commands.
-``tests/test_genesis_absent.py`` is what covers the seam without any of that,
-and it is the one that gates every commit.
+``tests/test_genesis_{registration,refusals,coupling}.py`` are what cover the seam
+without any of that, and they are the ones that gate every commit.
 """
 
 BENCH_TOP = 0.75

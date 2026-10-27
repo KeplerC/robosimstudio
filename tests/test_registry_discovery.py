@@ -24,12 +24,8 @@ Static: no scene, no GPU.
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
 import unittest
-from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from textwrap import dedent
@@ -40,6 +36,7 @@ from robosimstudio.assetlib.semantics.atoms import ATOMS
 from robosimstudio.assetlib.semantics.handlers import HANDLERS
 from robosimstudio.specs.physics import DOMAINS
 from robosimstudio_bench.taskbuild.discovery import scan
+from tests.fixtures.processes import Processes, last_json
 
 TIER = "fast"
 """No GPU. Gates every commit."""
@@ -95,8 +92,7 @@ class _Root:
 
     def __exit__(self, *exc: object) -> None:
         for registry, name in ((DOMAINS, "probe_gel"), (MATERIALS, "probe_denim")):
-            registry._items.pop(name, None)
-            registry._origins.pop(name, None)
+            registry.forget(name)
         roots.clear_task_roots()
         self._tmp.cleanup()
 
@@ -166,6 +162,27 @@ REPORT = dedent(
 ).strip()
 
 
+def _kind_root(processes: Processes, name: str = "probe_granular", *, module: bool = False, scripts=()) -> Path:
+    """A root holding one kind -- a package, or with ``module`` a single ``<name>.py`` -- and example ``scripts``."""
+    root = processes.directory()
+    source = (
+        KIND.replace("probe_granular", name).replace("ProbeGranular", "Probe") if name != "probe_granular" else KIND
+    )
+    if module:
+        (root / f"{name}.py").write_text(source)
+    else:
+        (root / name).mkdir()
+        (root / name / "__init__.py").write_text(source)
+    for script in scripts:
+        (root / script).write_text(NUMBERED)
+    return root
+
+
+def _start(processes: Processes, key: str, script: str, *rootpaths: Path) -> None:
+    """A fresh interpreter with ``rootpaths`` as its domain roots."""
+    processes.start(key, script, env={roots.DOMAIN_ROOTS_ENV: os.pathsep.join(str(r) for r in rootpaths)})
+
+
 class TestAKindMayLiveOutsideTheCheckout(unittest.TestCase):
     """A domain package on somebody else's root, reached by our own import name.
 
@@ -182,36 +199,22 @@ class TestAKindMayLiveOutsideTheCheckout(unittest.TestCase):
     registries scan beside this one -- ``tests/test_materials_package``.)
 
     Run in a subprocess because ``__path__`` is built when the package is first
-    imported, so this is a claim about what a *process* sees.
+    imported, so this is a claim about what a *process* sees -- one process per
+    claim, all of them started together.
     """
 
-    def _root(self, stack, name: str = "probe_granular") -> Path:
-        root = Path(stack.enter_context(TemporaryDirectory()))
-        (root / name).mkdir()
-        (root / name / "__init__.py").write_text(KIND)
-        return root
-
-    def _run(self, script: str, *rootpaths: Path) -> subprocess.CompletedProcess:
-        env = {
-            **os.environ,
-            roots.DOMAIN_ROOTS_ENV: os.pathsep.join(str(r) for r in rootpaths),
-            "CUDA_VISIBLE_DEVICES": "",
-        }
-        return subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=Path(__file__).resolve().parents[1],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=False,
-        )
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.processes = Processes()
+        cls.addClassCleanup(cls.processes.close)
+        _start(cls.processes, "ours", REPORT, _kind_root(cls.processes))
+        cls.first, cls.second = _kind_root(cls.processes, "probe_dup"), _kind_root(cls.processes, "probe_dup")
+        _start(cls.processes, "two roots", "import robosimstudio.domains", cls.first, cls.second)
 
     def test_it_registers_and_reads_as_ours(self) -> None:
-        with ExitStack() as stack:
-            proc = self._run(REPORT, self._root(stack))
+        proc = self.processes.result("ours")
         self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
-        got = json.loads([ln for ln in proc.stdout.splitlines() if ln.startswith("{")][-1])
+        got = last_json(proc)
         self.assertIn("probe_granular", got["domains"], "a domain on a root did not register")
         self.assertIn(
             "cloth", got["domains"], "the library's own kinds are gone -- the path was replaced, not extended"
@@ -227,34 +230,10 @@ class TestAKindMayLiveOutsideTheCheckout(unittest.TestCase):
     def test_two_roots_holding_one_name_refuse(self) -> None:
         """``pkgutil.iter_modules`` keeps the first and never imports the second,
         which hides exactly the collision the registries exist to report."""
-        with ExitStack() as stack:
-            first = self._root(stack, "probe_dup")
-            second = self._root(stack, "probe_dup")
-            proc = self._run("import robosimstudio.domains", first, second)
+        proc = self.processes.result("two roots")
         self.assertNotEqual(0, proc.returncode, "a duplicate kind across two roots was accepted")
         self.assertIn("probe_dup", proc.stderr)
-        self.assertIn(str(second), proc.stderr, "the message must name both roots")
-
-
-def _run_with_roots(script: str, *rootpaths: Path) -> subprocess.CompletedProcess:
-    env = {
-        **os.environ,
-        roots.DOMAIN_ROOTS_ENV: os.pathsep.join(str(r) for r in rootpaths),
-        "CUDA_VISIBLE_DEVICES": "",
-    }
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=Path(__file__).resolve().parents[1],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=600,
-        check=False,
-    )
-
-
-def _last_json(proc: subprocess.CompletedProcess):
-    return json.loads([ln for ln in proc.stdout.splitlines() if ln.startswith("{")][-1])
+        self.assertIn(str(self.second), proc.stderr, "the message must name both roots")
 
 
 NUMBERED = 'raise RuntimeError("a numbered example was imported as a domain pack")'
@@ -279,38 +258,45 @@ class TestARootMayHoldAModuleOrAnExampleFolder(unittest.TestCase):
     name as a module on one root and a package on another is the clash the
     duplicate rule exists to catch, which ``pkgutil.iter_modules`` would hide
     by keeping the first. The repository's own kinds no longer travel this way
-    (they are a package), so these claims are made on throwaway roots.
+    (they are a package), so these claims are made on throwaway roots, a fresh
+    process each, all started together.
     """
 
-    def _folder(self, stack: ExitStack, *scripts: str, pack: str = "", as_package: bool = False) -> Path:
-        root = Path(stack.enter_context(TemporaryDirectory()))
-        if pack:
-            source = KIND.replace("probe_granular", pack).replace("ProbeGranular", "Probe")
-            if as_package:
-                (root / pack).mkdir()
-                (root / pack / "__init__.py").write_text(source)
-            else:
-                (root / f"{pack}.py").write_text(source)
-        for name in scripts:
-            (root / name).write_text(NUMBERED)
-        return root
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.processes = processes = Processes()
+        cls.addClassCleanup(processes.close)
+        _start(processes, "module", REPORT, _kind_root(processes, module=True))
+        cls.pairs = {}
+        for order in ("module first", "package first"):
+            module, package = _kind_root(processes, "probe_dup", module=True), _kind_root(processes, "probe_dup")
+            cls.pairs[order] = pair = (module, package) if order == "module first" else (package, module)
+            _start(processes, order, "import robosimstudio.domains", *pair)
+        leftover = processes.directory()
+        (leftover / "probe_granular" / "__pycache__").mkdir(parents=True)
+        (leftover / "probe_granular" / "__pycache__" / "__init__.cpython-312.pyc").write_bytes(b"")
+        _start(processes, "emptied", REPORT, leftover, _kind_root(processes, module=True))
+        root = _kind_root(processes, module=True, scripts=("00_drop.py", "01_fold.py"))
+        _start(processes, "beside scripts", SCANNED, root)
+        first = _kind_root(processes, module=True, scripts=("00_intro.py",))
+        second = _kind_root(processes, "probe_gel", module=True, scripts=("00_intro.py",))
+        _start(processes, "two intros", SCANNED, first, second)
+        first = _kind_root(processes, module=True, scripts=("00_intro.py",))
+        second = _kind_root(processes, module=True, scripts=("01_other.py",))
+        _start(processes, "one pack twice", "import robosimstudio.domains", first, second)
 
     def test_a_single_module_on_a_root_registers_and_reads_as_ours(self) -> None:
-        with ExitStack() as stack:
-            proc = _run_with_roots(REPORT, self._folder(stack, pack="probe_granular"))
+        proc = self.processes.result("module")
         self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
-        got = _last_json(proc)
+        got = last_json(proc)
         self.assertIn("probe_granular", got["domains"], "a one-module kind on a root did not register")
         self.assertIn("cloth", got["domains"], "the shipped kinds are gone -- the scan lost a package")
         self.assertEqual("robosimstudio.domains.probe_granular", got["module"])
 
     def test_a_module_and_a_package_of_one_name_refuse(self) -> None:
-        for order in ("module first", "package first"):
-            with self.subTest(order=order), ExitStack() as stack:
-                module = self._folder(stack, pack="probe_dup")
-                package = self._folder(stack, pack="probe_dup", as_package=True)
-                pair = (module, package) if order == "module first" else (package, module)
-                proc = _run_with_roots("import robosimstudio.domains", *pair)
+        for order, pair in self.pairs.items():
+            with self.subTest(order=order):
+                proc = self.processes.result(order)
                 self.assertNotEqual(0, proc.returncode, "one name as a module and as a package was accepted")
                 self.assertIn("probe_dup", proc.stderr)
                 self.assertIn(str(pair[1]), proc.stderr, "the message must name both roots")
@@ -319,40 +305,27 @@ class TestARootMayHoldAModuleOrAnExampleFolder(unittest.TestCase):
         """What a moved pack leaves behind in a checkout that has run it: the
         directory, holding nothing but ``__pycache__``. It is not a package -- the
         scan would not yield it -- so it must not be refused as one."""
-        with ExitStack() as stack:
-            module = self._folder(stack, pack="probe_granular")
-            leftover = Path(stack.enter_context(TemporaryDirectory()))
-            (leftover / "probe_granular" / "__pycache__").mkdir(parents=True)
-            (leftover / "probe_granular" / "__pycache__" / "__init__.cpython-312.pyc").write_bytes(b"")
-            proc = _run_with_roots(REPORT, leftover, module)
-            self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
-            self.assertEqual("robosimstudio.domains.probe_granular", _last_json(proc)["module"])
+        proc = self.processes.result("emptied")
+        self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
+        self.assertEqual("robosimstudio.domains.probe_granular", last_json(proc)["module"])
 
     def test_the_scan_imports_the_pack_and_not_the_scripts_beside_it(self) -> None:
-        with ExitStack() as stack:
-            root = self._folder(stack, "00_drop.py", "01_fold.py", pack="probe_granular")
-            proc = _run_with_roots(SCANNED, root)
+        proc = self.processes.result("beside scripts")
         self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
-        got = _last_json(proc)
+        got = last_json(proc)
         self.assertIn("probe_granular", got["domains"], "the pack beside the scripts did not register")
         self.assertEqual([], got["stray"], "a numbered script was imported under robosimstudio.domains")
 
     def test_two_folders_may_each_hold_a_script_of_one_name(self) -> None:
         """Two ``00_intro.py`` are two examples, not one kind declared twice -- which
         is what the duplicate rule would say of two files called ``intro.py``."""
-        with ExitStack() as stack:
-            first = self._folder(stack, "00_intro.py", pack="probe_granular")
-            second = self._folder(stack, "00_intro.py", pack="probe_gel")
-            proc = _run_with_roots(SCANNED, first, second)
+        proc = self.processes.result("two intros")
         self.assertEqual(0, proc.returncode, proc.stderr[-2000:])
-        got = _last_json(proc)
+        got = last_json(proc)
         self.assertLessEqual({"probe_granular", "probe_gel"}, set(got["domains"]))
         self.assertEqual([], got["stray"])
         # The counter-test: the exemption is for names no import can spell, and for nothing else.
-        with ExitStack() as stack:
-            first = self._folder(stack, "00_intro.py", pack="probe_granular")
-            second = self._folder(stack, "01_other.py", pack="probe_granular")
-            proc = _run_with_roots("import robosimstudio.domains", first, second)
+        proc = self.processes.result("one pack twice")
         self.assertNotEqual(0, proc.returncode, "one pack name on two roots was accepted")
         self.assertIn("probe_granular", proc.stderr)
 

@@ -19,6 +19,7 @@ import numpy as np
 
 from robosimstudio.domains.rigid.measures.jaws import _jaw_stall
 from robosimstudio.scene.handles import ArmHandle
+from tests.fixtures.arrays import host
 
 TIER = "fast"
 """No GPU: the handler over a handle and plain arrays."""
@@ -32,7 +33,7 @@ def _snapshot(arm: ArmHandle, measured, commanded) -> SimpleNamespace:
     target = np.zeros(4)
     for coord, m, c in zip(arm.gripper_coords, measured, commanded, strict=True):
         joint_q[coord], target[coord] = m, c
-    ctx = SimpleNamespace(state=SimpleNamespace(joint_q=SimpleNamespace(numpy=lambda: joint_q)), joint_target_q=target)
+    ctx = SimpleNamespace(state=SimpleNamespace(joint_q=host(joint_q)), joint_target_q=target)
     handles = SimpleNamespace(work_arm=arm.name, arms={arm.name: arm})
     return SimpleNamespace(ctx=ctx, handles=handles)
 

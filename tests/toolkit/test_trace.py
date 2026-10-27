@@ -214,5 +214,20 @@ class TestGoldensRoundTrip(unittest.TestCase):
         self.assertTrue(compare(got, want).ok)
 
 
+class SummariseGatedMetricTest(unittest.TestCase):
+    def test_steps_come_from_the_rows_that_carry_the_metric(self) -> None:
+        rows = [
+            {"step": 1, "success": False, "reward": 0.0, "metrics": {"awaiting": "lid"}},
+            {"step": 2, "success": False, "reward": 0.0, "metrics": {"awaiting": "lid"}},
+            {"step": 3, "success": False, "reward": 0.0, "metrics": {"fired": False, "d": 0.1}},
+            {"step": 4, "success": False, "reward": 0.0, "metrics": {"fired": True, "d": 0.9}},
+            {"step": 5, "success": True, "reward": 1.0, "metrics": {"fired": True, "d": 0.2}},
+        ]
+        summary = summarise(rows)
+        self.assertEqual(summary.boolean["fired"]["first_true_step"], 4.0)
+        self.assertEqual(summary.numeric["d"]["argmax_step"], 4.0)
+        self.assertNotIn("awaiting", summary.numeric)
+
+
 if __name__ == "__main__":
     unittest.main()

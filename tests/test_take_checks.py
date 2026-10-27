@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from tests.fixtures.arrays import host
+
 TIER = "fast"
 """Calls the take table's check functions on plain arrays."""
 
@@ -40,7 +42,7 @@ class _Sim:
     """What a check reads off ``film.sim``: the state's arrays, and things by name."""
 
     def __init__(self, body_q=None, refs=None) -> None:
-        self.state = SimpleNamespace(body_q=SimpleNamespace(numpy=lambda: body_q))
+        self.state = SimpleNamespace(body_q=host(body_q))
         self._refs = refs or {}
 
     def __getitem__(self, name: str):
