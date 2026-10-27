@@ -63,9 +63,9 @@ import os
 import pathlib
 import queue
 import re
+import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 
@@ -141,6 +141,15 @@ def modules(tier: str = "") -> list[str]:
     return out
 
 
+def _defines_test(item: ast.stmt) -> bool:
+    """A ``def test*``, an ``async def test*``, or a ``test* = ...`` assigned in a class body."""
+    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return item.name.startswith("test")
+    if isinstance(item, ast.Assign):
+        return any(isinstance(t, ast.Name) and t.id.startswith("test") for t in item.targets)
+    return False
+
+
 def classes(module: str) -> list[str]:
     """The test classes a module defines, as dotted names, read by AST.
 
@@ -157,15 +166,16 @@ def classes(module: str) -> list[str]:
 
     def chain(node: ast.ClassDef, seen: frozenset[str] = frozenset()) -> tuple[bool, bool, bool]:
         """(derives from a TestCase, has a test method, has a base not resolved here)."""
-        case = tests = foreign = False
-        tests = any(isinstance(item, ast.FunctionDef) and item.name.startswith("test") for item in node.body)
+        case = foreign = False
+        tests = any(_defines_test(item) for item in node.body)
         for base in node.bases:
             name = ast.unparse(base)
             if name.endswith("TestCase"):
                 case = True
-            elif name in local and name not in seen:
-                got = chain(local[name], seen | {node.name})
-                case, tests, foreign = case or got[0], tests or got[1], foreign or got[2]
+            elif name in local:
+                if name not in seen:
+                    got = chain(local[name], seen | {node.name})
+                    case, tests, foreign = case or got[0], tests or got[1], foreign or got[2]
             elif name != "object":
                 foreign = True
         return case, tests, foreign
@@ -224,6 +234,14 @@ def read_outcome(name: str, code: int, seconds: float, output: str) -> Outcome:
     return out
 
 
+def _kill_group(child: subprocess.Popen) -> None:
+    """Kill a child started with ``start_new_session`` and everything it started."""
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        child.kill()
+
+
 def run_parallel(
     names: list[str],
     jobs: int,
@@ -231,7 +249,7 @@ def run_parallel(
     extra: list[str],
     gpus: list[str] | None = None,
     coverage: pathlib.Path | None = None,
-    stream=sys.stdout,
+    stream=None,
     timeout: float | None = None,
 ) -> list[Outcome]:
     """Run each name in its own ``python -m unittest`` process, ``jobs`` at a time.
@@ -243,6 +261,7 @@ def run_parallel(
     killed and reported with whatever it printed, so one hung module cannot stall
     the tier with nothing on the screen.
     """
+    stream = stream or sys.stdout
     work: queue.Queue[str] = queue.Queue()
     for name in names:
         work.put(name)
@@ -250,40 +269,51 @@ def run_parallel(
     lock = threading.Lock()
     workers = len(gpus) if gpus else max(1, jobs)
 
+    def one(name: str, own: dict[str, str]) -> Outcome:
+        prefix = [sys.executable, "-m"]
+        if coverage is not None:
+            prefix += ["coverage", "run", f"--rcfile={coverage}", "-m"]
+        start = time.monotonic()
+        # Its own process group, so a timeout takes down whatever the module started
+        # too: a server or a browser left holding the pipe would block the read forever.
+        child = subprocess.Popen(
+            [*prefix, "unittest", name, *extra],
+            cwd=ROOT,
+            env=own,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            start_new_session=True,
+        )
+        try:
+            output, _ = child.communicate(timeout=timeout)
+            code = child.returncode
+        except subprocess.TimeoutExpired:
+            _kill_group(child)
+            try:
+                output, _ = child.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                output = ""
+            output += f"\n[testrun] killed after {timeout:.0f} s; the output above is all it printed\n"
+            code = TIMED_OUT
+        return read_outcome(name, code, time.monotonic() - start, output)
+
     def worker(slot: int) -> None:
         own = dict(env if env is not None else os.environ)
         if gpus:
             # The worker sees its one card as cuda:0, so a device or renderer the shell
             # named (ROBOSIMSTUDIO_DEVICE=cuda:3) would point at a card it cannot see.
             own.update(CUDA_VISIBLE_DEVICES=gpus[slot], ROBOSIMSTUDIO_DEVICE="", ROBOSIMSTUDIO_RENDERER="")
-        if coverage is not None:
-            own["COVERAGE_FILE"] = str(coverage)
         while True:
             try:
                 name = work.get_nowait()
             except queue.Empty:
                 return
-            prefix = [sys.executable, "-m"]
-            if coverage is not None:
-                prefix += ["coverage", "run", "-p", f"--source={','.join(SOURCES)}", "-m"]
-            start = time.monotonic()
-            child = subprocess.Popen(
-                [*prefix, "unittest", name, *extra],
-                cwd=ROOT,
-                env=own,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
             try:
-                output, _ = child.communicate(timeout=timeout)
-                code = child.returncode
-            except subprocess.TimeoutExpired:
-                child.kill()
-                output, _ = child.communicate()
-                output += f"\n[testrun] killed after {timeout:.0f} s; the output above is all it printed\n"
-                code = TIMED_OUT
-            outcome = read_outcome(name, code, time.monotonic() - start, output)
+                outcome = one(name, own)
+            except Exception as error:  # a run that could not even be read is a failed run, never a missing one
+                outcome = Outcome(name, 1, 0.0, f"[testrun] {type(error).__name__}: {error}\n")
             with lock:
                 outcomes.append(outcome)
                 where = f" [gpu {gpus[slot]}]" if gpus else ""
@@ -302,8 +332,14 @@ def run_parallel(
     return sorted(outcomes, key=lambda o: o.name)
 
 
-def report(outcomes: list[Outcome], wall: float, durations: int, stream=sys.stdout) -> int:
-    """Print every failing run's output, the slowest runs and the totals; return the exit status."""
+def report(outcomes: list[Outcome], wall: float, durations: int, stream=None, expected: int | None = None) -> int:
+    """Print every failing run's output, the slowest runs and the totals; return the exit status.
+
+    ``expected`` is how many runs were asked for: fewer outcomes than that is a
+    failure even when every outcome passed, since a run that left none behind
+    is a run nobody saw.
+    """
+    stream = stream or sys.stdout
     failed = [o for o in outcomes if not o.ok]
     for outcome in failed:
         print(f"\n{'=' * 70}\n{outcome.name} exited {outcome.code}\n{'=' * 70}", file=stream)
@@ -321,19 +357,48 @@ def report(outcomes: list[Outcome], wall: float, durations: int, stream=sys.stdo
     )
     if failed:
         print("FAILED: " + " ".join(o.name for o in failed), file=stream)
-    return 1 if failed else 0
+    missing = expected is not None and len(outcomes) != expected
+    if missing:
+        print(f"FAILED: {expected} runs were asked for and {len(outcomes)} reported", file=stream)
+    return 1 if failed or missing else 0
 
 
-def coverage_report(data: pathlib.Path, stream=sys.stdout) -> int:
-    """Combine the per-process data files beside ``data`` and print the report."""
-    env = {**os.environ, "COVERAGE_FILE": str(data)}
-    combine = [sys.executable, "-m", "coverage", "combine", "-q", str(data.parent)]
-    if subprocess.run(combine, cwd=ROOT, env=env, check=False).returncode:
+COVERAGE_DIR = ROOT / "outputs" / "coverage"
+"""Where ``--coverage`` keeps its data, replaced on every run; ``outputs/`` is not committed."""
+
+
+def coverage_rc(where: pathlib.Path) -> pathlib.Path:
+    """A fresh data directory and the coverage configuration every run of the tier shares.
+
+    ``patch = subprocess`` measures the Python processes a test starts as well --
+    the live page, a fresh-interpreter import check -- which would otherwise read
+    as uncovered code in exactly the packages that start them.
+    """
+    if where.exists():
+        for old in where.glob(".coverage*"):
+            old.unlink()
+    where.mkdir(parents=True, exist_ok=True)
+    rc = where / "coveragerc"
+    rc.write_text(
+        "[run]\n"
+        "parallel = true\n"
+        f"data_file = {where / '.coverage'}\n"
+        f"source = {', '.join(SOURCES)}\n"
+        "patch = subprocess\n"
+    )
+    return rc
+
+
+def coverage_report(rc: pathlib.Path, stream=None) -> int:
+    """Combine the per-process data files and print the report."""
+    stream = stream or sys.stdout
+    combine = [sys.executable, "-m", "coverage", "combine", "-q", f"--rcfile={rc}"]
+    if subprocess.run(combine, cwd=ROOT, check=False).returncode:
         return 1
     print("", file=stream, flush=True)
-    show = [sys.executable, "-m", "coverage", "report", "--skip-covered", "--sort=miss"]
-    code = subprocess.run(show, cwd=ROOT, env=env, check=False).returncode
-    print(f"\ncoverage data: {data}  (open it with: COVERAGE_FILE={data} python -m coverage html)", file=stream)
+    show = [sys.executable, "-m", "coverage", "report", f"--rcfile={rc}", "--skip-covered", "--sort=miss"]
+    code = subprocess.run(show, cwd=ROOT, check=False).returncode
+    print(f"\ncoverage data in {rc.parent}  (python -m coverage html --rcfile={rc})", file=stream)
     return code
 
 
@@ -402,26 +467,28 @@ def main(argv: list[str] | None = None) -> int:
 
     env = {**os.environ, **NO_GPU} if args.tier in NO_GPU_TIERS else None
     extra = [*(["-v"] if args.verbose else []), *args.rest]
-    data = pathlib.Path(tempfile.mkdtemp(prefix="rss-coverage-")) / ".coverage" if args.coverage else None
+    rc = coverage_rc(COVERAGE_DIR) if args.coverage else None
 
     if jobs == 1 and not gpus:
+        ignored = [flag for flag, on in (("--by-class", args.by_class), ("--timeout", args.timeout != 3600.0)) if on]
+        if ignored:
+            print(f"note: {' and '.join(ignored)} need -j or --gpus; the tier runs as one unittest process")
         prefix = [sys.executable, "-m"]
-        if data is not None:
-            prefix += ["coverage", "run", f"--source={','.join(SOURCES)}", "-m"]
-            env = {**(env if env is not None else os.environ), "COVERAGE_FILE": str(data) + ".serial"}
+        if rc is not None:
+            prefix += ["coverage", "run", f"--rcfile={rc}", "-m"]
         command = [*prefix, "unittest", *names, *extra]
         print(f"$ {' '.join(command[:4])} ... ({len(names)} modules)")
         code = subprocess.run(command, cwd=ROOT, check=False, env=env).returncode
-        return (coverage_report(data) or code) if data is not None else code
+        return (coverage_report(rc) or code) if rc is not None else code
 
     if args.by_class:
         names = [name for module in names for name in classes(module)]
     workers = len(gpus) if gpus else jobs
     print(f"{len(names)} runs of tier {args.tier!r} on {workers} worker(s)" + (f", cards {gpus}" if gpus else ""))
     start = time.monotonic()
-    outcomes = run_parallel(names, jobs, env, extra, gpus=gpus or None, coverage=data, timeout=args.timeout)
-    code = report(outcomes, time.monotonic() - start, args.durations)
-    return (coverage_report(data) or code) if data is not None else code
+    outcomes = run_parallel(names, jobs, env, extra, gpus=gpus or None, coverage=rc, timeout=args.timeout)
+    code = report(outcomes, time.monotonic() - start, args.durations, expected=len(names))
+    return (coverage_report(rc) or code) if rc is not None else code
 
 
 if __name__ == "__main__":
