@@ -21,6 +21,7 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from tests.fixtures.packs import HAS_ROD_PACK, has_pack, needs_rod_pack
+from tests.fixtures.registries import restored
 
 TIER = "medium"
 
@@ -183,12 +184,9 @@ class TestAnEngineCanBeTaughtAKind(unittest.TestCase):
         def build(bridge, record, particle_q, tet_indices, tet_materials):
             return {"kind": "strand"}
 
-        register_actor_builder("superdex", "strand", build)
-        try:
+        with restored(ACTOR_BUILDERS):
+            register_actor_builder("superdex", "strand", build)
             self.assertIs(actor_builder("superdex", "strand"), build)
-        finally:
-            ACTOR_BUILDERS._items.pop("superdex:strand", None)
-            ACTOR_BUILDERS._origins.pop("superdex:strand", None)
 
 
 if __name__ == "__main__":

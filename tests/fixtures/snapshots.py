@@ -8,7 +8,7 @@ scoring 0.84 and 0.90 on consecutive folds of the same towel, so anything checke
 through a live rollout can only ever be checked within a band -- while anything
 checked against a scripted snapshot can be checked exactly.
 
-Three things here:
+Four things here:
 
 * :func:`ctx` -- an ``WorldState`` carrying only what the caller sets. The
   environment's own fields (task, episode, handles, state) are left empty rather
@@ -20,6 +20,9 @@ Three things here:
 * :class:`Tape` -- a scripted sequence of verdicts, for driving temporal
   combinators through a story ("holds, holds, lapses, holds again") whose right
   answer is known by construction.
+* :func:`contact_view` -- a **real** ``ContactView`` over scripted pairs, for a
+  measure that reads the scene's contact set. Real for the same reason as the
+  probe: the sign convention lives in its queries, and a fake would hide it.
 """
 
 from __future__ import annotations
@@ -31,10 +34,11 @@ from typing import Any
 import numpy as np
 
 from robosimstudio.core.probes import ParticleProbe
+from robosimstudio.core.probes.contact import ContactView
 from robosimstudio.scene.state import WorldState
 from robosimstudio_bench.goals.context import EvalResult
 
-__all__ = ["Tape", "ctx", "fold_context", "probe_for"]
+__all__ = ["Tape", "contact_view", "ctx", "fold_context", "probe_for"]
 
 
 def ctx(
@@ -138,3 +142,28 @@ class Tape:
     def rewind(self) -> None:
         """Start the story again -- what a reset test needs."""
         self.calls = 0
+
+
+def contact_view(
+    rows: Sequence[tuple[int, int, Sequence[float]]] = (), *, dt: float = 0.01, depths: Sequence[float] | None = None
+) -> ContactView:
+    """A real ``ContactView`` over scripted contacts.
+
+    Args:
+        rows: ``(shape_a, shape_b, impulse)`` per contact, the impulse [N*s] being
+            the one that acts on ``shape_b`` -- the solver's convention, which
+            ``ContactQueries`` turns around when ``shape_a`` is asked about.
+            Geom ``i`` is shape ``i``, so a failure names a shape a reader can find.
+        dt: The substep a force is divided by.
+        depths: Signed gap per contact (negative is overlap); zeros when omitted.
+    """
+    geoms = np.array([(a, b) for a, b, _ in rows], dtype=np.int32).reshape(-1, 2)
+    impulses = np.array([tuple(impulse) for _, _, impulse in rows], dtype=np.float64).reshape(-1, 3)
+    widest = int(geoms.max(initial=0)) + 1
+    return ContactView(
+        geoms=geoms,
+        impulses=impulses,
+        depths=np.zeros(len(geoms)) if depths is None else np.asarray(depths, dtype=np.float64),
+        geom_to_shape=np.arange(widest, dtype=np.int32),
+        dt=dt,
+    )

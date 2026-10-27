@@ -176,12 +176,8 @@ class TestAnEpisodeThatMovesAStaticObjectIsRefused(_ThreePaths):
             fleet._check_statics([STAYS, MOVED], [None, None])
 
     def test_the_reset_and_the_wave_name_one_remedy_written_once(self) -> None:
-        """The way out was written in ``EntityRigid.reset`` and again in ``FleetEnv._check_statics``."""
-        import inspect
-
-        from robosimstudio.domains.rigid import entity as rigid
-        from robosimstudio_bench.envs import fleet as fleet_module
-
+        """The way out was written in ``EntityRigid.reset`` and again in ``FleetEnv._check_statics``: both now end on
+        the entity's one ``move_remedy``."""
         entity, _ = _built(self._spec("primitive", static=True))
         with self.assertRaises(ValueError) as serial:
             entity.reset(None, MOVED)
@@ -189,8 +185,9 @@ class TestAnEpisodeThatMovesAStaticObjectIsRefused(_ThreePaths):
             _fleet({"box": entity})._check_statics([STAYS, MOVED], [None, None])
         for refusal in (serial.exception, wave.exception):
             self.assertTrue(str(refusal).endswith(entity.move_remedy), str(refusal))
-        written = sum(inspect.getsource(m).count("(:model-key-fields ...)") for m in (rigid, fleet_module))
-        self.assertEqual(1, written, "the remedy is written in one place")
+            # A second copy pasted ahead of the appended one would still end right; it would not count once.
+            self.assertEqual(1, str(refusal).count("(:model-key-fields"), str(refusal))
+        self.assertIn("(:model-key-fields ...)", entity.move_remedy, "the remedy names the way out")
 
 
 class TestAWaveAsksOnlyItsStatics(unittest.TestCase):

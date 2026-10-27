@@ -381,5 +381,106 @@ class TestAnIslandThatHoldsItsOwnCopy(unittest.TestCase):
         self.assertEqual([("vbd", ("tri_materials",))], pipeline.solver.projected)
 
 
+class TestTwoWritersOverOneArray(unittest.TestCase):
+    def test_neither_puts_back_the_others_rows(self) -> None:
+        model = SimpleNamespace(shape_material_mu=_Array([0.5, 0.5, 0.5, 0.5]))
+        a = ShapeWriter(model, [0, 1])
+        b = ShapeWriter(model, [2, 3])
+        a.read(), b.read()
+        b("mu", 1.2)
+        a("mu", 0.1)
+        np.testing.assert_allclose(model.shape_material_mu.numpy(), [0.1, 0.1, 1.2, 1.2])
+
+    def test_an_outside_write_survives_the_next_one(self) -> None:
+        model = SimpleNamespace(shape_material_mu=_Array([0.5, 0.5, 0.5, 0.5]))
+        a = ShapeWriter(model, [0, 1])
+        a("mu", 0.2)
+        model.shape_material_mu.values[3] = 0.9
+        a("mu", 0.3)
+        np.testing.assert_allclose(model.shape_material_mu.numpy(), [0.3, 0.3, 0.5, 0.9])
+
+
+class TestTwoClothsOverOneMaterialArray(unittest.TestCase):
+    def _target(self, name, tris):
+        from robosimstudio.scene.tuning import ClothTarget
+
+        empty = np.zeros(0, dtype=np.int32)
+        return ClothTarget(name=name, particles=empty, tris=np.asarray(tris, dtype=np.int32), edges=empty, tets=empty)
+
+    def test_neither_puts_back_the_others_rows(self) -> None:
+        from robosimstudio.scene.tuning import LiveMaterial
+
+        model = SimpleNamespace(tri_materials=_Array(np.full((4, 3), 100.0)))
+        a = LiveMaterial(model, self._target("a", [0, 1]))
+        b = LiveMaterial(model, self._target("b", [2, 3]))
+        self.assertTrue(a.write_field("tri_ke", 5.0))
+        self.assertTrue(b.write_field("tri_ke", 7.0))
+        model.tri_materials.values[0, 1] = 9.0
+        self.assertTrue(a.write_field("tri_kd", 3.0))
+        np.testing.assert_allclose(model.tri_materials.numpy()[:, 0], [5.0, 5.0, 7.0, 7.0])
+        np.testing.assert_allclose(model.tri_materials.numpy()[:, 1], [9.0, 100.0, 100.0, 100.0])
+        np.testing.assert_allclose(model.tri_materials.numpy()[:, 2], [3.0, 3.0, 100.0, 100.0])
+
+
+class TestAMassThatIsNotOne(unittest.TestCase):
+    def test_zero_and_negative_are_refused(self) -> None:
+        model = SimpleNamespace(
+            body_mass=_Array([2.0]),
+            body_inv_mass=_Array([0.5]),
+            body_inertia=_Array([np.eye(3) * 2.0]),
+            body_inv_inertia=_Array([np.eye(3) * 0.5]),
+        )
+        writer = BodyWriter(model, [0])
+        for mass in (0.0, -1.0, float("nan")):
+            self.assertFalse(writer("mass", mass))
+        self.assertAlmostEqual(float(model.body_mass.numpy()[0]), 2.0)
+        self.assertAlmostEqual(float(model.body_inv_mass.numpy()[0]), 0.5)
+        np.testing.assert_allclose(model.body_inertia.numpy()[0], np.eye(3) * 2.0)
+        self.assertTrue(writer("mass", 4.0))
+        self.assertAlmostEqual(float(model.body_inv_mass.numpy()[0]), 0.25)
+
+
+class TestSetKinematic(unittest.TestCase):
+    """A pin and its release write the two state bits and nothing else, in the model and in an island's copy."""
+
+    def _pipeline(self, model_flags, island_flags):
+        """A model of three bodies and one island whose copy of ``body_flags`` holds bodies 1 and 2 as rows 0 and 1."""
+        view = SimpleNamespace(overrides={"body_flags": _Array(island_flags)})
+        entry = SimpleNamespace(body_global_to_local=_Array([-1, 0, 1]))
+        solver = SimpleNamespace(_entries={"vbd": entry}, view=lambda name: view)
+        pipeline = SimpleNamespace(model=SimpleNamespace(body_flags=_Array(model_flags)), solver=solver)
+        return pipeline, view.overrides["body_flags"]
+
+    def test_an_islands_proxy_mark_outlives_a_pin_and_its_release(self) -> None:
+        import newton
+
+        from robosimstudio.core.tuning import set_kinematic
+
+        flags = newton.BodyFlags
+        dynamic, kinematic, proxy = int(flags.DYNAMIC), int(flags.KINEMATIC), int(flags.PROXY)
+        pipeline, island = self._pipeline([dynamic] * 3, [proxy | dynamic, dynamic])
+        before = set_kinematic(pipeline, [1, 2], True)
+        self.assertEqual({1: dynamic, 2: dynamic}, before)
+        self.assertEqual([dynamic, kinematic, kinematic], [int(f) for f in pipeline.model.body_flags.numpy()])
+        self.assertEqual([proxy | kinematic, kinematic], [int(f) for f in island.numpy()])
+        set_kinematic(pipeline, [1, 2], False, restore=before)
+        self.assertEqual([dynamic] * 3, [int(f) for f in pipeline.model.body_flags.numpy()])
+        self.assertEqual([proxy | dynamic, dynamic], [int(f) for f in island.numpy()])
+
+    def test_a_body_kinematic_before_the_pin_is_kinematic_after_the_release(self) -> None:
+        import newton
+
+        from robosimstudio.core.tuning import set_kinematic
+
+        dynamic, kinematic = int(newton.BodyFlags.DYNAMIC), int(newton.BodyFlags.KINEMATIC)
+        pipeline, island = self._pipeline([dynamic, kinematic, dynamic], [kinematic, dynamic])
+        before = set_kinematic(pipeline, [1, 2], True)
+        set_kinematic(pipeline, [1, 2], False, restore=before)
+        self.assertEqual([dynamic, kinematic, dynamic], [int(f) for f in pipeline.model.body_flags.numpy()])
+        self.assertEqual([kinematic, dynamic], [int(f) for f in island.numpy()])
+        set_kinematic(pipeline, [1], False)
+        self.assertEqual([dynamic] * 3, [int(f) for f in pipeline.model.body_flags.numpy()], "no restore: DYNAMIC")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -23,6 +23,7 @@ time, where they cost a second to check.
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import newton
 import warp as wp
@@ -384,6 +385,41 @@ class TestSubstepHooksIsThePhaseListsTogether(unittest.TestCase):
         self.assertFalse(hooks)
         hooks.add("post_solve", _recorder([], "x"))
         self.assertTrue(hooks)
+
+
+class TestASettleKeepsAPendingRecapture(unittest.TestCase):
+    def _executor(self):
+        from robosimstudio.core.schedule import Schedule, ScheduleExecutor
+        from tests.test_schedule import _model
+
+        return ScheduleExecutor(_model(), Schedule(), control_hz=50.0, substeps=2, use_cuda_graph=False)
+
+    def test_a_recapture_asked_for_before_the_settle_waits_for_it(self) -> None:
+        """Captured at the settle's substep count and then discarded with the
+        block, the re-capture used to be spent, and the run went eager for good."""
+        executor = self._executor()
+        executor.invalidate_graph()
+        with executor.substeps_at(8):
+            executor.step()
+        self.assertTrue(executor._recapture, "the re-capture must still be pending at the run's own count")
+        self.assertEqual(executor.substeps, 2)
+
+    def test_stages_changed_inside_the_settle_drop_the_graph_set_aside(self) -> None:
+        executor = self._executor()
+        executor._graph = object()  # stands in for a captured graph
+        with executor.substeps_at(8):
+            executor.invalidate_graph()
+        self.assertIsNone(executor._graph, "the graph set aside no longer matches the stages")
+        self.assertTrue(executor._recapture)
+
+    def test_an_after_stage_added_later_still_makes_the_step_wait(self) -> None:
+        from robosimstudio.core.schedule import Stage
+
+        executor = self._executor()
+        executor.schedule.add(Stage(name="tick", fn=lambda s, dt: None, phase="after", reads=frozenset({"body_q"})))
+        with mock.patch("robosimstudio.core.schedule.wp.synchronize_device") as sync:
+            executor.step()
+        sync.assert_called_once()
 
 
 if __name__ == "__main__":

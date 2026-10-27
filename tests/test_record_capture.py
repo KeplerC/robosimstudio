@@ -3,7 +3,7 @@
 
 The tape is what replaced the description layer: ``--capture-state`` writes the
 numbers a simulator can produce -- indices, arrays, contact pairs, tool spans --
-and nothing that interprets them. These six pin the parts that were wrong at
+and nothing that interprets them. These pin the parts that were wrong at
 least once: the two views of one tape, the refusal that keeps a span honest on a
 decimated capture, what opens a span and what does not, the boundary close, the
 absence of the tools this layer replaced, and the step stream capture rides on.
@@ -16,13 +16,17 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
 
 from robosimstudio.core.env import EnvBase
+from robosimstudio.core.probes.contact import ContactView
 from robosimstudio.record import EpisodeCapture, ToolSpanRecorder
-from robosimstudio.specs import CaptureSpec
+from robosimstudio.record.recorder import EpisodeRecorder
+from robosimstudio.specs import CaptureSpec, RecordSpec
 from robosimstudio_bench.envs.env import Env
 from robosimstudio_policy_agent.sim_tools import SimTools
 
@@ -167,6 +171,82 @@ class TestRawCapture(unittest.TestCase):
             env.remove_step_observer(observer)
             env.step([2.0])
             self.assertEqual(len(seen), 1)
+
+
+class CaptureRestrictedContactsTest(unittest.TestCase):
+    def test_restricted_view_is_read_without_update(self) -> None:
+        view = ContactView(
+            geoms=np.array([[0, 1]], dtype=np.int32),
+            impulses=np.array([[0.0, 0.0, 1.0]]),
+            depths=np.array([0.001]),
+            geom_to_shape=np.array([4, 5], dtype=np.int32),
+            dt=0.01,
+        )
+        context = SimpleNamespace(
+            contacts=view,
+            body_q=np.zeros((1, 7)),
+            body_qd=np.zeros((1, 6)),
+            settled_body_q=np.zeros((1, 7)),
+            joint_target_q=np.zeros(2),
+        )
+        snap = SimpleNamespace(joint_q=np.zeros(2), joint_qd=np.zeros(2))
+        env = SimpleNamespace(
+            step_count=3,
+            sim_time=0.03,
+            last_context=context,
+            pipeline=SimpleNamespace(snapshot=snap),
+            model=SimpleNamespace(particle_count=0),
+        )
+        rec = EpisodeRecorder(tempfile.mkdtemp(), RecordSpec(enabled=False), capture=CaptureSpec(enabled=True))
+        rec._record_capture(env)
+        self.assertEqual(len(rec._capture_contacts), 1)
+        pair = rec._capture_contacts[0]["pairs"][0]
+        self.assertEqual((pair["shape_a"], pair["shape_b"]), (4, 5))
+
+
+class _Unreadable:
+    def numpy(self):
+        raise AssertionError("read the device array instead of the step's snapshot")
+
+
+class TestRawCaptureReadsTheSnapshot(unittest.TestCase):
+    def test_joint_and_particle_arrays_come_from_the_snapshot(self) -> None:
+        from robosimstudio.record import EpisodeRecorder
+        from robosimstudio.specs import CaptureSpec, RecordSpec
+
+        snap = SimpleNamespace(
+            joint_q=np.array([1.0, 2.0]),
+            joint_qd=np.array([3.0]),
+            particle_q=np.ones((2, 3)),
+            particle_qd=np.zeros((2, 3)),
+        )
+        context = SimpleNamespace(
+            body_q=np.zeros((1, 7)),
+            body_qd=np.zeros((1, 6)),
+            settled_body_q=np.zeros((1, 7)),
+            joint_target_q=np.zeros(2),
+            contacts=None,
+        )
+        unreadable = _Unreadable()
+        env = SimpleNamespace(
+            last_context=context,
+            pipeline=SimpleNamespace(snapshot=snap),
+            state=SimpleNamespace(
+                joint_q=unreadable, joint_qd=unreadable, particle_q=unreadable, particle_qd=unreadable
+            ),
+            model=SimpleNamespace(particle_count=2),
+            step_count=3,
+            sim_time=0.05,
+        )
+        with TemporaryDirectory() as directory:
+            recorder = EpisodeRecorder(
+                directory, RecordSpec(record_video=False), capture=CaptureSpec(enabled=True, contacts=False)
+            )
+            recorder._capture = {}
+            recorder._record_capture(env)
+        np.testing.assert_allclose(recorder._capture["joint_q"][0], [1.0, 2.0])
+        self.assertEqual(recorder._capture["joint_q"][0].dtype, np.float32)
+        np.testing.assert_allclose(recorder._capture["particle_q"][0], np.ones((2, 3)))
 
 
 if __name__ == "__main__":

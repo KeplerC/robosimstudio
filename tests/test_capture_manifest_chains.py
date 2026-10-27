@@ -17,6 +17,7 @@ import numpy as np
 
 from robosimstudio.record.capture import capture_manifest
 from robosimstudio.scene.handles import EntityHandle
+from tests.fixtures.arrays import host
 
 TIER = "fast"
 
@@ -43,8 +44,8 @@ def _env(objects: dict[str, EntityHandle], shape_type: np.ndarray, shape_scale: 
         physics=SimpleNamespace(control_hz=60.0),
     )
     model = SimpleNamespace(
-        shape_type=SimpleNamespace(numpy=lambda: shape_type),
-        shape_scale=SimpleNamespace(numpy=lambda: shape_scale),
+        shape_type=host(shape_type),
+        shape_scale=host(shape_scale),
     )
     return SimpleNamespace(handles=handles, task=task, model=model, episode=None, doc=None)
 

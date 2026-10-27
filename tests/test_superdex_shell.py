@@ -24,19 +24,13 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from tests.fixtures.arrays import host
+
 TIER = "fast"
 """A stand-in engine and model. No GPU, no wheel."""
 
 ENGINE_MU, ENGINE_FALLOFF, ENGINE_PENALTY = 0.5, 0.01, 1.0e9
 """The engine's own contact, as a shell is built with when nothing is said (``p1_facts.py``)."""
-
-
-class _Arr:
-    def __init__(self, a) -> None:
-        self.a = np.asarray(a)
-
-    def numpy(self):
-        return self.a
 
 
 class _Quaternion:
@@ -163,7 +157,7 @@ def _bridge(vertices: np.ndarray, faces: np.ndarray, **recipe):
 
     bridge = object.__new__(SuperdexBridge)
     bridge.physics = _engine()
-    bridge.model = SimpleNamespace(particle_q=_Arr(vertices), tri_indices=_Arr(faces), tri_count=len(faces))
+    bridge.model = SimpleNamespace(particle_q=host(vertices), tri_indices=host(faces, int), tri_count=len(faces))
     bridge.recipe = {"shell_young": 1.0e5, "shell_poisson": 0.3, **recipe}
     bridge.scenes, bridge.num_worlds = [object()], 1
     return bridge

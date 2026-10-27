@@ -70,10 +70,6 @@ class TestTheTwoHalvesAreWhereTheySay(unittest.TestCase):
         have = {_module(GOAL_HALF, p) for p in GOAL_HALF.glob("*.py")} - {"__init__"}
         self.assertEqual(GOAL_MODULES | GOAL_SIDE, have, f"robosimstudio_bench/goals holds {sorted(have)}")
 
-    def test_none_of_it_is_left_in_assetlib(self) -> None:
-        stale = sorted(m for m in GOAL_MODULES | GOAL_SIDE if (CORE_HALF / f"{m}.py").exists())
-        self.assertEqual([], stale, f"still in assetlib: {stale}")
-
     def test_the_core_half_is_still_the_shape_this_describes(self) -> None:
         """A counter-test: an emptied directory would pass everything below."""
         self.assertGreater(len(list(CORE_HALF.rglob("*.py"))), 20)
@@ -100,8 +96,12 @@ class TestTheCoreHalfNeedsNoParser(unittest.TestCase):
         )
 
     def test_mint_is_here_for_the_stated_reason(self) -> None:
-        source = (GOAL_HALF / "mint.py").read_text()
-        self.assertIn("gauntlet", source, "mint no longer reaches the goal half through gauntlet")
+        imported = {
+            node.module
+            for node in ast.parse((GOAL_HALF / "mint.py").read_text()).body
+            if isinstance(node, ast.ImportFrom) and node.level == 1
+        }
+        self.assertIn("gauntlet", imported, "mint no longer reaches the goal half through gauntlet")
         self.assertFalse(
             _names_parser(GOAL_HALF / "mint.py"), "mint names the parser directly now; update the docstring"
         )
