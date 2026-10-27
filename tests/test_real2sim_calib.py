@@ -52,6 +52,18 @@ class TestCameraFit(unittest.TestCase):
         spec = CameraSpec(name="fit", **fit["spec"])
         self.assertLess(np.abs(spec.project(world)[0] - pixels).max(), 0.5, "the printed keywords make that camera")
 
+    def test_a_mirrored_set_is_refused_with_its_field_of_view_given(self) -> None:
+        """Named, the field of view leaves the search no path through a camera from behind: it must look there."""
+        world, pixels = self._points()
+        with self.assertRaisesRegex(ValueError, "mirror"):
+            calib.fit_camera(world * np.array([1.0, -1.0, 1.0]), pixels, 1280, 720, fov_y=48.0)
+
+    def test_the_camera_comes_back_with_its_field_of_view_given(self) -> None:
+        world, pixels = self._points()
+        fit = calib.fit_camera(world, pixels, 1280, 720, fov_y=48.0)
+        self.assertLess(fit["rms_px"], 0.05)
+        self.assertEqual(0, fit["behind"])
+
     def test_a_point_read_off_wrong_stands_out(self) -> None:
         world, pixels = self._points(12)
         pixels = pixels.copy()
