@@ -221,12 +221,16 @@ def _opened(binary: np.ndarray) -> np.ndarray:
 
     As its two halves. OpenCV anchors an even kernel at (1, 1) for both, so
     ``MORPH_OPEN`` moved every mask, and its box, one pixel down and to the
-    right; the dilation anchored at (0, 0) undoes the erosion's shift exactly.
+    right; the dilation anchored at (0, 0) undoes the erosion's shift. And the
+    erosion is told the off-image pixels are background: its default border
+    reads them as foreground, which kept a one-pixel strip along row 0 or
+    column 0 that the same strip along the far edges loses.
     """
     import cv2
 
     opening = np.ones((2, 2), np.uint8)
-    return cv2.dilate(cv2.erode(binary, opening), opening, anchor=(0, 0))
+    eroded = cv2.erode(binary, opening, borderType=cv2.BORDER_CONSTANT, borderValue=0)
+    return cv2.dilate(eroded, opening, anchor=(0, 0))
 
 
 def _palette_segment(arr: np.ndarray, query: str, max_results: int) -> dict[str, Any]:
