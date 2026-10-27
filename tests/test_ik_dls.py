@@ -243,6 +243,10 @@ class TestThePolishKeepsItsPromises(unittest.TestCase):
         self.assertLess(float(after_w.max()), 0.1 * float(before_w.min()), "and on a reachable pose it closes")
 
     def test_no_joint_moves_further_than_the_whole_polish_allows(self) -> None:
+        """Handed a pose a third of a radian off, an unbounded polish swings a joint two radians to close it."""
+        far = self.handed + np.random.default_rng(9).normal(0.0, 0.3, self.handed.shape)
+        out = polish_pose_batched(self.fk, far, self.position, self.rotation, lower=self.fk.lower, upper=self.fk.upper)
+        self.assertLessEqual(float(np.abs(out - far).max()), POLISH_MAX_MOVE + 1e-12)
         self.assertLessEqual(float(np.abs(self.polished - self.handed).max()), POLISH_MAX_MOVE + 1e-12)
 
     def test_one_step_moves_no_joint_more_than_its_cap(self) -> None:

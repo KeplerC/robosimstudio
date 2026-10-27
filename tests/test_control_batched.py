@@ -70,6 +70,7 @@ class TestASegment(unittest.TestCase):
         s = np.concatenate([[0.0], share])  # s(k / 10), k = 0..10
         np.testing.assert_allclose(s + s[::-1], 1.0, atol=1e-5)
         self.assertTrue(np.all(np.diff(s) > 0.0), s)
+        self.assertLess(s[1], 0.05, "it eases in: the first tenth of the time covers less than a tenth of the way")
 
     def test_it_is_finished_on_its_last_step_and_not_before(self) -> None:
         self.driver.plan(0, self.q0, self.q1, 5)
