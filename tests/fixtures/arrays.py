@@ -9,8 +9,13 @@ passes against one stand-in and fails against the other. :func:`host` says
 which, by name.
 
 Warp's own rule: a CPU array's ``numpy()`` shares its memory, a CUDA array's is
-a copy. ``copy=False`` is the CPU behaviour and the default; ``copy=True`` is
-the device one, for a test of code that must write back with ``assign``.
+a copy. ``copy=False`` is the CPU behaviour and the default, and ``device`` says
+``"cpu"``; ``copy=True`` is the device one, ``device`` says ``"cuda:0"``, for a
+test of code that must write back with ``assign``.
+
+An array handed in keeps its dtype and, with ``copy=False``, its memory: a test
+that edits the array it passed sees the edit through ``numpy()``, as it did with
+``SimpleNamespace(numpy=lambda: q)``. A plain list becomes float64.
 """
 
 from __future__ import annotations
@@ -26,9 +31,11 @@ class HostArray:
     """``numpy()``, ``shape``, ``dtype``, ``len()``, ``assign()`` and ``fill_()`` over a numpy array."""
 
     def __init__(self, values: Any, dtype: Any = None, *, copy: bool = False) -> None:
-        self.data = np.array(values, dtype=dtype)
+        if dtype is None and not isinstance(values, np.ndarray):
+            dtype = float
+        self.data = np.asarray(values, dtype=dtype)
         self.copy = copy
-        self.device = "cpu"
+        self.device = "cuda:0" if copy else "cpu"
 
     def numpy(self) -> np.ndarray:
         return self.data.copy() if self.copy else self.data
@@ -51,6 +58,10 @@ class HostArray:
         self.data.fill(value)
 
 
-def host(values: Any, dtype: Any = float, *, copy: bool = False) -> HostArray:
-    """``values`` as a :class:`HostArray`; ``copy=True`` makes ``numpy()`` hand out copies, as on a GPU."""
+def host(values: Any, dtype: Any = None, *, copy: bool = False) -> HostArray:
+    """``values`` as a :class:`HostArray`; ``copy=True`` makes ``numpy()`` hand out copies, as on a GPU.
+
+    ``dtype=None`` keeps an ndarray's dtype (an index array stays integer, a mask
+    stays bool) and makes a list float64.
+    """
     return HostArray(values, dtype, copy=copy)
