@@ -207,6 +207,74 @@ class TestASocketThatFitsWhateverTheTempDir(unittest.TestCase):
         self.assertEqual(2, code)
         self.assertTrue(err.getvalue().startswith("ctl: no directory short enough"), err.getvalue())
 
+    def test_a_root_it_cannot_write_is_passed_over_for_the_next(self) -> None:
+        """A sandbox may leave ``/tmp`` a directory and only ``TMPDIR`` writable: a path there could not be bound."""
+        if os.geteuid() == 0:
+            self.skipTest("root writes into any directory")
+        locked, open_ = self.enterContext(short_dir("ro-")), self.enterContext(short_dir("rw-"))
+        os.chmod(locked, 0o500)
+        self.addCleanup(os.chmod, locked, 0o700)
+        with (
+            mock.patch.object(wire, "SOCKET_DIRS", (str(locked),)),
+            mock.patch.object(tempfile, "tempdir", str(open_)),
+        ):
+            path = wire.socket_path(self.deep_run_dir())
+        self.assertEqual(open_, path.parent)
+
+    def _nowhere(self) -> contextlib.ExitStack:
+        """No root short enough for a socket: the temp dir and every one of :data:`wire.SOCKET_DIRS` too deep."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(tempfile, "tempdir", DEEP_TEMP))
+        stack.enter_context(mock.patch.object(wire, "SOCKET_DIRS", (DEEP_TEMP,)))
+        return stack
+
+    def test_a_twin_is_made_with_no_socket_to_be_had(self) -> None:
+        from robosimstudio_real2sim_agent import ctl
+
+        twin = self.enterContext(short_dir("new-")) / "lid"
+        with self._nowhere(), contextlib.redirect_stdout(io.StringIO()):
+            code = ctl.main(["--run-dir", str(self.deep_run_dir()), "new", "lid", "--dir", str(twin)])
+        self.assertEqual(0, code)
+        self.assertTrue((twin / "scene.py").exists())
+
+    def test_a_camera_is_fitted_with_no_socket_to_be_had(self) -> None:
+        from robosimstudio.core.cameras import CameraSpec
+        from robosimstudio_real2sim_agent import ctl
+
+        cam = CameraSpec(name="c", width=640, height=480, fov_y=48, eye=(1.9, -0.7, 1.6), look_at=(0.6, 0.1, 0.75))
+        world = np.array([[0.2, -0.5, 0.75], [1.0, -0.4, 0.8], [0.3, 0.5, 0.9], [0.9, 0.6, 1.1], [0.6, 0.0, 1.0]])
+        points = [
+            f"--point={x},{y},{z}={u},{v}" for (x, y, z), (u, v) in zip(world, cam.project(world)[0], strict=True)
+        ]
+        with self._nowhere(), contextlib.redirect_stdout(io.StringIO()):
+            code = ctl.main(
+                ["--run-dir", str(self.deep_run_dir()), "camera", "fit", *points, "--size", "640x480", "--fov", "48"]
+            )
+        self.assertEqual(0, code)
+
+    def test_stills_are_cut_with_no_socket_to_be_had(self) -> None:
+        from robosimstudio_real2sim_agent import ctl
+        from tests.fixtures.real2sim_clips import flat_clip
+
+        here = self.enterContext(short_dir("cut-"))
+        clip = flat_clip(here / "c.mp4", 1, "red")
+        argv = ["--run-dir", str(self.deep_run_dir()), "ref", "frames", str(clip), "--out", str(here / "ref")]
+        with self._nowhere(), contextlib.redirect_stdout(io.StringIO()):
+            code = ctl.main(argv)
+        self.assertEqual(0, code)
+        self.assertTrue((here / "ref" / "timeline.json").exists())
+
+    def test_the_server_says_so_in_one_line_too(self) -> None:
+        from robosimstudio_real2sim_agent import serve
+
+        err = io.StringIO()
+        with self._nowhere(), contextlib.redirect_stderr(err):
+            code = serve.main(["--scene", "scene.py", "--run-dir", str(self.deep_run_dir())])
+        self.assertEqual(2, code)
+        self.assertIn("no directory short enough", err.getvalue())
+        self.assertIn("--sock", err.getvalue())
+        self.assertEqual(1, len(err.getvalue().strip().splitlines()), err.getvalue())
+
 
 class TestTheBind(unittest.TestCase):
     def test_a_regular_file_is_not_deleted(self) -> None:
