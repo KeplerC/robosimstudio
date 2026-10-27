@@ -12,6 +12,7 @@ to refuse, is :mod:`tests.test_real2sim_calib_search`'s.
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
@@ -63,6 +64,46 @@ class TestCameraFit(unittest.TestCase):
         fit = calib.fit_camera(world, pixels, 1280, 720, fov_y=48.0)
         self.assertLess(fit["rms_px"], 0.05)
         self.assertEqual(0, fit["behind"])
+
+    def test_a_poor_fit_from_behind_does_not_stand_in_for_looking_there(self) -> None:
+        """A start that drifts behind the points and stops far from any fit says nothing about a mirror."""
+        from scipy import optimize
+
+        solve, calls = optimize.least_squares, []
+
+        def first_start_drifts_behind(fun, x0, **kwargs):
+            calls.append(1)
+            if len(calls) > 1:
+                return solve(fun, x0, **kwargs)
+            rot = calib._rodrigues(x0[1:4])
+            eye = -rot.T @ x0[4:7]
+            turned = np.diag([-1.0, 1.0, -1.0]) @ rot  # half a turn about its own y: every point behind it
+            x = np.concatenate([[x0[0]], calib._rotvec(turned), -turned @ eye])
+            return SimpleNamespace(x=x, fun=fun(x))  # stopped there, nowhere near a fit
+
+        world, pixels = self._points()
+        with (
+            mock.patch.object(optimize, "least_squares", first_start_drifts_behind),
+            self.assertRaisesRegex(ValueError, "mirror"),
+        ):
+            calib.fit_camera(world * np.array([1.0, -1.0, 1.0]), pixels, 1280, 720, fov_y=48.0)
+
+    def test_a_hand_clicked_set_pays_for_no_search_from_behind(self) -> None:
+        """A pixel or two of clicking noise is a fit some pixels out, not a mirror: one search, not two."""
+        from scipy import optimize
+
+        solve, calls = optimize.least_squares, []
+
+        def counted(fun, x0, **kwargs):
+            calls.append(1)
+            return solve(fun, x0, **kwargs)
+
+        world, pixels = self._points(12)
+        clicked = pixels + np.random.default_rng(5).normal(0.0, 2.0, pixels.shape)
+        with mock.patch.object(optimize, "least_squares", counted):
+            fit = calib.fit_camera(world, clicked, 1280, 720, fov_y=48.0)
+        self.assertGreater(fit["rms_px"], 1.0, "a fit poor enough that the old rule looked from behind")
+        self.assertEqual(FEW_STARTS * 2, len(calls), "one start per direction and distance, from in front")
 
     def test_a_point_read_off_wrong_stands_out(self) -> None:
         world, pixels = self._points(12)
