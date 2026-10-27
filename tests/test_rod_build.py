@@ -8,12 +8,10 @@ and passes ``add_rod(rod=...)`` with all eight stiffness and damping numbers.
 Three claims, on the CPU builder with no scene:
 
 * **No deprecation warning** mentioning either old form comes out of a build.
-* **The straight spawn is bit-identical** to what the deprecated path built:
-  ``body_q``, ``joint_X_p``/``joint_X_c``, masses, ``shape_scale``,
-  ``joint_target_ke``/``kd``. The old path is restated here from the entity as
-  it stood before the migration (``git show
-  materials/sibling:robosimstudio_materials/rod/entity.py``) rather than
-  imported, since it is gone.
+* **The straight spawn is the chain its spec states**: capsules laid end to
+  end from ``start`` along ``direction``, each ``length / segments`` long, of
+  the spec's radius and weighing its density times its volume, joined by one
+  joint fewer than there are capsules. A polyline keeps its nodes.
 * **The twist slot is its own**: ``joint_target_ke`` rows 2 and 3 of each cable
   joint equal ``bend_ke`` and ``twist_ke`` when the spec splits them, and are
   equal when ``twist_ke`` is ``None``; the same for shear against stretch.
@@ -31,19 +29,6 @@ import numpy as np
 
 TIER = "fast"
 """The CPU builder and a CPU finalize: no scene and no GPU."""
-
-ARRAYS = (
-    "body_q",
-    "body_com",
-    "body_mass",
-    "body_inertia",
-    "shape_scale",
-    "joint_X_p",
-    "joint_X_c",
-    "joint_target_ke",
-    "joint_target_kd",
-    "joint_qd_start",
-)
 
 
 def _episode():
@@ -137,20 +122,36 @@ class TestNoDeprecatedCall(unittest.TestCase):
             self.assertNotIn("create_straight_cable", message)
 
 
-class TestTheStraightSpawnIsUnchanged(unittest.TestCase):
-    def test_every_array_matches_the_deprecated_path(self) -> None:
-        entity = _entity()
-        new, _ = _build(entity)
-        old = _build_the_old_way(entity.spec)
-        self.assertEqual(new.body_count, old.body_count)
-        self.assertEqual(new.joint_count, old.joint_count)
-        for name in ARRAYS:
-            with self.subTest(array=name):
-                a = np.asarray(getattr(old, name).numpy(), dtype=np.float64)
-                b = np.asarray(getattr(new, name).numpy(), dtype=np.float64)
-                self.assertEqual(a.shape, b.shape)
-                self.assertLessEqual(float(np.max(np.abs(a - b))) if a.size else 0.0, 1e-6, name)
+class TestTheStraightSpawn(unittest.TestCase):
+    """What :class:`RodSpec` states, read back off the built model."""
 
+    def test_the_capsules_lie_end_to_end_along_the_direction(self) -> None:
+        from robosimstudio.core.math import quat_to_mat
+
+        for direction in ((0.0, 1.0, 0.0), (0.6, 0.0, -0.8)):
+            with self.subTest(direction=direction):
+                entity = _entity(start=(0.1, -0.2, 0.3), direction=direction, length=0.5, segments=10)
+                model, _ = _build(entity)
+                q = model.body_q.numpy().astype(np.float64)
+                step = 0.5 / 10
+                centres = np.asarray((0.1, -0.2, 0.3)) + np.outer(np.arange(10) + 0.5, step * np.asarray(direction))
+                np.testing.assert_allclose(q[:, :3], centres, atol=1e-6)
+                for quat in q[:, 3:7]:
+                    np.testing.assert_allclose(quat_to_mat(quat)[:, 2], direction, atol=1e-6)
+                np.testing.assert_allclose(
+                    model.shape_scale.numpy()[:, :2], [[entity.spec.radius, step / 2]] * 10, rtol=1e-5
+                )
+                self.assertEqual(9, len(range(*entity._rod_spans[1])), "one joint between each pair of capsules")
+
+    def test_each_capsule_weighs_its_density_times_its_volume(self) -> None:
+        entity = _entity(length=0.4, segments=8, radius=0.005, density=900.0)
+        model, _ = _build(entity)
+        r, half = 0.005, 0.4 / 8 / 2
+        volume = np.pi * r * r * 2.0 * half + 4.0 / 3.0 * np.pi * r**3
+        np.testing.assert_allclose(model.body_mass.numpy(), 900.0 * volume, rtol=1e-5)
+
+
+class TestTheStraightSpawnIsUnchanged(unittest.TestCase):
     def test_a_polyline_keeps_its_nodes_and_drops_the_leg_twist(self) -> None:
         """Positions as stated; frames parallel-transported, where the old form aligned each leg on its own.
 
