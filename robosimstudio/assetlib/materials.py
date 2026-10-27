@@ -222,7 +222,14 @@ def _build(cls: type, data: dict[str, Any], where: str) -> Any:
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(f"{where}: unknown field(s) {unknown}; {cls.__name__} has {sorted(known)}")
-    return cls(**data)
+    # JSON has no tuple, and a frozen spec holds no list: a colour read back as
+    # one is a spec unequal to the one written, and one that cannot be hashed.
+    return cls(**{key: _tuples(value) for key, value in data.items()})
+
+
+def _tuples(value: Any) -> Any:
+    """``value`` with every list in it, at any depth, a tuple."""
+    return tuple(_tuples(item) for item in value) if isinstance(value, list) else value
 
 
 def material_from_dict(data: dict[str, Any], *, where: str = "material") -> MaterialRecord:
