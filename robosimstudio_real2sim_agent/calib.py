@@ -118,24 +118,37 @@ def fit_camera(
         return (_project(p, world, cx0, cy0, free_center) - pixels).ravel()
 
     best, behind, fits = None, None, []
-    # Nothing here is convex: start from cameras all round the points, at several distances and fields of
-    # view, each looking at their centre, and keep the best fit that has the points in front of it.
     directions = [np.array(d, dtype=np.float64) for d in _sphere(26)]
-    for fov in [fov_y] if fov_y else (30.0, 50.0, 75.0):
-        f = 0.5 * height / math.tan(math.radians(fov) * 0.5)
-        for direction in directions:
-            for distance in (2.5, 5.0):
-                eye = centre + direction * spread * distance
-                rot = _look_rotation(eye, centre)
-                x0 = np.concatenate([[math.log(f)], _rotvec(rot), -rot @ eye] + ([[cx0, cy0]] if free_center else []))
-                sol = least_squares(residual, x0, method="lm" if len(world) * 2 > len(x0) else "trf")
-                depth = (world @ _rodrigues(sol.x[1:4]).T + sol.x[4:7])[:, 2]
-                cost = float(np.mean(sol.fun**2))
-                if (depth <= 0).mean() > 0.5:
-                    # seen from behind: a fit there means one axis of the points is flipped, or pairs are crossed
-                    behind = cost if behind is None else min(behind, cost)
-                    continue
-                fits.append((cost, sol.x, int((depth <= 0).sum())))
+
+    def search(away: bool) -> None:
+        """Fit from cameras all round the points, each looking at their centre -- or, ``away``, from it."""
+        nonlocal behind
+        for fov in [fov_y] if fov_y else (30.0, 50.0, 75.0):
+            f = 0.5 * height / math.tan(math.radians(fov) * 0.5)
+            for direction in directions:
+                for distance in (2.5, 5.0):
+                    eye = centre + direction * spread * distance
+                    rot = _look_rotation(eye, 2.0 * eye - centre if away else centre)
+                    x0 = np.concatenate(
+                        [[math.log(f)], _rotvec(rot), -rot @ eye] + ([[cx0, cy0]] if free_center else [])
+                    )
+                    sol = least_squares(residual, x0, method="lm" if len(world) * 2 > len(x0) else "trf")
+                    depth = (world @ _rodrigues(sol.x[1:4]).T + sol.x[4:7])[:, 2]
+                    cost = float(np.mean(sol.fun**2))
+                    if (depth <= 0).mean() > 0.5:
+                        # seen from behind: a fit there means one axis of the points is flipped, or pairs are crossed
+                        behind = cost if behind is None else min(behind, cost)
+                        continue
+                    fits.append((cost, sol.x, int((depth <= 0).sum())))
+
+    # Nothing here is convex: start from cameras all round the points, at several distances and fields of
+    # view, and keep the best fit that has the points in front of it.
+    search(away=False)
+    if behind is None and (not fits or min(fit[0] for fit in fits) > 1.0):
+        # A poor fit, and no start met one from behind -- which a field of view held fixed can leave none of
+        # a path to, as no start's points ever cross the image plane: look for it from behind, before
+        # passing a mirrored set off as a fit some pixels out.
+        search(away=True)
     if fits:
         # the lowest error, unless a fit with every point in front is nearly as good: a point that falls behind is
         # a wrong pair to name, not a pose to prefer over a whole set that fits
