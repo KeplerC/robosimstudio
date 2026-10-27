@@ -18,7 +18,7 @@ import threading
 import time
 import unittest
 
-from tests.fixtures.examples import SCRIPTS, scripts_module, scripts_modules
+from tests.fixtures.examples import scripts_module, scripts_modules
 from tests.fixtures.packs import in_parallel, once
 
 TIER = "fast"
@@ -77,10 +77,10 @@ class TestInParallel(unittest.TestCase):
 
 class TestScriptsModules(unittest.TestCase):
     def test_nothing_from_scripts_is_left_on_the_path_or_among_the_modules(self) -> None:
-        before = set(sys.modules)
+        before, path = set(sys.modules), list(sys.path)
         takes = scripts_module("recording.takes")
         self.assertGreater(takes.FOLD_PINCH, 0.0, "the module object stays good")
-        self.assertNotIn(str(SCRIPTS), sys.path)
+        self.assertEqual(path, sys.path, "the block leaves the path as it found it")
         left = [name for name in set(sys.modules) - before if name.split(".")[0] in ("recording", "calibration")]
         self.assertEqual([], left)
 
