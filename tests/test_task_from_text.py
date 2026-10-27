@@ -3,15 +3,18 @@
 
 ``robosimstudio_bench.task`` lowers a document through the same function a folder
 of documents goes through; the first class checks what it registers and what it
-refuses, with no scene built. The second runs in a subprocess with the scripted
-routine module refused, which is the shape of a release that leaves it out. The
-third holds the task and policy examples to the docstring and length rules the
-other examples keep.
+refuses, in this process and with no scene built, and gives the registries back
+as it found them. The release check runs in a subprocess with the scripted
+routine module refused, which is the shape of a release that leaves it out: a
+module an earlier test imported cannot be un-imported in this one. The last class
+holds the task and policy examples to the docstring and length rules the other
+examples keep.
 """
 
 from __future__ import annotations
 
 import ast
+import contextlib
 import os
 import subprocess
 import sys
@@ -19,28 +22,20 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
+
+from tests.fixtures import taskdocs
+from tests.fixtures.registries import restored
 
 TIER = "fast"
 
 ROOT = Path(__file__).resolve().parents[1]
 
-PREAMBLE = """
-import robosimstudio as rss
-from robosimstudio.assetlib import register_asset
-from robosimstudio.domains.rigid import Body
+PREAMBLE = "from tests.fixtures.taskdocs import register_cube\nregister_cube()\n"
+"""What a subprocess runs first: the cube the document places, registered for the life of the process."""
 
-register_asset(Body.from_spec(rss.box(name="cube", half=(0.025,) * 3, at=(0.0, 0.1, 0.03)), name="text_probe_cube"))
-"""
-
-DOCUMENT = """
-(define (problem text_probe)
-  (:language put the cube in the square)
-  (:staging (:scene bench_075) (:embodiment panda) (:physics mujoco_500hz@v1))
-  (:objects cube - text_probe_cube)
-  (:regions (square (:ranges ((0.05 -0.20 0.15 -0.10)))))
-  (:goal (>= (containment cube square) 1.0))
-  (:artifacts (:graph pick "pick_place")))
-"""
+DOCUMENT = taskdocs.DOCUMENT.replace("(:goal", '(:artifacts (:graph pick "pick_place"))\n  (:goal')
+"""The fixture's cube-in-a-square document, with a graph to resolve."""
 
 
 def _run(script: str, *, refuse: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
@@ -73,62 +68,61 @@ def _run(script: str, *, refuse: tuple[str, ...] = ()) -> subprocess.CompletedPr
     )
 
 
+@contextlib.contextmanager
+def _stated():
+    """This process with ``text_probe_cube`` registered, scanning no task folder, and given back as it was.
+
+    The asset, the suites a string states and the record of which ones it
+    stated are all put back on the way out, so a task stated here is gone for
+    whatever this process runs next.
+    """
+    from robosimstudio.assetlib.registry import ASSETS
+    from robosimstudio.roots import task_roots
+    from robosimstudio_bench.taskbuild import text
+    from robosimstudio_bench.taskbuild.registry import SUITES
+
+    with (
+        mock.patch.dict(os.environ, {"ROBOSIMSTUDIO_TASK_ROOTS": "", "ROBOSIMSTUDIO_TASK_ROOTS_ONLY": "1"}),
+        restored(ASSETS, SUITES),
+        mock.patch.object(text, "_FROM_TEXT", set()),
+    ):
+        if task_roots():
+            raise AssertionError(f"a string task's test would scan {task_roots()}")
+        taskdocs.register_cube()
+        yield
+
+
 class TestATaskFromAString(unittest.TestCase):
     def test_it_registers_and_its_graph_resolves_beside_the_caller(self) -> None:
-        done = _run(
-            f"""
-            import robosimstudio_bench as bench
-            from robosimstudio_bench.taskbuild.artifacts import graph_dir
-            task = bench.task({DOCUMENT!r}, home="/somewhere/else")
-            assert task.full_name == "text_probe/text_probe", task.full_name
-            assert bench.get_task("text_probe") is task
-            assert graph_dir(task.suite, task.graph_path("pick")) == "/somewhere/else/pick_place"
-            again = bench.task({DOCUMENT!r}, home="/somewhere/else")
-            assert bench.get_task("text_probe") is again, "stating it again replaces it"
-            print("ok")
-            """
-        )
-        self.assertEqual(0, done.returncode, done.stderr[-3000:])
-        self.assertIn("ok", done.stdout)
+        import robosimstudio_bench as bench
+        from robosimstudio_bench.taskbuild.artifacts import graph_dir
+
+        with _stated():
+            task = bench.task(DOCUMENT, home="/somewhere/else")
+            self.assertEqual(task.full_name, "text_probe/text_probe")
+            self.assertIs(bench.get_task("text_probe"), task)
+            self.assertEqual(graph_dir(task.suite, task.graph_path("pick")), "/somewhere/else/pick_place")
+            again = bench.task(DOCUMENT, home="/somewhere/else")
+            self.assertIs(bench.get_task("text_probe"), again, "stating it again replaces it")
 
     def test_without_home_a_script_s_graphs_resolve_beside_it(self) -> None:
-        folder = Path(tempfile.mkdtemp(prefix="home-"))
-        script = folder / "probe.py"
-        script.write_text(
-            PREAMBLE
-            + "import robosimstudio_bench as bench\n"
-            + "from robosimstudio_bench.taskbuild.artifacts import graph_dir\n"
-            + f"task = bench.task({DOCUMENT!r})\n"
-            + "print(graph_dir(task.suite, task.graph_path('pick')))\n"
-        )
-        env = {
-            **os.environ,
-            "ROBOSIMSTUDIO_TASK_ROOTS": "",
-            "ROBOSIMSTUDIO_TASK_ROOTS_ONLY": "1",
-            "CUDA_VISIBLE_DEVICES": "",
-        }
-        done = subprocess.run(
-            [sys.executable, str(script)], cwd=ROOT, env=env, capture_output=True, text=True, timeout=600, check=False
-        )
-        self.assertEqual(0, done.returncode, done.stderr[-3000:])
-        self.assertEqual(str(folder.resolve() / "pick_place"), done.stdout.strip().splitlines()[-1])
+        from robosimstudio_bench.taskbuild.artifacts import graph_dir
+
+        with tempfile.TemporaryDirectory(prefix="home-") as tmp, _stated():
+            script = Path(tmp) / "probe.py"
+            script.write_text("import robosimstudio_bench as bench\ntask = bench.task(DOCUMENT)\n")
+            # Run as that file runs, so the caller ``bench.task`` reads off the stack is the script.
+            namespace = {"DOCUMENT": DOCUMENT}
+            exec(compile(script.read_text(), str(script), "exec"), namespace)
+            task = namespace["task"]
+            self.assertEqual(graph_dir(task.suite, task.graph_path("pick")), str(Path(tmp).resolve() / "pick_place"))
 
     def test_a_measure_nothing_implements_is_refused_when_stated(self) -> None:
+        import robosimstudio_bench as bench
+
         bad = DOCUMENT.replace("(containment cube square)", "(sparkle cube)")
-        done = _run(
-            f"""
-            import robosimstudio_bench as bench
-            try:
-                bench.task({bad!r})
-            except Exception as exc:
-                print("refused:", type(exc).__name__, exc)
-            else:
-                print("accepted")
-            """
-        )
-        self.assertEqual(0, done.returncode, done.stderr[-3000:])
-        self.assertIn("refused:", done.stdout)
-        self.assertIn("sparkle", done.stdout)
+        with _stated(), self.assertRaisesRegex(Exception, "sparkle"):
+            bench.task(bad)
 
 
 class TestTheSurface(unittest.TestCase):

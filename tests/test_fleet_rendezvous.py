@@ -16,9 +16,10 @@ Nothing here needs a device.
 
 from __future__ import annotations
 
+import functools
 import threading
-import time
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -31,8 +32,12 @@ from robosimstudio_policy_agent.fleet import (
     ServiceQueue,
     StallTimeout,
     StallWatch,
+    barrier,
 )
+from robosimstudio_policy_agent.fleet.barrier import ParkTable, Rendezvous
 from robosimstudio_policy_agent.fleet.ik_backend import IKBackendFleet, solve_group
+from tests.fixtures.fleet import GivesUpOnceStarted
+from tests.fixtures.waits import fake_clock, wait_until
 
 TIER = "fast"
 """No GPU. Gates every commit."""
@@ -291,12 +296,11 @@ class TestRendezvous(unittest.TestCase):
 
     @staticmethod
     def _await(rv: Rendezvous, count: int) -> None:
-        for _ in range(400):
+        def arrived() -> bool:
             with rv._lock:
-                if sum(len(g) for g in rv._pending.values()) >= count:
-                    return
-            time.sleep(0.005)
-        raise AssertionError(f"only {count} asks never arrived")
+                return sum(len(g) for g in rv._pending.values()) >= count
+
+        wait_until(arrived, what=f"{count} asks to arrive")
 
 
 class TestStallWatch(unittest.TestCase):
@@ -308,18 +312,23 @@ class TestStallWatch(unittest.TestCase):
         self.assertFalse(watch.expired)
 
     def test_it_expires_past_the_deadline(self):
-        watch = StallWatch(timeout=0.01)
-        watch.arm()
-        time.sleep(0.05)
-        self.assertTrue(watch.expired)
+        with fake_clock("robosimstudio_policy_agent.fleet.barrier") as clock:
+            watch = StallWatch(timeout=5.0)
+            watch.arm()
+            clock.advance(5.0)
+            self.assertFalse(watch.expired, "at the deadline is not past it")
+            clock.advance(0.001)
+            self.assertTrue(watch.expired)
 
     def test_progress_restarts_the_clock(self):
-        watch = StallWatch(timeout=0.05)
-        watch.arm()
-        time.sleep(0.03)
-        watch.progress()
-        time.sleep(0.03)
-        self.assertFalse(watch.expired)
+        with fake_clock("robosimstudio_policy_agent.fleet.barrier") as clock:
+            watch = StallWatch(timeout=5.0)
+            watch.arm()
+            clock.advance(3.0)
+            watch.progress()
+            clock.advance(3.0)
+            self.assertFalse(watch.expired)
+            self.assertAlmostEqual(watch.held_s, 3.0)
 
 
 class TestTheStreamGuardIsOnTheFleetsSide(unittest.TestCase):
@@ -354,8 +363,8 @@ class TestTheStreamGuardIsOnTheFleetsSide(unittest.TestCase):
 
         thread = threading.Thread(target=worker)
         thread.start()
-        time.sleep(0.05)
-        service.pump()
+        # Pumped until the call is served, so it cannot run before the worker posted it.
+        wait_until(service.pump, what="the marshalled call")
         thread.join(timeout=5.0)
         self.assertIsInstance(out[0], BusTimeout, "the deadlock this guards against has gone away")
 
@@ -462,6 +471,55 @@ class TestTheSolveGroup(unittest.TestCase):
         ]
 
         self.assertEqual(solve_group(asks), [[0.0], [1.0]])
+
+
+class RendezvousTimeoutTest(unittest.TestCase):
+    def test_timed_out_ask_is_withdrawn(self) -> None:
+        parks = ParkTable(1)
+        rendezvous = Rendezvous(parks=parks)
+        calls: list[list] = []
+        rendezvous.register("solve", lambda group: calls.append(group) or [None] * len(group))
+        with parks.parked(0), self.assertRaises(BusTimeout):
+            rendezvous.post(0, "solve", "stale", timeout=0.02)
+        self.assertFalse(rendezvous.pending())
+        with parks.parked(0):
+            self.assertEqual(rendezvous.dispatch(), 0)
+            self.assertEqual(calls, [])
+            self.assertTrue(parks.parked_mask()[0])
+
+    def test_late_settle_leaves_the_next_park_alone(self) -> None:
+        parks = ParkTable(1)
+        rendezvous = Rendezvous(parks=parks)
+        started = threading.Event()
+        release = threading.Event()
+
+        def adapter(group):
+            started.set()
+            release.wait(2.0)
+            return ["late"] * len(group)
+
+        rendezvous.register("solve", adapter)
+        # The fleet dispatches until it has answered the ask; the asker gives up
+        # once the adapter is running, which is the moment this is about.
+        fleet = threading.Thread(target=lambda: wait_until(rendezvous.dispatch, what="the posted ask"))
+        fleet.start()
+        done = GivesUpOnceStarted(started)
+        try:
+            with (
+                mock.patch.object(barrier, "Ask", functools.partial(barrier.Ask, done=done)),
+                parks.parked(0),
+                self.assertRaises(BusTimeout),
+            ):
+                rendezvous.post(0, "solve", "slow", timeout=0.1)
+            self.assertTrue(started.is_set())
+            with parks.parked(0):
+                release.set()
+                fleet.join(2.0)
+                self.assertFalse(fleet.is_alive())
+                self.assertTrue(parks.parked_mask()[0])
+        finally:
+            release.set()
+            fleet.join(2.0)
 
 
 if __name__ == "__main__":

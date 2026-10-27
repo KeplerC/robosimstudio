@@ -10,8 +10,10 @@ closing) are what a wave's correctness rests on. Nothing here needs a device.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import threading
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -26,8 +28,12 @@ from robosimstudio_policy_agent.fleet import (
     SnapshotTable,
     StepWaiter,
     WorldBus,
+    world_bus,
 )
-from robosimstudio_policy_agent.fleet.world_bus import _Request
+from robosimstudio_policy_agent.fleet.barrier import ParkTable
+from robosimstudio_policy_agent.fleet.world_bus import ServiceQueue, _Request
+from tests.fixtures.fleet import GivesUpOnceStarted
+from tests.fixtures.waits import wait_until
 
 TIER = "fast"
 """No GPU. Gates every commit."""
@@ -401,6 +407,55 @@ class TestIntentShapes(unittest.TestCase):
         """max_steps=0 installs the motion without the caller waiting, which is
         the non-blocking pose contract the runtime already has."""
         self.assertEqual(MoveToJoints(arm=0, target=np.zeros(6), max_steps=0).max_steps, 0)
+
+
+class ServiceQueueTimeoutTest(unittest.TestCase):
+    def test_timed_out_request_is_withdrawn(self) -> None:
+        parks = ParkTable(1)
+        queue = ServiceQueue(parks=parks)
+        ran: list[int] = []
+        with self.assertRaises(BusTimeout):
+            queue.post(0, lambda: ran.append(1), (), {}, timeout=0.02)
+        # The same thread is now in another fleet wait; the stale request must
+        # neither run nor release it.
+        with parks.parked(0):
+            self.assertEqual(queue.pump(), 0)
+            self.assertEqual(ran, [])
+            self.assertTrue(parks.parked_mask()[0])
+
+    def test_late_answer_leaves_the_next_park_alone(self) -> None:
+        """A request already running when its poster gives up still finishes,
+        but its completion must not unpark the wait the poster is in by then."""
+        parks = ParkTable(1)
+        queue = ServiceQueue(parks=parks)
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow() -> str:
+            started.set()
+            release.wait(2.0)
+            return "late"
+
+        # The fleet pumps until it has served the request; the poster gives up
+        # once it is running, which is the moment this is about.
+        pumper = threading.Thread(target=lambda: wait_until(queue.pump, what="the posted request"))
+        pumper.start()
+        done = GivesUpOnceStarted(started)
+        try:
+            with (
+                mock.patch.object(world_bus, "_Request", functools.partial(world_bus._Request, done=done)),
+                self.assertRaises(BusTimeout),
+            ):
+                queue.post(0, slow, (), {}, timeout=0.1)
+            self.assertTrue(started.is_set())
+            with parks.parked(0):
+                release.set()
+                pumper.join(2.0)
+                self.assertFalse(pumper.is_alive())
+                self.assertTrue(parks.parked_mask()[0])
+        finally:
+            release.set()
+            pumper.join(2.0)
 
 
 if __name__ == "__main__":
