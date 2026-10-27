@@ -25,6 +25,16 @@ import numpy as np
 
 __all__ = ["fit_camera", "overlay", "parse_point"]
 
+MIRROR_MISS = 0.08
+"""How far the best fit from in front may miss, as a fraction of the points' own spread in the picture (RMS
+about their mean), before the fit also looks for one from behind. Measured: a mirrored set's best front fit
+missed by 14 % or more of that spread, over 45 mirrored sets (three cameras, five point sets, each with one of
+three axes flipped), and a true set clicked with up to 3 px of noise by under 4 %. So a set that is only
+clicked a few pixels out costs one search, and one that may be mirrored costs two."""
+
+BEHIND_BETTER = 0.1
+"""A fit from behind this far below the best from in front, in mean squared error, says the set is mirrored."""
+
 
 def parse_point(text: str) -> tuple[tuple[float, float, float], tuple[float, float]]:
     """``"0.6,0.3,0.75=812,455"`` -> ``((0.6, 0.3, 0.75), (812.0, 455.0))``: a world point and its pixel."""
@@ -144,10 +154,13 @@ def fit_camera(
     # Nothing here is convex: start from cameras all round the points, at several distances and fields of
     # view, and keep the best fit that has the points in front of it.
     search(away=False)
-    if behind is None and (not fits or min(fit[0] for fit in fits) > 1.0):
-        # A poor fit, and no start met one from behind -- which a field of view held fixed can leave none of
-        # a path to, as no start's points ever cross the image plane: look for it from behind, before
-        # passing a mirrored set off as a fit some pixels out.
+    front = min((fit[0] for fit in fits), default=math.inf)
+    pixel_spread = float(np.sqrt(np.mean(np.sum((pixels - pixels.mean(axis=0)) ** 2, axis=1))))
+    if (behind is None or behind >= BEHIND_BETTER * front) and math.sqrt(2.0 * front) > MIRROR_MISS * pixel_spread:
+        # A fit that misses as a mirrored set's does, and no start met a better one from behind -- which a
+        # field of view held fixed can leave none of a path to, as no start's points ever cross the image
+        # plane, and a start that drifted behind and stopped short says nothing either way: look for it
+        # from behind, before passing a mirrored set off as a fit some pixels out.
         search(away=True)
     if fits:
         # the lowest error, unless a fit with every point in front is nearly as good: a point that falls behind is
@@ -159,7 +172,7 @@ def fit_camera(
             if alt[0] <= 2.0 * best[0] + 4.0:
                 best = alt
     # a set on one plane fits as well from behind as from in front: mirrored only when the front fit is poor
-    mirrored = behind is not None and (best is None or (best[0] > 1.0 and behind < 0.1 * best[0]))
+    mirrored = behind is not None and (best is None or (best[0] > 1.0 and behind < BEHIND_BETTER * best[0]))
     if mirrored:
         best = None
     if best is None:
