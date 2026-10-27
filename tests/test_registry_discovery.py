@@ -95,8 +95,7 @@ class _Root:
 
     def __exit__(self, *exc: object) -> None:
         for registry, name in ((DOMAINS, "probe_gel"), (MATERIALS, "probe_denim")):
-            registry._items.pop(name, None)
-            registry._origins.pop(name, None)
+            registry.forget(name)
         roots.clear_task_roots()
         self._tmp.cleanup()
 

@@ -31,6 +31,7 @@ tree that carries the rope and in one that does not.
 
 from __future__ import annotations
 
+import contextlib
 import unittest
 from typing import Any
 
@@ -42,6 +43,8 @@ from robosimstudio.scene.physics import CompositionError, build_graph, compose
 from robosimstudio.scene.physics.islands import partition
 from robosimstudio.specs import ArrangementSpec, PhysicsManifest, SimRequirements, backend, contacts_with, coupler
 from robosimstudio.specs.physics import DOMAINS, register_backend, register_coupler, register_domain
+from robosimstudio.specs.registries import BACKENDS, COUPLERS
+from tests.fixtures.registries import restored
 
 TIER = "fast"
 """No GPU: warp runs the kernels this never launches, and a graph is arithmetic."""
@@ -149,7 +152,12 @@ registries are process-global, and the fast tier may run in one process.
 """
 
 
+_REGISTRIES = contextlib.ExitStack()
+"""Puts ``DOMAINS`` back as it was when the module is done with its probe domain."""
+
+
 def setUpModule() -> None:
+    _REGISTRIES.enter_context(restored(DOMAINS))
     register_domain(
         CHAIN,
         state=("bodies", "joints", "shapes"),
@@ -161,8 +169,7 @@ def setUpModule() -> None:
 
 
 def tearDownModule() -> None:
-    DOMAINS._items.pop(CHAIN, None)
-    DOMAINS._origins.pop(CHAIN, None)
+    _REGISTRIES.close()
 
 
 ARM = SimRequirements(domain="articulated", contacts=contacts_with("surface", "objects"))
@@ -429,8 +436,6 @@ class TestExtensibility(unittest.TestCase):
     def test_a_registered_alias_and_a_registered_coupler_compose(self):
         """Both registries are open and keyed by string, so a task may add to
         either from its own directory."""
-        register_backend("probe_solver", cls="newton.solvers.SolverXPBD", supports=("bodies", "joints", "shapes"))
-        register_coupler("probe_coupler")
         from robosimstudio.scene.physics.couplers import COUPLER_BUILDERS, register_coupler_builder
 
         seen = {}
@@ -439,8 +444,10 @@ class TestExtensibility(unittest.TestCase):
             seen["islands"] = [i.name for i in ctx.islands]
             return object()
 
-        register_coupler_builder("probe_coupler", build)
-        try:
+        with restored(BACKENDS, COUPLERS, COUPLER_BUILDERS):
+            register_backend("probe_solver", cls="newton.solvers.SolverXPBD", supports=("bodies", "joints", "shapes"))
+            register_coupler("probe_coupler")
+            register_coupler_builder("probe_coupler", build)
             arrangement = ArrangementSpec(
                 backends=(("articulated", backend("probe_solver")), ("cloth", backend("vbd"))),
                 coupling=coupler("probe_coupler"),
@@ -451,8 +458,6 @@ class TestExtensibility(unittest.TestCase):
             program = compose(model, parts, arm, arrangement)
             self.assertEqual(program.manifest.coupler, "probe_coupler")
             self.assertEqual(sorted(seen["islands"]), ["probe_solver", "vbd"])
-        finally:
-            COUPLER_BUILDERS._items.pop("probe_coupler", None)
 
     def test_a_second_builder_under_a_taken_kind_is_refused(self):
         """The coupler builders were the one registry here with no duplicate
@@ -472,8 +477,8 @@ class TestExtensibility(unittest.TestCase):
         def build_theirs(ctx):
             return object()
 
-        register_coupler_builder("probe_dup", build_mine)
-        try:
+        with restored(COUPLER_BUILDERS):
+            register_coupler_builder("probe_dup", build_mine)
             # The same builder again -- a second task shipping its own copy.
             register_coupler_builder("probe_dup", build_mine)
             # Sameness is judged on (module basename, qualname), so two builders
@@ -483,8 +488,6 @@ class TestExtensibility(unittest.TestCase):
                 register_coupler_builder("probe_dup", build_theirs)
             self.assertIn("probe_dup", str(caught.exception))
             self.assertIn("already registered", str(caught.exception))
-        finally:
-            COUPLER_BUILDERS._items.pop("probe_dup", None)
 
     def test_a_coupler_kind_with_no_builder_says_so(self):
         arrangement = ArrangementSpec(

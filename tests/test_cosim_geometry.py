@@ -20,6 +20,8 @@ import unittest
 
 import numpy as np
 
+from tests.fixtures.registries import restored
+
 TIER = "fast"
 """A stub model. No GPU, no engine, no scene."""
 
@@ -295,8 +297,8 @@ class TestTheActorKindSetIsOpen(unittest.TestCase):
         """
         from robosimstudio.engines.geometry import ACTOR_KINDS, actor_geometry, register_actor_kind
 
+        self.enterContext(restored(ACTOR_KINDS))
         register_actor_kind("centerline_probe", lambda model, base: base)
-        self.addCleanup(lambda: ACTOR_KINDS._items.pop("centerline_probe", None))
 
         nodes = np.linspace([0.0, 0.0, 0.0], [0.5, 0.0, 0.0], 8)
         model = _DeformableModel(particles=nodes)
