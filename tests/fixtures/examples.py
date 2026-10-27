@@ -50,6 +50,7 @@ __all__ = [
     "_path",
     "_run",
     "_stub_studio",
+    "scripts_module",
 ]
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -185,6 +186,22 @@ def _load(rel: str):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def scripts_module(name: str):
+    """A module under ``scripts/`` by its dotted name (``"recording.takes"``), imported with ``scripts/`` on the path.
+
+    On ``sys.path`` only while the import runs: ``scripts/`` holds packages named
+    like libraries (``recording``, ``calibration``), and a tier runs in one
+    process, so a path entry left behind decides an import in every module that
+    runs after this one.
+    """
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        return importlib.import_module(name)
+    finally:
+        sys.path.remove(scripts)
 
 
 def _run(rel: str):

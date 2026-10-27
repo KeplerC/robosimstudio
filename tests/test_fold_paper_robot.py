@@ -22,20 +22,17 @@ each other and the fold keeps a 2.8 rad crease once the hands have gone, the she
 
 from __future__ import annotations
 
-import sys
 import time
 import unittest
-from pathlib import Path
 
 import numpy as np
 
-from tests.fixtures.examples import _run
+from tests.fixtures.examples import _run, scripts_module
 from tests.fixtures.grasp import open_session, tick
 
 TIER = "medium"
 """One GPU: the example built once and its take's drive played through its page (about 10,500 control steps)."""
 
-FOLD_PORT = 9734
 GAP = 0.020
 """The closest the two arms' colliders may come [m]."""
 CAP = 10.0
@@ -54,9 +51,8 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         from robosimstudio.assetlib.vocabulary.measures import cloth_fold
         from robosimstudio_materials.paper import crease_angle
 
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-        from recording import takes
-        from recording.lockstep import Film
+        takes = scripts_module("recording.takes")
+        Film = scripts_module("recording.lockstep").Film
 
         cls.takes = takes
         cls.sim, kwargs = _run("03_materials/05_paper.py")
@@ -66,7 +62,7 @@ class TestTheHandsFoldTheSheet(unittest.TestCase):
         t = time.perf_counter()
         sim.run(60).sync()
         cls.ms_per_step = 1e3 * (time.perf_counter() - t) / 60
-        cls.session = session = open_session(sim, FOLD_PORT, kwargs.get("page"))
+        cls.session = session = open_session(sim, 0, kwargs.get("page"))
         film = Film(takes.find("03_materials/05_paper"), port=0, scratch=None, software=False, probe=False, log=print)
         film.sim, film.session = sim, session
         lay = takes._fold_layout(film)
