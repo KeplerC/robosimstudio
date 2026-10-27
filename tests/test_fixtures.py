@@ -76,6 +76,11 @@ class TestRegistries(unittest.TestCase):
         self.assertEqual(lazy.get("found"), 5, "what the first lookup loaded survives the block")
         self.assertNotIn("probe", lazy.names())
 
+    def test_a_populator_added_in_the_block_is_taken_back(self) -> None:
+        with restored(self.registry):
+            self.registry.add_discover(lambda: None)
+        self.assertEqual(self.registry.discovers, ())
+
     def test_a_block_that_raises_still_restores_names_and_origins(self) -> None:
         with self.assertRaises(RuntimeError), restored(self.registry):
             self.registry.register("added", 3)
