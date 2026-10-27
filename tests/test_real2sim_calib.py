@@ -105,6 +105,21 @@ class TestCameraFit(unittest.TestCase):
         self.assertGreater(fit["rms_px"], 1.0, "a fit poor enough that the old rule looked from behind")
         self.assertEqual(FEW_STARTS * 2, len(calls), "one start per direction and distance, from in front")
 
+    def test_a_mirrored_set_stops_looking_from_behind_at_the_first_fit_there(self) -> None:
+        """One fit from behind settles the verdict; the rest of the round from behind would cost and say nothing."""
+        from scipy import optimize
+
+        solve, calls = optimize.least_squares, []
+
+        def counted(fun, x0, **kwargs):
+            calls.append(1)
+            return solve(fun, x0, **kwargs)
+
+        world, pixels = self._points()
+        with mock.patch.object(optimize, "least_squares", counted), self.assertRaisesRegex(ValueError, "mirror"):
+            calib.fit_camera(world * np.array([1.0, -1.0, 1.0]), pixels, 1280, 720, fov_y=48.0)
+        self.assertLess(len(calls), FEW_STARTS * 2 + FEW_STARTS, "a whole round from behind was searched")
+
     def test_a_point_read_off_wrong_stands_out(self) -> None:
         world, pixels = self._points(12)
         pixels = pixels.copy()
