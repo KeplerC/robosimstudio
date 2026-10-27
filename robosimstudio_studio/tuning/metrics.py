@@ -21,7 +21,6 @@ from typing import Any
 
 import numpy as np
 
-from robosimstudio.core.shell import mid_surface
 from robosimstudio_materials.cloth import DROOP_BAND, bending_length_from_droop, resembles
 
 __all__ = ["Reading", "measure_cantilever", "measure_sheet", "relax", "settle_speed"]
@@ -86,23 +85,26 @@ class Reading:
 
 
 def _sheet(entity: Any, particle_q: Any) -> np.ndarray:
-    """This cloth's points out of a whole particle array, on the mid-surface for a slab.
+    """This cloth's points out of a whole particle array, as the cloth reads itself.
 
     A slab has a particle on each face, so a raw z would read whichever face
-    happened to be sampled and swing by a thickness. The mid-surface is what the
-    membrane's single sheet already is, and what a droop should be measured on.
-    One rule for the positions now and the rest layout they are compared with:
-    read on the mid-surface one side and on both faces the other, a slab's two
-    arrays differed in length and every reading that compares them refused it.
+    happened to be sampled and swing by a thickness; the cloth's own
+    ``mid_surface_of`` says where its single sheet is, and is the one place
+    that rule lives. One reading for the positions now and the rest layout
+    they are compared with: read on the mid-surface one side and on both faces
+    the other, a slab's two arrays differed in length and every reading that
+    compares them refused it. A thing with no such method is read as its
+    particles are.
     """
-    q = np.asarray(particle_q, dtype=np.float64)[entity.particles]
-    material = getattr(getattr(entity, "spec", None), "material", None)
-    if getattr(material, "is_slab", False):
+    read = getattr(entity, "mid_surface_of", None)
+    if read is not None:
         try:
-            return mid_surface(q, entity.surface_count)
-        except (AttributeError, ValueError):  # faces that do not pair are read as they are
+            mid = read(particle_q)
+            if mid is not None and len(mid):
+                return np.asarray(mid, dtype=np.float64)
+        except (AttributeError, ValueError, TypeError):
             pass
-    return q
+    return np.asarray(particle_q, dtype=np.float64)[entity.particles]
 
 
 def _positions(entity: Any, state: Any) -> np.ndarray:

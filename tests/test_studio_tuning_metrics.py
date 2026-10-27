@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import math
 import unittest
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest import mock
 
 import numpy as np
 
-from robosimstudio_materials.cloth import DROOP_BAND
+from robosimstudio_materials.cloth import DROOP_BAND, EntityCloth
 from robosimstudio_studio.tuning import metrics
 from robosimstudio_studio.tuning.metrics import Reading, measure_cantilever, measure_sheet, relax, settle_speed
 from tests.fixtures.arrays import host
@@ -49,9 +49,11 @@ def _cloth(rest: np.ndarray | None, now: np.ndarray, qd: np.ndarray | None = Non
 
 
 def _as_a_slab(entity, surface_count: int):
-    """``entity`` as a slab cloth is: a slab material, and a particle on each face of ``surface_count`` vertices."""
+    """``entity`` as a slab cloth is: a slab material, a particle on each face of ``surface_count`` vertices,
+    and the cloth's own way of reading where it is."""
     entity.spec = SimpleNamespace(material=SimpleNamespace(is_slab=True))
     entity.surface_count = surface_count
+    entity.mid_surface_of = MethodType(EntityCloth.mid_surface_of, entity)
     return entity
 
 

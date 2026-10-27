@@ -813,7 +813,11 @@ class EntityCloth(ParticleMixin, Entity):
         For a slab, the average of its two faces. Measure geometry on this, never on one face: a
         fold turns the sheet over, which adds a full thickness of error, 5 mm on a bath towel.
         """
-        q = np.asarray(state.particle_q.numpy(), dtype=np.float64)[self.particles]
+        return self.mid_surface_of(state.particle_q.numpy())
+
+    def mid_surface_of(self, particle_q: np.ndarray) -> np.ndarray:
+        """:meth:`mid_surface_positions` read off a whole particle array: a state's, or a rest layout."""
+        q = np.asarray(particle_q, dtype=np.float64)[self.particles]
         return mid_surface(q, self.surface_count) if self.spec.material.is_slab else q
 
     def update_probe(self, state: newton.State, step: int | None = None, *, readback=None) -> ParticleProbe:
