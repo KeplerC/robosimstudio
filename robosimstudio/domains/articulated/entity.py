@@ -83,6 +83,7 @@ class EntityArticulated(WeldedFixture, Entity):
         self._root_dof: int = -1
         self._coords: dict[str, int] = {}
         self._dofs: dict[str, int] = {}
+        self._loose: list[dict] = []
         self.root_offset = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
         """The root part's pose in the frame :attr:`pose` places, read off the import."""
         self.parts: dict[str, int] = {}
@@ -109,8 +110,11 @@ class EntityArticulated(WeldedFixture, Entity):
         The root's, not the spec's origin's, because this is what a fleet's wave
         writes into the root's free-joint coordinates.
         """
-        placed = self._placed(episode_pose(self.spec.name, self.declared_q if base is None else base, episode))
-        return _compose(placed, self.root_offset)
+        return _compose(self._asset_pose(episode, base), self.root_offset)
+
+    def _asset_pose(self, episode, base: np.ndarray | None = None) -> np.ndarray:
+        """Where the asset's origin stands for one episode, in world coordinates."""
+        return self._placed(episode_pose(self.spec.name, self.declared_q if base is None else base, episode))
 
     def move_refusal(self, episode, *, base: np.ndarray | None = None) -> str:
         """Nothing refuses a layout: either base is placed per world at reset."""
@@ -145,10 +149,13 @@ class EntityArticulated(WeldedFixture, Entity):
         )
         joints = range(joints_before, builder.joint_count)
         roots = [j for j in joints if int(builder.joint_parent[j]) == -1]
-        if builder.body_count == bodies_before or len(roots) != 1:
+        if builder.body_count == bodies_before or not roots:
+            raise ValueError(f"articulated {spec.name!r}: {path.name} declares no rigid body")
+        if len(roots) > 1 and spec.fixed_base:
             raise ValueError(
-                f"articulated {spec.name!r}: {path.name} imported {builder.body_count - bodies_before} bodies "
-                f"with {len(roots)} joints to the world; an articulated object is one tree with one root"
+                f"articulated {spec.name!r}: {path.name} is {len(roots)} separate parts that no joint holds "
+                "together (a jar and its lid); fixed_base=False imports each one free, and bolting all of "
+                "them down is not what the asset says"
             )
         root = roots[0]
         self.body = int(builder.joint_child[root])
@@ -161,10 +168,25 @@ class EntityArticulated(WeldedFixture, Entity):
             self.coord_start = int(builder.joint_q_start[root])
         self._root_joint = int(root)
         self._root_dof = int(builder.joint_qd_start[root])
-        root_pose = np.asarray([float(v) for v in builder.body_q[self.body]], dtype=np.float64)
-        self.root_offset = np.asarray(
-            xform_from_matrix(np.linalg.inv(transform_matrix(placed)) @ transform_matrix(root_pose)), dtype=np.float64
-        )
+        origin = np.linalg.inv(transform_matrix(placed))
+
+        def offset(body: int) -> np.ndarray:
+            pose = [float(v) for v in builder.body_q[body]]
+            return np.asarray(xform_from_matrix(origin @ transform_matrix(pose)), dtype=np.float64)
+
+        self.root_offset = offset(self.body)
+        # Every other root is a part no joint holds to the first -- a jar's lid. Each is free,
+        # and placed with the asset from where the asset puts it.
+        self._loose = [
+            {
+                "coord": int(builder.joint_q_start[j]),
+                "dof": int(builder.joint_qd_start[j]),
+                "articulation": int(builder.joint_articulation[j]),
+                "joint": int(j),
+                "offset": offset(int(builder.joint_child[j])),
+            }
+            for j in roots[1:]
+        ]
 
         self.parts = {}
         for body in range(bodies_before, builder.body_count):
@@ -308,7 +330,8 @@ class EntityArticulated(WeldedFixture, Entity):
         """
         worlds = self.worlds
         model = self.stepping_model or self.model
-        pose = self.episode_start_q(episode)
+        asset = self._asset_pose(episode)
+        pose = _compose(asset, self.root_offset)
         if self.spec.fixed_base:
             self.place_welded(pipeline, pose, world=world)
         coord = (lambda c: worlds.coord(c, world)) if worlds is not None else (lambda c: c)
@@ -321,15 +344,17 @@ class EntityArticulated(WeldedFixture, Entity):
             if not self.spec.fixed_base:
                 c = coord(self.coord_start)
                 joint_q[c : c + 7] = pose[:7]
+            for part in self._loose:
+                c = coord(part["coord"])
+                joint_q[c : c + 7] = _compose(asset, part["offset"])[:7]
             for name, value in starts.items():
                 joint_q[coord(self._coords[name])] = value
             state.joint_q.assign(joint_q)
             joint_qd = state.joint_qd.numpy()
             for name in starts:
                 joint_qd[dof(self._dofs[name])] = 0.0
-            if not self.spec.fixed_base:
-                d = dof(self._root_dof)
-                joint_qd[d : d + 6] = 0.0
+            for d in ([] if self.spec.fixed_base else [self._root_dof]) + [part["dof"] for part in self._loose]:
+                joint_qd[dof(d) : dof(d) + 6] = 0.0
             state.joint_qd.assign(joint_qd)
         targets = getattr(pipeline.control, "joint_target_q", None) if getattr(pipeline, "control", None) else None
         driven = [joint.name for joint in self.spec.joints if joint.target_ke is not None]
@@ -343,10 +368,11 @@ class EntityArticulated(WeldedFixture, Entity):
     def _forward(self, model, pipeline, world: int) -> None:
         """This world's articulation's forward kinematics, into both states."""
         state_0, state_1 = pipeline.state_0, pipeline.state_1
-        articulation = self.articulation
+        roots = [self._root_joint] + [part["joint"] for part in self._loose]
         if self.worlds is not None:
-            articulation = int(model.joint_articulation.numpy()[self.worlds.joint(self._root_joint, world)])
-        indices = wp.array([articulation], dtype=int, device=model.device)
+            roots = [self.worlds.joint(j, world) for j in roots]
+        articulations = model.joint_articulation.numpy()
+        indices = wp.array([int(articulations[j]) for j in roots], dtype=int, device=model.device)
         newton.eval_fk(model, state_0.joint_q, state_0.joint_qd, state_0, indices=indices)
         if state_1 is None:
             return

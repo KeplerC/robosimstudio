@@ -656,7 +656,9 @@ class ArticulatedSpec:
         world_xform: :attr:`pose` is world coordinates; see :class:`ObjectSpec`.
         fixed_base: Bolt the root part to the world (a cabinet, a door frame).
             ``False`` leaves the root on a free joint, so the whole thing can be
-            carried (a box with a lid).
+            carried (a box with a hinged lid). An asset in loose parts that no
+            joint holds together -- a jar and its lid, a rack and its boxes -- is
+            one entity with every part free, and needs ``False``.
         joints: Per-joint start coordinates and drive overrides, by name.
         self_collide: Let the parts collide with each other. Off by default: a
             drawer sits inside its cabinet's collider, and colliding the two

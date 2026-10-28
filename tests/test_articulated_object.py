@@ -239,6 +239,50 @@ class TestAResetPlacesOneWorld(_Cabinet):
             entity.reset(pipeline, {"joint_q": {"cabinet": {"drawer_09": 0.1}}}, world=0)
 
 
+class TestALooseAssetIsOneEntityOfFreeParts(unittest.TestCase):
+    """A jar and its lid: two rigid bodies and no joint, as 39 SimReady assets are."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._dir = tempfile.TemporaryDirectory()
+        cls.path = write_stage(
+            Path(cls._dir.name) / "jar.usda",
+            [
+                Part("jar_01", (0.0, 0.0, 0.05), (0.04, 0.04, 0.05)),
+                Part("lid_01", (0.0, 0.0, 0.11), (0.04, 0.04, 0.01)),
+            ],
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._dir.cleanup()
+
+    def test_a_fixed_base_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "2 separate parts.*fixed_base=False"):
+            _built(_spec(self.path, name="jar"))
+
+    def test_every_part_is_free_and_named(self) -> None:
+        entity, model = _built(_spec(self.path, name="jar", fixed_base=False))
+        self.assertEqual([int(newton.JointType.FREE)] * 2, model.joint_type.numpy().tolist())
+        self.assertEqual({"jar_01", "lid_01"}, set(entity.handle(model).parts))
+
+    def test_a_reset_places_both_parts_with_the_asset(self) -> None:
+        entity = EntityArticulated(_spec(self.path, name="jar", fixed_base=False))
+        base = newton.ModelBuilder()
+        entity.build_into(base, None)
+        fleet = newton.ModelBuilder()
+        fleet.replicate(base, 2, spacing=(0.0, 0.0, 0.0))
+        template, model = base.finalize(device="cpu"), fleet.finalize(device="cpu")
+        entity.worlds, entity.stepping_model = WorldMap.of(template, model, 2), model
+        entity.bind(template)
+        pipeline = _Pipeline(model)
+        entity.reset(pipeline, {"object_poses": {"jar": (0.9, -0.3, 0.0, 0.0)}}, world=1)
+        handle = entity.handle(template)
+        one = entity.worlds.body_view(pipeline.state_0.body_q.numpy(), 1)
+        np.testing.assert_allclose(one[handle.parts["jar_01"]][:3], (0.9, -0.3, 0.05), atol=1e-5)
+        np.testing.assert_allclose(one[handle.parts["lid_01"]][:3], (0.9, -0.3, 0.11), atol=1e-5)
+
+
 class TestItIsNotTheRobot(_Cabinet):
     def test_its_node_plays_objects(self) -> None:
         entity, model = _built(_spec(self.path))
