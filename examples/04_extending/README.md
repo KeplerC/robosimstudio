@@ -216,8 +216,15 @@ print(drawer.coordinate_from_bodies(sim.pipeline.state_0.body_q.numpy()))    # 0
   edits go to a session layer; the file is not changed.
 - A drawer task wants the arm, the cabinet and what goes in the drawer in one
   engine, so use an all-MuJoCo arrangement such as `rss.MUJOCO_500HZ`.
-- An asset whose parts are not all joined (a lid with no hinge joint) is
-  refused with a message naming it.
+- MuJoCo's own contacts collide every mesh as its convex hull, so a part that
+  rests *inside* a concave one -- crates on a shelf rack -- starts inside the
+  shelf's hull and is thrown off. Newton's contacts keep the concave mesh:
+  `replace(rss.MUJOCO_500HZ, backends=(("*", rss.backend("mujoco", nconmax=4096, njmax=4096, use_mujoco_contacts=False)),))`.
+- An asset in loose parts with no joints at all (a jar and its lid) goes
+  through `rss.articulated(..., fixed_base=False)`: one entity, every part free.
+- An asset whose stage puts jointed parts in two trees under one articulation
+  root, or whose joints close a loop (a pair of pliers), is refused with a
+  message naming it.
 
 ## Add a kind of thing
 
