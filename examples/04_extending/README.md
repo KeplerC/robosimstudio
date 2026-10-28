@@ -212,19 +212,31 @@ print(drawer.coordinate_from_bodies(sim.pipeline.state_0.body_q.numpy()))    # 0
 - A goal asks how far a joint is open with the `opening` atom over a `joint`
   feature: 0 at its lower limit, 1 at its upper.
 - The stage's `Newton` physics variant is selected on import, and joints that
-  belong to no articulation are given one root on the stage's default prim. Both
+  belong to no articulation are given one root on the stage's default prim. These
   edits go to a session layer; the file is not changed.
+- An asset in separate parts (a jar and its lid, a storage box whose lid has no
+  hinge joint) is one entity with each part its own articulation. With
+  `fixed_base=True` the heaviest part is bolted down and the rest are free; with
+  `False` every part is free.
+- Joints that close a loop (a pair of pliers) import with the closing joint
+  outside the tree, and MuJoCo holds it as an equality. The joint is not in the
+  handle's `joints`, since its coordinate follows from the others.
+- A part the asset rests outside its own joint's limits starts at the nearer
+  limit, with a warning. A start you state outside them is refused.
+- A mesh bound to several materials (a kettle's metal body and wooden handle) is
+  drawn in each of them.
 - A drawer task wants the arm, the cabinet and what goes in the drawer in one
   engine, so use an all-MuJoCo arrangement such as `rss.MUJOCO_500HZ`.
-- MuJoCo's own contacts collide every mesh as its convex hull, so a part that
-  rests *inside* a concave one -- crates on a shelf rack -- starts inside the
-  shelf's hull and is thrown off. Newton's contacts keep the concave mesh:
-  `replace(rss.MUJOCO_500HZ, backends=(("*", rss.backend("mujoco", nconmax=4096, njmax=4096, use_mujoco_contacts=False)),))`.
-- An asset in loose parts with no joints at all (a jar and its lid) goes
-  through `rss.articulated(..., fixed_base=False)`: one entity, every part free.
-- An asset whose stage puts jointed parts in two trees under one articulation
-  root, or whose joints close a loop (a pair of pliers), is refused with a
-  message naming it.
+- SimReady collides every mesh as authored, a triangle mesh, and MuJoCo's own
+  contacts collide a mesh as its convex hull. So a part that rests *inside* a
+  concave one (crates on a shelf rack) starts inside the shelf's hull and is
+  thrown off. There are two fixes:
+  - Use Newton's contacts:
+    `replace(rss.MUJOCO_500HZ, backends=(("*", rss.backend("mujoco", nconmax=4096, njmax=4096, use_mujoco_contacts=False)),))`.
+  - Decompose the colliders:
+    `asset=rss.AssetSpec(path=..., approximate="coacd", keep_visual=True)`.
+    This keeps the authored masses and settles the rack on MuJoCo's contacts, but
+    the decomposition takes minutes per asset.
 
 ## Add a kind of thing
 
