@@ -4638,6 +4638,7 @@ curobo = [
 ]
 dev = [
     { name = "coverage" },
+    { name = "newton-usd-schemas" },
     { name = "pyyaml" },
     { name = "ruff" },
 ]
@@ -4696,6 +4697,7 @@ requires-dist = [
     { name = "msgpack-numpy", marker = "extra == 'gap'" },
     { name = "newton", extras = ["importers"], marker = "extra == 'usd'" },
     { name = "newton", extras = ["sim"], specifier = ">=1.7,<1.8" },
+    { name = "newton-usd-schemas", marker = "extra == 'dev'" },
     { name = "numpy" },
     { name = "nvidia-curobo", extras = ["cu12"], marker = "extra == 'curobo'", git = "https://github.com/NVlabs/curobo.git?tag=v0.8.0" },
     { name = "ovrtx", marker = "extra == 'rtx'", specifier = "==0.4.1.*", index = "https://pypi.nvidia.com/" },
