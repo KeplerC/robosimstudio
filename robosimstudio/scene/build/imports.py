@@ -33,16 +33,156 @@ from robosimstudio.core.builder import rekey_custom_attributes
 __all__ = [
     "add_mjcf_collapsed",
     "add_usd_stage",
+    "all_joints_fixed",
+    "articulate",
     "clear_texture_tints",
     "expose_declared_colliders",
     "is_textured",
     "is_transparent",
+    "open_session_stage",
+    "select_engine_variant",
     "strip_free_bodies",
     "texture_box_geoms",
 ]
 
 
-def expose_declared_colliders(source: str, *, verbose: bool = False) -> tuple[Any, dict[str, list[str]]]:
+def open_session_stage(source: str | Path) -> Any:
+    """Open a stage whose every edit lands on a throwaway session layer.
+
+    Opened with an explicit anonymous session layer, and that is not a detail.
+    ``Usd.Stage.Open(path)`` gives a stage with **no** session layer, so
+    ``SetEditTarget(GetSessionLayer())`` falls back to the *root* layer -- and
+    root layers are shared process-wide by Sdf's layer cache. Editing there
+    mutates the checked-in asset for every stage opened afterwards (measured:
+    a second call found 0 instanceable prims because the first had already
+    cleared them, and the root layer came back ``dirty``). Nothing writes it to
+    disk, but a scene built later in the same process would silently get
+    different collision geometry.
+
+    Raises:
+        ValueError: If the stage cannot be opened, or USD will not take the
+            session layer as the edit target.
+    """
+    from pxr import Sdf, Usd
+
+    source = str(source)
+    root = Sdf.Layer.FindOrOpen(source)
+    if not root:
+        raise ValueError(f"could not open USD stage {source!r}")
+    session = Sdf.Layer.CreateAnonymous("robosimstudio_session")
+    stage = Usd.Stage.Open(root, session, Usd.Stage.LoadAll)
+    if not stage:
+        raise ValueError(f"could not open USD stage {source!r}")
+    stage.SetEditTarget(session)
+    if stage.GetEditTarget().GetLayer() != session:
+        raise ValueError(
+            f"USD refused the anonymous session layer for {source!r}; refusing to edit the root layer, "
+            "which is shared process-wide and would change every scene built after this one"
+        )
+    return stage
+
+
+#: The physics-engine variant sets a SimReady asset carries on its default prim.
+#: Each holds ``Enabled``/``Disabled``, and the asset ships with PhysX enabled.
+ENGINE_VARIANT_SETS = ("PhysX", "Newton", "MuJoCo")
+
+
+def select_engine_variant(stage: Any, engine: str = "Newton", *, verbose: bool = False) -> list[str]:
+    """Enable the stage's own variant for ``engine`` and disable the other engines'.
+
+    NVIDIA's SimReady assets carry one variant set per physics engine on the
+    default prim, and ship with ``PhysX = Enabled``. The PhysX variant asks for
+    an ``sdf`` collider approximation on every mesh; the Newton variant asks for
+    the authored mesh (``none``). A stage that declares a variant for the engine
+    it is being built for is saying which claims hold there, so this takes it --
+    the same rule as an object's USD import: the stage says which flavour it is.
+
+    A stage with no variant set named ``engine`` is not touched. Edits go to the
+    stage's edit target, which :func:`open_session_stage` makes a throwaway layer.
+
+    Returns:
+        ``"<set>=<selection>"`` for each selection changed.
+    """
+    prim = stage.GetDefaultPrim()
+    if not prim:
+        return []
+    sets = prim.GetVariantSets()
+    if engine not in sets.GetNames():
+        return []
+    changed = []
+    for name in sets.GetNames():
+        if name not in ENGINE_VARIANT_SETS:
+            continue
+        want = "Enabled" if name == engine else "Disabled"
+        variant_set = sets.GetVariantSet(name)
+        if want not in variant_set.GetVariantNames() or variant_set.GetVariantSelection() == want:
+            continue
+        variant_set.SetVariantSelection(want)
+        changed.append(f"{name}={want}")
+        if verbose:
+            print(f"[usd] variant {name} = {want}")
+    return changed
+
+
+def articulate(stage: Any, *, verbose: bool = False) -> list[str]:
+    """Give a stage whose joints belong to no articulation one root, on its default prim.
+
+    ``add_usd`` gathers joints into articulations by ``PhysicsArticulationRootAPI``;
+    a joint under no root is parsed and then left out of every articulation, and
+    ``finalize`` refuses the model ("joint(s) not belonging to any
+    articulation"). PhysX builds such a stage as loose maximal-coordinate joints,
+    so the export is valid for Isaac and unbuildable here. 854 of the 969
+    multi-body SimReady assets are in this state: a bottle and its cap held by a
+    fixed joint, a file cabinet's ten drawers and doors.
+
+    One root on the default prim makes the whole stage one articulation, which is
+    what an object asset is. A stage that already declares a root anywhere is
+    left alone -- it has said where its articulations are -- and so is one whose
+    joints are all disabled or excluded from articulation.
+
+    Returns:
+        The path the root was applied to, or nothing.
+    """
+    from pxr import Usd, UsdPhysics
+
+    prims = list(Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies()))
+    if any(prim.HasAPI(UsdPhysics.ArticulationRootAPI) for prim in prims):
+        return []
+    jointed = False
+    for prim in prims:
+        if not prim.IsA(UsdPhysics.Joint):
+            continue
+        joint = UsdPhysics.Joint(prim)
+        if joint.GetJointEnabledAttr().Get() is False or joint.GetExcludeFromArticulationAttr().Get():
+            continue
+        jointed = True
+        break
+    root = stage.GetDefaultPrim()
+    if not jointed or not root:
+        return []
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    if verbose:
+        print(f"[usd] applied ArticulationRootAPI to {root.GetPath()}")
+    return [str(root.GetPath())]
+
+
+def all_joints_fixed(stage: Any) -> bool:
+    """Whether the stage has joints and every enabled one is a fixed joint.
+
+    Such a stage is one object in several parts -- a bottle and its cap, a
+    socket and its faceplate -- and collapses to a single body.
+    """
+    from pxr import Usd, UsdPhysics
+
+    kinds = {
+        prim.GetTypeName()
+        for prim in Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies())
+        if prim.IsA(UsdPhysics.Joint) and UsdPhysics.Joint(prim).GetJointEnabledAttr().Get() is not False
+    }
+    return bool(kinds) and kinds == {"PhysicsFixedJoint"}
+
+
+def expose_declared_colliders(source: Any, *, verbose: bool = False) -> tuple[Any, dict[str, list[str]]]:
     """Open a stage with the colliders it declares actually reachable by ``add_usd``.
 
     **An Isaac export can declare a collider in two ways ``add_usd`` cannot
@@ -82,7 +222,8 @@ def expose_declared_colliders(source: str, *, verbose: bool = False) -> tuple[An
     and render-only instances (the table's ``visuals``) keep their instancing.
 
     Args:
-        source: Path to the USD stage.
+        source: Path to the USD stage, or a stage :func:`open_session_stage`
+            opened, to edit further.
         verbose: Print each prim changed.
 
     Returns:
@@ -92,30 +233,9 @@ def expose_declared_colliders(source: str, *, verbose: bool = False) -> tuple[An
     Raises:
         ValueError: If the stage cannot be opened.
     """
-    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+    from pxr import Usd, UsdGeom, UsdPhysics
 
-    # Opened with an explicit anonymous session layer, and that is not a detail.
-    # ``Usd.Stage.Open(path)`` gives a stage with **no** session layer, so
-    # ``SetEditTarget(GetSessionLayer())`` falls back to the *root* layer -- and
-    # root layers are shared process-wide by Sdf's layer cache. Editing there
-    # mutates the checked-in asset for every stage opened afterwards (measured:
-    # a second call found 0 instanceable prims because the first had already
-    # cleared them, and the root layer came back ``dirty``). Nothing writes it to
-    # disk, but a scene built later in the same process would silently get
-    # different collision geometry.
-    root = Sdf.Layer.FindOrOpen(source)
-    if not root:
-        raise ValueError(f"could not open USD stage {source!r}")
-    session = Sdf.Layer.CreateAnonymous("robosimstudio_expose_declared_colliders")
-    stage = Usd.Stage.Open(root, session, Usd.Stage.LoadAll)
-    if not stage:
-        raise ValueError(f"could not open USD stage {source!r}")
-    stage.SetEditTarget(session)
-    if stage.GetEditTarget().GetLayer() != session:
-        raise ValueError(
-            f"USD refused the anonymous session layer for {source!r}; refusing to edit the root layer, "
-            "which is shared process-wide and would change every scene built after this one"
-        )
+    stage = source if isinstance(source, Usd.Stage) else open_session_stage(source)
 
     # Collected before anything is edited: clearing `instanceable` restructures
     # the composed scene graph, and mutating it mid-traversal skips prims.
@@ -150,16 +270,19 @@ def expose_declared_colliders(source: str, *, verbose: bool = False) -> tuple[An
     return stage, {"deinstanced": deinstanced, "collision_applied": applied}
 
 
-#: Module-local alias, because ``add_usd_stage`` takes a keyword of the same name.
+#: Module-local aliases, because ``add_usd_stage`` takes keywords of the same names.
 _expose_declared_colliders = expose_declared_colliders
+_articulate = articulate
 
 
 def add_usd_stage(
     builder: newton.ModelBuilder,
-    source: str,
+    source: str | Path,
     *,
-    collapse_fixed_joints: bool = False,
+    collapse_fixed_joints: bool | str = False,
     expose_declared_colliders: bool = False,
+    engine_variant: str | None = "Newton",
+    articulate: bool = True,
     verbose: bool = False,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -170,34 +293,87 @@ def add_usd_stage(
     there is nothing to work around -- but the re-key still has to happen, and a
     caller should not have to know that.
 
+    The stage is opened on a session layer and given the fixups below before the
+    import; when none of them changes anything the path itself is imported, as
+    before they existed.
+
     Args:
         builder: Builder to import into.
         source: Path to the USD stage.
         collapse_fixed_joints: Fold the stage's fixed joints. Worth doing on an
             Isaac export, whose robot carries a wrist flange and a gripper base
             welded on: keeping them hands the solver zero-DOF articulations to
-            maintain for nothing.
+            maintain for nothing. ``"if_all_fixed"`` folds them only when every
+            joint is fixed, so a multi-part prop becomes one body and a jointed
+            one keeps its parts.
         expose_declared_colliders: Make the stage's declared colliders reachable
             by the importer -- colliders inside instance prototypes, and
             ``CollisionAPI`` declared on an Xform rather than on the mesh under
             it, are both otherwise dropped silently. See
             :func:`expose_declared_colliders` for what that costs on a gripper.
+        engine_variant: The physics-engine variant to select where the stage
+            offers one (:func:`select_engine_variant`); ``None`` keeps the
+            stage's own selection.
+        articulate: Give joints that belong to no articulation one root
+            (:func:`articulate`).
         verbose: Forwarded to the import and the re-key.
         **kwargs: Forwarded to :meth:`newton.ModelBuilder.add_usd`.
 
     Returns:
         ``parse_usd``'s own result dict.
+
+    Raises:
+        ValueError: If the stage's jointed bodies form more than one tree under
+            one articulation root, naming the stage.
     """
+    stage = open_session_stage(source)
+    changed: dict[str, list[str]] = {}
+    if engine_variant:
+        changed["variant"] = select_engine_variant(stage, engine_variant, verbose=verbose)
+    if articulate:
+        changed["articulation_root"] = _articulate(stage, verbose=verbose)
+    # Folded after the import, keeping every joint already in the builder:
+    # ``add_usd(collapse_fixed_joints=True)`` collapses the WHOLE builder, so a
+    # prop imported after a fixed-base cabinet folded the cabinet into the world
+    # and renumbered every body built before it.
+    fold_own = collapse_fixed_joints == "if_all_fixed" and all_joints_fixed(stage)
+    if collapse_fixed_joints == "if_all_fixed":
+        collapse_fixed_joints = False
+    joints_before = builder.joint_count
     if expose_declared_colliders:
-        source, changed = _expose_declared_colliders(source, verbose=verbose)
+        _, exposed = _expose_declared_colliders(stage, verbose=verbose)
+        changed.update(exposed)
         if verbose:
-            counts = ", ".join(f"{len(v)} {k}" for k, v in changed.items())
+            counts = ", ".join(f"{len(v)} {k}" for k, v in exposed.items())
             print(f"[usd] exposed declared colliders: {counts}")
-    results = builder.add_usd(source, collapse_fixed_joints=collapse_fixed_joints, verbose=verbose, **kwargs)
-    collapse = (results or {}).get("collapse_results")
+    target = stage if any(changed.values()) else str(source)
+    try:
+        results = builder.add_usd(target, collapse_fixed_joints=collapse_fixed_joints, verbose=verbose, **kwargs)
+    except ValueError as error:
+        if "Multiple roots" not in str(error):
+            raise
+        raise ValueError(
+            f"{source}: the stage's jointed bodies form more than one tree under one articulation root -- "
+            "some part is joined to nothing (an authoring gap in the asset, e.g. a lid with no hinge joint)"
+        ) from error
+    results = dict(results or {})
+    if fold_own:
+        before = {path: int(body) for path, body in (results.get("path_body_map") or {}).items()}
+        collapse = builder.collapse_fixed_joints(verbose=verbose, joints_to_keep=list(range(joints_before)))
+        remap = collapse.get("body_remap") or {}
+        merged = collapse.get("body_merged_parent") or {}
+        bodies = {}
+        for path, imported in before.items():
+            survivor = imported
+            while survivor in merged:
+                survivor = int(merged[survivor])
+            bodies[path] = int(remap.get(survivor, survivor))
+        results["path_body_map"] = bodies
+        results["collapse_results"] = collapse
+    collapse = results.get("collapse_results")
     if collapse:
         rekey_custom_attributes(builder, collapse, verbose=verbose)
-    return results or {}
+    return results
 
 
 def clear_texture_tints(builder: newton.ModelBuilder, shapes=None) -> int:

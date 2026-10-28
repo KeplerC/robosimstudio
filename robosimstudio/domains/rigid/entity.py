@@ -35,13 +35,39 @@ from robosimstudio.scene.entity import Entity, label_index
 from robosimstudio.solvers import ObbGrasp, compute_obb
 from robosimstudio.specs import ObjectSpec
 
-__all__ = ["EntityRigid"]
+__all__ = ["EntityRigid", "episode_pose"]
 
 WELD_TOLERANCE = 1.0e-5
 """How far an episode's pose may sit from a static object's weld and still be where it was built.
 
 In metres, and per quaternion component. The weld is read back off the builder in
 float32, so this is that rounding, not a move."""
+
+
+def episode_pose(name: str, declared, episode) -> np.ndarray:
+    """One object's start pose for one episode, as a 7-vector.
+
+    An episode sampler reports ``object_poses[name] = (x, y, z, yaw)``, which is
+    the layout family every tabletop task varies over; anything richer overrides
+    the full transform under ``object_xforms``. Neither names it: ``declared``.
+
+    Args:
+        name: The object's name in the episode's tables.
+        declared: Its declared pose, xyz + xyzw.
+        episode: The episode, or ``None``.
+    """
+    pose = np.asarray(declared, dtype=np.float64).reshape(-1)[:7]
+    if episode is None:
+        return pose
+    xforms = episode.get("object_xforms") or {}
+    if name in xforms:
+        return np.asarray(xforms[name], dtype=np.float64)
+    poses = episode.get("object_poses") or {}
+    if name in poses:
+        x, y, z, yaw = (float(v) for v in poses[name])
+        half = yaw * 0.5
+        pose = np.array([x, y, z, 0.0, 0.0, np.sin(half), np.cos(half)])
+    return pose
 
 
 class EntityRigid(Entity):
@@ -355,13 +381,21 @@ class EntityRigid(Entity):
             if self.spec.static:
                 raise ValueError(
                     f"object {self.spec.name!r}: {path.name} declares a rigid body, "
-                    f"so it cannot also be static; strip the physics schemas or drop static=True"
+                    f"so it cannot also be static; strip the physics schemas, drop static=True, "
+                    f"or build it as an ArticulatedSpec with fixed_base=True"
                 )
+            from robosimstudio.scene.build.imports import add_usd_stage
+
             before = builder.body_count
-            results = builder.add_usd(
-                str(path),
+            results = add_usd_stage(
+                builder,
+                path,
                 xform=xform,
                 floating=True,
+                # A prop in several welded parts -- a bottle and its cap -- is
+                # one object, and becomes one body; a jointed stage keeps its
+                # parts and is refused below.
+                collapse_fixed_joints="if_all_fixed",
                 # Left False so the stage's own ``physics:approximation`` is
                 # honoured -- that approximation is the claim this flavour
                 # exists to test. True means the opposite of what it sounds
@@ -369,11 +403,11 @@ class EntityRigid(Entity):
                 # the stage asked for, which is why the grocery tote sets it.
                 skip_mesh_approximation=self.spec.asset.skip_mesh_approximation,
             )
-            bodies = sorted(int(b) for b in (results.get("path_body_map") or {}).values())
+            bodies = sorted({int(b) for b in (results.get("path_body_map") or {}).values()})
             if len(bodies) != 1:
                 raise ValueError(
-                    f"object {self.spec.name!r}: {path.name} declares {len(bodies)} rigid bodies; "
-                    f"an object asset must declare exactly one"
+                    f"object {self.spec.name!r}: {path.name} declares {len(bodies)} rigid bodies; an object "
+                    f"asset must be one body -- a jointed asset (a cabinet, a lid) is an ArticulatedSpec"
                 )
             self.body = bodies[0]
             if self.body < before:
@@ -579,24 +613,8 @@ class EntityRigid(Entity):
         return cfg
 
     def _episode_pose(self, episode, base: np.ndarray | None = None) -> np.ndarray:
-        """This object's start pose for one episode, as a 7-vector.
-
-        An episode sampler reports ``object_poses[name] = (x, y, z, yaw)``,
-        which is the layout family every tabletop task varies over; anything
-        richer overrides the full transform under ``object_xforms``.
-        """
-        pose = self.declared_q if base is None else np.asarray(base, dtype=np.float64).reshape(-1)[:7]
-        if episode is None:
-            return pose
-        xforms = episode.get("object_xforms") or {}
-        if self.spec.name in xforms:
-            return np.asarray(xforms[self.spec.name], dtype=np.float64)
-        poses = episode.get("object_poses") or {}
-        if self.spec.name in poses:
-            x, y, z, yaw = (float(v) for v in poses[self.spec.name])
-            half = yaw * 0.5
-            pose = np.array([x, y, z, 0.0, 0.0, np.sin(half), np.cos(half)])
-        return pose
+        """This object's start pose for one episode, as a 7-vector (:func:`episode_pose`)."""
+        return episode_pose(self.spec.name, self.declared_q if base is None else base, episode)
 
     def after_build(self, builder: newton.ModelBuilder, episode) -> None:
         """Find, collect, approximate, box, pose -- in that order."""
