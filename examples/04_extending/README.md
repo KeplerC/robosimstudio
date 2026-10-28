@@ -183,6 +183,42 @@ print([a.name for a in spec.arms], resolve_gripper(spec, spec.arms[0]).name)    
 ```
 
 
+## Import a SimReady asset
+
+NVIDIA's [SimReady assets](https://huggingface.co/datasets/nvidia/simready-assets)
+(CC-BY-4.0) are USD stages that state their own mass, friction and colliders.
+They need the `[usd]` extra. Download the asset folders you want and point at
+the `sm_*.usd` file in each:
+
+```python
+scene = rss.Scene(cell="bench_075", physics=rss.MUJOCO_500HZ)
+scene.add(rss.body(name="bottle", asset="simready/bottle_laboratory_a01/simready_usd/sm_bottle_laboratory_a01_01.usd",
+                   at=(0.0, 0.1, 0.0)))
+scene.add(rss.articulated(name="cabinet", asset="simready/cabinet_file_a01/simready_usd/sm_cabinet_file_a01_01.usd",
+                          at=(0.6, 0.0, 0.0), joints={"drawer_02": 0.12}))
+sim = scene.build()
+drawer = sim.handles.objects["cabinet"].joint("drawer_02")
+print(drawer.coordinate_from_bodies(sim.pipeline.state_0.body_q.numpy()))    # 0.12
+```
+
+- The asset's origin is its base, so `z = 0` stands it on the surface.
+- `rss.body` takes a one-body asset, or one whose parts are all held by fixed
+  joints (a bottle and its cap); those become one body.
+- `rss.articulated` takes one with moving joints. `fixed_base=True` (the
+  default) bolts its root part to the world; `False` lets the whole thing be
+  carried. Its handle names the parts and joints the asset declares
+  (`joint_drawer_02_joint_00` is `drawer_02`), and `joints=` starts any of
+  them elsewhere. `rss.JointSpec` overrides a joint's damping, friction or drive.
+- A goal asks how far a joint is open with the `opening` atom over a `joint`
+  feature: 0 at its lower limit, 1 at its upper.
+- The stage's `Newton` physics variant is selected on import, and joints that
+  belong to no articulation are given one root on the stage's default prim. Both
+  edits go to a session layer; the file is not changed.
+- A drawer task wants the arm, the cabinet and what goes in the drawer in one
+  engine, so use an all-MuJoCo arrangement such as `rss.MUJOCO_500HZ`.
+- An asset whose parts are not all joined (a lid with no hinge joint) is
+  refused with a message naming it.
+
 ## Add a kind of thing
 
 ### Two routes
