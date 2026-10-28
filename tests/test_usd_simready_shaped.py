@@ -43,6 +43,7 @@ class _Stages(unittest.TestCase):
         cls._dir = tempfile.TemporaryDirectory()
         root = Path(cls._dir.name)
         cls.box = write_stage(root / "box.usda", [Part("box_01")])
+        cls.pallet = write_stage(root / "pallet.usda", [Part("pallet_01", (0.0, 0.0, 0.3), (0.5, 0.5, 0.3))])
         cls.bottle = write_stage(
             root / "bottle.usda",
             [
@@ -123,6 +124,29 @@ class TestAFixedJointPropIsOneBody(_Stages):
         self.assertEqual(list(alone.shape_body), list(both.shape_body)[:shapes])
         self.assertEqual(bodies, prop.body)
         both.finalize(device="cpu")
+
+
+class TestABodyAboveTheStageOriginStandsWhereTheAssetDoes(_Stages):
+    """The pallet's body frame is 0.3 m above its stage origin, its box hanging to the origin."""
+
+    def test_the_free_joint_holds_the_body_frame_not_the_pose(self) -> None:
+        entity = _rigid(self.pallet)
+        builder = newton.ModelBuilder()
+        entity.build_into(builder, None)
+        c = entity.coord_start
+        np.testing.assert_allclose(list(builder.joint_q[c : c + 3]), (0.0, 0.0, 0.1 + 0.3), atol=1e-6)
+        np.testing.assert_allclose(entity.episode_start_q(None)[:3], (0.0, 0.0, 0.4), atol=1e-6)
+
+    def test_an_episode_pose_moves_the_asset_origin(self) -> None:
+        entity = _rigid(self.pallet)
+        entity.build_into(newton.ModelBuilder(), None)
+        moved = entity.episode_start_q({"object_poses": {"prop": (1.0, 2.0, 0.0, np.pi / 2)}})
+        np.testing.assert_allclose(moved[:3], (1.0, 2.0, 0.3), atol=1e-6)
+
+    def test_a_body_at_the_origin_has_no_offset(self) -> None:
+        entity = _rigid(self.box)
+        entity.build_into(newton.ModelBuilder(), None)
+        self.assertIsNone(entity.body_offset)
 
 
 class TestAJointedStageIsNotARigidBody(_Stages):

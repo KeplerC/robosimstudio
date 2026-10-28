@@ -324,7 +324,7 @@ def add_usd_stage(
 
     Raises:
         ValueError: If the stage's jointed bodies form more than one tree under
-            one articulation root, naming the stage.
+            one articulation root, or close a loop, naming the stage.
     """
     stage = open_session_stage(source)
     changed: dict[str, list[str]] = {}
@@ -350,12 +350,17 @@ def add_usd_stage(
     try:
         results = builder.add_usd(target, collapse_fixed_joints=collapse_fixed_joints, verbose=verbose, **kwargs)
     except ValueError as error:
-        if "Multiple roots" not in str(error):
-            raise
-        raise ValueError(
-            f"{source}: the stage's jointed bodies form more than one tree under one articulation root -- "
-            "some part is joined to nothing (an authoring gap in the asset, e.g. a lid with no hinge joint)"
-        ) from error
+        if "Multiple roots" in str(error):
+            raise ValueError(
+                f"{source}: the stage's jointed bodies form more than one tree under one articulation root -- "
+                "some part is joined to nothing (an authoring gap in the asset, e.g. a lid with no hinge joint)"
+            ) from error
+        if "contains a cycle" in str(error):
+            raise ValueError(
+                f"{source}: the stage's joints close a loop (a pair of pliers, a four-bar linkage), and an "
+                "articulation is a tree; Newton builds no loop-closing joint"
+            ) from error
+        raise
     results = dict(results or {})
     if fold_own:
         before = {path: int(body) for path, body in (results.get("path_body_map") or {}).items()}

@@ -123,6 +123,14 @@ class EntityRigid(Entity):
         Its weld's pose, or where the scene's arena stood it for :meth:`find_in_scene`.
         Nothing writes either again, so :meth:`move_refusal` measures each layout against it."""
         self.shapes: np.ndarray = np.zeros(0, dtype=np.int32)
+        self.body_offset: np.ndarray | None = None
+        """The body's frame in the asset's, xyz + xyzw, when a USD stage puts it elsewhere; ``None`` for identity.
+
+        A stage's rigid body is a prim with a transform of its own: a SimReady pallet's sits
+        0.35 m above the stage origin, with its mesh hanging below it. ``add_usd`` places the
+        *asset* origin at the pose, so the free joint, which holds the *body's* frame, is
+        written as the pose composed with this. Writing the pose itself put that pallet's
+        body at the pose and its mesh 0.34 m into the floor, and contact threw it 65 m up."""
         self.obb: ObbGrasp | None = None
         self.init_pose = np.asarray(spec.pose, dtype=np.float64)
         self.init_quat = np.asarray(spec.quat, dtype=np.float64)
@@ -407,11 +415,18 @@ class EntityRigid(Entity):
             if len(bodies) != 1:
                 raise ValueError(
                     f"object {self.spec.name!r}: {path.name} declares {len(bodies)} rigid bodies; an object "
-                    f"asset must be one body -- a jointed asset (a cabinet, a lid) is an ArticulatedSpec"
+                    f"asset must be one body -- a jointed asset (a cabinet) is an ArticulatedSpec, and so is "
+                    f"one in loose parts (a jar and its lid), with fixed_base=False"
                 )
             self.body = bodies[0]
             if self.body < before:
                 raise ValueError(f"object {self.spec.name!r}: {path.name} reused body {self.body}")
+            from robosimstudio.core.math import transform_matrix, xform_from_matrix
+
+            placed = transform_matrix([float(v) for v in xform])
+            offset = np.linalg.inv(placed) @ transform_matrix([float(v) for v in builder.body_q[self.body]])
+            if not np.allclose(offset, np.eye(4), atol=1.0e-7):
+                self.body_offset = np.asarray(xform_from_matrix(offset), dtype=np.float64)
             joint = builder.joint_count - 1
             self.coord_start = int(builder.joint_q_start[joint])
             self.dof_start = int(builder.joint_qd_start[joint])
@@ -482,7 +497,17 @@ class EntityRigid(Entity):
             base: The 7-vector to treat as the object's own declared pose. The
                 entity's current one when omitted.
         """
-        return self._placed(self._episode_pose(episode, base))
+        return self._body_frame(self._placed(self._episode_pose(episode, base)))
+
+    def _body_frame(self, pose: np.ndarray) -> np.ndarray:
+        """Where the body's frame is when the asset stands at ``pose`` (:attr:`body_offset`)."""
+        if self.body_offset is None:
+            return pose
+        from robosimstudio.core.math import transform_matrix, xform_from_matrix
+
+        return np.asarray(
+            xform_from_matrix(transform_matrix(pose) @ transform_matrix(self.body_offset)), dtype=np.float64
+        )
 
     @property
     def declared_q(self) -> np.ndarray:
@@ -1150,7 +1175,7 @@ class EntityRigid(Entity):
         # start, not a base: the next episode is measured from ``declared_q``.
         raw = self._episode_pose(episode)
         self.init_pose, self.init_quat = raw[:3].copy(), raw[3:7].copy()
-        pose = self._placed(raw)
+        pose = self._body_frame(self._placed(raw))
         c = self.coord_start
         builder.joint_q[c : c + 3] = [float(v) for v in pose[:3]]
         builder.joint_q[c + 3 : c + 7] = [float(v) for v in pose[3:7]]
@@ -1187,7 +1212,7 @@ class EntityRigid(Entity):
         # start, not a base: the next episode is measured from ``declared_q``.
         raw = self._episode_pose(episode)
         self.init_pose, self.init_quat = raw[:3].copy(), raw[3:7].copy()
-        pose = np.asarray(self._placed(raw)[:7], dtype=np.float32)
+        pose = np.asarray(self._body_frame(self._placed(raw))[:7], dtype=np.float32)
         # Just the seven coordinates, uploaded: a read of the whole vector and a
         # write of it back, per object per state, is what a reset of forty
         # objects spent most of its time on.
