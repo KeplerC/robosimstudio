@@ -14,6 +14,11 @@ is a FREE joint on the root part, written like any object's: a fleet's wave
 writes its seven coordinates from :meth:`episode_start_q`, and :meth:`reset`
 writes them in a single-world run.
 
+**Several roots.** An asset in parts no joint holds together (a jar and its lid)
+imports one articulation per part (:func:`~robosimstudio.scene.build.imports.split_articulations`).
+On a fixed base the heaviest is the base and the rest are free; each free one
+is placed with the asset at reset, from where the asset puts it.
+
 **No fixed-joint collapse.** On a fixed base the collapse folds the root part
 into the world -- the cabinet body disappears and its drawers hang off body -1 --
 and then nothing is left to place per world.
@@ -22,6 +27,7 @@ and then nothing is left to place per world.
 from __future__ import annotations
 
 import re
+import warnings
 
 import newton
 import numpy as np
@@ -83,6 +89,7 @@ class EntityArticulated(WeldedFixture, Entity):
         self._root_dof: int = -1
         self._coords: dict[str, int] = {}
         self._dofs: dict[str, int] = {}
+        self._travel: dict[str, tuple[float, float]] = {}
         self._loose: list[dict] = []
         self.root_offset = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
         """The root part's pose in the frame :attr:`pose` places, read off the import."""
@@ -145,19 +152,29 @@ class EntityArticulated(WeldedFixture, Entity):
             xform=xform,
             floating=not spec.fixed_base,
             enable_self_collisions=spec.self_collide,
+            material_subsets=True,
             skip_mesh_approximation=spec.asset.skip_mesh_approximation,
         )
+        if spec.asset.approximate:
+            from robosimstudio.scene.build.bodies import approximate_imported_colliders
+
+            approximate_imported_colliders(
+                builder,
+                range(self.range.shapes[0], builder.shape_count),
+                spec.asset.approximate,
+                keep_visual=spec.asset.keep_visual,
+            )
         joints = range(joints_before, builder.joint_count)
         roots = [j for j in joints if int(builder.joint_parent[j]) == -1]
         if builder.body_count == bodies_before or not roots:
             raise ValueError(f"articulated {spec.name!r}: {path.name} declares no rigid body")
-        if len(roots) > 1 and spec.fixed_base:
-            raise ValueError(
-                f"articulated {spec.name!r}: {path.name} is {len(roots)} separate parts that no joint holds "
-                "together (a jar and its lid); fixed_base=False imports each one free, and bolting all of "
-                "them down is not what the asset says"
-            )
-        root = roots[0]
+        # In several separate parts (a jar and its lid) on a fixed base, the import
+        # welded the heaviest and left the rest free: that weld is the base.
+        welded = [j for j in roots if int(builder.joint_type[j]) != int(newton.JointType.FREE)]
+        if spec.fixed_base and not welded:
+            raise ValueError(f"articulated {spec.name!r}: {path.name} imported with no part fixed to the world")
+        root = welded[0] if spec.fixed_base else roots[0]
+        roots = [root, *(j for j in roots if j != root)]
         self.body = int(builder.joint_child[root])
         self.articulation = int(builder.joint_articulation[root])
         if spec.fixed_base:
@@ -194,8 +211,11 @@ class EntityArticulated(WeldedFixture, Entity):
             self.parts[name if name not in self.parts else builder.body_label[body].rsplit("/", maxsplit=1)[-1]] = body
         self.joints = {}
         for j in joints:
-            if int(builder.joint_type[j]) in _JOINT_KINDS:
-                self.joints[joint_name(builder.joint_label[j])] = j
+            # A joint of no articulation closes a loop (the pliers' second jaw pivot):
+            # its coordinate follows from the tree's, and nothing writes it.
+            if int(builder.joint_type[j]) in _JOINT_KINDS and int(builder.joint_articulation[j]) >= 0:
+                name = joint_name(builder.joint_label[j])
+                self.joints[name if name not in self.joints else builder.joint_label[j].rsplit("/", maxsplit=1)[-1]] = j
         self._apply_joint_specs(builder)
         self._write_joint_starts(builder.joint_q, episode, lambda q: q)
 
@@ -209,6 +229,8 @@ class EntityArticulated(WeldedFixture, Entity):
             j = self.joints[joint.name]
             dof = int(builder.joint_qd_start[j])
             coord = int(builder.joint_q_start[j])
+            if joint.q is not None:
+                self._check_travel(joint.name, joint.q, builder, "its JointSpec")
             for field, array in (
                 ("damping", builder.joint_damping),
                 ("friction", builder.joint_friction),
@@ -225,7 +247,26 @@ class EntityArticulated(WeldedFixture, Entity):
                     builder.joint_target_q[coord] = float(joint.q)
         coords = {name: int(builder.joint_q_start[j]) for name, j in self.joints.items()}
         stated = {joint.name: joint.q for joint in self.spec.joints if joint.q is not None}
-        self.built_q = {name: float(stated.get(name, builder.joint_q[c])) for name, c in coords.items()}
+        self._travel = {
+            name: (float(builder.joint_limit_lower[d]), float(builder.joint_limit_upper[d]))
+            for name, d in ((name, int(builder.joint_qd_start[j])) for name, j in self.joints.items())
+        }
+        # An asset can rest a part outside its own joint's travel (a sterilization
+        # tray's locks rest at 0 between limits of 0.09 and 2.09 rad); started
+        # there, the first step's limit force flings the part. It starts at the
+        # nearer limit instead.
+        self.built_q, outside = {}, []
+        for name, c in coords.items():
+            authored = float(stated.get(name, builder.joint_q[c]))
+            self.built_q[name] = min(max(authored, self._travel[name][0]), self._travel[name][1])
+            if self.built_q[name] != authored:
+                outside.append(f"{name} at {authored:g} outside [{self._travel[name][0]:g}, {self._travel[name][1]:g}]")
+        if outside:
+            warnings.warn(
+                f"articulated {self.spec.name!r}: the asset rests {', '.join(outside)}; "
+                "started at the nearer limit instead",
+                stacklevel=2,
+            )
         self._coords = coords
         self._dofs = {name: int(builder.joint_qd_start[j]) for name, j in self.joints.items()}
 
@@ -238,8 +279,21 @@ class EntityArticulated(WeldedFixture, Entity):
                 raise ValueError(
                     f"episode joint_q names {self.spec.name!r}.{name}, which is not one of its joints {sorted(starts)}"
                 )
+            low, high = self._travel[name]
+            if not low <= float(value) <= high:
+                raise ValueError(
+                    f"episode joint_q starts {self.spec.name!r}.{name} at {value}, outside its travel [{low}, {high}]"
+                )
             starts[name] = float(value)
         return starts
+
+    def _check_travel(self, name: str, value: float, builder: newton.ModelBuilder, where: str) -> None:
+        dof = int(builder.joint_qd_start[self.joints[name]])
+        low, high = float(builder.joint_limit_lower[dof]), float(builder.joint_limit_upper[dof])
+        if not low <= float(value) <= high:
+            raise ValueError(
+                f"articulated {self.spec.name!r}: {where} starts {name} at {value}, outside [{low}, {high}]"
+            )
 
     def _write_joint_starts(self, joint_q, episode, coord) -> None:
         for name, value in self.joint_starts(episode).items():

@@ -16,7 +16,10 @@ handle, and nothing else:
 
 Mass is authored inside the engine variants, so a test can tell which one the
 import selected: the PhysX variant states :data:`PHYSX_MASS` for every part and
-the Newton variant :data:`NEWTON_MASS`.
+the Newton variant :data:`NEWTON_MASS`, each times the part's own ``mass``.
+
+A part given ``materials`` splits its box's six faces between them, one bound
+``GeomSubset`` each, as a SimReady kettle's one mesh holds its metal and wood.
 """
 
 from __future__ import annotations
@@ -40,6 +43,9 @@ class Part:
     name: str
     at: tuple[float, float, float] = (0.0, 0.0, 0.0)
     half: tuple[float, float, float] = (0.05, 0.05, 0.05)
+    mass: float = 1.0
+    materials: tuple[tuple[float, float, float], ...] = ()
+    """Diffuse colours; with two or more, the faces are dealt out between them."""
 
 
 @dataclass(frozen=True)
@@ -59,8 +65,8 @@ class Joint:
     limits: tuple[float, float] = (0.0, 0.3)
 
 
-def _box(stage, path: str, half) -> None:
-    from pxr import UsdGeom, UsdPhysics
+def _box(stage, path: str, half, materials=()) -> None:
+    from pxr import Gf, Sdf, UsdGeom, UsdPhysics, UsdShade
 
     hx, hy, hz = half
     mesh = UsdGeom.Mesh.Define(stage, path)
@@ -71,6 +77,16 @@ def _box(stage, path: str, half) -> None:
     mesh.CreateFaceVertexIndicesAttr([i for face in faces for i in face])
     UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
     UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr("convexHull")
+    for index, colour in enumerate(materials if len(materials) > 1 else ()):
+        material = UsdShade.Material.Define(stage, f"{path}_looks/m_{index}")
+        shader = UsdShade.Shader.Define(stage, f"{path}_looks/m_{index}/surface")
+        shader.CreateIdAttr("UsdPreviewSurface")
+        shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*colour))
+        shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.5)
+        material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+        faces_of = [f for f in range(len(faces)) if f % len(materials) == index]
+        subset = UsdGeom.Subset.CreateGeomSubset(mesh, f"m_{index}", "face", faces_of, "materialBind")
+        UsdShade.MaterialBindingAPI.Apply(subset.GetPrim()).Bind(material)
 
 
 def write_stage(path: str | Path, parts: list[Part], joints: list[Joint] = ()) -> Path:
@@ -86,7 +102,7 @@ def write_stage(path: str | Path, parts: list[Part], joints: list[Joint] = ()) -
 
     # The instance prototypes: one collider mesh per part, outside the default prim.
     for part in parts:
-        _box(stage, f"/Prototypes/{part.name}/{part.name}_mesh_00", part.half)
+        _box(stage, f"/Prototypes/{part.name}/{part.name}_mesh_00", part.half, part.materials)
         stage.GetPrimAtPath(f"/Prototypes/{part.name}").SetSpecifier(Sdf.SpecifierClass)
 
     UsdGeom.Scope.Define(stage, "/RootNode/Geometry")
@@ -99,8 +115,10 @@ def write_stage(path: str | Path, parts: list[Part], joints: list[Joint] = ()) -
         UsdPhysics.RigidBodyAPI.Apply(prim)
 
     UsdGeom.Scope.Define(stage, "/RootNode/Joints")
-    for joint in joints:
-        joint_path = f"/RootNode/Joints/joint_{joint.name}_joint_00"
+    for index, joint in enumerate(joints):
+        # Numbered like SimReady's own: a second joint onto one part is ``_joint_01``.
+        repeat = sum(1 for other in joints[:index] if other.name == joint.name)
+        joint_path = f"/RootNode/Joints/joint_{joint.name}_joint_{repeat:02d}"
         if joint.kind == "fixed":
             usd_joint = UsdPhysics.FixedJoint.Define(stage, joint_path)
         elif joint.kind == "prismatic":
@@ -132,7 +150,7 @@ def write_stage(path: str | Path, parts: list[Part], joints: list[Joint] = ()) -
             for part in parts:
                 prim = stage.GetPrimAtPath(f"/RootNode/Geometry/{part.name}_obj_00")
                 mass_api = UsdPhysics.MassAPI.Apply(prim)
-                mass_api.CreateMassAttr(mass)
+                mass_api.CreateMassAttr(mass * part.mass)
                 mass_api.CreateDiagonalInertiaAttr(Gf.Vec3f(0.01, 0.01, 0.01))
         variant_set.SetVariantSelection("Enabled" if engine == "PhysX" else "Disabled")
     stage.GetRootLayer().Save()

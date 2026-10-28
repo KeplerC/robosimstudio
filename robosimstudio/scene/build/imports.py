@@ -21,8 +21,10 @@ to state what the label said.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -36,11 +38,15 @@ __all__ = [
     "all_joints_fixed",
     "articulate",
     "clear_texture_tints",
+    "collapse_own_fixed_joints",
+    "collapsed_body",
+    "draw_material_subsets",
     "expose_declared_colliders",
     "is_textured",
     "is_transparent",
     "open_session_stage",
     "select_engine_variant",
+    "split_articulations",
     "strip_free_bodies",
     "texture_box_geoms",
 ]
@@ -166,6 +172,150 @@ def articulate(stage: Any, *, verbose: bool = False) -> list[str]:
     return [str(root.GetPath())]
 
 
+def split_articulations(stage: Any, *, fix_one_tree: bool = False, verbose: bool = False) -> dict[str, list[str]]:
+    """Make each articulation the stage declares a tree Newton can build.
+
+    Newton's importer builds an articulation as one tree hanging from one root,
+    and refuses anything else ("Multiple roots found", "contains a cycle"). PhysX
+    builds both, so SimReady ships both:
+
+    ``a loop``
+        A pair of pliers or a four-bar linkage. The joint that closes each loop
+        is excluded from articulation; Newton then adds it after the tree as a
+        joint of no articulation, which MuJoCo enforces as an equality.
+    ``several trees under one root``
+        A storage box whose lid has no hinge joint, a tray and its separate cover.
+        The one root is replaced by a root on each tree's root body, so each tree
+        is its own articulation.
+
+    With ``fix_one_tree`` and several trees, none jointed to the world, the
+    heaviest is named, for the caller to import fixed and the rest free (a jar
+    bolted down, its lid loose): :func:`add_usd_stage` does that in two imports,
+    since ``add_usd(floating=...)`` holds for every tree at once. A weld authored
+    on the stage would not do: Newton leaves a fixed joint to a lone body out of
+    every articulation.
+
+    Every edit is on the stage's edit target; open it with
+    :func:`open_session_stage`.
+
+    Returns:
+        The paths edited, under ``"loop_joints_excluded"`` and
+        ``"articulation_roots_split"``, and the bodies of the tree to fix under
+        ``"fixed_tree"``.
+    """
+    from pxr import Sdf, Usd, UsdPhysics
+
+    changed: dict[str, list[str]] = {"loop_joints_excluded": [], "articulation_roots_split": [], "fixed_tree": []}
+    prims = list(Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies()))
+    bodies = [str(p.GetPath()) for p in prims if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+    if not bodies:
+        return changed
+    is_body = set(bodies)
+
+    def owner(targets) -> str:
+        # A joint names a body or anything under it (SimReady names the mesh); no body is the world.
+        path = Sdf.Path(targets[0]) if targets else Sdf.Path.emptyPath
+        while not path.isEmpty and path != Sdf.Path.absoluteRootPath:
+            if str(path) in is_body:
+                return str(path)
+            path = path.GetParentPath()
+        return ""
+
+    joints = []
+    for prim in prims:
+        if not prim.IsA(UsdPhysics.Joint):
+            continue
+        joint = UsdPhysics.Joint(prim)
+        if joint.GetJointEnabledAttr().Get() is False or joint.GetExcludeFromArticulationAttr().Get():
+            continue
+        parent, child = owner(joint.GetBody0Rel().GetTargets()), owner(joint.GetBody1Rel().GetTargets())
+        if parent or child:
+            joints.append((prim, parent, child))
+
+    group = {b: b for b in bodies}
+    anchored: set[str] = set()
+
+    def find(b: str) -> str:
+        while group[b] != b:
+            group[b] = group[group[b]]
+            b = group[b]
+        return b
+
+    # A body that two joints both call their child is where a loop closes, so
+    # those joints go last and the second of them is the one excluded: what
+    # remains has one parent per body, which is the tree the importer walks.
+    incoming: dict[str, int] = {}
+    for _, _, child in joints:
+        incoming[child] = incoming.get(child, 0) + 1
+    tree_edges = []
+    joined: set[tuple[str, str]] = set()
+    for prim, parent, child in sorted(joints, key=lambda j: incoming.get(j[2], 0) > 1):
+        # A second joint between two bodies already joined is no loop: an MJCF-style
+        # humanoid states a shoulder as three hinges on one pair, which the
+        # importer merges into one joint of three DOFs.
+        if (parent, child) in joined or (child, parent) in joined:
+            continue
+        joined.add((parent, child))
+        ends = [find(b) for b in (parent, child) if b]
+        world = not (parent and child)
+        closes = (ends[0] in anchored) if world else (ends[0] == ends[1] or {ends[0], ends[1]} <= anchored)
+        if closes and not prim.IsInstanceProxy():
+            UsdPhysics.Joint(prim).CreateExcludeFromArticulationAttr(True)
+            changed["loop_joints_excluded"].append(str(prim.GetPath()))
+            continue
+        tree_edges.append((parent, child))
+        if world:
+            anchored.add(ends[0])
+        else:
+            group[ends[0]] = ends[1]
+            if ends[0] in anchored:
+                anchored.add(ends[1])
+
+    trees: dict[str, list[str]] = {}
+    for b in bodies:
+        trees.setdefault(find(b), []).append(b)
+    children = {child for parent, child in tree_edges if parent}
+
+    def tree_root(tree: str) -> str:
+        members = trees[tree]
+        jointed_to_world = [child or parent for parent, child in tree_edges if not (parent and child)]
+        return next(
+            (b for b in members if b in jointed_to_world), next((b for b in members if b not in children), members[0])
+        )
+
+    def apply_roots(over: list[str]) -> None:
+        for tree in over:
+            root = stage.GetPrimAtPath(tree_root(tree))
+            if not root.HasAPI(UsdPhysics.ArticulationRootAPI):
+                UsdPhysics.ArticulationRootAPI.Apply(root)
+                changed["articulation_roots_split"].append(str(root.GetPath()))
+
+    for prim in prims:
+        if not prim.HasAPI(UsdPhysics.ArticulationRootAPI) or prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        under = prim.GetPath()
+        covered = sorted({find(b) for b in bodies if Sdf.Path(b).HasPrefix(under)}, key=bodies.index)
+        if len(covered) > 1 and not prim.IsInstanceProxy():
+            prim.RemoveAPI(UsdPhysics.ArticulationRootAPI)
+            apply_roots(covered)
+
+    free = [tree for tree in sorted(trees, key=bodies.index) if tree not in anchored]
+    if fix_one_tree and len(trees) > 1 and len(free) == len(trees):
+
+        def mass(tree: str) -> float:
+            return sum(
+                float(UsdPhysics.MassAPI(stage.GetPrimAtPath(b)).GetMassAttr().Get() or 0.0) for b in trees[tree]
+            )
+
+        apply_roots(free)
+        changed["fixed_tree"] = list(trees[max(free, key=lambda tree: (mass(tree), len(trees[tree])))])
+    if verbose:
+        for kind, paths in changed.items():
+            for path in paths:
+                print(f"[usd] {kind}: {path}")
+    return changed
+
+
 def all_joints_fixed(stage: Any) -> bool:
     """Whether the stage has joints and every enabled one is a fixed joint.
 
@@ -283,6 +433,7 @@ def add_usd_stage(
     expose_declared_colliders: bool = False,
     engine_variant: str | None = "Newton",
     articulate: bool = True,
+    material_subsets: bool = False,
     verbose: bool = False,
     **kwargs: Any,
 ) -> dict[str, Any]:
@@ -315,7 +466,11 @@ def add_usd_stage(
             offers one (:func:`select_engine_variant`); ``None`` keeps the
             stage's own selection.
         articulate: Give joints that belong to no articulation one root
-            (:func:`articulate`).
+            (:func:`articulate`), and make each articulation a tree
+            (:func:`split_articulations`); with ``floating=False`` and an asset
+            in several separate trees, the heaviest is the one fixed.
+        material_subsets: Draw a mesh collider bound to several materials in
+            one visual shape per material (:func:`draw_material_subsets`).
         verbose: Forwarded to the import and the re-key.
         **kwargs: Forwarded to :meth:`newton.ModelBuilder.add_usd`.
 
@@ -332,14 +487,17 @@ def add_usd_stage(
         changed["variant"] = select_engine_variant(stage, engine_variant, verbose=verbose)
     if articulate:
         changed["articulation_root"] = _articulate(stage, verbose=verbose)
+        changed.update(split_articulations(stage, fix_one_tree=kwargs.get("floating") is False, verbose=verbose))
+    fixed_tree = changed.pop("fixed_tree", [])
     # Folded after the import, keeping every joint already in the builder:
     # ``add_usd(collapse_fixed_joints=True)`` collapses the WHOLE builder, so a
     # prop imported after a fixed-base cabinet folded the cabinet into the world
     # and renumbered every body built before it.
-    fold_own = collapse_fixed_joints == "if_all_fixed" and all_joints_fixed(stage)
     if collapse_fixed_joints == "if_all_fixed":
-        collapse_fixed_joints = False
-    joints_before = builder.joint_count
+        fold_own = all_joints_fixed(stage)
+    else:
+        fold_own = bool(collapse_fixed_joints)
+    joints_before, shapes_before = builder.joint_count, builder.shape_count
     if expose_declared_colliders:
         _, exposed = _expose_declared_colliders(stage, verbose=verbose)
         changed.update(exposed)
@@ -348,7 +506,10 @@ def add_usd_stage(
             print(f"[usd] exposed declared colliders: {counts}")
     target = stage if any(changed.values()) else str(source)
     try:
-        results = builder.add_usd(target, collapse_fixed_joints=collapse_fixed_joints, verbose=verbose, **kwargs)
+        if fixed_tree:
+            results = _add_usd_one_tree_fixed(builder, stage, fixed_tree, verbose=verbose, **kwargs)
+        else:
+            results = builder.add_usd(target, collapse_fixed_joints=False, verbose=verbose, **kwargs)
     except ValueError as error:
         if "Multiple roots" in str(error):
             raise ValueError(
@@ -363,22 +524,140 @@ def add_usd_stage(
         raise
     results = dict(results or {})
     if fold_own:
-        before = {path: int(body) for path, body in (results.get("path_body_map") or {}).items()}
-        collapse = builder.collapse_fixed_joints(verbose=verbose, joints_to_keep=list(range(joints_before)))
-        remap = collapse.get("body_remap") or {}
-        merged = collapse.get("body_merged_parent") or {}
-        bodies = {}
-        for path, imported in before.items():
-            survivor = imported
-            while survivor in merged:
-                survivor = int(merged[survivor])
-            bodies[path] = int(remap.get(survivor, survivor))
-        results["path_body_map"] = bodies
+        collapse = collapse_own_fixed_joints(builder, joints_before, verbose=verbose)
+        results["path_body_map"] = {
+            path: collapsed_body(collapse, int(body)) for path, body in (results.get("path_body_map") or {}).items()
+        }
         results["collapse_results"] = collapse
-    collapse = results.get("collapse_results")
-    if collapse:
-        rekey_custom_attributes(builder, collapse, verbose=verbose)
+    if material_subsets:
+        results["material_subset_shapes"] = draw_material_subsets(
+            builder, stage, range(shapes_before, builder.shape_count)
+        )
     return results
+
+
+def _add_usd_one_tree_fixed(builder: newton.ModelBuilder, stage: Any, fixed: list[str], **kwargs: Any) -> dict:
+    """Import ``stage`` with the bodies in ``fixed`` on a fixed base and every other body free.
+
+    Two imports of the one stage, each ignoring what the other takes; geometry on
+    no body comes with the first.
+    """
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    prims = list(Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies()))
+    bodies = [str(p.GetPath()) for p in prims if p.HasAPI(UsdPhysics.RigidBodyAPI)]
+    unbodied = [
+        str(p.GetPath())
+        for p in prims
+        if p.IsA(UsdGeom.Gprim) and not any(p.GetPath().HasPrefix(Sdf.Path(b)) for b in bodies)
+    ]
+
+    def under(paths: list[str]) -> list[str]:
+        # With a ".*", so the importer reads it as a pattern rather than an Sdf path.
+        return [re.escape(path) + "(/.*)?$" for path in paths]
+
+    ignored = list(kwargs.pop("ignore_paths", None) or [])
+    kwargs.pop("floating", None)
+    results = dict(
+        builder.add_usd(
+            stage, floating=False, ignore_paths=ignored + under([b for b in bodies if b not in fixed]), **kwargs
+        )
+        or {}
+    )
+    rest = builder.add_usd(stage, floating=True, ignore_paths=ignored + under(fixed + unbodied), **kwargs) or {}
+    for key, value in rest.items():
+        if isinstance(value, dict) and isinstance(results.get(key), dict):
+            results[key] = {**results[key], **value}
+    return results
+
+
+def draw_material_subsets(builder: newton.ModelBuilder, stage: Any, shapes: Iterable[int]) -> list[int]:
+    """Draw each mesh bound to several materials in one visual shape per material.
+
+    Newton splits a *visual* mesh into one shape per bound ``GeomSubset``, but a
+    mesh that is also a collider is drawn as one shape with one material -- the
+    collider itself when it collides as the mesh, or the ``_visual`` copy kept
+    beside an approximated one -- so a kettle with a metal body and a wooden
+    handle in one mesh renders all metal. SimReady makes every mesh its own
+    collider. Here each such drawn shape is replaced, on its body, by the visual
+    path's per-subset meshes; hidden, it still collides if it did.
+
+    Args:
+        builder: The builder, after the import.
+        stage: The stage the import read.
+        shapes: The shapes the import added.
+
+    Returns:
+        The shapes added.
+    """
+    from newton._src.usd._visuals import _UsdVisuals
+    from pxr import UsdGeom
+
+    from robosimstudio.scene.build.bodies import preserve_body_inertia
+
+    visuals = _UsdVisuals(stage)
+    visible = int(newton.ShapeFlags.VISIBLE)
+    cfg = builder.default_shape_cfg.copy()
+    cfg.density = 0.0
+    cfg.has_shape_collision = False
+    cfg.has_particle_collision = False
+    added: list[int] = []
+    for shape in list(shapes):
+        if builder.shape_type[shape] != newton.GeoType.MESH or not builder.shape_flags[shape] & visible:
+            continue
+        label = str(builder.shape_label[shape])
+        path = label.removesuffix("_visual")
+        prim = stage.GetPrimAtPath(path) if path.startswith("/") else None
+        submeshes = visuals.get_visual_material_subset_meshes(prim) if prim and prim.IsA(UsdGeom.Mesh) else []
+        if len(submeshes) < 2:
+            continue
+        body = int(builder.shape_body[shape])
+        with preserve_body_inertia(builder, body):
+            for subset, mesh in submeshes:
+                added.append(
+                    builder.add_shape_mesh(
+                        body,
+                        xform=builder.shape_transform[shape],
+                        scale=builder.shape_scale[shape],
+                        mesh=mesh,
+                        cfg=cfg,
+                        color=None,
+                        label=subset,
+                    )
+                )
+        builder.shape_flags[shape] = int(builder.shape_flags[shape]) & ~visible
+    return added
+
+
+def collapse_own_fixed_joints(builder: newton.ModelBuilder, joints_before: int, *, verbose: bool = False) -> dict:
+    """Fold the fixed joints added since ``joints_before``, and re-key the custom attributes.
+
+    ``builder.collapse_fixed_joints()`` with no ``joints_to_keep`` folds every
+    fixed joint in the builder, including the world weld of anything imported
+    earlier: its body is merged into the world and every later body renumbered,
+    while the entity that built it keeps the old index. Each importer's own
+    ``collapse_fixed_joints=True`` is that whole-builder call.
+
+    Args:
+        builder: The builder, right after an import.
+        joints_before: ``builder.joint_count`` before that import.
+        verbose: Forwarded to the collapse and the re-key.
+
+    Returns:
+        The collapse's own result dict.
+    """
+    results = builder.collapse_fixed_joints(verbose=verbose, joints_to_keep=list(range(joints_before)))
+    rekey_custom_attributes(builder, results, verbose=verbose)
+    return results
+
+
+def collapsed_body(results: dict, body: int) -> int:
+    """Where ``body`` went in a collapse: its own new index, or the one it merged into."""
+    merged = results.get("body_merged_parent") or {}
+    remap = results.get("body_remap") or {}
+    while body in merged:
+        body = int(merged[body])
+    return int(remap.get(body, body))
 
 
 def clear_texture_tints(builder: newton.ModelBuilder, shapes=None) -> int:
@@ -749,7 +1028,8 @@ def add_mjcf_collapsed(
 
     ``add_mjcf(collapse_fixed_joints=True)`` throws away the remap tables the
     collapse returns, so the re-key cannot be applied to its result. Importing
-    uncollapsed and collapsing explicitly keeps them.
+    uncollapsed and collapsing explicitly keeps them, and folds only this
+    import's joints (:func:`collapse_own_fixed_joints`).
 
     Args:
         builder: Builder to import into.
@@ -764,10 +1044,9 @@ def add_mjcf_collapsed(
     """
     if "collapse_fixed_joints" in kwargs:
         raise ValueError("add_mjcf_collapsed collapses itself; drop the collapse_fixed_joints argument")
+    joints_before = builder.joint_count
     builder.add_mjcf(source, verbose=verbose, collapse_fixed_joints=False, **kwargs)
-    results = builder.collapse_fixed_joints(verbose=verbose)
-    rekey_custom_attributes(builder, results, verbose=verbose)
-    return results
+    return collapse_own_fixed_joints(builder, joints_before, verbose=verbose)
 
 
 def strip_free_bodies(scene_xml: str | Path) -> str:

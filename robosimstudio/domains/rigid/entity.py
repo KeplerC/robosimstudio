@@ -404,6 +404,7 @@ class EntityRigid(Entity):
                 # one object, and becomes one body; a jointed stage keeps its
                 # parts and is refused below.
                 collapse_fixed_joints="if_all_fixed",
+                material_subsets=True,
                 # Left False so the stage's own ``physics:approximation`` is
                 # honoured -- that approximation is the claim this flavour
                 # exists to test. True means the opposite of what it sounds
@@ -416,7 +417,7 @@ class EntityRigid(Entity):
                 raise ValueError(
                     f"object {self.spec.name!r}: {path.name} declares {len(bodies)} rigid bodies; an object "
                     f"asset must be one body -- a jointed asset (a cabinet) is an ArticulatedSpec, and so is "
-                    f"one in loose parts (a jar and its lid), with fixed_base=False"
+                    f"one in loose parts (a jar and its lid)"
                 )
             self.body = bodies[0]
             if self.body < before:
@@ -427,6 +428,15 @@ class EntityRigid(Entity):
             offset = np.linalg.inv(placed) @ transform_matrix([float(v) for v in builder.body_q[self.body]])
             if not np.allclose(offset, np.eye(4), atol=1.0e-7):
                 self.body_offset = np.asarray(xform_from_matrix(offset), dtype=np.float64)
+            if self.spec.asset.approximate:
+                from robosimstudio.scene.build.bodies import approximate_imported_colliders
+
+                approximate_imported_colliders(
+                    builder,
+                    range(self.range.shapes[0], builder.shape_count),
+                    self.spec.asset.approximate,
+                    keep_visual=self.spec.asset.keep_visual,
+                )
             joint = builder.joint_count - 1
             self.coord_start = int(builder.joint_q_start[joint])
             self.dof_start = int(builder.joint_qd_start[joint])

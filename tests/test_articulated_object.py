@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -153,6 +154,43 @@ class TestTheSpecStartsAndDrivesItsJoints(_Cabinet):
         with self.assertRaisesRegex(ValueError, "named twice"):
             _spec(self.path, joints=(JointSpec(name="drawer_01"), JointSpec(name="drawer_01")))
 
+    def test_a_start_outside_the_travel_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, r"starts drawer_01 at 0.5, outside \[0.0, 0.3"):
+            _built(_spec(self.path, joints=(JointSpec(name="drawer_01", q=0.5),)))
+
+
+class TestAPartRestingOutsideItsTravelStartsAtTheNearerLimit(unittest.TestCase):
+    """The sterilization tray's lock: authored at rest at 0, between limits of 5 and 120 degrees."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._dir = tempfile.TemporaryDirectory()
+        cls.path = write_stage(
+            Path(cls._dir.name) / "tray.usda",
+            [
+                Part("body_01", (0.0, 0.0, 0.02), (0.2, 0.1, 0.02)),
+                Part("lock_01", (0.2, 0.0, 0.05), (0.01, 0.03, 0.02)),
+            ],
+            [Joint("lock_01", "revolute", "body_01", "lock_01", (0.2, 0.0, 0.04), "Y", (5.0, 120.0))],
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._dir.cleanup()
+
+    def test_it_starts_at_the_limit_and_says_so(self) -> None:
+        with self.assertWarnsRegex(UserWarning, r"lock_01 at 0 outside \[0.0872665, 2.0944\]"):
+            entity, model = _built(_spec(self.path, name="tray"))
+        lock = entity.handle(model).joints["lock_01"]
+        self.assertAlmostEqual(np.radians(5.0), float(model.joint_q.numpy()[lock.q_start]), places=5)
+
+    def test_an_episode_start_outside_it_is_refused(self) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            entity, _ = _built(_spec(self.path, name="tray"))
+        with self.assertRaisesRegex(ValueError, "outside its travel"):
+            entity.joint_starts({"joint_q": {"tray": {"lock_01": 0.0}}})
+
 
 class TestAJointIsReadFromItsBodies(_Cabinet):
     def test_both_kinds_agree_with_joint_q(self) -> None:
@@ -248,7 +286,7 @@ class TestALooseAssetIsOneEntityOfFreeParts(unittest.TestCase):
         cls.path = write_stage(
             Path(cls._dir.name) / "jar.usda",
             [
-                Part("jar_01", (0.0, 0.0, 0.05), (0.04, 0.04, 0.05)),
+                Part("jar_01", (0.0, 0.0, 0.05), (0.04, 0.04, 0.05), mass=4.0),
                 Part("lid_01", (0.0, 0.0, 0.11), (0.04, 0.04, 0.01)),
             ],
         )
@@ -257,9 +295,13 @@ class TestALooseAssetIsOneEntityOfFreeParts(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls._dir.cleanup()
 
-    def test_a_fixed_base_is_refused(self) -> None:
-        with self.assertRaisesRegex(ValueError, "2 separate parts.*fixed_base=False"):
-            _built(_spec(self.path, name="jar"))
+    def test_a_fixed_base_bolts_the_heavier_part_and_frees_the_other(self) -> None:
+        entity, model = _built(_spec(self.path, name="jar"))
+        parts = entity.handle(model).parts
+        self.assertEqual(parts["jar_01"], entity.body)
+        kinds = {int(model.joint_child.numpy()[j]): int(model.joint_type.numpy()[j]) for j in range(model.joint_count)}
+        self.assertEqual(int(newton.JointType.FIXED), kinds[parts["jar_01"]])
+        self.assertEqual(int(newton.JointType.FREE), kinds[parts["lid_01"]])
 
     def test_every_part_is_free_and_named(self) -> None:
         entity, model = _built(_spec(self.path, name="jar", fixed_base=False))
@@ -267,7 +309,12 @@ class TestALooseAssetIsOneEntityOfFreeParts(unittest.TestCase):
         self.assertEqual({"jar_01", "lid_01"}, set(entity.handle(model).parts))
 
     def test_a_reset_places_both_parts_with_the_asset(self) -> None:
-        entity = EntityArticulated(_spec(self.path, name="jar", fixed_base=False))
+        for fixed_base in (False, True):
+            with self.subTest(fixed_base=fixed_base):
+                self._reset_places_both(fixed_base)
+
+    def _reset_places_both(self, fixed_base: bool) -> None:
+        entity = EntityArticulated(_spec(self.path, name="jar", fixed_base=fixed_base))
         base = newton.ModelBuilder()
         entity.build_into(base, None)
         fleet = newton.ModelBuilder()
