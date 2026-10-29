@@ -35,13 +35,39 @@ from robosimstudio.scene.entity import Entity, label_index
 from robosimstudio.solvers import ObbGrasp, compute_obb
 from robosimstudio.specs import ObjectSpec
 
-__all__ = ["EntityRigid"]
+__all__ = ["EntityRigid", "episode_pose"]
 
 WELD_TOLERANCE = 1.0e-5
 """How far an episode's pose may sit from a static object's weld and still be where it was built.
 
 In metres, and per quaternion component. The weld is read back off the builder in
 float32, so this is that rounding, not a move."""
+
+
+def episode_pose(name: str, declared, episode) -> np.ndarray:
+    """One object's start pose for one episode, as a 7-vector.
+
+    An episode sampler reports ``object_poses[name] = (x, y, z, yaw)``, which is
+    the layout family every tabletop task varies over; anything richer overrides
+    the full transform under ``object_xforms``. Neither names it: ``declared``.
+
+    Args:
+        name: The object's name in the episode's tables.
+        declared: Its declared pose, xyz + xyzw.
+        episode: The episode, or ``None``.
+    """
+    pose = np.asarray(declared, dtype=np.float64).reshape(-1)[:7]
+    if episode is None:
+        return pose
+    xforms = episode.get("object_xforms") or {}
+    if name in xforms:
+        return np.asarray(xforms[name], dtype=np.float64)
+    poses = episode.get("object_poses") or {}
+    if name in poses:
+        x, y, z, yaw = (float(v) for v in poses[name])
+        half = yaw * 0.5
+        pose = np.array([x, y, z, 0.0, 0.0, np.sin(half), np.cos(half)])
+    return pose
 
 
 class EntityRigid(Entity):
@@ -97,6 +123,14 @@ class EntityRigid(Entity):
         Its weld's pose, or where the scene's arena stood it for :meth:`find_in_scene`.
         Nothing writes either again, so :meth:`move_refusal` measures each layout against it."""
         self.shapes: np.ndarray = np.zeros(0, dtype=np.int32)
+        self.body_offset: np.ndarray | None = None
+        """The body's frame in the asset's, xyz + xyzw, when a USD stage puts it elsewhere; ``None`` for identity.
+
+        A stage's rigid body is a prim with a transform of its own: a SimReady pallet's sits
+        0.35 m above the stage origin, with its mesh hanging below it. ``add_usd`` places the
+        *asset* origin at the pose, so the free joint, which holds the *body's* frame, is
+        written as the pose composed with this. Writing the pose itself put that pallet's
+        body at the pose and its mesh 0.34 m into the floor, and contact threw it 65 m up."""
         self.obb: ObbGrasp | None = None
         self.init_pose = np.asarray(spec.pose, dtype=np.float64)
         self.init_quat = np.asarray(spec.quat, dtype=np.float64)
@@ -118,10 +152,11 @@ class EntityRigid(Entity):
             return
         path = resolve_asset(self.spec.asset)
         xform = wp.transform(tuple(float(v) for v in pose[:3]), wp.quat(*[float(v) for v in pose[3:7]]))
+        approximated = False
         if path.suffix.lower() in (".usd", ".usda", ".usdc", ".usdz"):
             # Sets self.body and, for a free object, the joint coordinates --
             # which body it even is depends on what the stage declares.
-            self._build_usd(builder, path, xform)
+            approximated = self._build_usd(builder, path, xform)
         elif path.suffix.lower() in (".obj", ".stl", ".ply", ".glb", ".gltf", ".dae"):
             if self.spec.static:
                 body = self._add_welded_link(builder, xform)
@@ -242,7 +277,7 @@ class EntityRigid(Entity):
                     copy_shape_material(builder, visual_shape, proxy_shape)
         else:
             raise ValueError(f"object {self.spec.name!r}: unsupported asset {path.suffix!r}")
-        if self.spec.asset.approximate:
+        if self.spec.asset.approximate and not approximated:
             targets = list(range(self.range.shapes[0], builder.shape_count))
             builder.approximate_meshes(
                 method=self.spec.asset.approximate,
@@ -318,7 +353,7 @@ class EntityRigid(Entity):
             builder.shape_flags[shape] = int(builder.shape_flags[shape]) & ~int(newton.ShapeFlags.COLLIDE_SHAPES)
             builder.shape_color[shape] = tuple(float(channel) for channel in color)
 
-    def _build_usd(self, builder: newton.ModelBuilder, path, xform) -> None:
+    def _build_usd(self, builder: newton.ModelBuilder, path, xform) -> bool:
         """Import one object from a USD stage, either flavour.
 
         **The stage says which flavour it is.** A stage carrying
@@ -342,6 +377,10 @@ class EntityRigid(Entity):
             builder: The builder to import into.
             path: The resolved stage path.
             xform: Where this episode wants the object.
+
+        Returns:
+            Whether it already applied ``asset.approximate``, which a stage that
+            describes its body does here, masses held.
         """
         # pxr is the [usd] extra, so it is imported where it is used.
         from pxr import Usd, UsdPhysics
@@ -355,13 +394,22 @@ class EntityRigid(Entity):
             if self.spec.static:
                 raise ValueError(
                     f"object {self.spec.name!r}: {path.name} declares a rigid body, "
-                    f"so it cannot also be static; strip the physics schemas or drop static=True"
+                    f"so it cannot also be static; strip the physics schemas, drop static=True, "
+                    f"or build it as an ArticulatedSpec with fixed_base=True"
                 )
+            from robosimstudio.scene.build.imports import add_usd_stage
+
             before = builder.body_count
-            results = builder.add_usd(
-                str(path),
+            results = add_usd_stage(
+                builder,
+                path,
                 xform=xform,
                 floating=True,
+                # A prop in several welded parts -- a bottle and its cap -- is
+                # one object, and becomes one body; a jointed stage keeps its
+                # parts and is refused below.
+                collapse_fixed_joints="if_all_fixed",
+                material_subsets=True,
                 # Left False so the stage's own ``physics:approximation`` is
                 # honoured -- that approximation is the claim this flavour
                 # exists to test. True means the opposite of what it sounds
@@ -369,19 +417,41 @@ class EntityRigid(Entity):
                 # the stage asked for, which is why the grocery tote sets it.
                 skip_mesh_approximation=self.spec.asset.skip_mesh_approximation,
             )
-            bodies = sorted(int(b) for b in (results.get("path_body_map") or {}).values())
+            bodies = sorted({int(b) for b in (results.get("path_body_map") or {}).values()})
             if len(bodies) != 1:
                 raise ValueError(
-                    f"object {self.spec.name!r}: {path.name} declares {len(bodies)} rigid bodies; "
-                    f"an object asset must declare exactly one"
+                    f"object {self.spec.name!r}: {path.name} declares {len(bodies)} rigid bodies; an object "
+                    f"asset must be one body -- a jointed asset (a cabinet) is an ArticulatedSpec, and so is "
+                    f"one in loose parts (a jar and its lid)"
                 )
             self.body = bodies[0]
+            if self.body < 0:
+                raise ValueError(
+                    f"object {self.spec.name!r}: {path.name} welds its parts to the world, so they fold into it; "
+                    f"build it as an ArticulatedSpec with fixed_base=True"
+                )
             if self.body < before:
                 raise ValueError(f"object {self.spec.name!r}: {path.name} reused body {self.body}")
+            from robosimstudio.core.math import transform_matrix, xform_from_matrix
+
+            placed = transform_matrix([float(v) for v in xform])
+            offset = np.linalg.inv(placed) @ transform_matrix([float(v) for v in builder.body_q[self.body]])
+            self.body_offset = (
+                None if np.allclose(offset, np.eye(4), atol=1.0e-7) else np.asarray(xform_from_matrix(offset))
+            )
+            if self.spec.asset.approximate:
+                from robosimstudio.scene.build.bodies import approximate_imported_colliders
+
+                approximate_imported_colliders(
+                    builder,
+                    range(self.range.shapes[0], builder.shape_count),
+                    self.spec.asset.approximate,
+                    keep_visual=self.spec.asset.keep_visual,
+                )
             joint = builder.joint_count - 1
             self.coord_start = int(builder.joint_q_start[joint])
             self.dof_start = int(builder.joint_qd_start[joint])
-            return
+            return True
 
         import newton.usd
 
@@ -405,6 +475,7 @@ class EntityRigid(Entity):
             cfg=cfg,
             label=self.spec.name,
         )
+        return False
 
     def _placed(self, pose: np.ndarray) -> np.ndarray:
         """One start pose in world coordinates, respecting who placed it.
@@ -448,7 +519,15 @@ class EntityRigid(Entity):
             base: The 7-vector to treat as the object's own declared pose. The
                 entity's current one when omitted.
         """
-        return self._placed(self._episode_pose(episode, base))
+        return self._body_frame(self._placed(self._episode_pose(episode, base)))
+
+    def _body_frame(self, pose: np.ndarray) -> np.ndarray:
+        """Where the body's frame is when the asset stands at ``pose`` (:attr:`body_offset`)."""
+        if self.body_offset is None:
+            return pose
+        from robosimstudio.core.math import compose_xforms
+
+        return compose_xforms(pose, self.body_offset)
 
     @property
     def declared_q(self) -> np.ndarray:
@@ -579,24 +658,8 @@ class EntityRigid(Entity):
         return cfg
 
     def _episode_pose(self, episode, base: np.ndarray | None = None) -> np.ndarray:
-        """This object's start pose for one episode, as a 7-vector.
-
-        An episode sampler reports ``object_poses[name] = (x, y, z, yaw)``,
-        which is the layout family every tabletop task varies over; anything
-        richer overrides the full transform under ``object_xforms``.
-        """
-        pose = self.declared_q if base is None else np.asarray(base, dtype=np.float64).reshape(-1)[:7]
-        if episode is None:
-            return pose
-        xforms = episode.get("object_xforms") or {}
-        if self.spec.name in xforms:
-            return np.asarray(xforms[self.spec.name], dtype=np.float64)
-        poses = episode.get("object_poses") or {}
-        if self.spec.name in poses:
-            x, y, z, yaw = (float(v) for v in poses[self.spec.name])
-            half = yaw * 0.5
-            pose = np.array([x, y, z, 0.0, 0.0, np.sin(half), np.cos(half)])
-        return pose
+        """This object's start pose for one episode, as a 7-vector (:func:`episode_pose`)."""
+        return episode_pose(self.spec.name, self.declared_q if base is None else base, episode)
 
     def after_build(self, builder: newton.ModelBuilder, episode) -> None:
         """Find, collect, approximate, box, pose -- in that order."""
@@ -1132,7 +1195,7 @@ class EntityRigid(Entity):
         # start, not a base: the next episode is measured from ``declared_q``.
         raw = self._episode_pose(episode)
         self.init_pose, self.init_quat = raw[:3].copy(), raw[3:7].copy()
-        pose = self._placed(raw)
+        pose = self._body_frame(self._placed(raw))
         c = self.coord_start
         builder.joint_q[c : c + 3] = [float(v) for v in pose[:3]]
         builder.joint_q[c + 3 : c + 7] = [float(v) for v in pose[3:7]]
@@ -1169,7 +1232,7 @@ class EntityRigid(Entity):
         # start, not a base: the next episode is measured from ``declared_q``.
         raw = self._episode_pose(episode)
         self.init_pose, self.init_quat = raw[:3].copy(), raw[3:7].copy()
-        pose = np.asarray(self._placed(raw)[:7], dtype=np.float32)
+        pose = np.asarray(self._body_frame(self._placed(raw))[:7], dtype=np.float32)
         # Just the seven coordinates, uploaded: a read of the whole vector and a
         # write of it back, per object per state, is what a reset of forty
         # objects spent most of its time on.

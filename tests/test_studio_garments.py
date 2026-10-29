@@ -7,7 +7,8 @@ that can be written down: a flat sheet's normals are its face normal (the
 other way for the other winding), the weave's peak is its fabric's amplitude,
 the pile stands between the shell's face and the tip of the nap and moves with
 the cloth, a towel's woven bands are bald, and the crease a garment is banded
-across is the one its asset declares.
+across is the one its asset declares. An imported mesh that brought its own
+texture is drawn on its own UVs, not box-projected over them.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from robosimstudio_studio.garments import (
     ViewerStudio,
     _declared_crease_axis,
     _display_normals,
+    authored_uvs,
 )
 
 TIER = "fast"
@@ -220,6 +222,22 @@ class TestTheDeclaredCrease(unittest.TestCase):
             self.assertEqual(0, _declared_crease_axis(self._doc(), "towel"))
         with mock.patch.object(ASSETS, "get", return_value=self._record()):
             self.assertEqual(1, _declared_crease_axis(self._doc(), "towel"), "no panel, no crease")
+
+
+class TestAnImportedTextureKeepsItsUVs(unittest.TestCase):
+    POINTS = np.zeros((4, 3), dtype=np.float32)
+    UVS = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=np.float32)
+
+    def test_a_mesh_with_its_own_texture_keeps_its_uvs(self) -> None:
+        data = {"points": self.POINTS, "uvs": self.UVS, "texture": np.zeros((2, 2, 3), dtype=np.uint8)}
+        np.testing.assert_array_equal(self.UVS, authored_uvs(data))
+
+    def test_a_mesh_without_its_own_texture_is_box_projected(self) -> None:
+        self.assertIsNone(authored_uvs({"points": self.POINTS, "uvs": self.UVS, "texture": None}))
+        self.assertIsNone(authored_uvs({"points": self.POINTS, "uvs": None, "texture": "albedo.png"}))
+
+    def test_uvs_that_do_not_match_the_points_are_not_used(self) -> None:
+        self.assertIsNone(authored_uvs({"points": self.POINTS, "uvs": self.UVS[:3], "texture": "albedo.png"}))
 
 
 if __name__ == "__main__":
