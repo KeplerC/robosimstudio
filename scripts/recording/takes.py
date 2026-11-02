@@ -524,6 +524,27 @@ FINAL = (
     lift("examples/00_getting_started/00_hello_world.py"),
     lift("examples/00_getting_started/01_core_concepts.py"),
     lift("examples/04_extending/00_add_a_robot.py"),
+    Take(
+        "examples/10_hands/00_sharpa_wave.py",
+        camera=Camera(eye=(1.30, -0.65, 1.15), look_at=(0.62, -0.08, 0.80)),
+        warmup=1.0,
+        beats=(
+            Wait(seconds=0.5, label="two UR5e arms, two Sharpa Wave hands, a cube under the right one"),
+            # 10 mm over the cube's centre: the pads are 12 mm thick, so their
+            # lower halves take the cube's sides clear of the bench.
+            Drag("right", "z", to=At("cube", dz=0.01), seconds=1.4, label="drag the right hand down onto the cube"),
+            Wait(seconds=0.3),
+            Press(text="Close", within=RIGHT, label="Close: a thumb-index pinch"),
+            Wait(seconds=1.2, mark="closed", label="the pads hold it"),
+            Drag("right", "z", 0.12, seconds=1.4, label="drag it up 120 mm"),
+            Wait(seconds=0.8, mark="lifted", label="held"),
+            Run(label="Run: the left hand through a fist, flat, a pointing finger, the pinch"),
+            Press(text="Open", within=RIGHT, label="Open: the cube drops"),
+            Wait(seconds=1.2),
+        ),
+        # The medium test holds the same pinch to a rise over 60 mm.
+        expect=(Rose("cube", 0.08, at="lifted"), Held("cube", since="closed", at="lifted", tolerance=0.02)),
+    ),
     lift(
         "examples/05_studio/00_your_own_panel.py",
         camera=Camera(eye=(1.05, -0.20, 1.00), look_at=(0.55, -0.05, 0.85)),
