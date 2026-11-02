@@ -96,6 +96,12 @@
 |---|---|
 | <img src="09_teleop/media/00_leader_arm.webp" width="240"> | <img src="09_teleop/media/01_force_feedback.webp" width="240"> |
 
+## [10 Dexterous Hands](10_hands/README.md)
+
+| [Sharpa Wave hands](10_hands/00_sharpa_wave.py) |
+|---|
+| <img src="10_hands/media/00_sharpa_wave.webp" width="240"> |
+
 ## [Live Scene Editing](live/README.md)
 
 | [The live page](live/README.md) |

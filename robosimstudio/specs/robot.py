@@ -15,8 +15,8 @@ backends, which read reach, joint sets and tool frames off them.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 
 from robosimstudio.core.render.finish import Finish
 
@@ -335,6 +335,16 @@ class GripperSpec:
             that dies on ``'wrist_3_link' matched 0 labels`` -- a true statement
             about labels that tells a reader nothing about the pairing.
         mount_xform: The hand's root pose in :attr:`mount_body`'s frame.
+        postures: Named finger configurations, one value per joint in
+            :attr:`finger_names`, for a hand with more fingers than a jaw.
+
+            A parallel jaw has two postures and the 0..1 command interpolates
+            between them. A five-finger hand has many that matter -- a flat
+            hand, a thumb-index pinch, a fist -- and which one "closed" means
+            depends on the thing being held. :attr:`finger_open_q` and
+            :attr:`finger_closed_q` stay the pair the scalar command moves
+            between; this is the catalogue a routine or a retargeter picks from
+            by name, and ``Gripper.set_joint_targets`` plays. Empty on every jaw.
         suction_pad: Body label of a vacuum cup's face, or empty for a hand that
             holds with fingers. Set, the hand holds by sealing that face onto a
             flat part and nothing here about fingers applies: no finger joints,
@@ -391,6 +401,7 @@ class GripperSpec:
     mount_body: str = ""
     mount_xform: Xform = IDENTITY
     suction_pad: str = ""
+    postures: Mapping[str, tuple[float, ...]] = field(default_factory=dict)
     actuation: ActuationSpec | None = None
 
     @property

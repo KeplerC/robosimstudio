@@ -327,6 +327,87 @@ measures 0.0424 here against the Isaac stage export's 0.0425.
 
 ---
 
+## `embodiments/ur5e/` — Universal Robots UR5e, from MuJoCo Menagerie
+
+**Source:** `google-deepmind/mujoco_menagerie` @ `feadf76`, folder
+`universal_robots_ur5e`, read from the `robot_descriptions` package's cache
+of that repository on 2026-11-02. **BSD-3-Clause**: `LICENSE` is the file
+Menagerie ships beside it, "Copyright 2018 ROS Industrial Consortium".
+
+**Files:** Menagerie's bytes, unmodified (`ur5e.xml`, `assets/*.obj`,
+`LICENSE`), and its `README.md` with the links to files not vendored here
+(`CHANGELOG.md`, `ur5e.png`) pointed at Menagerie. `scene.xml` is not vendored.
+
+**What it is:** six revolute joints with `<general>` position servos (2000/400
+on the three big joints, 500/100 on the wrists, ±150 and ±28 N·m) and the
+tool flange as `attachment_site` on `wrist_3_link` (`pos="0 0.1 0"
+quat="-1 1 0 0"`). The `ur5e` embodiment (`robots/embodiments/ur5e.py`)
+imports it bare and restates those gains; `robotiq_2f85_menagerie` welds onto
+its flange at build; the composed files below are made from it.
+
+---
+
+## `embodiments/sharpa_wave/` — Sharpa Wave hand, from Sharpa's own repository
+
+**Source:** `sharpa-robotics/sharpa-urdf-usd-xml` @ `0d19cac`, files
+`wave_01/{left,right}_sharpa_wave/{left,right}_sharpa_wave_with_flange.xml`
+and the STLs they name from `wave_01/{left,right}_sharpa_wave/meshes/`,
+fetched 2026-11-02. **Apache-2.0**: `LICENSE.txt` and `NOTICE.txt` are the
+repository's. The `with_wrist`, float-base, dual-hand and high-fidelity
+variants, the URDFs and the USDs are not vendored.
+
+**Edited in the checked-in copies:** the five fingertip elastomer *colliders*
+all carry the file's `elastomer_geom` class (`solref="0.06 0.9"`). Upstream,
+the left hand's index, middle, ring and little fingertips put that `solref` on
+the *visual* geom and left the collider at MuJoCo's default (their issue 5);
+here the class is on every colliding `*_elastomer` geom and no visual geom
+carries a `solref`; and the left file's two mesh assets no geom draws
+(`thumb_elastomer_surface`, `elastomer_surface`) are dropped, with their
+STLs. Both files are otherwise Sharpa's bytes.
+
+**What it is:** 22 joints, each with a `<position>` servo whose `kp`,
+`dampratio`, `armature`, `frictionloss` and `damping` Sharpa calibrated against
+the hardware in Isaac Lab (their README); convex-hull colliders per phalanx;
+1.25 kg. The root body `*_hand_C_MC` carries the flange and wrist meshes, so
+its origin is the tool flange: `+z` along the fingers, `+x` out of the palm,
+`+y` towards the thumb.
+
+**Measured** by forward kinematics on the right file (the probe is
+`tests/test_sharpa_wave.py`): with every joint at zero the thumb and index
+elastomer centres sit at (0.016, 0.119, 0.136) and (0.003, 0.030, 0.222), 0.124
+m apart; the thumb-index pinch `robots/grippers/sharpa_wave.py` closes to
+brings them to 12.3 mm apart (their own thickness) at (0.057, 0.031, 0.173). The
+hand is 151 mm across the knuckles and 222 mm flange to the longest fingertip.
+
+---
+
+## `embodiments/ur5e_sharpa/` — UR5e arms wearing Sharpa Wave hands
+
+**Source:** the two directories above, composed by
+`scripts/compose_ur5e_sharpa.py` (in this repository; rerun it after editing
+either source). *Generated*: `ur5e_sharpa.xml` (one right arm and hand) and
+`ur5e_sharpa_bimanual.xml` (a left and a right, bases at y = ±0.3 m).
+
+**How:** MuJoCo's `MjSpec.attach` bolts each hand's root body onto its arm's
+`attachment_site`, the flange, with no further offset. The arm's labels get
+the side as a prefix (`right_shoulder_pan_joint`, `right_wrist_3_link`); the
+hand's own side prefix is stripped first so the arm's is the only one
+(`right_thumb_CMC_FE`, `right_hand_C_MC`). Meshes are not copied: the files
+name them in the two source folders through `meshdir=".."`. The sources'
+keyframes are dropped (the embodiment states its home).
+
+**The servos are restated, not copied.** `MjSpec.to_xml` writes every servo
+back as a `<general>` with `gainprm`/`biasprm`, which Newton's MJCF importer
+reads as direct control, leaving every joint's position target ignored. The
+script deletes the composed actuators and appends one `<position kp kv>` per
+source actuator, with `kp` from the compiled source's `gainprm[0]` and `kv`
+from its `-biasprm[2]` (where MuJoCo puts a resolved `dampratio`), and the
+declared control and force ranges. Newton reads those as position servos.
+The embodiments restate the same gains, so a reader finds them without the
+file and the position-mode check runs on them.
+
+---
+
 ## `embodiments/suction/` — a single-cup vacuum hand, authored here
 
 **Source:** none; `suction_cup.xml` was written for this repository and is
