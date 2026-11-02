@@ -27,8 +27,8 @@ human hand -- goes through :attr:`GripperSpec.postures` and
 
 * flat hand: thumb elastomer centre at (0.016, 0.119, 0.136), index at
   (0.003, 0.030, 0.222), 0.124 m apart;
-* pinch: the two elastomer centres meet 12.3 mm apart (their own thickness) at
-  (0.078, 0.032, 0.132); ready, the index pad stays at (0.078, 0.030, 0.138)
+* pinch: the two elastomer centres meet 12.3 mm apart (their own thickness)
+  along ``y`` at (0.078, 0.036, 0.138); ready, the index pad stays at (0.078, 0.030, 0.138)
   and the thumb's stands 0.045 m from it along ``y``, which is :attr:`span`,
   and the middle of that opening, (0.078, 0.053, 0.138), is the tool-centre
   point: the index finger does not move to close, so a thing goes where both
@@ -180,26 +180,29 @@ on the table first. Their hulls overlap each other by a few millimetres there,
 as the real fingers press together; nothing else touches."""
 
 PINCH = posture(
-    thumb_CMC_FE=1.113, thumb_CMC_AA=-0.109, thumb_MCP_FE=0.198, thumb_MCP_AA=-0.088, thumb_IP=1.579,
+    thumb_CMC_FE=0.694, thumb_CMC_AA=0.009, thumb_MCP_FE=0.586, thumb_MCP_AA=-0.328, thumb_IP=0.678,
     index_MCP_FE=0.8, index_PIP=1.0, index_DIP=0.5, **CURL,
 )  # fmt: skip
-"""Thumb to index fingertip, the elastomers meeting, the other fingers curled.
+"""Thumb to index fingertip, the elastomers meeting face on, the other fingers curled.
 The index finger is curled a right angle at its middle joint so its last
 phalanx points out of the palm -- what the hand comes down along -- and the
 thumb's five joints were solved by forward kinematics to bring its elastomer
-onto the index finger's. The two meet 12.3 mm apart, their own thickness."""
+onto the index finger's **along the hand's y alone**: 12.3 mm apart (their
+own thickness) with no offset along the fingers or out of the palm. An
+earlier solve let the thumb meet the index 12 mm further along the fingers,
+and the pads then slid past each other with a thin sheet between them."""
 
 READY = posture(
-    thumb_CMC_FE=0.984, thumb_CMC_AA=-0.145, thumb_MCP_FE=0.183, thumb_MCP_AA=0.347, thumb_IP=0.318,
+    thumb_CMC_FE=0.575, thumb_CMC_AA=-0.059, thumb_MCP_FE=0.327, thumb_MCP_AA=-0.204, thumb_IP=0.477,
     index_MCP_FE=0.8, index_PIP=1.0, index_DIP=0.5, **CURL,
 )  # fmt: skip
-"""The pinch held open: the index finger as in :data:`PINCH`, the thumb swung
-45 mm away from it across the palm (along the hand's ``y``, to the tenth of a
-millimetre, with no offset along the approach), solved the same way. What the
-scalar command's *open* is, so that a hand coming down to pinch is already
-shaped to, the way a jaw arrives open rather than flat -- straight, the index
-finger reaches past the pinch point and meets the table before the pinch
-point meets the thing."""
+"""The pinch held open: the index finger as in :data:`PINCH`, the thumb 45 mm
+from it along the hand's ``y`` (to 0.3 mm, with no offset along the approach),
+solved so that halfway to :data:`PINCH` the gap is still along ``y`` (1 mm
+off). What the scalar command's *open* is, so that a hand coming down to pinch
+is already shaped to, the way a jaw arrives open rather than flat -- straight,
+the index finger reaches past the pinch point and meets the table before the
+pinch point meets the thing."""
 
 OPEN = READY
 """The scalar command's open end. The flat hand is :data:`FLAT`."""

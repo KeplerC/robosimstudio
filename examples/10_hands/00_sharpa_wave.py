@@ -29,9 +29,10 @@ def routine(sim):
 
 def main() -> None:
     scene = rss.Scene(cell="bench_075", name="sharpa_wave", physics=rss.MUJOCO_500HZ)
-    # Under the right hand's pinch point at home: on the middle line of the
+    # On the right hand's line of approach from home: the pinch comes down at
+    # 35 degrees, so the cube sits 54 mm behind the pinch point's spot on the
     # bench, 200 mm to the robot's right.
-    scene.add(rss.box(name="cube", half=(0.0125, 0.0125, 0.0125), at=(0.0, -0.2, 0.0125), mass=0.05))
+    scene.add(rss.box(name="cube", half=(0.0125, 0.0125, 0.0125), at=(-0.054, -0.2, 0.0125), mass=0.05))
     scene.add(rss.robot("ur5e_sharpa_bimanual"))
 
     sim = scene.build(control_mode="joint_position")

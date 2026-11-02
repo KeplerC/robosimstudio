@@ -32,16 +32,19 @@ UR5E_JOINTS = (
 )
 """The six joints, base to flange, the file's own labels."""
 
-UR5E_HOME = (2.8873, -1.2675, 2.3685, -1.3375, 1.3233, -1.5118)
-"""A posture over the work surface for the Sharpa Wave's pinch: palm down,
-fingers forward, the pinch point 0.6 m in front of the base, 0.2 m to the
-arm's right and 0.1 m up. Solved by forward kinematics on the composed file
-(:mod:`.ur5e_sharpa`) so that the hand's approach axis points straight down
-and its closing axis runs across the bench; the shoulder pans by about pi
-because the arm's zero reaches *behind* its base. :data:`UR5E_HOME_LEFT` is
-the same for a hand 0.2 m to the arm's left, the left arm of a pair."""
+UR5E_HOME = (2.9248, -1.3242, 1.9259, -0.2118, 1.3698, -1.6527)
+"""A posture over the work surface for the Sharpa Wave's pinch: the pinch
+point 0.6 m in front of the base, 0.2 m to the arm's right and 0.1 m up,
+the fingers pointing forward and 35 degrees down with the palm facing down
+and back, as a hand comes to a thing on a table. Pitched rather than flat
+because with the fingers level the UR5e's wrist_2 link hangs 20 mm below the
+fingertip pads and meets the table before the pinch point is 25 mm over it;
+at 35 degrees the wrist stands 0.35 m up and the pads are the lowest thing.
+Solved by forward kinematics on the composed file (:mod:`.ur5e_sharpa`); the
+shoulder pans by about pi because the arm's zero reaches *behind* its base.
+:data:`UR5E_HOME_LEFT` is the same for a hand 0.2 m to the arm's left."""
 
-UR5E_HOME_LEFT = (2.6198, -1.2694, 2.3755, -1.3689, 1.064, -1.4409)
+UR5E_HOME_LEFT = (2.6947, -1.3171, 1.9201, -0.1842, 1.1582, -1.7474)
 """The same hand pose 0.2 m to the arm's *left*: the left arm of a pair, so
 that two arms 0.6 m apart hold their pinch points 0.4 m apart over the middle."""
 

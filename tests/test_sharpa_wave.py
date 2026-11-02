@@ -151,7 +151,7 @@ class TestTheComposedRobots(unittest.TestCase):
             self.assertNotIn("<general ", text.split("<actuator>")[1], name)
 
     def test_the_home_holds_the_pinch_points_over_the_middle_of_the_bench(self) -> None:
-        """Both pinch points 0.2 m either side of the centre line and 0.1 m up, approaching straight down."""
+        """Both pinch points 0.2 m either side of the centre line and 0.1 m up, approaching 35 degrees from vertical."""
         import mujoco
 
         from robosimstudio.robots.registry import get_embodiment, resolve_gripper
@@ -170,8 +170,9 @@ class TestTheComposedRobots(unittest.TestCase):
             rot = data.xmat[palm].reshape(3, 3)
             pinch = data.xpos[palm] + rot @ np.asarray(hand.tcp_offset)
             np.testing.assert_allclose(pinch, (0.6, y, 0.1), atol=2e-3, err_msg=arm.name)
+            s, c = np.sin(np.radians(35.0)), np.cos(np.radians(35.0))
             np.testing.assert_allclose(
-                rot @ np.asarray(hand.approach_axis), (0.0, 0.0, -1.0), atol=2e-3, err_msg=f"{arm.name} approach"
+                rot @ np.asarray(hand.approach_axis), (-s, 0.0, -c), atol=2e-3, err_msg=f"{arm.name} approach"
             )
             # The thumb closes inward on both arms: +y on the right arm, -y on the left.
             np.testing.assert_allclose(

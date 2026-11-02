@@ -19,8 +19,9 @@ arm is the right one.
 embodiment puts that midpoint 0.6 m behind the work surface's middle, on it.
 At home (:data:`~.ur5e.UR5E_HOME` and its mirror for the left arm) each palm
 holds its pinch point over the surface's middle, 0.2 m either side of the
-centre line and 0.1 m up, palm down with the fingers forward and the thumbs
-inward -- the way two hands come down to pinch a thing on a table.
+centre line and 0.1 m up, the fingers forward and 35 degrees down, the palms
+facing down and back and the thumbs inward -- the way two hands come down to
+pinch a thing on a table.
 
 The arm gains are Menagerie's own (:data:`~.ur5e.UR5E_ACTUATION`); the hands'
 are their file's (:mod:`..grippers.sharpa_wave`, whose left entry carries the

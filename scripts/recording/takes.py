@@ -532,12 +532,16 @@ FINAL = (
             Wait(seconds=0.5, label="two UR5e arms, two Sharpa Wave hands, a cube under the right one"),
             # 10 mm over the cube's centre: the pads are 12 mm thick, so their
             # lower halves take the cube's sides clear of the bench.
-            Drag("right", "z", to=At("cube", dz=0.01), seconds=1.4, label="drag the right hand down onto the cube"),
-            Wait(seconds=0.3),
+            # The gizmo's z arrow is the pinch's approach, 35 degrees off vertical,
+            # and a drag is asked in world metres: 94.6 mm along the arrow is 77.5
+            # mm down, from the pinch point 100 mm up to 10 mm over the cube's
+            # centre, and 54 mm back, where the cube sits.
+            Drag("right", "z", -0.0946, seconds=2.4, label="drag the right hand down onto the cube"),
+            Wait(seconds=1.0, label="the hand arrives"),
             Press(text="Close", within=RIGHT, label="Close: a thumb-index pinch"),
             Wait(seconds=1.2, mark="closed", label="the pads hold it"),
-            Drag("right", "z", 0.12, seconds=1.4, label="drag it up 120 mm"),
-            Wait(seconds=0.8, mark="lifted", label="held"),
+            Drag("right", "z", 0.12, seconds=2.4, label="drag it up 120 mm"),
+            Wait(seconds=1.2, mark="lifted", label="held"),
             Run(label="Run: the left hand through a fist, flat, a pointing finger, the pinch"),
             Press(text="Open", within=RIGHT, label="Open: the cube drops"),
             Wait(seconds=1.2),
