@@ -5,6 +5,11 @@ Two shapes of gripper, one command:
 
 * **Mirrored prismatic fingers** -- the Panda hand, the YAM gripper. Two joints
   travelling ``+w`` and ``-w`` metres, and the command interpolates both.
+* **A five-finger hand** -- the Sharpa Wave. Twenty-two driven joints whose
+  open and closed postures are a flat hand and a thumb-index pinch, so the
+  scalar still means what a jaw's does; and :meth:`Gripper.set_joint_targets`,
+  which plays any posture joint by joint for the things a scalar cannot say.
+
 * **A geared linkage** -- a Robotiq 2F-85. *One* actuated revolute joint whose
   0.785 rad of travel closes the whole hand, with five passive joints geared to
   it by solver-side mimic constraints. Its open position is 0 and its closed
@@ -34,12 +39,23 @@ def _write_gripper_targets(
     gripper_coords: wp.array[wp.int32],
     open_q: wp.array[wp.float32],
     closed_q: wp.array[wp.float32],
+    posture_on: wp.array[wp.int32],
+    posture_q: wp.array[wp.float32],
     joint_target_q: wp.array[wp.float32],
 ):
-    """Interpolate each driven finger joint between its open and closed value."""
+    """Interpolate each driven finger joint between its open and closed value, or play a posture.
+
+    The posture branch is what a multi-finger hand is driven by once the
+    scalar command stops describing it: one target per driven joint, written
+    as given. Both live in device arrays so the choice is made on device and
+    survives graph capture.
+    """
     i = wp.tid()
-    c = wp.clamp(command[0], 0.0, 1.0)
-    joint_target_q[gripper_coords[i]] = open_q[i] + (closed_q[i] - open_q[i]) * c
+    if posture_on[0] != 0:
+        joint_target_q[gripper_coords[i]] = posture_q[i]
+    else:
+        c = wp.clamp(command[0], 0.0, 1.0)
+        joint_target_q[gripper_coords[i]] = open_q[i] + (closed_q[i] - open_q[i]) * c
 
 
 class Gripper:
@@ -138,6 +154,10 @@ class Gripper:
 
         self._command_host = np.zeros(1, dtype=np.float32)
         self._command = wp.zeros(1, dtype=wp.float32, device=model.device)
+        self._posture_host = np.zeros(len(self.coords), dtype=np.float32)
+        self._posture = wp.zeros(len(self.coords), dtype=wp.float32, device=model.device)
+        self._posture_on_host = np.zeros(1, dtype=np.int32)
+        self._posture_on = wp.zeros(1, dtype=wp.int32, device=model.device)
         self._coords = wp.array(np.asarray(self.coords, dtype=np.int32), dtype=wp.int32, device=model.device)
         self._open = wp.array(self.open_q, dtype=wp.float32, device=model.device)
         self._closed = wp.array(self.closed_q, dtype=wp.float32, device=model.device)
@@ -152,12 +172,38 @@ class Gripper:
         self._command_host[0] = float(np.clip(value, 0.0, 1.0))
         self._command.assign(self._command_host)
 
+    @property
+    def posture(self) -> np.ndarray | None:
+        """The per-joint targets being played instead of the command, or ``None``."""
+        return self._posture_host.copy() if self._posture_on_host[0] else None
+
+    def set_joint_targets(self, values: Sequence[float] | None) -> None:
+        """Drive every finger joint to its own target, or ``None`` to go back to the command.
+
+        For a hand whose fingers do more than open and close: a retargeted
+        human hand, a named posture off the spec's catalogue, a finger held
+        still while the rest curl. One value per driven joint, in ``coords``
+        order, written as given on the next :meth:`apply`. The scalar
+        :attr:`command` is kept, not overwritten, so a caller that hands the
+        hand back gets the grip it last asked for.
+        """
+        if values is None:
+            self._posture_on_host[0] = 0
+        else:
+            targets = np.asarray(values, dtype=np.float32).reshape(-1)
+            if len(targets) != len(self.coords):
+                raise ValueError(f"{len(targets)} finger targets for {len(self.coords)} driven finger joints")
+            self._posture_host[:] = targets
+            self._posture.assign(self._posture_host)
+            self._posture_on_host[0] = 1
+        self._posture_on.assign(self._posture_on_host)
+
     def apply(self, joint_target_q: wp.array) -> None:
         """Write the finger targets into the solver's target vector."""
         wp.launch(
             _write_gripper_targets,
             dim=len(self.coords),
-            inputs=[self._command, self._coords, self._open, self._closed],
+            inputs=[self._command, self._coords, self._open, self._closed, self._posture_on, self._posture],
             outputs=[joint_target_q],
             device=self.model.device,
         )
