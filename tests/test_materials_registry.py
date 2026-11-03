@@ -94,7 +94,7 @@ KINDS: dict[str, Kind] = {
     ),
     "bag": Kind(
         "bag",
-        ("BAG_60HZ", "BagSpec", "bag", "bags"),
+        ("BAG_60HZ", "BagSpec", "MAILER", "bag", "bags", "face_up", "mailer"),
         ("bag", "cloth"),
         (("bag", "bag.EntityBag"), ("bag@superdex", "bag.EntityBagSuperdex")),
         ("Bag", "bag", "bag"),

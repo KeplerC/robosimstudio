@@ -363,5 +363,80 @@ class TestTheEngineActor(unittest.TestCase):
                 self.assertEqual(want, tuple(moduli.call_args.args[:2]))
 
 
+class TestASealedMailer(unittest.TestCase):
+    """``rss.mailer``: a bag sewn on all four edges, its faces textured apart, and which face is up."""
+
+    def _mailer(self, **kwargs):
+        from robosimstudio_materials.bag import EntityBag, mailer
+
+        entity = EntityBag(mailer(**kwargs))
+        vertices, faces = entity.surface()
+        return entity, vertices, faces
+
+    def test_the_layers_share_every_edge(self) -> None:
+        entity, _, _ = self._mailer()
+        top, bottom = entity.top, entity.bottom
+        self.assertEqual(top.shape, bottom.shape, "no lip")
+        sewn = np.zeros(top.shape, dtype=bool)
+        sewn[0, :] = sewn[-1, :] = sewn[:, 0] = sewn[:, -1] = True
+        np.testing.assert_array_equal(top[sewn], bottom[sewn])
+        self.assertFalse(set(top[~sewn].ravel()) & set(bottom[~sewn].ravel()), "only the seams are shared")
+
+    def test_no_triangle_lies_on_three_seam_nodes(self) -> None:
+        # A triangle on three sewn nodes is the same triangle on both layers: SuperDex's linear solve
+        # read NaN from the first step with the mouth's far corner cut that way.
+        entity, _, faces = self._mailer()
+        sewn = set(np.intersect1d(entity.top, entity.bottom).tolist())
+        self.assertFalse(any(all(int(v) in sewn for v in f) for f in faces))
+        self.assertEqual(len(faces), len(np.unique(np.sort(faces, axis=1), axis=0)), "a triangle is repeated")
+
+    def test_an_open_bag_keeps_its_triangles(self) -> None:
+        from robosimstudio_materials.bag import bag_mesh
+
+        _, faces, _, _ = bag_mesh(0.24, 0.20, (24, 20), 3, 0.008, 1.3)
+        self.assertEqual(2040, len(faces), "sealing changed how an open bag is cut")
+        first = faces[0]
+        self.assertEqual(3, len(set(first.tolist())))
+
+    def test_the_face_mesh_prints_each_face_on_its_half_of_the_image(self) -> None:
+        from robosimstudio_materials.bag import face_mesh
+
+        entity, vertices, _ = self._mailer()
+        particles = np.arange(len(vertices)) + 100
+        parts, tris, uvs = face_mesh(entity.top, entity.bottom, int(entity.spec.cells[0]), particles)
+        self.assertEqual(entity.top.size + entity.bottom.size, len(parts), "each seam node drawn once per face")
+        self.assertEqual(len(parts), len(uvs))
+        self.assertEqual(set(range(100, 100 + len(vertices))), set(parts.tolist()), "every particle is drawn")
+        face_of = (uvs[:, 0] > 0.5 + 1e-6) | ((uvs[:, 0] == 0.5) & (np.arange(len(uvs)) >= entity.top.size))
+        self.assertTrue(np.all(face_of[tris] == face_of[tris][:, :1]), "a triangle spans both faces")
+        np.testing.assert_allclose(uvs.min(axis=0), (0.0, 0.0))
+        np.testing.assert_allclose(uvs.max(axis=0), (1.0, 1.0))
+        # Wound outward: the top face's normals up, the bottom's down, on the rest positions.
+        at = vertices[parts - 100]
+        normal = np.cross(at[tris[:, 1]] - at[tris[:, 0]], at[tris[:, 2]] - at[tris[:, 0]])
+        top_tris = ~face_of[tris[:, 0]]
+        self.assertGreater(normal[top_tris, 2].sum(), 0.0)
+        self.assertLess(normal[~top_tris, 2].sum(), 0.0)
+
+    def test_face_up_reads_which_way_the_top_face_points(self) -> None:
+        from robosimstudio_materials.bag import face_up
+
+        entity, vertices, _ = self._mailer()
+        self.assertAlmostEqual(1.0, face_up(vertices, entity), places=6)
+        over = vertices * np.array([1.0, -1.0, -1.0])  # turned half over about x
+        self.assertAlmostEqual(-1.0, face_up(over, entity), places=6)
+        on_end = vertices[:, [2, 1, 0]] * np.array([-1.0, 1.0, 1.0])  # stood on its closed end
+        self.assertLess(abs(face_up(on_end, entity)), 0.05)
+
+    def test_the_mailer_defaults(self) -> None:
+        from robosimstudio_materials.bag import MAILER, mailer
+
+        spec = mailer()
+        self.assertTrue(spec.sealed and spec.face_uvs)
+        self.assertEqual(0.0, spec.lip)
+        self.assertIs(MAILER, spec.material)
+        self.assertAlmostEqual(0.6 * 2 * 0.33 * 0.24, MAILER.areal_density * 2 * spec.size[0] * spec.size[1])
+
+
 if __name__ == "__main__":
     unittest.main()

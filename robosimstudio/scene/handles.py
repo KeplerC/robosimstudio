@@ -381,6 +381,12 @@ class DeformableHandle:
     at, the particles' radius as built. 0 for anything drawn from its
     triangles or swept as a tube; a renderer that meets a handle with no
     triangles, no tube and a positive ``point_radius`` draws points."""
+    render_mesh: Any = None
+    """A mesh a texturing renderer draws instead of :attr:`triangles`: ``(particles, triangles,
+    uvs)``, where ``particles`` are global indices that may repeat -- a vertex shared by two faces
+    that print different parts of one image is split, one copy per face -- ``triangles`` index
+    into them and ``uvs`` is ``[len(particles), 2]``. ``None`` for anything drawn from its own
+    triangles with planar UVs. Only for drawing: nothing measures through it."""
     surface: Any = None
     """For a particle body, a callable a renderer *may* call to get a surface
     mesh over the particles in their current positions -- ``surface(positions)
