@@ -411,6 +411,20 @@ class TestASealedMailer(unittest.TestCase):
         self.assertTrue(np.all(face_of[tris] == face_of[tris][:, :1]), "a triangle spans both faces")
         np.testing.assert_allclose(uvs.min(axis=0), (0.0, 0.0))
         np.testing.assert_allclose(uvs.max(axis=0), (1.0, 1.0))
+        # Read the right way round from outside each face: the image's right (du) crossed with its up
+        # (dv) points out of the face. Run the other way on the top face, the front's print was mirrored.
+        at0 = vertices[parts - 100]
+        for k in range(len(tris)):
+            a, b, c = tris[k]
+            e1, e2 = at0[b] - at0[a], at0[c] - at0[a]
+            d1, d2 = uvs[b] - uvs[a], uvs[c] - uvs[a]
+            det = d1[0] * d2[1] - d1[1] * d2[0]
+            if abs(det) < 1e-12:
+                continue
+            right = (e1 * d2[1] - e2 * d1[1]) / det  # dP/du
+            up = (e2 * d1[0] - e1 * d2[0]) / det  # dP/dv
+            outward = np.cross(e1, e2)
+            self.assertGreater(float(np.dot(np.cross(right, up), outward)), 0.0, f"triangle {k} prints mirrored")
         # Wound outward: the top face's normals up, the bottom's down, on the rest positions.
         at = vertices[parts - 100]
         normal = np.cross(at[tris[:, 1]] - at[tris[:, 0]], at[tris[:, 2]] - at[tris[:, 0]])

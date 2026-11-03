@@ -466,8 +466,9 @@ def face_mesh(
 
     Each layer is a grid of quads in its own vertices -- the sewn nodes drawn twice, once per
     face -- so the top face can print the left half of an image (``u`` in [0, 0.5]) and the
-    bottom face the right half, each stretched over its whole face, ``v`` running from the closed
-    end (0) to the mouth (1); a lip's rows run past 1. Triangles wind outward as :func:`bag_mesh`
+    bottom face the right half, each stretched over its whole face and read the right way round
+    from outside it: ``v`` (the image's up) runs from the closed end (0) to the mouth (1), a lip's
+    rows past 1, and ``u`` (its right) runs along the cross of that with the face's outward normal. Triangles wind outward as :func:`bag_mesh`
     winds them. ``particles`` maps the bag's own vertex numbers to the model's.
     """
     particles = np.asarray(particles)
@@ -479,7 +480,11 @@ def face_mesh(
         for i in range(n_i):
             for j in range(n_j):
                 out_p.append(int(particles[int(grid[i, j])]))
-                out_uv.append((u0 + 0.5 * j / ny, i / rows))
+                # Seen from outside, the image's up runs from the closed end to the mouth and its right
+                # is the cross of that with the outward normal: -y on the top face, +y on the bottom one.
+                # Run along +y on both, the front's print came out mirrored.
+                across = (ny - j) / ny if outward else j / ny
+                out_uv.append((u0 + 0.5 * across, i / rows))
         for i in range(n_i - 1):
             for j in range(n_j - 1):
                 a, b = base + i * n_j + j, base + (i + 1) * n_j + j
