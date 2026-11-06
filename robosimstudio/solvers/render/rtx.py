@@ -567,12 +567,21 @@ def _viewer_class():
                         wp.array(uv, dtype=wp.vec2, device=self.device),
                     )
                     continue
+                stated = getattr(handle, "render_mesh", None)
+                uv_np = None
+                if stated is not None:
+                    # A mesh the deformable split for its texture: the same particles, some twice.
+                    particles = np.asarray(stated[0], dtype=np.int32)
+                    tris_np = np.asarray(stated[1], dtype=np.int32).reshape(-1, 3)
+                    uv_np = np.asarray(stated[2], dtype=np.float32).reshape(-1, 2)
                 if len(particles) == 0 or len(tris_np) == 0:
                     continue
                 idx = wp.array(particles, dtype=wp.int32, device=self.device)
                 tris = wp.array(tris_np.reshape(-1), dtype=wp.int32, device=self.device)
                 out = wp.empty(len(particles), dtype=wp.vec3, device=self.device)
-                uvs = wp.array(planar_uvs(rest[particles]), dtype=wp.vec2, device=self.device)
+                if uv_np is None:
+                    uv_np = planar_uvs(rest[particles])
+                uvs = wp.array(uv_np, dtype=wp.vec2, device=self.device)
                 cache[name] = (idx, tris, tris_np, out, uvs)
             return cache
 

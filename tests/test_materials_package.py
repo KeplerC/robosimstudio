@@ -99,6 +99,7 @@ FLAT = {
     "PaperSpec": "robosimstudio_materials.paper",
     "bag": "robosimstudio_materials.bag",
     "BagSpec": "robosimstudio_materials.bag",
+    "mailer": "robosimstudio_materials.bag",
     "heap": "robosimstudio_materials.granular",
     "liquid": "robosimstudio_materials.liquid",
     "dough": "robosimstudio_materials.dough",
@@ -126,9 +127,11 @@ LISTED = [
     "cuttable",
     "cuttables",
     "dough",
+    "face_up",
     "heap",
     "knife",
     "liquid",
+    "mailer",
     "materials",
     "paper",
     "papers",
@@ -508,7 +511,8 @@ class TestTheLibraryIsWholeWithoutThePackage(unittest.TestCase):
 
     def test_the_package_really_was_absent(self) -> None:
         self.assertEqual([], self.got["materials_loaded"])
-        self.assertEqual(["articulated", "rigid", "static"], self.got["domains"])
+        # The conveyor is core machinery, not a material: it registers without the package.
+        self.assertEqual(["articulated", "conveyor", "rigid", "static"], self.got["domains"])
         self.assertFalse({entity for (_, _, _, entity) in KINDS.values()} & set(self.got["entities"]))
         self.assertNotIn("rice", self.got["materials"])
         self.assertNotIn("terry_towelling", self.got["materials"])

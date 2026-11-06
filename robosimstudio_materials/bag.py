@@ -33,6 +33,7 @@ from robosimstudio_materials.cloth import ClothMaterialSpec, ClothSpec, EntityCl
 __all__ = [
     "BAG_60HZ",
     "CANVAS",
+    "MAILER",
     "Bag",
     "BagSpec",
     "EntityBag",
@@ -40,7 +41,10 @@ __all__ = [
     "bag",
     "bag_mesh",
     "bags",
+    "face_mesh",
+    "face_up",
     "layer_gap",
+    "mailer",
     "mouth_opening",
 ]
 
@@ -84,6 +88,7 @@ def bag_mesh(
     lip_cells: int,
     gap: float,
     lip_angle: float = 0.0,
+    sealed: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """The bag as one surface: ``(vertices, triangles, top, bottom)``.
 
@@ -92,7 +97,8 @@ def bag_mesh(
     two share the nodes of the three sewn edges (``x = 0``, ``y = 0``, ``y = width``), which sit at
     ``z = 0``, and the rest of each layer sits ``gap / 2`` above or below. The top layer runs on for
     ``lip_cells`` rows past the mouth, turned up by ``lip_angle`` [rad]: a tab to take hold of.
-    Bottom triangles wind the other way, so every normal points out of the bag.
+    Bottom triangles wind the other way, so every normal points out of the bag. ``sealed`` sews the
+    mouth row too, as a mailer's flap is glued: the layers then share every edge node.
     """
     nx, ny = (int(c) for c in cells)
     dx, dy = length / nx, width / ny
@@ -102,7 +108,7 @@ def bag_mesh(
     for grid, side in ((top, 1.0), (bottom, -1.0)):
         for i in range(grid.shape[0]):
             for j in range(ny + 1):
-                if i <= nx and (i == 0 or j in (0, ny)):
+                if i <= nx and (i == 0 or j in (0, ny) or (sealed and i == nx)):
                     if side > 0:  # a sewn node, made once with the top layer and shared
                         grid[i, j] = len(vertices)
                         vertices.append((i * dx, j * dy, 0.0))
@@ -117,14 +123,22 @@ def bag_mesh(
                     vertices.append(
                         (length + run * np.cos(lip_angle), j * dy, side * gap / 2 + run * np.sin(lip_angle))
                     )
+
+    def sewn(i: int, j: int) -> bool:
+        return i <= nx and (i == 0 or j in (0, ny) or (sealed and i == nx))
+
     triangles = []
     for grid, outward in ((top, True), (bottom, False)):
         for i in range(grid.shape[0] - 1):
             for j in range(ny):
                 a, b, c, d = grid[i, j], grid[i + 1, j], grid[i, j + 1], grid[i + 1, j + 1]
-                # The closed corner's cell has three sewn nodes, which would make one triangle twice
-                # (once per layer, and SuperDex's solve went to NaN on the first step): cut it the other way.
-                pair = [(a, b, d), (a, d, c)] if i == 0 and j == 0 else [(a, b, c), (b, d, c)]
+                # A corner cell has three sewn nodes, and a triangle on all three would be one triangle
+                # twice, once per layer -- SuperDex's solve went to NaN on the first step. Cut such a
+                # cell along its other diagonal. Open, only the closed end's corner is one; sealed, the
+                # mouth's far corner too.
+                abc = sewn(i, j) and sewn(i + 1, j) and sewn(i, j + 1)
+                bdc = sewn(i + 1, j) and sewn(i + 1, j + 1) and sewn(i, j + 1)
+                pair = [(a, b, d), (a, d, c)] if (abc or bdc) else [(a, b, c), (b, d, c)]
                 triangles += pair if outward else [t[::-1] for t in pair]
     return np.asarray(vertices, dtype=np.float64), np.asarray(triangles, dtype=np.int64), top, bottom
 
@@ -152,7 +166,17 @@ CANVAS = ClothMaterialSpec(
 )
 """A cotton canvas pouch: 1 mm, 300 g/m^2, a 4 mm contact radius."""
 
-bags = SimpleNamespace(CANVAS=CANVAS)
+
+MAILER = replace(CANVAS, areal_density=0.6)
+"""A padded kraft mailer with something soft in it: :data:`CANVAS`'s membrane at 600 g/m^2, about
+95 g for a 0.33 x 0.24 m mailer.
+
+Kept at canvas stiffness on purpose. Two YAM hands pinch its edge where it lies on a deck --
+fingertips 2 mm up, jaws across the edge, 8 N a finger -- and the edge buckles up into the jaws:
+8 of 8 held at a 3 cm test lift. At 3e6 Pa the stiffer edge would not buckle and the jaws
+closed past it: 1 of 3 (``p0e_mailer.py``). Stiffer reads more like paper and is not grasped."""
+
+bags = SimpleNamespace(CANVAS=CANVAS, MAILER=MAILER)
 """The bag fabrics under one name."""
 
 
@@ -170,6 +194,11 @@ class BagSpec(ClothSpec):
         lip: How far the top layer runs on past the mouth [m].
         lip_angle: How far the lip is turned up from the bench [rad].
         self_contact: Whether the shell collides with itself. Off, the layers pass through each other.
+        sealed: Sew the mouth shut too, as a mailer's glued flap: nothing goes in or comes out.
+        face_uvs: Texture coordinates that print a texture's left half on the top layer and its right
+            half on the bottom one, each stretched over its whole face -- a mailer's printed front and
+            plain back. Off, the renderer's planar projection prints one image through both layers.
+            A finish meant for them states ``uv_scale=(1, 1)``.
         friction_falloff: SuperDex ``friction_falloff_vel`` [m/s] of the bag. Below it friction grows
             with slip; against a gripper pad the deformable's value is the one that counts.
         mass_damping: SuperDex ``mass_damping_coefficient`` [1/s], a drag on every node.
@@ -186,6 +215,8 @@ class BagSpec(ClothSpec):
     lip: float = field(default=0.03, metadata=ui(tier=REBUILD, unit="m", range=(0.0, 0.06), group="geometry"))
     lip_angle: float = field(default=1.3, metadata=ui(tier=REBUILD, unit="rad", range=(0.0, 1.57), group="geometry"))
     self_contact: bool = field(default=True, metadata=ui(tier=REBUILD, group="contact"))
+    sealed: bool = field(default=False, metadata=ui(tier=REBUILD, group="geometry"))
+    face_uvs: bool = False
     friction_falloff: float = field(
         default=1.0e-2, metadata=ui(tier=REBUILD, unit="m/s", log=True, range=(1.0e-4, 1.0e-1), group="contact")
     )
@@ -265,6 +296,7 @@ class EntityBag(EntityCloth):
             spec.lip_cells,
             2.0 * float(spec.material.particle_radius),
             float(spec.lip_angle),
+            bool(spec.sealed),
         )
         # About the middle of the footprint, which is what ``pose`` names.
         return vertices - np.array([float(spec.size[0]) / 2, float(spec.size[1]) / 2, 0.0]), faces
@@ -359,6 +391,42 @@ class EntityBag(EntityCloth):
         pipeline.sim_time = 0.0
         pipeline.step_count = 0
 
+    def handle(self, model: newton.Model) -> Any:
+        """As cloth's, plus, under :attr:`BagSpec.face_uvs`, a render mesh with a texture per face.
+
+        The two layers share every sewn node, and one vertex can carry one texture coordinate: a
+        printed front over the same vertices as a plain back would smear one cell of the front
+        image round every seam of the back. So the render mesh splits them -- the bottom layer
+        draws its own copy of each sewn node -- and only the renderer sees the split.
+        """
+        out = super().handle(model)
+        if self.spec.face_uvs and len(self.top):
+            out.render_mesh = face_mesh(self.top, self.bottom, int(self.spec.cells[0]), self.particles)
+        return out
+        rows = int(self.spec.cells[0])
+        ny = self.top.shape[1] - 1
+        particles, uvs, triangles = [], [], []
+        for grid, u0, outward in ((self.top, 0.0, True), (self.bottom, 0.5, False)):
+            base = len(particles)
+            n_i, n_j = grid.shape
+            for i in range(n_i):
+                for j in range(n_j):
+                    particles.append(int(self.particles[int(grid[i, j])]))
+                    # Rows past the mouth (the lip) run on past the face's top edge of the image.
+                    uvs.append((u0 + 0.5 * j / ny, i / rows))
+            for i in range(n_i - 1):
+                for j in range(n_j - 1):
+                    a, b = base + i * n_j + j, base + (i + 1) * n_j + j
+                    c, d = a + 1, b + 1
+                    pair = [(a, b, c), (b, d, c)]
+                    triangles += pair if outward else [t[::-1] for t in pair]
+        out.render_mesh = (
+            np.asarray(particles, dtype=np.int32),
+            np.asarray(triangles, dtype=np.int32),
+            np.asarray(uvs, dtype=np.float32),
+        )
+        return out
+
 
 # =============================================================================
 # 5. The constructor and the measures
@@ -389,6 +457,80 @@ def bag(
     """
     extra = {} if material is None else {"material": material}
     return BagSpec(name=name, size=size, cells=cells, pose=at, **extra, **kwargs)
+
+
+def face_mesh(
+    top: np.ndarray, bottom: np.ndarray, rows: int, particles: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A bag's two faces as separate meshes over its particles: ``(particles, triangles, uvs)``.
+
+    Each layer is a grid of quads in its own vertices -- the sewn nodes drawn twice, once per
+    face -- so the top face can print the left half of an image (``u`` in [0, 0.5]) and the
+    bottom face the right half, each stretched over its whole face and read the right way round
+    from outside it: ``v`` (the image's up) runs from the closed end (0) to the mouth (1), a lip's
+    rows past 1, and ``u`` (its right) runs along the cross of that with the face's outward normal. Triangles wind outward as :func:`bag_mesh`
+    winds them. ``particles`` maps the bag's own vertex numbers to the model's.
+    """
+    particles = np.asarray(particles)
+    ny = top.shape[1] - 1
+    out_p, out_uv, out_t = [], [], []
+    for grid, u0, outward in ((top, 0.0, True), (bottom, 0.5, False)):
+        base = len(out_p)
+        n_i, n_j = grid.shape
+        for i in range(n_i):
+            for j in range(n_j):
+                out_p.append(int(particles[int(grid[i, j])]))
+                # Seen from outside, the image's up runs from the closed end to the mouth and its right
+                # is the cross of that with the outward normal: -y on the top face, +y on the bottom one.
+                # Run along +y on both, the front's print came out mirrored.
+                across = (ny - j) / ny if outward else j / ny
+                out_uv.append((u0 + 0.5 * across, i / rows))
+        for i in range(n_i - 1):
+            for j in range(n_j - 1):
+                a, b = base + i * n_j + j, base + (i + 1) * n_j + j
+                pair = [(a, b, a + 1), (b, b + 1, a + 1)]
+                out_t += pair if outward else [t[::-1] for t in pair]
+    return np.asarray(out_p, dtype=np.int32), np.asarray(out_t, dtype=np.int32), np.asarray(out_uv, dtype=np.float32)
+
+
+def mailer(
+    *,
+    name: str = "mailer",
+    size: tuple[float, float] = (0.33, 0.24),
+    cells: tuple[int, int] = (33, 24),
+    at: Vec3 = (0.0, 0.0, 0.0),
+    material: Any = None,
+    **kwargs,
+) -> BagSpec:
+    """A sealed padded mailer: a :func:`bag` sewn on all four edges, in :data:`MAILER`, its faces
+    textured separately (:attr:`BagSpec.face_uvs`): a finish's image prints its left half on the
+    top face, the one with the label, and its right half on the back.
+
+    :func:`face_up` says which face is up. Needs SuperDex, as every bag does.
+    """
+    kwargs.setdefault("lip", 0.0)
+    kwargs.setdefault("lip_angle", 0.0)
+    kwargs.setdefault("sealed", True)
+    kwargs.setdefault("face_uvs", True)
+    return bag(name=name, size=size, cells=cells, at=at, material=MAILER if material is None else material, **kwargs)
+
+
+def face_up(points: np.ndarray, entity: EntityBag) -> float:
+    """Which way the top face points: the vertical part of its area-weighted mean normal.
+
+    1 lying top face up, -1 turned over; a bag stood on end reads near 0. The top layer's own
+    triangles, wound outward as :func:`bag_mesh` winds them, its lip included.
+
+    Args:
+        points: This bag's particles ``[n, 3]``, in the model's order.
+        entity: The bag, for its top layer.
+    """
+    q = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    grid = q[entity.top]
+    a, b, c, d = grid[:-1, :-1], grid[1:, :-1], grid[:-1, 1:], grid[1:, 1:]
+    normal = np.cross(b - a, c - a).sum(axis=(0, 1)) + np.cross(d - b, c - b).sum(axis=(0, 1))
+    norm = float(np.linalg.norm(normal))
+    return float(normal[2] / norm) if norm > 0.0 else 0.0
 
 
 class Bag:

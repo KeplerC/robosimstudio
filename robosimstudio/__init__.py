@@ -147,6 +147,8 @@ _EXPORTS: dict[str, str] = {
     "sphere": "robosimstudio.domains.rigid",
     "post": "robosimstudio.domains.static",
     "slab": "robosimstudio.domains.static",
+    "conveyor": "robosimstudio.domains.conveyor",
+    "ConveyorSpec": "robosimstudio.domains.conveyor",
 }
 """Flat name -> the module that defines it. A table rather than a wildcard.
 
@@ -200,7 +202,7 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "robosimstudio_materials.bag": (
         "bags (the `bag` kind: two layers of cloth sewn into a pocket, on SuperDex)",
-        ("BAG_60HZ", "BagSpec", "bag", "bags"),
+        ("BAG_60HZ", "BagSpec", "MAILER", "bag", "bags", "face_up", "mailer"),
     ),
     "robosimstudio_materials.brush": (
         "brushes (the `brush` kind: a handle with a field of short capsule-chain bristles)",
