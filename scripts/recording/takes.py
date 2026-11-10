@@ -190,12 +190,12 @@ def _cap_off(film) -> tuple[bool, str]:
 
 
 def _bulb_home(film) -> tuple[bool, str]:
-    """The lamp demo's own measures: the tip on the holder's pad, and the lamp's weight through the contact."""
+    """The lamp demo's own measures: the eyelet on the holder's centre contact, the lamp's weight through it, and lit."""
     m = _script(film).measures(film.sim)
-    ok = abs(m["tip_over_floor"] - m["pad_height"]) <= 5.0e-5 and m["contact_force"] >= 0.05
+    ok = abs(m["eyelet_over_contact"]) <= 5.0e-5 and m["contact_force"] >= 0.1 and m["lit"]
     return ok, (
-        f"tip {1000 * m['tip_over_floor']:.2f} mm over the floor (the pad stands {1000 * m['pad_height']:.2f}), "
-        f"{m['contact_force']:.2f} N on the base contact (need 0.05)"
+        f"eyelet {1000 * m['eyelet_over_contact']:.2f} mm over the centre contact (within 0.05), "
+        f"{m['contact_force']:.2f} N on it (need 0.1), {'lit' if m['lit'] else 'dark'}"
     )
 
 
@@ -976,13 +976,13 @@ DRAFTS = (
     routine(
         "examples/08_demos/fold_the_towel/fold_the_towel.py", speed=2.0, success="the towel is folded:", done=_folded
     ),
-    # 33 s and 31 s of scene: at 3x each stroke of the wrist is under a second of clip.
+    # 33 s and 41 s of scene: at 3x and 4x each stroke of the wrist is under a second of clip.
     routine(
         "examples/08_demos/unscrew_the_cap/unscrew_the_cap.py", speed=3.0, success="the cap is off:", done=_cap_off
     ),
     routine(
         "examples/08_demos/screw_in_the_bulb/screw_in_the_bulb.py",
-        speed=3.0,
+        speed=4.0,
         success="the lamp is home:",
         done=_bulb_home,
     ),
