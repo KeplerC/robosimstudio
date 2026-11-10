@@ -11,6 +11,8 @@ the seams around it, each a sentence of ``robosimstudio_materials/bond.py``:
 * **The pieces take the stated contact impedance**, in the solver's own model.
 * **Both bodies have to be on MuJoCo.** ``rss.GENERIC`` puts free bodies on VBD, and the build says so
   rather than hold nothing.
+* **The module's own example is run.** The kind ships with no example script, so the snippet in its
+  docstring is taken out of the docstring and executed here, and what it prints is what it says.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import numpy as np
 from tests.fixtures.bonds import Wrenches
 
 TIER = "medium"
-"""Five two-block scenes on one GPU, stepped a few seconds of scene time between them."""
+"""Six scenes of two blocks on one GPU, stepped a few seconds of scene time between them."""
 
 HALF = (0.02, 0.02, 0.01)
 
@@ -114,6 +116,47 @@ class TestBothBodiesHaveToBeOnMuJoCo(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "MUJOCO_500HZ"):
             _pair(physics=rss.GENERIC).build()
+
+
+class TestTheModulesOwnExample(unittest.TestCase):
+    """The usage snippet in ``robosimstudio_materials/bond.py``'s docstring, executed as it is written."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import contextlib
+        import io
+        import itertools
+        import textwrap
+
+        from robosimstudio_materials import bond
+
+        block = bond.__doc__.split("::\n\n", 1)[1].splitlines()
+        indented = itertools.takewhile(lambda line: not line.strip() or line.startswith("    "), block)
+        cls.source = textwrap.dedent("\n".join(indented))
+        cls.names: dict = {}
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            exec(compile(cls.source, "robosimstudio_materials/bond.py docstring", "exec"), cls.names)
+        cls.printed = printed.getvalue().splitlines()[-2:]
+
+    def test_it_is_the_whole_of_a_scene(self) -> None:
+        self.assertIn("import robosimstudio as rss", self.source)
+        self.assertIn("rss.bond(", self.source)
+        self.assertIn("scene.build()", self.source)
+
+    def test_the_light_block_hangs_and_the_heavy_one_fell(self) -> None:
+        sim, hooks = self.names["sim"], self.names["hooks"].entity
+        self.assertEqual([False, True], hooks.let_go().tolist())
+        surface = 0.75  # bench_075's top in the world [m]
+        self.assertAlmostEqual(surface + 0.3, float(sim["light"].position[2]), delta=0.001)
+        self.assertAlmostEqual(surface + 0.02, float(sim["heavy"].position[2]), delta=0.002, msg="on the bench")
+
+    def test_it_prints_what_its_comments_say(self) -> None:
+        self.assertEqual("[False  True]", self.printed[0])
+        loads = self.names["hooks"].entity.loads()
+        self.assertAlmostEqual(0.1 * 9.81, float(loads[0]), delta=0.02, msg="the light block's weight")
+        self.assertEqual(0.0, float(loads[1]))
+        self.assertEqual("[0.98 0.  ]", self.printed[1])
 
 
 if __name__ == "__main__":

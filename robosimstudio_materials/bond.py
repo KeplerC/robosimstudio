@@ -5,7 +5,30 @@ This file is what ``rss.bond`` builds, imported as ``robosimstudio_materials.bon
 point on a rigid body to the point of another body (or of the world) it was built on. It carries
 whatever the scene puts on it up to a strength, in tension and in shear, and once that is passed it
 is gone until the scene is reset. A seam, a perforation, a glued lid and a shell's score line are rows
-of them. Run ``examples/03_materials/15_egg.py`` first.
+of them.
+
+Two blocks hung from the world by a bond each, good for 3 N along its normal: the 100 g block's weight
+is 0.98 N and it hangs, the 500 g block's is 4.9 N and it falls (``tests/test_bond_scene`` runs this)::
+
+    import robosimstudio as rss
+
+    scene = rss.Scene(cell="bench_075", name="hung", physics=rss.MUJOCO_500HZ)
+    scene.add(rss.box(name="light", half=(0.02, 0.02, 0.02), at=(0.0, -0.1, 0.3), mass=0.1))
+    scene.add(rss.box(name="heavy", half=(0.02, 0.02, 0.02), at=(0.0, 0.1, 0.3), mass=0.5))
+    down = (0.0, 0.0, -1.0)  # a bond's normal, the way its block comes off: a pull along it is tension
+    hooks = scene.add(
+        rss.bond(
+            name="hooks",
+            points=(
+                rss.BondPoint(a="light", at=(0.0, -0.1, 0.32), normal=down, strength=3.0),
+                rss.BondPoint(a="heavy", at=(0.0, 0.1, 0.32), normal=down, strength=3.0),
+            ),
+        )
+    )
+    sim = scene.build()
+    sim.run(60)
+    print(hooks.entity.let_go())  # [False  True]: the heavy block is on the bench, its bond gone for good
+    print(hooks.entity.loads().round(2))  # [0.98 0.  ]: what each carries now, by the rule it breaks on [N]
 """
 
 from __future__ import annotations
@@ -75,8 +98,8 @@ __all__ = [
 # step; a 100 g block 0.029 mm and 0.0002 mm.
 #
 # The same sum makes a bonded *piece* soft to the world. MuJoCo sizes a contact's softness by the
-# lighter body in it, and a shard of a bonded shell is light though the shell is not: in the egg
-# example's first build a bowl's rim sank 2 mm into a 0.4 g shard for 0.4 N.
+# lighter body in it, and a shard of a bonded shell is light though the shell is not: a bowl's rim
+# sank 2 mm into a 0.4 g shard of one for 0.4 N.
 # :attr:`BondSpec.piece_impedance` writes a stiff impedance onto the shapes of every bonded body, with
 # a mixing weight that makes it the pair's; friction and contact dimension still come from the larger
 # of the two surfaces.
