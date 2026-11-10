@@ -22,6 +22,7 @@ import newton
 import numpy as np
 import warp as wp
 
+from robosimstudio.core.builder import set_shape_attribute
 from robosimstudio.domains.static.welded import weld_to_world
 from robosimstudio.paths import resolve_asset, resolve_path
 from robosimstudio.scene.build.bodies import preserve_body_inertia, set_body_mass
@@ -696,6 +697,10 @@ class EntityRigid(Entity):
                 )
             self.approximate_collider(builder, self.spec.collider)
             self.collect_shapes(builder)
+        if self.spec.impedance is not None:
+            # After the last collect, so a substituted collider takes it too.
+            d = float(self.spec.impedance)
+            set_shape_attribute(builder, "mujoco:geom_solimp", (d, d, 0.001, 0.5, 2.0), self.shapes)
         self.compute_grasp_box(builder)
         self.write_initial_q(builder, episode)
 

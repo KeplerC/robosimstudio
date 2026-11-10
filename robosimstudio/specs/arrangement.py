@@ -162,6 +162,17 @@ class CollisionSpec:
             timeconst above twice the substep). ``None`` keeps Newton's 2.5e3.
         contact_kd: Contact damping for shapes that state none. Scale it with
             :attr:`contact_ke`. ``None`` keeps Newton's 100.
+        finger_priority: MuJoCo contact priority of the robot's finger shapes.
+            MuJoCo mixes the two shapes' contact parameters at a contact unless
+            one has the higher priority, whose parameters it then uses alone. 0
+            mixes, as every scene did before this field; 1 makes a finger's
+            own contact class, friction and impedance, the law of everything
+            it touches. A part built by Newton arrives with a softer impedance
+            than a hand's MJCF states (``solimp`` 0.9 to 0.95 against the YAM's
+            0.998), and under a Newton collision pipeline the mix let a 3 g cap
+            held with 50 N a jaw creep out of the fingers at 4 to 5 mm/s; at 1
+            it stays within 0.014 mm/s (``tests/test_thread_grasp``). Read by
+            MuJoCo only.
         rigid_contact_max: Contact-buffer ceiling for the main pipeline. 0
             keeps Newton's sizing, which is derived from the settled scene.
         collide_every: Run the main pipeline's narrow phase every this many
@@ -187,6 +198,9 @@ class CollisionSpec:
     contact_kd: float | None = field(
         default=None, metadata=ui(tier=REBUILD, unit="N*s/m", log=True, range=(1.0e-3, 1.0e3), group="rigid contact")
     )
+    finger_priority: int = field(
+        default=0, metadata=ui(tier=REBUILD, range=(0.0, 4.0), step=1.0, group="rigid contact")
+    )
     rigid_contact_max: int = field(default=0, metadata=ui(tier=REBUILD, group="buffers"))
     collide_every: int = field(default=1, metadata=ui(tier=REBUILD, range=(1.0, 8.0), step=1.0, group="cadence"))
     contact_matching: str = field(
@@ -203,6 +217,8 @@ class CollisionSpec:
             raise ValueError(
                 f"contact_matching must be 'disabled', 'latest' or 'sticky', got {self.contact_matching!r}"
             )
+        if isinstance(self.finger_priority, bool) or int(self.finger_priority) != self.finger_priority:
+            raise ValueError(f"finger_priority must be a whole number, got {self.finger_priority!r}")
         if self.broad_phase not in ("explicit", "sap", "nxn"):
             raise ValueError(f"broad_phase must be 'explicit', 'sap' or 'nxn', got {self.broad_phase!r}")
 

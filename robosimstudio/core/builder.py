@@ -30,6 +30,7 @@ __all__ = [
     "rekey_custom_attributes",
     "restate_body_attribute",
     "set_body_attribute",
+    "set_shape_attribute",
 ]
 
 # Frequencies whose CustomAttribute.values dict is keyed by an entity index that
@@ -170,6 +171,35 @@ def set_body_attribute(builder: newton.ModelBuilder, key: str, value: Any, bodie
         values[body] = value
     attr.values = values
     return len(bodies)
+
+
+def set_shape_attribute(builder: newton.ModelBuilder, key: str, value: Any, shapes) -> int:
+    """Set one SHAPE-frequency custom attribute on a named set of shapes.
+
+    :func:`set_body_attribute` for shapes: how one entity states a per-geom
+    MuJoCo contact parameter for the shapes it built, ``mujoco:geom_priority``
+    on a hand's fingers or ``mujoco:geom_solimp`` on a threaded part. Entries
+    for other shapes are left alone.
+
+    Args:
+        builder: The builder, before it finalizes.
+        key: Attribute name, e.g. ``"mujoco:geom_priority"``.
+        value: The value to write on each shape.
+        shapes: Shape indices to write it on.
+
+    Returns:
+        How many shapes were written, or 0 if the attribute is not declared:
+        no backend of the arrangement registered it, so no solver reads it.
+    """
+    attr = builder.custom_attributes.get(key)
+    if attr is None:
+        return 0
+    shapes = [int(shape) for shape in shapes]  # once: an iterator would be spent by the count
+    values = dict(attr.values) if isinstance(attr.values, dict) else {}
+    for shape in shapes:
+        values[shape] = value
+    attr.values = values
+    return len(shapes)
 
 
 def assert_even_substeps(substeps: int) -> int:

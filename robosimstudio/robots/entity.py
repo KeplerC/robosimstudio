@@ -28,7 +28,7 @@ import newton
 import numpy as np
 import warp as wp
 
-from robosimstudio.core.builder import restate_body_attribute, set_body_attribute
+from robosimstudio.core.builder import restate_body_attribute, set_body_attribute, set_shape_attribute
 from robosimstudio.core.suction import Suction
 from robosimstudio.paths import resolve_asset
 from robosimstudio.robots.registry import resolve_gripper
@@ -1202,6 +1202,26 @@ class EntityEmbodiment(Entity):
                 if int(body) >= 0 and int(body) not in out:
                     out.append(int(body))
         return out
+
+    def prioritize_fingers(self, builder: newton.ModelBuilder, priority: int) -> int:
+        """Give every hand's finger shapes one MuJoCo contact priority; returns how many shapes took it.
+
+        :attr:`~robosimstudio.specs.physics.CollisionSpec.finger_priority`, applied
+        before the builder finalizes. The shapes are those on each hand's
+        :attr:`~robosimstudio.specs.GripperSpec.finger_bodies`, so a hand that
+        names none takes none, and 0 comes back where no MuJoCo backend
+        registered the attribute.
+        """
+        labels = list(builder.body_label)
+        bodies = {
+            label_index(labels, name)
+            for arm in self.spec.arms
+            if (hand := self.hands.get(arm.name)) is not None
+            for side in hand.finger_bodies
+            for name in side
+        }
+        shapes = [s for s in range(builder.shape_count) if int(builder.shape_body[s]) in bodies]
+        return set_shape_attribute(builder, "mujoco:geom_priority", int(priority), shapes)
 
     def builder_shapes(self, builder: newton.ModelBuilder) -> list[int]:
         """Every shape belonging to this robot, pre-finalize."""
