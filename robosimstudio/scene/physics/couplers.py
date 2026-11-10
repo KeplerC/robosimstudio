@@ -53,6 +53,8 @@ class Channel:
         coupling: ``"two_way"`` or ``"one_way"``.
         entities: Which entities the bodies came from.
         pairs: Explicit shape pairs for the channel's pipeline, or ``None``.
+        mass_scale: The proxy mass scale these bodies' entities declared for themselves
+            (``SimRequirements.proxy_mass_scale``), or ``None`` for the coupler's.
     """
 
     source: str
@@ -63,6 +65,7 @@ class Channel:
     coupling: str = "two_way"
     entities: tuple[str, ...] = ()
     pairs: np.ndarray | None = None
+    mass_scale: float | None = None
 
 
 @dataclass
@@ -187,8 +190,14 @@ def build_proxy(ctx: CouplerBuild) -> Any:
 
     by_name = {island.name: island for island in ctx.islands}
     proxies = []
+    # One factory per pair of islands: Newton takes one collision pipeline per source and
+    # destination and refuses a second factory there, and the bodies that declare a mass scale
+    # of their own are a second channel between the same two islands.
+    factories: dict[tuple[str, str], Any] = {}
     for channel in ctx.channels:
         scale = mass_scale if channel.coupling == "two_way" else one_way_scale
+        if channel.mass_scale is not None:
+            scale = float(channel.mass_scale)
         destination = by_name.get(channel.destination)
         particles = bool(destination is not None and destination.particles.size)
         # A destination that detects its own contacts -- the MPM, whose
@@ -200,7 +209,10 @@ def build_proxy(ctx: CouplerBuild) -> Any:
         if destination is not None and destination.uses_native_contacts():
             pipeline = _null_pipeline
         else:
-            pipeline = _pipeline_factory(ctx, channel.pairs, particles=particles)
+            pair = (channel.source, channel.destination)
+            if pair not in factories:
+                factories[pair] = _pipeline_factory(ctx, channel.pairs, particles=particles)
+            pipeline = factories[pair]
         proxies.append(
             SolverCoupledProxy.Proxy(
                 source=channel.source,

@@ -38,7 +38,8 @@ class Kind(NamedTuple):
     names: tuple[str, ...]
     """Every flat name it provides on ``rss``."""
     reads: tuple[str, ...]
-    """What its domain reads: its own layout first, then the ones it borrows."""
+    """What its domain reads: its own layout first, then the ones it borrows. Empty for a kind with no
+    domain of its own: the bond, which has no state and composes in ``rigid``."""
     entities: tuple[tuple[str, str], ...]
     """``(registered name, module.Class)`` for each entity it registers."""
     record: tuple[str, str, str] = ("", "", "")
@@ -112,6 +113,12 @@ KINDS: dict[str, Kind] = {
         ("tape", "cloth"),
         (("tape", "tape.EntityTape"),),
         ("Tape", "tape", "tape"),
+    ),
+    "bond": Kind(
+        "bond",
+        ("BondPoint", "BondSpec", "bond"),
+        (),
+        (("bond", "bond.EntityBond"),),
     ),
     "cutting": Kind(
         "cutting",
@@ -235,7 +242,7 @@ class TestTheFlatNames(unittest.TestCase):
         constructors |= {"heap": ("granular", "heap"), "liquid": ("liquid", "liquid"), "dough": ("dough", "dough")}
         constructors |= {"roller": ("dough", "roller"), "paper": ("paper", "paper"), "bag": ("bag", "bag")}
         constructors |= {"brush": ("brush", "brush"), "tape": ("tape", "tape"), "water": ("water", "water")}
-        constructors |= {"cuttable": ("cutting", "cuttable"), "knife": ("cutting", "knife")}
+        constructors |= {"cuttable": ("cutting", "cuttable"), "knife": ("cutting", "knife"), "bond": ("bond", "bond")}
         for name, (kind, entity) in constructors.items():
             with self.subTest(constructor=name):
                 if kind not in PRESENT:
@@ -256,9 +263,12 @@ class TestTheDomains(unittest.TestCase):
     def test_each_kind_registers_its_domain_with_what_it_reads(self) -> None:
         from robosimstudio.specs.physics import get_domain, list_domains
 
-        self.assertLessEqual(PRESENT, set(list_domains()))
+        self.assertLessEqual({kind for kind in PRESENT if KINDS[kind].reads}, set(list_domains()))
         for kind, row in _kinds(self):
             with self.subTest(kind=kind):
+                if not row.reads:
+                    self.assertNotIn(kind, list_domains(), "a kind with no state registers no domain")
+                    continue
                 domain = get_domain(kind)
                 self.assertEqual(row.reads, domain.reads)
                 self.assertEqual("deformables", domain.role)

@@ -237,9 +237,13 @@ class PhysicsProgram:
         refresh = getattr(self.solver, "_apply_proxy_effective_masses", None)
         if not mappings or refresh is None:
             return REBUILD
+        own = [channel.bodies for channel in self.channels if channel.mass_scale is not None]
+        own = np.concatenate(own) if own else np.zeros(0, np.int32)
         for mapping in mappings:
             if mapping.mass_scale > 1.0e5:
                 continue  # a one-way proxy keeps its own scale
+            if own.size and np.isin(mapping.src_ids.numpy(), own).any():
+                continue  # and so do the bodies whose entity declared one
             mapping.mass_scale = float(value)
         refresh()
         return RECAPTURE
@@ -264,9 +268,10 @@ class PhysicsProgram:
             )
         for channel in self.channels:
             pairs = "view pairs" if channel.pairs is None else f"{len(channel.pairs)} pairs"
+            own = "" if channel.mass_scale is None else f", mass x{channel.mass_scale:g}"
             lines.append(
                 f"  channel {channel.source} -> {channel.destination}: {channel.bodies.size} bodies "
-                f"({channel.coupling}, {pairs}) from {list(channel.entities)}"
+                f"({channel.coupling}, {pairs}{own}) from {list(channel.entities)}"
             )
         if self.routing.main_pairs is not None:
             lines.append(f"  main pipeline: {len(self.routing.main_pairs)} pairs")
@@ -281,7 +286,7 @@ def _channels(graph: InteractionGraph, islands: list[Island], worlds, model: new
     Into a host engine's island, the other side's bodies from whichever island holds them.
     """
     by_entity = {node.name: next((i for i in islands if i.owns(node.name)), None) for node in graph.nodes.values()}
-    gathered: dict[tuple[str, str, str], dict[str, Any]] = {}
+    gathered: dict[tuple[str, str, str, float | None], dict[str, Any]] = {}
     for edge in graph.edges:
         a, b = graph.nodes[edge.a], graph.nodes[edge.b]
         ia, ib = by_entity[a.name], by_entity[b.name]
@@ -307,7 +312,11 @@ def _channels(graph: InteractionGraph, islands: list[Island], worlds, model: new
         bodies = src_node.hand_bodies if hands_only else src_node.bodies
         if bodies.size == 0:
             continue
-        key = (src.name, dest.name, edge.coupling)
+        # An entity that states its own proxy mass scale is a channel of its own: Newton
+        # takes one scale per proxy mapping. One-way mirrors keep the coupler's, and a host
+        # engine mirrors bodies by its own recipe, which has no such scale.
+        own = src_node.sim.proxy_mass_scale if edge.coupling == "two_way" and not dest.is_host_engine else None
+        key = (src.name, dest.name, edge.coupling, None if own is None else float(own))
         slot = gathered.setdefault(key, {"bodies": [], "entities": set()})
         slot["bodies"].append(bodies)
         slot["entities"].add(src_node.name)
@@ -315,7 +324,7 @@ def _channels(graph: InteractionGraph, islands: list[Island], worlds, model: new
     shape_body = model.shape_body.numpy() if model.shape_count else np.zeros(0, np.int32)
     joint_child = model.joint_child.numpy() if model.joint_count else np.zeros(0, np.int32)
     out: list[Channel] = []
-    for (src, dest, coupling), slot in gathered.items():
+    for (src, dest, coupling, own), slot in gathered.items():
         bodies = np.unique(np.concatenate(slot["bodies"])).astype(np.int32)
         if worlds is not None and worlds.num_worlds > 1:
             bodies = expand_indices(bodies, worlds.bodies_per_world, worlds.num_worlds)
@@ -332,11 +341,12 @@ def _channels(graph: InteractionGraph, islands: list[Island], worlds, model: new
                 joints=joints,
                 coupling=coupling,
                 entities=tuple(sorted(slot["entities"])),
+                mass_scale=own,
             )
         )
     # A one-way and a two-way channel to the same destination are both allowed:
     # Newton takes one Proxy per mapping and the mass scales differ.
-    out.sort(key=lambda c: (c.source, c.destination, c.coupling != "two_way"))
+    out.sort(key=lambda c: (c.source, c.destination, c.coupling != "two_way", c.mass_scale or 0.0))
     return out
 
 
@@ -897,7 +907,9 @@ def compose(
                 bodies=tuple(int(v) for v in c.bodies),
                 coupling=c.coupling,
                 mass_scale=float(
-                    arrangement.coupling.get("mass_scale", 1.0)
+                    c.mass_scale
+                    if c.mass_scale is not None
+                    else arrangement.coupling.get("mass_scale", 1.0)
                     if c.coupling == "two_way"
                     else arrangement.coupling.get("one_way_mass_scale", 1.0e6)
                 ),
