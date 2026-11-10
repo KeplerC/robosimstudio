@@ -165,6 +165,16 @@ def _mesh_points(spec: ParticleBodySpec, spacing: float) -> tuple[np.ndarray, np
     return points, cell
 
 
+def _named_shapes(name: str, labels: list[str], bodies: list[str], shape_body: Any) -> list[int]:
+    """The shapes of the entity called ``name``: those on the body of that name, and those labelled with it.
+
+    See :meth:`EntityParticleBody._apply_container_margins` for the labels and why a prefix is not enough.
+    """
+    owned = {i for i, label in enumerate(bodies) if label == name}
+    own = re.compile(rf"{re.escape(name)}(?:_collision(?:_\d+)?)?(?:_convex_\d+)?")
+    return [s for s in range(len(labels)) if int(shape_body[s]) in owned or own.fullmatch(labels[s])]
+
+
 def island_solver(pipeline: Any, entity_name: str) -> Any | None:
     """The MPM solver stepping ``entity_name``'s island, or ``None`` when it is not on one.
 
@@ -287,9 +297,7 @@ class EntityParticleBody(ParticleMixin, Entity):
         labels = list(getattr(builder, "shape_label", []))
         bodies = list(getattr(builder, "body_label", []))
         for name in self.spec.containers:
-            owned = {i for i, label in enumerate(bodies) if label == name}
-            own = re.compile(rf"{re.escape(name)}(?:_collision(?:_\d+)?)?(?:_convex_\d+)?")
-            shapes = [s for s in range(len(labels)) if builder.shape_body[s] in owned or own.fullmatch(labels[s])]
+            shapes = _named_shapes(name, labels, bodies, builder.shape_body)
             if not shapes:
                 warnings.warn(
                     f"particle body {self.spec.name!r}: container {name!r} has no shapes in the builder yet, "
@@ -390,11 +398,38 @@ class EntityParticleBody(ParticleMixin, Entity):
         return True
 
     # -------------------------------------------------------------- phase 4
+    def _apply_adhesion(self) -> None:
+        """Write :attr:`ParticleBodySpec.sticks_to` into the solver's colliders, by the named entities' shapes.
+
+        After the solver exists, because the adhesion is the solver's own and no model array: found
+        on the solver's model, which is the island's view, by the labels a container is found by. A
+        name with no collider there is an error, since a paste that was to stick and slides is a
+        wrong answer with nothing to show for it.
+        """
+        if not self.spec.sticks_to:
+            return
+        setter = getattr(self.solver, "set_collider_adhesion", None)
+        if setter is None:
+            raise RuntimeError(
+                f"particle body {self.spec.name!r}: sticks_to needs the implicit MPM, and this body's solver is "
+                f"{type(self.solver).__name__}; stage rss.backend('mpm') for its domain."
+            )
+        model = self.solver.model
+        labels, bodies = list(model.shape_label), list(model.body_label)
+        shape_body = model.shape_body.numpy()
+        for name, adhesion in self.spec.sticks_to:
+            if not setter(_named_shapes(name, labels, bodies, shape_body), adhesion):
+                raise RuntimeError(
+                    f"particle body {self.spec.name!r}: sticks_to names {name!r}, which has no collider in the "
+                    "particles' solver; it takes a rigid or static entity the body is in contact with."
+                )
+
     def on_scene_ready(self, pipeline: ScenePipeline) -> None:
-        """Resolve the sets, settle, find the solver, and offer a surface if asked."""
+        """Resolve the sets, find the solver, say what the body sticks to, settle, and offer a surface if asked."""
         self.resolve_sets(pipeline.state_0)
-        self.join_settle(pipeline, (int(self.spec.settle_frames), int(self.spec.settle_substeps)))
         self.solver = island_solver(pipeline, self.name)
+        self._apply_adhesion()
+        self.join_settle(pipeline, (int(self.spec.settle_frames), int(self.spec.settle_substeps)))
         self._check_voxel_ratio()
         if self.spec.render == "surface" and self.solver is not None:
             self._install_surface()

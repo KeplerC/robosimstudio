@@ -12,6 +12,7 @@ sampled on a lattice.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from typing import Any, ClassVar
@@ -264,6 +265,12 @@ class ParticleBodySpec:
             pipeline would offset them by the margin.
         container_margin: The margin [m], or ``None`` for 2 mm, half the
             registered voxel.
+        sticks_to: What this body sticks to and how hard, as ``{entity name:
+            adhesion [Pa]}``: the pull per unit area it keeps on that rigid or
+            static entity's surfaces before it lets go. The names are found as
+            :attr:`containers` are. Empty, and every surface not named, is
+            Newton's zero, at which nothing holds a paste to a plate but
+            friction under its own weight.
         color: Display RGB in [0, 1], or ``None`` for the material's.
         opacity: Display alpha in (0, 1].
         finish: Finish under the path-traced backend, or ``None`` for the
@@ -293,6 +300,7 @@ class ParticleBodySpec:
     surface_voxel: float | None = None
     containers: tuple[str, ...] = ()
     container_margin: float | None = None
+    sticks_to: Any = ()
     color: Vec3 | None = None
     opacity: float = 1.0
     finish: Finish | None = None
@@ -320,6 +328,11 @@ class ParticleBodySpec:
             raise ValueError(f"{where}: settle_frames and settle_substeps must be >= 0")
         if self.container_margin is not None and not float(self.container_margin) > 0.0:
             raise ValueError(f"{where}: container_margin must be > 0 m, got {self.container_margin}")
+        # A mapping is how it is written and a tuple of pairs how it is kept: the spec is frozen.
+        sticks = tuple((str(name), float(value)) for name, value in dict(self.sticks_to).items())
+        if any(not (math.isfinite(value) and value >= 0.0) for _, value in sticks):
+            raise ValueError(f"{where}: sticks_to takes an adhesion >= 0 Pa for each name, got {dict(sticks)}")
+        object.__setattr__(self, "sticks_to", sticks)
 
     @property
     def particle_count(self) -> int | None:

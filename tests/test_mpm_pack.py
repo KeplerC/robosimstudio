@@ -388,6 +388,35 @@ class TestTheContainerMargins(unittest.TestCase):
         self.assertEqual(set(labels[:5]), given)
 
 
+class TestWhatABodySticksTo(unittest.TestCase):
+    """``sticks_to``: written as a mapping, kept as pairs, and found on a model by the names a container is."""
+
+    def test_a_mapping_is_kept_as_pairs_and_nothing_is_the_default(self) -> None:
+        import robosimstudio as rss
+
+        self.assertEqual((), rss.dough(name="pat").sticks_to)
+        pat = rss.dough(name="pat", sticks_to={"plate": 2000, "knife": 0.0})
+        self.assertEqual((("plate", 2000.0), ("knife", 0.0)), pat.sticks_to)
+        self.assertEqual(pat, rss.replace(pat, name="pat"), "what a spec holds goes back in as it came out")
+        hash(pat)
+
+    def test_an_adhesion_is_a_pressure_that_is_not_negative(self) -> None:
+        import robosimstudio as rss
+
+        for bad in (-1.0, float("nan"), float("inf")):
+            with self.subTest(adhesion=bad), self.assertRaisesRegex(ValueError, "sticks_to takes an adhesion"):
+                rss.dough(name="pat", sticks_to={"plate": bad})
+
+    def test_the_named_entitys_shapes_are_its_bodys_and_its_own_labels(self) -> None:
+        from robosimstudio_materials.mpm.entity import _named_shapes
+
+        labels = ["plate", "plate_rim", "plate_collision_00", "plate_2", "knife"]
+        bodies, shape_body = ["plate", "knife"], [0, 0, -1, -1, 1]
+        self.assertEqual([0, 1, 2], _named_shapes("plate", labels, bodies, shape_body))
+        self.assertEqual([4], _named_shapes("knife", labels, bodies, shape_body))
+        self.assertEqual([], _named_shapes("spoon", labels, bodies, shape_body))
+
+
 class TestTheCupMesh(unittest.TestCase):
     def test_the_mesh_is_written_beside_its_name_and_renamed_onto_it(self) -> None:
         """Two processes building one cup share the cache file; neither may read it half written."""

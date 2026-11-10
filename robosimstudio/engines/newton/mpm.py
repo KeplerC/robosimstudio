@@ -81,6 +81,7 @@ import inspect
 from typing import Any
 
 import newton
+import numpy as np
 import warp as wp
 import warp.fem as fem
 from newton.solvers import SolverImplicitMPM
@@ -160,6 +161,39 @@ class SolverMPM(SolverImplicitMPM):
         self._was_capturing = False
         self._held_wrenches: dict[int, wp.array] = {}
         self._harvested_at: dict[int, int] = {}
+
+    # ------------------------------------------------------------ colliders
+    def set_collider_adhesion(self, shapes: Any, adhesion: float) -> int:
+        """Set how hard the particles stick to some of this solver's collider shapes [Pa]; return how many it set.
+
+        Newton's implicit MPM keeps one collider material per shape, in the order its
+        ``setup_collider`` found them -- the world-fixed shapes, then each body's -- behind a default
+        material at index 0, and fills the friction and the thickness from the shape and the
+        adhesion with zero: a model has no adhesion to read. This writes the material table in place,
+        which a captured graph reads by pointer. ``shapes`` index this solver's own model.
+        """
+        from newton._src.solvers.implicit_mpm.implicit_mpm_model import _get_body_collision_shapes
+
+        model, mpm = self.model, self._mpm_model
+        static = np.asarray(_get_body_collision_shapes(model, -1), dtype=int)
+        if getattr(mpm, "_separate_worlds", False) and static.size:
+            world = model.shape_world.numpy()[static]
+            static = np.concatenate([static[world == w] for w in sorted({int(w) for w in world})])
+        order = [int(s) for s in static]
+        for body in range(model.body_count):
+            order += [int(s) for s in _get_body_collision_shapes(model, body)]
+        table = mpm.collider.material_adhesion
+        values = table.numpy().copy()
+        if len(order) + 1 != len(values):
+            raise RuntimeError(
+                f"SolverMPM: {len(values) - 1} collider materials for {len(order)} collider shapes; the colliders "
+                "were not set up from the model's shapes, so a shape's material cannot be found by its place."
+            )
+        wanted = {int(s) for s in np.asarray(shapes).reshape(-1)}
+        hit = [i + 1 for i, s in enumerate(order) if s in wanted]
+        values[hit] = float(adhesion)
+        table.assign(values)
+        return len(hit)
 
     # ----------------------------------------------------------------- rate
     @property
