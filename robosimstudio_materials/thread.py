@@ -7,7 +7,9 @@ build, imported as ``robosimstudio_materials.thread``. Run
 each part is one rigid body whose thread is a watertight mesh, a trapezoid ridge
 wound round the neck's outside and another round the cap's inside, and what
 holds the cap on, turns a quarter turn into three quarters of a millimetre of
-rise and lets it go after two turns is contact between the two ridges.
+rise and lets it go after two turns is contact between the two ridges. The
+bulb and its socket are a household lamp on the medium Edison screw, whose
+thread is rounded and whose numbers are the published ones (:class:`LampSpec`).
 
 **It needs Newton's collision pipeline, which is what** :data:`THREAD_60HZ`
 **stages.** MuJoCo collides a mesh as its convex hull, and the hull of a cap is
@@ -29,6 +31,16 @@ and meshes of 17k and 34k triangles turned alike (7 to 10 um rms); at 600 Hz the
 flanks gave 12 um a newton at Newton's default impedance and 1.3 at 0.998, and
 let go between 40 and 80 N; at 1920 Hz the pair held 100 N.
 
+Measured on the lamp, alone in its holder (``tests/test_lamp_pair``): turned by
+a torque of 10 mN m from three turns out it goes down 3.62 mm a turn against
+the 3.629 of its pitch, over two and a half turns and never farther off the
+helix than the 0.18 mm of its thread's play, until its eyelet is on the holder's
+centre contact; 390 contacts, 1.6 x real time. **A round thread clamps harder
+than it looks.** Its flanks are arcs, and turned on at a turn in 4 s into a
+closed contact the lamp went from under 2 N to as much as 115 N in one control
+step: slow the hand as it comes home
+(``examples/08_demos/screw_in_the_bulb`` does, and reads 2 to 4 N).
+
 **A light part tunnels where a heavy one would not.** MuJoCo acts on a contact
 once the surfaces overlap, and a 3 g cap moves a ridge's whole 0.9 mm overlap in
 one 600 Hz step under a 20 N force applied all at once: it ends half a pitch up,
@@ -45,6 +57,7 @@ from typing import Any
 
 import numpy as np
 
+from robosimstudio.core.render.finish import GLOSS, Finish
 from robosimstudio.domains.rigid.entity import EntityRigid
 from robosimstudio.scene.registry import register_entity
 from robosimstudio.specs import ObjectSpec
@@ -55,12 +68,15 @@ from robosimstudio.specs.base import Vec3
 __all__ = [
     "THREAD_60HZ",
     "EntityThreaded",
+    "LampSpec",
     "ThreadSpec",
     "ThreadedSpec",
     "bottle",
     "bulb",
     "cap",
     "cap_mesh",
+    "holder_meshes",
+    "lamp_meshes",
     "neck_mesh",
     "screwed",
     "socket",
@@ -276,7 +292,261 @@ def cap_mesh(thread: ThreadSpec | None = None) -> tuple[np.ndarray, np.ndarray]:
 
 
 # =============================================================================
-# 2. The parts
+# 2. The lamp: a medium Edison screw under a pear of glass, and its holder
+# =============================================================================
+
+INCH = 0.0254
+
+
+@dataclass(frozen=True, kw_only=True)
+class LampSpec:
+    """A household lamp and the holder it screws into [m]: an A19 bulb on a medium Edison screw (E26).
+
+    The numbers are published ones, kept in the inches they are printed in:
+
+    - **The thread** is the American Standard rolled thread for the screw
+      shells of lamp bases and sockets, medium size, as Machinery's Handbook
+      tabulates it (read from Engineers Edge's copy of that table): seven
+      threads to the inch, a crest and a root that are arcs of 0.047 in, 0.033
+      in deep; the base 1.037 to 1.031 in over its crests and 0.971 to 0.965 in
+      at its roots, the socket 1.053 to 1.045 in and 0.987 to 0.979 in. Each
+      diameter here is the middle of its two limits, which leaves 0.19 mm
+      between the two threads all round.
+    - **The base** is GE Lighting Components' data sheet 7675-1A, "Medium Screw
+      Bases" (November 1994): 0.937 in tall, 1.075 in over its top rim, a centre
+      eyelet of 0.389 in, glass insulated; its thread columns repeat the
+      standard's (depth 0.033 in, radius 0.047 in, crest 1.037 in, root 0.971 in).
+    - **The bulb** is the A19: 19 eighths of an inch at its widest and about
+      4 3/8 in long (Wikipedia, "A-series light bulb", after ANSI C79.1 and
+      IEC 60887), inside the 2.38 in by 4.5 in a maker lists as its maximum
+      (Satco S2419, a 60 W A19, whose 0.07 lb is the 32 g :func:`bulb` weighs).
+
+    What is not from a drawing: the pear's outline below its sphere (a cone
+    tangent to it, into a 26.4 mm neck), how the base's 23.8 mm divide between
+    eyelet, insulator, dome, thread and rim, the turns of thread on each part,
+    and everything about the holder but its thread.
+
+    Attributes:
+        pitch: Rise per turn, a seventh of an inch.
+        base_major, base_minor: The base's **diameters** over its crests and at
+            its roots.
+        holder_major, holder_minor: The holder's, at its roots and over its
+            crests.
+        base_turns, holder_turns: Turns of thread wound on each.
+        taper_deg: The angle over which each end of a thread runs in and out.
+        base_height: From the eyelet's face to the top of the base's rim.
+        rim_diameter: Over the base's top rim, where the glass is cemented in.
+        eyelet_diameter: The centre contact at the base's tip.
+        bulb_diameter: The glass at its widest.
+        length: The whole lamp, eyelet to the top of the glass.
+        well: The holder's depth, its mouth above its centre contact.
+        pad: The holder's centre contact, ``(radius, height off the floor)``.
+        housing: The holder's body, ``(radius, flange radius, foot)``: ``foot``
+            is how far its underside is below the centre contact.
+        segments: Mesh facets round the axis.
+        row: Mesh row height along the axis through a thread.
+    """
+
+    pitch: float = INCH / 7.0
+    base_major: float = 0.5 * (1.037 + 1.031) * INCH
+    base_minor: float = 0.5 * (0.971 + 0.965) * INCH
+    holder_major: float = 0.5 * (1.053 + 1.045) * INCH
+    holder_minor: float = 0.5 * (0.987 + 0.979) * INCH
+    base_turns: float = 3.5
+    holder_turns: float = 2.75
+    taper_deg: float = 30.0
+    base_height: float = 0.937 * INCH
+    rim_diameter: float = 1.075 * INCH
+    eyelet_diameter: float = 0.389 * INCH
+    bulb_diameter: float = 2.375 * INCH
+    length: float = 4.375 * INCH
+    well: float = 21.3e-3
+    pad: tuple[float, float] = (5.5e-3, 1.0e-3)
+    housing: tuple[float, float, float] = (21.0e-3, 30.0e-3, 12.0e-3)
+    segments: int = 180
+    row: float = 0.12e-3
+
+    def __post_init__(self) -> None:
+        if not 0.0 < self.radial_clearance < self.depth:
+            raise ValueError(
+                "the holder's thread is wider than the base's by less than the thread's depth, and by more than 0"
+            )
+        if abs(0.5 * (self.holder_major - self.holder_minor) - self.depth) > 1.0e-5:
+            raise ValueError("the two threads are one depth: the holder's diameters differ by what the base's do")
+        if self.arc_radius < 0.25 * self.pitch:
+            raise ValueError(
+                "a thread this deep for its pitch has no round profile: its arcs would be past a half circle"
+            )
+
+    @property
+    def depth(self) -> float:
+        """The thread's depth, crest to root."""
+        return 0.5 * (self.base_major - self.base_minor)
+
+    @property
+    def arc_radius(self) -> float:
+        """The radius of the two arcs, crest and root, that meet at half depth and make the profile."""
+        return (self.pitch**2 / 16.0 + self.depth**2 / 4.0) / self.depth
+
+    @property
+    def radial_clearance(self) -> float:
+        """Between the two threads all round, when the lamp is centred in the holder."""
+        return 0.5 * (self.holder_major - self.base_major)
+
+    @property
+    def axial_play(self) -> float:
+        """How far the lamp moves along the axis between its two flank contacts, centred in the holder."""
+        across = np.linspace(-0.5, 0.5, 4001)
+        low, high = 0.0, 0.5 * self.pitch
+        for _ in range(40):
+            shift = 0.5 * (low + high)
+            gap = self.radial_clearance + _round(across, self) - _round(across - shift / self.pitch, self)
+            low, high = (shift, high) if float(gap.min()) > 0.0 else (low, shift)
+        return 2.0 * low
+
+    @property
+    def thread_foot(self) -> float:
+        """Height over the eyelet's face of the lower end of the base's threaded band."""
+        return self.base_height - 1.6e-3 - self.pitch * (self.base_turns + 1.0)
+
+    @property
+    def crest_start(self) -> float:
+        """Height over the eyelet's face at which the base's crest starts winding."""
+        return self.thread_foot + 0.5 * self.pitch
+
+    @property
+    def equator(self) -> float:
+        """Height over the eyelet's face of the glass at its widest: where a hand closes on it."""
+        return self.length - 0.5 * self.bulb_diameter
+
+    @property
+    def mouth(self) -> float:
+        """Height of the holder's mouth over its underside."""
+        return self.housing[2] + self.well
+
+    @property
+    def catch(self) -> float:
+        """How far above home the lamp is as its thread first meets the holder's [m]: about three turns' worth."""
+        top = self.crest_start + self.pitch * (self.holder_turns + 1.0)
+        return top - self.thread_foot - self.pitch
+
+
+def _round(offset, lamp: LampSpec) -> np.ndarray:
+    """The round profile's height over its root, ``offset`` pitches along the axis from a crest."""
+    along = np.abs(offset - np.round(offset)) * lamp.pitch
+    radius, depth = lamp.arc_radius, lamp.depth
+    crest = depth - (radius - np.sqrt(np.maximum(radius**2 - along**2, 0.0)))
+    root = radius - np.sqrt(np.maximum(radius**2 - (0.5 * lamp.pitch - along) ** 2, 0.0))
+    return np.where(along <= 0.25 * lamp.pitch, crest, root)
+
+
+def _wound(theta: np.ndarray, z: float, start: float, turns: float, lamp: LampSpec) -> np.ndarray:
+    """A round thread's height over its root at each angle and one height ``z``.
+
+    Its crest starts at ``start`` and winds ``turns``; each end runs in over
+    :attr:`LampSpec.taper_deg`.
+    """
+    offset = (z - start) / lamp.pitch - theta / (2.0 * math.pi)
+    turn = np.round(offset)
+    along = theta + 2.0 * math.pi * turn
+    taper = math.radians(lamp.taper_deg)
+    ends = np.clip(np.minimum(along / taper, (2.0 * math.pi * turns - along) / taper), 0.0, 1.0)
+    return ends * _round(offset - turn, lamp)
+
+
+def _outline(lamp: LampSpec) -> tuple[np.ndarray, np.ndarray]:
+    """The glass, as ``(radius, height)`` up its outside: a neck, a cone, and the sphere the cone is tangent to."""
+    radius = 0.5 * lamp.bulb_diameter
+    neck = 0.5 * lamp.rim_diameter - 0.45e-3
+    corner = np.array([neck, lamp.base_height + 4.0e-3])
+    centre = np.array([0.0, lamp.equator])
+    to_centre = centre - corner
+    reach = float(np.linalg.norm(to_centre))
+    lean = math.atan2(-to_centre[0], to_centre[1]) - math.asin(radius / reach)  # the tangent's angle off the axis
+    along = np.array([-math.sin(lean), math.cos(lean)])
+    touch = corner + math.sqrt(reach**2 - radius**2) * along
+    blend = corner + 3.5e-3 * along
+    below = np.array([neck, lamp.base_height + 1.0e-3])
+    f = np.linspace(0.0, 1.0, 9)[:, None]
+    points = [
+        np.array([[neck, lamp.base_height - 0.8e-3]]),
+        (1 - f) ** 2 * below + 2 * f * (1 - f) * corner + f**2 * blend,
+    ]
+    points += [blend + (touch - blend) * np.linspace(0.0, 1.0, 16)[1:, None]]
+    first = math.atan2(touch[1] - centre[1], touch[0])
+    arc = np.linspace(first, 0.5 * math.pi, 40)[1:-1]
+    points += [np.stack([radius * np.cos(arc), centre[1] + radius * np.sin(arc)], -1)]
+    outline = np.concatenate(points)
+    return outline[:, 0], outline[:, 1]
+
+
+def lamp_meshes(lamp: LampSpec | None = None) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """The lamp's three turned parts as ``(vertices, faces)``, each watertight, the eyelet's face at z = 0.
+
+    ``"base"`` is the metal: a dome, the threaded shell and the rim.
+    ``"insulator"`` is the ring of glass between it and the eyelet, and
+    ``"glass"`` the bulb. The base and :func:`holder_meshes`' shell are one
+    helix, so a lamp standing on the holder's centre contact is screwed home.
+    """
+    m = lamp or LampSpec()
+    theta = np.linspace(0.0, 2.0 * math.pi, m.segments, endpoint=False)
+    flat = np.ones(m.segments)
+    root, rim = 0.5 * m.base_minor, 0.5 * m.rim_diameter
+    eyelet, shoulder = 0.5 * m.eyelet_diameter, 9.0e-3
+    foot, band = m.thread_foot, m.thread_foot + m.pitch * (m.base_turns + 1.0)
+    dome = foot - 2.6e-3
+    rings = [
+        (shoulder + (root - shoulder) * math.sin(0.5 * math.pi * f) * flat, dome + (foot - dome) * f)
+        for f in np.linspace(0, 1, 10)[:-1]
+    ]
+    rings += [(root + _wound(theta, z, m.crest_start, m.base_turns, m), z) for z in _rows(foot, band, m.row)]
+    rings += [
+        ((root + (rim - root) * (0.5 - 0.5 * math.cos(math.pi * f))) * flat, band + (m.base_height - band) * f)
+        for f in np.linspace(0, 1, 8)[1:]
+    ]
+    base = _sweep([r for r, _ in rings], [z for _, z in rings], poles=(dome, m.base_height))
+    low = 0.6e-3
+    rings = [
+        ((eyelet + 0.5e-3 + (shoulder + 0.2e-3 - eyelet - 0.5e-3) * f) * flat, low + (dome + 0.2e-3 - low) * f)
+        for f in np.linspace(0, 1, 8)
+    ]
+    insulator = _sweep([r for r, _ in rings], [z for _, z in rings], poles=(low, dome + 0.2e-3))
+    radii, heights = _outline(m)
+    glass = _sweep([r * flat for r in radii], list(heights), poles=(float(heights[0]), m.length))
+    return {"base": base, "insulator": insulator, "glass": glass}
+
+
+def holder_meshes(lamp: LampSpec | None = None) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """The holder's two turned parts as ``(vertices, faces)``, each watertight, its underside at z = 0, mouth up.
+
+    ``"shell"`` is the threaded metal cup, its floor a pad's height under the
+    centre contact; ``"housing"`` is the body round it.
+    """
+    m = lamp or LampSpec()
+    theta = np.linspace(0.0, 2.0 * math.pi, m.segments, endpoint=False)
+    flat = np.ones(m.segments)
+    body, flange, home = m.housing  # ``home`` is the centre contact's face, where the lamp's eyelet comes to rest
+    bore, outer = 0.5 * m.holder_major, 0.5 * m.holder_major + 1.0e-3
+    floor, under, mouth = home - m.pad[1], home - m.pad[1] - 1.2e-3, m.mouth
+    start = home + m.crest_start + 0.5 * m.pitch  # the holder's ridge runs half a pitch above the base's crest
+    low, high = start - 0.5 * m.pitch, start + m.pitch * (m.holder_turns + 0.5)
+    rings = [(outer * flat, z) for z in _rows(under, mouth, 2.0e-3)]
+    rings += [(bore * flat, z) for z in _rows(high, mouth, 0.3e-3)[::-1]]
+    rings += [(bore - _wound(theta, z, start, m.holder_turns, m), z) for z in _rows(low, high, m.row)[::-1][1:]]
+    rings += [(bore * flat, z) for z in _rows(floor, low, 0.5e-3)[::-1][1:]]
+    shell = _sweep([r for r, _ in rings], [z for _, z in rings], poles=(under, floor))
+    fit = outer + 2.0e-5  # the housing's bore, a hair off the shell so no two faces share a place
+    lip = mouth + 0.5e-3
+    turned = [(flange, 0.0), (flange, 4.0e-3), (body + 1.5e-3, 7.0e-3), (body, 9.0e-3)]
+    turned += [(body, z) for z in _rows(9.0e-3, mouth - 1.0e-3, 3.0e-3)[1:]]
+    turned += [(body - 0.4e-3, mouth), (body - 1.4e-3, lip), (fit + 0.6e-3, lip), (fit, mouth)]
+    turned += [(fit, z) for z in _rows(under - 2.0e-5, mouth, 3.0e-3)[::-1][1:]]
+    housing = _sweep([r * flat for r, _ in turned], [z for _, z in turned], poles=(0.0, under - 2.0e-5))
+    return {"shell": shell, "housing": housing}
+
+
+# =============================================================================
+# 3. The parts
 # =============================================================================
 
 
@@ -289,26 +559,24 @@ class ThreadedSpec(ObjectSpec):
 
     Attributes:
         part: ``"bottle"``, ``"cap"``, ``"bulb"`` or ``"socket"``.
-        thread: The thread it carries; two parts mate when theirs are equal.
-        sdf_resolution: Voxels along the longest side of each mesh's
+        thread: The thread a bottle or a cap carries; two mate when theirs are equal.
+        lamp: The lamp a bulb or a socket is cut to; two mate when theirs are equal.
+        sdf_resolution: Voxels along the longest side of the threaded mesh's
             signed-distance field. 64 to 256 turned alike; the robot runs were
-            measured at 256, 0.14 mm cells.
-        body: The bottle's body or the bulb's glass tube, ``(radius, height)``.
+            measured at 256, 0.14 mm cells on a cap and 0.11 mm on a lamp's base.
+        body: The bottle's body, ``(radius, height)``.
         shoulder: Height of the bottle's shoulder, body to stem.
         stem: The bottle's plain neck under its thread, ``(radius, height)``.
-        contact: The bulb's base contact and the socket's centre pad,
-            ``(radius, height)``: the pad stands this high off the socket's
-            floor, and the bulb's contact meets it before its rim seats.
     """
 
     entity: str = "threaded"
     part: str = "cap"
     thread: ThreadSpec = field(default_factory=ThreadSpec)
+    lamp: LampSpec = field(default_factory=LampSpec)
     sdf_resolution: int = 256
     body: tuple[float, float] = (0.030, 0.180)
     shoulder: float = 0.025
     stem: tuple[float, float] = (0.0125, 0.026)
-    contact: tuple[float, float] = (0.004, 0.0003)
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -317,41 +585,67 @@ class ThreadedSpec(ObjectSpec):
         if self.asset is not None:
             raise ValueError(f"threaded part {self.name!r}: built here from its thread, so it takes no asset")
         # The cylinder the part fits in: a stated primitive is what tells the rigid entity it builds this itself.
-        t, tall = self.thread, self.thread.top + self.thread.cap_depth
-        wide = t.grip_radius
+        t, m = self.thread, self.lamp
+        wide, tall = t.grip_radius, t.top + t.cap_depth
         if self.part == "bottle":
             wide, tall = max(self.body[0], t.collar_radius), self.rim
         elif self.part == "bulb":
-            wide, tall = max(self.body[0], t.collar_radius), t.finish_length + self.body[1] + self.body[0]
+            wide, tall = 0.5 * m.bulb_diameter, m.length
+        elif self.part == "socket":
+            wide, tall = m.housing[1], m.mouth
         object.__setattr__(self, "shape", ShapeSpec(kind="cylinder", radius=wide, half_height=0.5 * tall))
         if int(self.sdf_resolution) % 8:
             raise ValueError(f"threaded part {self.name!r}: sdf_resolution must be a multiple of 8")
 
     @property
+    def pitch(self) -> float:
+        """What one turn raises or lowers this part [m]: its thread's pitch, or its lamp's."""
+        return self.lamp.pitch if self.part in ("bulb", "socket") else self.thread.pitch
+
+    @property
     def rim(self) -> float:
         """Height of the mating point over the part's origin [m].
 
-        A bottle's rim, a socket's floor: where :func:`screwed` puts the other
-        part's origin when it is screwed home. A cap's seat and a bulb's tip
-        are their origins, 0.
+        A bottle's rim, the face of a socket's centre contact: where
+        :func:`screwed` puts the other part's origin when it is screwed home. A
+        cap's seat and a bulb's eyelet are their origins, 0.
         """
-        t = self.thread
         if self.part == "bottle":
-            return self.body[1] + self.shoulder + self.stem[1] + t.finish_length
-        return t.top if self.part == "socket" else 0.0
+            return self.body[1] + self.shoulder + self.stem[1] + self.thread.finish_length
+        return self.lamp.housing[2] if self.part == "socket" else 0.0
 
     @property
     def grasp_height(self) -> float:
-        """Height over the origin of the middle of the band a hand closes on [m]: the ribs, the glass, the body."""
+        """Height over the origin of the middle of the band a hand closes on [m]: the ribs, the glass at its widest, the body."""
         t = self.thread
         if self.part == "cap":
             return 0.5 * (t.top - t.cap_depth)
         if self.part == "bulb":
-            return t.finish_length + 0.55 * self.body[1]
+            return self.lamp.equator
         if self.part == "bottle":
             return 0.5 * self.body[1]
-        return t.top + 0.5 * t.cap_depth
+        return 0.5 * self.lamp.mouth
 
+
+GLASS: Vec3 = (0.96, 0.95, 0.92)
+"""A lamp's glass, dark."""
+GLASS_FINISH = Finish(roughness=0.12, opacity=0.35, ior=1.5)
+"""Soda-lime glass, lightly frosted: the path tracer draws it translucent. The studio's page draws a
+shape that repaints itself flat, so there the bulb is an opaque pearl shell."""
+LIT: Vec3 = (1.0, 0.92, 0.55)
+"""The glass with the filament on: :meth:`EntityThreaded.light`."""
+SHELL: Vec3 = (0.80, 0.80, 0.79)
+"""The base's and the holder's screw shells: aluminium."""
+BRASS: Vec3 = (0.80, 0.62, 0.28)
+"""The eyelet and the holder's centre contact."""
+VITRITE: Vec3 = (0.035, 0.035, 0.04)
+"""The black glass that insulates the eyelet from the shell."""
+PORCELAIN: Vec3 = (0.93, 0.92, 0.88)
+"""The holder's body."""
+LAMP_DENSITY = (127.0, 1240.0)
+"""What the lamp's glass and its base are built at [kg/m^3], before the whole is scaled to the lamp's
+mass: a bulb is a 0.6 mm wall, drawn here solid, so the 149 cm^3 it encloses carry 19 g and the 10.5 cm^3
+of base 13 g, and the lamp's centre of mass is 52 mm up, under its widest part."""
 
 _DEFAULTS: dict[str, Any] = {"friction": 0.3, "ke": 1.0e7, "kd": 1.0e4, "impedance": 0.998, "contact_gap": 0.002}
 """What every part states unless told otherwise: a hard plastic's friction, a stiff contact,
@@ -387,26 +681,33 @@ def cap(*, name: str = "cap", at: Vec3 = (0.0, 0.0, 0.0), thread: ThreadSpec | N
     return ThreadedSpec(name=name, part="cap", thread=thread or ThreadSpec(), pose=at, **spec)
 
 
-def bulb(*, name: str = "bulb", at: Vec3 = (0.0, 0.0, 0.0), thread: ThreadSpec | None = None, **kwargs) -> ThreadedSpec:
-    """A lamp: a threaded base under a short glass tube with a round end. ``at`` is the base's tip.
+def bulb(*, name: str = "bulb", at: Vec3 = (0.0, 0.0, 0.0), lamp: LampSpec | None = None, **kwargs) -> ThreadedSpec:
+    """A household lamp, base down: an A19 bulb on a medium Edison screw. ``at`` is the face of its eyelet.
 
-    The glass is a 34 mm tube 22 mm long, 20 g with its base. A contact in the
-    middle of the tip meets the socket's pad as the bulb comes home.
+    60.3 mm of glass at its widest, 81 mm up, and 111 mm tall; the base under
+    it is 26.3 mm over its thread's crests, a rounded thread of 3.63 mm pitch
+    (:class:`LampSpec` has where each number comes from). 32 g, 19 of them
+    glass, so it hangs base down from a hold on its widest part. The eyelet in
+    the middle of its tip is what meets a socket's centre contact:
+    ``sim["bulb"].entity.contact_shape``.
+
+    It is drawn as glass, on a metal base with a black insulator, and
+    :meth:`EntityThreaded.light` draws it lit or dark.
     """
-    spec = {"mass": 0.020, "body": (0.017, 0.022), "color": (1.0, 0.96, 0.78), **_DEFAULTS, **kwargs}
-    return ThreadedSpec(name=name, part="bulb", thread=thread or ThreadSpec(), pose=at, **spec)
+    spec = {"mass": 0.032, "color": GLASS, "finish": GLASS_FINISH, **_DEFAULTS, **kwargs}
+    return ThreadedSpec(name=name, part="bulb", lamp=lamp or LampSpec(), pose=at, **spec)
 
 
-def socket(
-    *, name: str = "socket", at: Vec3 = (0.0, 0.0, 0.0), thread: ThreadSpec | None = None, **kwargs
-) -> ThreadedSpec:
-    """A lamp holder: the inside thread, mouth up, with a contact pad in its floor. ``at`` is its underside.
+def socket(*, name: str = "socket", at: Vec3 = (0.0, 0.0, 0.0), lamp: LampSpec | None = None, **kwargs) -> ThreadedSpec:
+    """A lamp holder, mouth up: a threaded metal shell in a porcelain body, a centre contact in its floor. ``at`` is its underside.
 
-    Fixed where it stands unless ``static=False``: a lamp holder is screwed to
-    something.
+    60 mm over its flange and 34 mm tall; the mouth is 21.3 mm above the centre
+    contact, so a lamp's thread first meets the shell's 11.8 mm, three and a
+    quarter turns, above home. Fixed where it stands unless ``static=False``:
+    a lamp holder is screwed to something.
     """
-    spec = {"static": True, "color": (0.92, 0.90, 0.84), **_DEFAULTS, **kwargs}
-    return ThreadedSpec(name=name, part="socket", thread=thread or ThreadSpec(), pose=at, **spec)
+    spec = {"static": True, "color": PORCELAIN, **_DEFAULTS, **kwargs}
+    return ThreadedSpec(name=name, part="socket", lamp=lamp or LampSpec(), pose=at, **spec)
 
 
 def screwed(onto: ThreadedSpec, *, turns_out: float = 0.0, lift: float = 1.0e-4) -> dict[str, tuple[float, ...]]:
@@ -414,8 +715,8 @@ def screwed(onto: ThreadedSpec, *, turns_out: float = 0.0, lift: float = 1.0e-4)
 
     A cap on a bottle, a bulb in a socket: ``rss.cap(**screwed(flask))``.
     ``turns_out`` backs it off that many turns, raised a pitch for each; past
-    the thread's ``turns`` it stands on the ridge's end, not held. ``lift``
-    starts it that far clear [m].
+    the thread's ``turns`` (a lamp's :attr:`LampSpec.catch`, 3.25 turns) it
+    stands on the thread's end, not held. ``lift`` starts it that far clear [m].
 
     Raises:
         ValueError: If ``onto`` is a cap or a bulb, or is not upright.
@@ -426,7 +727,7 @@ def screwed(onto: ThreadedSpec, *, turns_out: float = 0.0, lift: float = 1.0e-4)
         raise ValueError(f"{onto.name!r} is turned: screwed() places a part on one standing upright")
     x, y, z = (float(v) for v in onto.pose[:3])
     half = math.pi * float(turns_out)
-    height = z + onto.rim + onto.thread.pitch * float(turns_out) + float(lift)
+    height = z + onto.rim + onto.pitch * float(turns_out) + float(lift)
     return {"at": (x, y, height), "quat": (0.0, 0.0, math.sin(half), math.cos(half))}
 
 
@@ -437,14 +738,18 @@ class EntityThreaded(EntityRigid):
     thread_shape: int = -1
     """The shape that carries the thread, once built."""
     contact_shape: int = -1
-    """A bulb's base contact or a socket's pad, once built; -1 on a bottle and a cap."""
+    """A bulb's eyelet or a socket's centre contact, once built; -1 on a bottle and a cap."""
+    glass_shape: int = -1
+    """A bulb's glass, once built; -1 on every other part."""
+    lit: bool = False
+    """Whether a bulb is drawn lit: :meth:`light`."""
 
     def _add_primitive(self, builder, pose) -> None:
         import warp as wp
 
         from robosimstudio.scene.build.bodies import set_body_mass
 
-        spec, t = self.spec, self.spec.thread
+        spec, t, m = self.spec, self.spec.thread, self.spec.lamp
         xform = wp.transform(tuple(float(v) for v in pose[:3]), wp.quat(*[float(v) for v in pose[3:7]]))
         if spec.static:
             body = self._add_welded_link(builder, xform)
@@ -456,32 +761,50 @@ class EntityThreaded(EntityRigid):
         self.body = body
         cfg = self._contact_cfg(builder)
         cfg.density = float(spec.density)
-        flipped = wp.quat(1.0, 0.0, 0.0, 0.0)  # half a turn about x: the thread stays right-handed
         upright = wp.quat_identity()
+        self._look = {}
 
-        def cylinder(radius: float, low: float, high: float, label: str) -> int:
+        def cylinder(radius: float, low: float, high: float, label: str, look=None, shape_cfg=None) -> int:
             at = wp.transform((0.0, 0.0, 0.5 * (low + high)), upright)
-            return builder.add_shape_cylinder(
-                body, xform=at, radius=radius, half_height=0.5 * (high - low), cfg=cfg, label=f"{spec.name}_{label}"
+            shape = builder.add_shape_cylinder(
+                body,
+                xform=at,
+                radius=radius,
+                half_height=0.5 * (high - low),
+                cfg=shape_cfg or cfg,
+                label=f"{spec.name}_{label}",
             )
+            self._look[shape] = look
+            return shape
 
-        def threaded(mesh_of, at: float, quat) -> int:
-            mesh = self._cooked(mesh_of(t))
-            where = wp.transform((0.0, 0.0, at), quat)
-            return builder.add_shape_mesh(body, xform=where, mesh=mesh, cfg=cfg, label=f"{spec.name}_thread")
+        def turned(mesh, label: str, *, at: float = 0.0, look=None, resolution: int = 0, shape_cfg=None) -> int:
+            cooked = self._cooked(mesh, resolution or int(spec.sdf_resolution))
+            where = wp.transform((0.0, 0.0, at), upright)
+            shape = builder.add_shape_mesh(
+                body, xform=where, mesh=cooked, cfg=shape_cfg or cfg, label=f"{spec.name}_{label}"
+            )
+            self._look[shape] = look
+            return shape
 
+        metal = Finish(roughness=0.3, metallic=1.0)
         if spec.part == "cap":
-            self.thread_shape = threaded(cap_mesh, 0.0, upright)
+            self.thread_shape = turned(cap_mesh(t), "thread")
         elif spec.part == "socket":
-            self.thread_shape = threaded(cap_mesh, t.top, flipped)
-            self.contact_shape = cylinder(spec.contact[0] + 0.001, t.top, t.top + spec.contact[1], "pad")
+            meshes = holder_meshes(m)
+            self.thread_shape = turned(meshes["shell"], "thread", look=(SHELL, metal))
+            turned(meshes["housing"], "housing", resolution=128)
+            radius, height = m.pad
+            self.contact_shape = cylinder(radius, spec.rim - height, spec.rim, "pad", look=(BRASS, metal))
         elif spec.part == "bulb":
-            radius, tube = spec.body
-            self.thread_shape = threaded(neck_mesh, 0.0, flipped)
-            self.contact_shape = cylinder(spec.contact[0], 0.0, 0.008, "contact")
-            cylinder(radius, t.finish_length, t.finish_length + tube, "glass")
-            dome = wp.transform((0.0, 0.0, t.finish_length + tube), upright)
-            builder.add_shape_sphere(body, xform=dome, radius=radius, cfg=cfg, label=f"{spec.name}_dome")
+            meshes = lamp_meshes(m)
+            light, heavy = cfg.copy(), cfg.copy()
+            light.density, heavy.density = LAMP_DENSITY
+            self.thread_shape = turned(meshes["base"], "thread", look=(SHELL, metal), shape_cfg=heavy)
+            turned(meshes["insulator"], "insulator", look=(VITRITE, GLOSS), resolution=64, shape_cfg=heavy)
+            self.contact_shape = cylinder(
+                0.5 * m.eyelet_diameter, 0.0, 1.0e-3, "eyelet", look=(BRASS, metal), shape_cfg=heavy
+            )
+            self.glass_shape = turned(meshes["glass"], "glass", resolution=128, shape_cfg=light)
         else:
             (radius, height), (stem, stem_height) = spec.body, spec.stem
             cylinder(radius, 0.0, height, "body")
@@ -489,11 +812,50 @@ class EntityThreaded(EntityRigid):
                 r = radius + (stem - radius) * (k + 0.5) / 4.0
                 cylinder(r, height + spec.shoulder * k / 4.0, height + spec.shoulder * (k + 1) / 4.0, f"shoulder_{k}")
             cylinder(stem, height + spec.shoulder, height + spec.shoulder + stem_height, "stem")
-            self.thread_shape = threaded(neck_mesh, spec.rim, upright)
+            self.thread_shape = turned(neck_mesh(t), "thread", at=spec.rim)
         if spec.mass is not None and not spec.static:
             set_body_mass(builder, body, float(spec.mass))
 
-    def _cooked(self, mesh: tuple[np.ndarray, np.ndarray]):
+    # ------------------------------------------------------------------ looks
+    def apply_display(self, builder) -> None:
+        """The spec's colour and finish on every shape, and a lamp's metal, brass and insulator on theirs."""
+        super().apply_display(builder)
+        for shape, look in getattr(self, "_look", {}).items():
+            if look is not None:
+                builder.shape_color[shape], self.finishes[shape] = look
+
+    @property
+    def recolors_live(self) -> bool:
+        """A bulb repaints its glass when it is lit; no other part repaints."""
+        return self.spec.part == "bulb"
+
+    def light(self, on: bool) -> None:
+        """Draw a bulb lit or dark. Display only: the solver never reads it.
+
+        A lamp is lit when its eyelet presses on the holder's centre contact,
+        and that force is the scene's to read (``sim.contacts``); this is what
+        the reader calls with the answer. It writes the glass's row of
+        ``model.shape_color``, which every viewer reads again for a shape of an
+        entity that :attr:`recolors_live`.
+
+        Raises:
+            ValueError: If this part is not a bulb.
+        """
+        if self.spec.part != "bulb":
+            raise ValueError(f"threaded part {self.spec.name!r} is a {self.spec.part}: only a bulb lights")
+        if bool(on) == self.lit or self.model is None:
+            return
+        colors = self.model.shape_color.numpy()
+        colors[self.glass_shape][:3] = LIT if on else tuple(float(v) for v in self.spec.color or GLASS)
+        self.model.shape_color.assign(colors)
+        self.lit = bool(on)
+
+    def reset(self, pipeline, episode) -> None:
+        super().reset(pipeline, episode)
+        if self.spec.part == "bulb":
+            self.light(False)
+
+    def _cooked(self, mesh: tuple[np.ndarray, np.ndarray], resolution: int):
         """The mesh as Newton's, with its signed-distance field cooked and cached on disk by content."""
         import tempfile
         from pathlib import Path
@@ -511,7 +873,7 @@ class EntityThreaded(EntityRigid):
         directory = Path(tempfile.gettempdir()) / "robosimstudio_sdf_cache"
         directory.mkdir(parents=True, exist_ok=True)
         cooked.build_sdf(
-            max_resolution=int(self.spec.sdf_resolution),
+            max_resolution=int(resolution),
             narrow_band_range=(-SDF_BAND, SDF_BAND),
             margin=SDF_BAND,
             cache_dir=directory,
@@ -523,7 +885,7 @@ register_entity("threaded")(EntityThreaded)
 
 
 # =============================================================================
-# 3. The physics that carries a thread
+# 4. The physics that carries a thread
 # =============================================================================
 
 THREAD_60HZ = ArrangementSpec(

@@ -131,7 +131,7 @@ KINDS: dict[str, Kind] = {
     ),
     "thread": Kind(
         "thread",
-        ("THREAD_60HZ", "ThreadSpec", "ThreadedSpec", "bottle", "bulb", "cap", "socket"),
+        ("THREAD_60HZ", "LampSpec", "ThreadSpec", "ThreadedSpec", "bottle", "bulb", "cap", "socket"),
         (),
         (("threaded", "thread.EntityThreaded"),),
     ),

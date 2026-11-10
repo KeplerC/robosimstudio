@@ -220,7 +220,7 @@ _PACKS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "robosimstudio_materials.thread": (
         "threaded parts (the `thread` kind: a bottle and its cap, a bulb and its socket, on real thread geometry)",
-        ("THREAD_60HZ", "ThreadSpec", "ThreadedSpec", "bottle", "bulb", "cap", "socket"),
+        ("THREAD_60HZ", "LampSpec", "ThreadSpec", "ThreadedSpec", "bottle", "bulb", "cap", "socket"),
     ),
 }
 """Kind -> what it is, in words, and the flat names it provides.

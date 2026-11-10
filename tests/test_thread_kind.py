@@ -20,13 +20,17 @@ import robosimstudio as rss
 from robosimstudio.core.builder import set_shape_attribute
 from robosimstudio.robots.registry import get_gripper
 from robosimstudio_materials.thread import (
+    INCH,
     THREAD_60HZ,
+    LampSpec,
     ThreadedSpec,
     ThreadSpec,
     bottle,
     bulb,
     cap,
     cap_mesh,
+    holder_meshes,
+    lamp_meshes,
     neck_mesh,
     screwed,
     socket,
@@ -163,6 +167,111 @@ class TestTheMeshes(unittest.TestCase):
             ThreadSpec(ridge_half_crest=1.0e-3)
 
 
+def _radius(vertices: np.ndarray) -> np.ndarray:
+    return np.hypot(vertices[:, 0], vertices[:, 1])
+
+
+class TestTheLamp(unittest.TestCase):
+    """The medium Edison screw and the A19 bulb, against the numbers their sources print (in inches)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lamp = LampSpec()
+        cls.parts = {**lamp_meshes(cls.lamp), **holder_meshes(cls.lamp)}
+
+    def test_every_turned_part_is_closed_and_faces_outward(self) -> None:
+        for name, (vertices, faces) in self.parts.items():
+            with self.subTest(part=name):
+                self.assertTrue(_closed(faces))
+                self.assertGreater(_volume(vertices, faces), 0.0)
+
+    def test_the_thread_is_the_standard_s(self) -> None:
+        m = self.lamp
+        self.assertAlmostEqual(1.0 / 7.0, m.pitch / INCH, delta=1e-12, msg="seven threads to the inch")
+        self.assertAlmostEqual(0.033, m.depth / INCH, delta=1e-9)
+        self.assertAlmostEqual(0.047, m.arc_radius / INCH, delta=0.0002, msg="the arcs that make a 0.033 in thread")
+        self.assertTrue(1.031 <= m.base_major / INCH <= 1.037 and 0.965 <= m.base_minor / INCH <= 0.971)
+        self.assertTrue(1.045 <= m.holder_major / INCH <= 1.053 and 0.979 <= m.holder_minor / INCH <= 0.987)
+        self.assertAlmostEqual(0.19e-3, m.radial_clearance, delta=0.01e-3)
+        self.assertAlmostEqual(0.36e-3, m.axial_play, delta=0.01e-3)
+
+    def test_the_base_is_cut_to_those_diameters(self) -> None:
+        m = self.lamp
+        vertices, _ = self.parts["base"]
+        radius, z = _radius(vertices), vertices[:, 2]
+        full = (z > m.thread_foot + m.pitch) & (z < m.thread_foot + m.pitch * m.base_turns)
+        self.assertAlmostEqual(m.base_major, 2.0 * float(radius[full].max()), delta=2e-6)
+        self.assertAlmostEqual(m.base_minor, 2.0 * float(radius[full].min()), delta=2e-6)
+        self.assertAlmostEqual(0.937 * INCH, float(z.max()), delta=1e-9, msg="the base's height")
+        self.assertAlmostEqual(1.075 * INCH, 2.0 * float(radius.max()), delta=1e-6, msg="over its rim")
+        self.assertLess(float(radius[z < m.thread_foot].max()), 0.5 * m.base_minor + 1e-9, "a dome that leads it in")
+
+    def test_the_holder_is_cut_to_its_own(self) -> None:
+        m = self.lamp
+        vertices, _ = self.parts["shell"]
+        radius, z = _radius(vertices), vertices[:, 2]
+        start = m.housing[2] + m.crest_start + 0.5 * m.pitch
+        inner = radius < 0.5 * m.holder_major + 1e-7
+        full = inner & (z > start + 0.6 * m.pitch) & (z < start + m.pitch * (m.holder_turns - 0.6))
+        self.assertAlmostEqual(m.holder_major, 2.0 * float(radius[full].max()), delta=2e-6)
+        self.assertAlmostEqual(m.holder_minor, 2.0 * float(radius[full].min()), delta=2e-6)
+        self.assertAlmostEqual(m.mouth, float(z.max()), delta=1e-9)
+        floor = float(z[radius < 1e-6].max())
+        self.assertAlmostEqual(
+            m.housing[2] - m.pad[1], floor, delta=1e-9, msg="the contact stands a pad's height off it"
+        )
+
+    def test_the_base_s_crest_climbs_one_pitch_a_turn(self) -> None:
+        m = self.lamp
+        vertices, _ = self.parts["base"]
+        radius = _radius(vertices)
+        crest = vertices[np.abs(radius - 0.5 * m.base_major) < 2.0e-6]
+        angle = np.mod(np.arctan2(crest[:, 1], crest[:, 0]), 2.0 * math.pi)
+        turn = np.round((crest[:, 2] - m.crest_start) / m.pitch - angle / (2.0 * math.pi))
+        slope = np.polyfit(angle + 2.0 * math.pi * turn, crest[:, 2], 1)[0] * 2.0 * math.pi
+        self.assertGreater(len(crest), 300)
+        self.assertAlmostEqual(m.pitch, slope, delta=0.002 * m.pitch)
+
+    def test_home_the_two_threads_are_one_clearance_apart_all_round(self) -> None:
+        """Every vertex of the base's threaded band, against the holder's surface at its angle and height."""
+        m = self.lamp
+        from robosimstudio_materials.thread import _wound
+
+        vertices, _ = self.parts["base"]
+        z = vertices[:, 2]
+        band = vertices[(z > m.crest_start + m.pitch) & (z < m.crest_start + m.pitch * (m.holder_turns - 0.5))]
+        gaps = []
+        for point in band[::37]:
+            angle = np.array([math.atan2(point[1], point[0]) % (2.0 * math.pi)])
+            ridge = _wound(angle, float(point[2]), m.crest_start + 0.5 * m.pitch, m.holder_turns, m)[0]
+            gaps.append(0.5 * m.holder_major - ridge - math.hypot(point[0], point[1]))
+        self.assertAlmostEqual(m.radial_clearance, min(gaps), delta=3e-6)
+        self.assertAlmostEqual(m.radial_clearance, max(gaps), delta=3e-6)
+
+    def test_the_lamp_s_thread_first_meets_the_holder_s_three_and_a_quarter_turns_out(self) -> None:
+        self.assertAlmostEqual(3.25, self.lamp.catch / self.lamp.pitch, delta=1e-9)
+        self.assertLess(self.lamp.catch, self.lamp.well - self.lamp.thread_foot, "inside the mouth by then")
+
+    def test_the_bulb_is_an_a19(self) -> None:
+        m = self.lamp
+        vertices, _ = self.parts["glass"]
+        radius, z = _radius(vertices), vertices[:, 2]
+        self.assertAlmostEqual(19.0 / 8.0 * INCH, 2.0 * float(radius.max()), delta=2e-5, msg="19 eighths of an inch")
+        self.assertAlmostEqual(4.375 * INCH, float(z.max()), delta=1e-9)
+        self.assertAlmostEqual(m.equator, float(z[radius.argmax()]), delta=1.5e-3, msg="widest at the sphere's middle")
+        order = np.argsort(z[radius > 1e-6])
+        widening = np.diff(radius[radius > 1e-6][order][z[radius > 1e-6][order] < m.equator - 2e-3])
+        self.assertGreaterEqual(float(widening.min()), -1e-9, "a pear: it only widens up to its widest")
+        eyelet, _ = self.parts["insulator"]
+        self.assertGreater(float(eyelet[:, 2].min()), 0.0, "the eyelet's face is the lowest thing on the lamp")
+
+    def test_a_holder_too_tight_or_a_thread_of_two_depths_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "wider than the base's"):
+            LampSpec(holder_major=1.030 * INCH, holder_minor=0.964 * INCH)
+        with self.assertRaisesRegex(ValueError, "one depth"):
+            LampSpec(holder_minor=0.990 * INCH)
+
+
 class TestTheParts(unittest.TestCase):
     def test_each_constructor_builds_its_part_stiff_and_hard_to_slide(self) -> None:
         for make, part in ((bottle, "bottle"), (cap, "cap"), (bulb, "bulb"), (socket, "socket")):
@@ -178,17 +287,20 @@ class TestTheParts(unittest.TestCase):
         self.assertIsNone(cap(impedance=None).impedance, "a part may be built as Newton builds one")
 
     def test_the_flat_names_are_the_kind_s(self) -> None:
-        for name in ("THREAD_60HZ", "ThreadSpec", "ThreadedSpec", "bottle", "bulb", "cap", "socket"):
+        for name in ("THREAD_60HZ", "LampSpec", "ThreadSpec", "ThreadedSpec", "bottle", "bulb", "cap", "socket"):
             self.assertIs(getattr(rss, name), getattr(__import__("robosimstudio_materials.thread").thread, name))
 
     def test_the_mating_points(self) -> None:
         t = ThreadSpec()
         self.assertAlmostEqual(0.249, bottle().rim, delta=1e-9)
         self.assertAlmostEqual(0.154, bottle(body=(0.03, 0.085)).rim, delta=1e-9)
-        self.assertAlmostEqual(t.top, socket().rim, delta=1e-12)
+        self.assertAlmostEqual(0.012, socket().rim, delta=1e-12, msg="its centre contact's face, over its underside")
         self.assertEqual(0.0, cap().rim)
+        self.assertEqual(0.0, bulb().rim)
         self.assertAlmostEqual(-0.005, cap().grasp_height, delta=1e-9, msg="the middle of the ribbed band")
-        self.assertAlmostEqual(0.0301, bulb().grasp_height, delta=1e-9, msg="on the glass, over the base")
+        self.assertAlmostEqual(0.0809625, bulb().grasp_height, delta=1e-9, msg="the glass at its widest")
+        self.assertEqual(t.pitch, bottle().pitch)
+        self.assertEqual(INCH / 7.0, socket().pitch)
 
     def test_screwed_places_the_mate_on_the_helix(self) -> None:
         flask = bottle(at=(0.1, -0.2, 0.0))
@@ -199,7 +311,7 @@ class TestTheParts(unittest.TestCase):
         self.assertAlmostEqual(0.249 + 0.75e-3, out["at"][2], delta=1e-12)
         np.testing.assert_allclose(out["quat"], (0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4)), atol=1e-12)
         lamp = rss.bulb(**screwed(socket(at=(0.0, 0.0, 0.05)), turns_out=2.0, lift=0.0))
-        self.assertAlmostEqual(0.05 + 1.5e-3 + 6.0e-3, lamp.pose[2], delta=1e-12)
+        self.assertAlmostEqual(0.05 + 0.012 + 2.0 * INCH / 7.0, lamp.pose[2], delta=1e-12)
         with self.assertRaisesRegex(ValueError, "a cap goes on a bottle"):
             screwed(cap())
         with self.assertRaisesRegex(ValueError, "is turned"):
