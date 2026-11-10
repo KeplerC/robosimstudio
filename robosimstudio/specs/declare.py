@@ -17,6 +17,7 @@ there.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -93,6 +94,17 @@ class SimRequirements:
             arrangement's choice for the domain. The permanent escape hatch:
             an asset whose physics needs a particular solver states it here,
             versioned by whatever arrangement carries it.
+        proxy_mass_scale: How many times its own mass and inertia this asset's
+            bodies carry where another island's solver sees them, or ``None``
+            for the coupler's ``mass_scale``. A two-way proxy coupling only: a
+            one-way mirror keeps the coupler's ``one_way_mass_scale``, and a
+            host engine mirrors bodies by its own recipe. The particle
+            arrangements mirror every body at 1000, which a held tool wants
+            and a loose light piece does not: a 0.4 g chip let fall into a cup
+            of liquid on a 1.5 mm grid was thrown at 1.5 to 12 m/s in five
+            drops of five at 1000, and out of the cup in four; at 1 nothing
+            moved it faster than the 0.65 m/s it fell at, and it sank
+            (``tests/test_loose_piece_in_liquid``).
         notes: Why a number is what it is.
     """
 
@@ -101,6 +113,7 @@ class SimRequirements:
     contributes_hooks: tuple[str, ...] = ()
     self_contact: bool = False
     backend: BackendSpec | None = None
+    proxy_mass_scale: float | None = None
     notes: str = ""
 
     @property
@@ -126,6 +139,9 @@ class SimRequirements:
         for contact in self.contacts:
             if contact.with_ == "self" and not self.self_contact:
                 out.append("a contact rule names 'self' but self_contact is False; say one thing")
+        scale = self.proxy_mass_scale
+        if scale is not None and not (math.isfinite(scale) and scale > 0.0):
+            out.append(f"proxy_mass_scale must be finite and above zero, got {scale!r}")
         return out
 
 

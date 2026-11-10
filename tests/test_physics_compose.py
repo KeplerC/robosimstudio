@@ -337,6 +337,56 @@ class TestComposingAWholeScene(unittest.TestCase):
         self.assertEqual(params["jacobian"], "sparse", "the alias's own default, recorded rather than implied")
 
 
+class TestAnEntityStatesItsOwnProxyMass(unittest.TestCase):
+    """``SimRequirements.proxy_mass_scale``: a channel of its own, at its own scale, that the coupler's leaves be."""
+
+    def _scene(self, own):
+        model = _model(bodies=6, shapes=8, particles=9)
+        arm = _Entity("arm", ARM, range=_Range(bodies=(0, 2), shapes=(0, 2)), hands=[1])
+        chip = SimRequirements(domain="rigid", proxy_mass_scale=own)
+        parts = {
+            "arm": arm,
+            "block": _Entity("block", SimRequirements(domain="rigid"), range=_Range(bodies=(2, 4), shapes=(2, 4))),
+            "chip": _Entity("chip", chip, range=_Range(bodies=(4, 6), shapes=(4, 6))),
+            "towel": _Entity("towel", CLOTH, range=_Range(particles=(0, 9))),
+            "table": _Entity("table", TABLE, range=_Range(shapes=(6, 8))),
+        }
+        mujoco = backend("mujoco")
+        arrangement = ArrangementSpec(
+            backends=(("articulated", mujoco), ("rigid", mujoco), ("cloth", backend("vbd"))),
+            coupling=coupler("proxy", mass_scale=20.0),
+        )
+        return compose(model, parts, arm, arrangement, scene_statics={"table"})
+
+    def test_nothing_stated_is_one_channel_at_the_couplers_scale(self):
+        program = self._scene(None)
+        self.assertEqual([None], [channel.mass_scale for channel in program.channels])
+        self.assertEqual([20.0], [mapping.mass_scale for mapping in program.solver._proxy_mappings])
+
+    def test_the_entity_that_states_one_is_mirrored_at_it_and_the_rest_are_not(self):
+        program = self._scene(1.0)
+        by_scale = {channel.mass_scale: channel for channel in program.channels}
+        self.assertEqual({None, 1.0}, set(by_scale))
+        self.assertEqual(("chip",), by_scale[1.0].entities)
+        self.assertEqual([4, 5], by_scale[1.0].bodies.tolist())
+        self.assertEqual([1, 2, 3], by_scale[None].bodies.tolist(), "the hand and the block, at the coupler's")
+        scales = {tuple(m.src_ids.numpy().tolist()): m.mass_scale for m in program.solver._proxy_mappings}
+        self.assertEqual({(1, 2, 3): 20.0, (4, 5): 1.0}, scales)
+        self.assertEqual([20.0, 1.0], [record.mass_scale for record in program.manifest.channels])
+        self.assertIn("mass x1", program.summary())
+
+    def test_the_couplers_knob_turned_live_leaves_it_alone(self):
+        program = self._scene(1.0)
+        program._apply_proxy_mass_scale(50.0)
+        self.assertEqual([50.0, 1.0], [mapping.mass_scale for mapping in program.solver._proxy_mappings])
+
+    def test_a_scale_that_is_no_mass_is_a_problem_of_the_declaration(self):
+        self.assertEqual([], SimRequirements(proxy_mass_scale=0.5).problems())
+        for bad in (0.0, -1.0, float("nan"), float("inf")):
+            with self.subTest(scale=bad):
+                self.assertIn("proxy_mass_scale", " ".join(SimRequirements(proxy_mass_scale=bad).problems()))
+
+
 class TestRoutingCoversEveryWorld(unittest.TestCase):
     """The pair lists a replicated scene is stepped with, and the world in each.
 
