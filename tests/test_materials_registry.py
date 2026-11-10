@@ -10,7 +10,9 @@ library's own tables have to equal this one:
 
 * **Its flat names** are on ``rss`` as the kind module's own objects, through
   the pack table (``rss._PACK_EXPORTS``), and never in the library's own table.
-* **Its domain** registers, reading its own layout and the ones it borrows.
+* **Its domain** registers, reading its own layout and the ones it borrows. A
+  kind whose parts are rigid bodies reads no layout and registers none: its
+  parts are the library's ``rigid`` (the ``thread`` kind).
 * **Its entity** registers under its name, and is the kind's class.
 * **A record** made from one of its specs carries its domain and builds that
   very spec; handed another kind's spec, it refuses.
@@ -38,7 +40,7 @@ class Kind(NamedTuple):
     names: tuple[str, ...]
     """Every flat name it provides on ``rss``."""
     reads: tuple[str, ...]
-    """What its domain reads: its own layout first, then the ones it borrows."""
+    """What its domain reads: its own layout first, then the ones it borrows. Empty for a kind of rigid parts."""
     entities: tuple[tuple[str, str], ...]
     """``(registered name, module.Class)`` for each entity it registers."""
     record: tuple[str, str, str] = ("", "", "")
@@ -126,6 +128,12 @@ KINDS: dict[str, Kind] = {
         ("water", "granular", "cloth"),
         (("water", "water.EntityWater"), ("water@genesis", "water.EntityWaterGenesis")),
         ("Water", "water", "water"),
+    ),
+    "thread": Kind(
+        "thread",
+        ("THREAD_60HZ", "ThreadSpec", "ThreadedSpec", "bottle", "bulb", "cap", "socket"),
+        (),
+        (("threaded", "thread.EntityThreaded"),),
     ),
 }
 
@@ -236,6 +244,7 @@ class TestTheFlatNames(unittest.TestCase):
         constructors |= {"roller": ("dough", "roller"), "paper": ("paper", "paper"), "bag": ("bag", "bag")}
         constructors |= {"brush": ("brush", "brush"), "tape": ("tape", "tape"), "water": ("water", "water")}
         constructors |= {"cuttable": ("cutting", "cuttable"), "knife": ("cutting", "knife")}
+        constructors |= dict.fromkeys(("bottle", "cap", "bulb", "socket"), ("thread", "threaded"))
         for name, (kind, entity) in constructors.items():
             with self.subTest(constructor=name):
                 if kind not in PRESENT:
@@ -256,9 +265,12 @@ class TestTheDomains(unittest.TestCase):
     def test_each_kind_registers_its_domain_with_what_it_reads(self) -> None:
         from robosimstudio.specs.physics import get_domain, list_domains
 
-        self.assertLessEqual(PRESENT, set(list_domains()))
+        self.assertLessEqual({kind for kind in PRESENT if KINDS[kind].reads}, set(list_domains()))
         for kind, row in _kinds(self):
             with self.subTest(kind=kind):
+                if not row.reads:
+                    self.assertNotIn(kind, list_domains(), "a kind of rigid parts registers no domain of its own")
+                    continue
                 domain = get_domain(kind)
                 self.assertEqual(row.reads, domain.reads)
                 self.assertEqual("deformables", domain.role)

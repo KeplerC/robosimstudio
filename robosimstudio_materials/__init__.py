@@ -23,7 +23,9 @@ that collides with itself), ``brush`` (``rss.brush``), ``tape`` (``rss.tape``, a
 body by bonds that let go), ``cutting`` (``rss.cuttable`` and ``rss.knife``, a block a knife parts),
 and the three particle kinds on
 Newton's implicit MPM -- ``granular`` (``rss.heap``), ``liquid`` (``rss.liquid``)
-and ``dough`` (``rss.dough``) -- and ``water`` (``rss.water``), on Genesis's SPH. The kinds the library itself is made of --
+and ``dough`` (``rss.dough``) -- and ``water`` (``rss.water``), on Genesis's SPH. One kind is rigid:
+``thread`` (``rss.bottle``, ``rss.cap``, ``rss.bulb`` and ``rss.socket``), parts that screw together on
+real thread geometry, under Newton's collision pipeline (``thread.py``). The kinds the library itself is made of --
 ``rigid``, ``static``, ``articulated`` -- stay in :mod:`robosimstudio.domains`,
 because the composer, the robots and the cells are built from them.
 
