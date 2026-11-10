@@ -17,15 +17,17 @@ contacts Newton found (``use_mujoco_contacts=False``): the arm, the hand and the
 parts stay on one solver, with the arm's own actuators and gravity compensation.
 
 Measured on the default thread (3 mm pitch, two turns, 27.6 mm over the neck's
-crests), a 2.9 g cap on a fixed neck, 1200 Hz, RTX PRO 6000
-(``tests/test_thread_pair``): turned by a torque of 2 mN m it rises 3.000 mm a
-turn, within 0.1% over the two turns and 7 um rms off the helix; a pull ramped
-to 20 N in half a second raises it 0.30 mm, of which 0.26 mm is the thread's own
-play, and it stays on. Signed-distance fields of 64, 128 and 256 voxels and
-meshes of 17k and 34k triangles turn alike. What sets how hard a thread holds is
-the step rate and the parts' :attr:`~robosimstudio.specs.ObjectSpec.impedance`,
-which is why the parts state 0.998: at 600 Hz the flanks are ten times as stiff
-as at Newton's default, and at 1920 Hz the pair holds 100 N.
+crests), a 2.9 g cap on a clamped bottle, 1200 Hz, RTX PRO 6000
+(``tests/test_thread_pair``): turned by a torque of 2 mN m it rises 3.001 mm a
+turn over the two turns, 8 um rms off the helix; a pull ramped to 20 N in half
+a second raises it 0.26 mm, the thread's own play, and it stays on. What sets
+how hard a thread holds is the step rate and the parts'
+:attr:`~robosimstudio.specs.ObjectSpec.impedance`, not the resolution of either
+mesh, and that is why the parts state 0.998. On the same solver and pipeline,
+driven outside the scene layer: signed-distance fields of 64, 128 and 256 voxels
+and meshes of 17k and 34k triangles turned alike (7 to 10 um rms); at 600 Hz the
+flanks gave 12 um a newton at Newton's default impedance and 1.3 at 0.998, and
+let go between 40 and 80 N; at 1920 Hz the pair held 100 N.
 
 **A light part tunnels where a heavy one would not.** MuJoCo acts on a contact
 once the surfaces overlap, and a 3 g cap moves a ridge's whole 0.9 mm overlap in
@@ -377,7 +379,9 @@ def cap(*, name: str = "cap", at: Vec3 = (0.0, 0.0, 0.0), thread: ThreadSpec | N
 
     31.0 mm across, 31.7 mm over its 30 ribs, 13 mm tall and 2.9 g of
     polypropylene at the default thread. :func:`screwed` gives the pose that
-    puts it on a bottle.
+    puts it on a bottle. Put down, it rests on a bench or a box either way up;
+    set over a post narrower than its mouth it sank through the post's end at
+    40 mm/s.
     """
     spec = {"density": 950.0, "color": (0.86, 0.16, 0.14), **_DEFAULTS, **kwargs}
     return ThreadedSpec(name=name, part="cap", thread=thread or ThreadSpec(), pose=at, **spec)
@@ -544,18 +548,17 @@ closing 50 N a jaw on a 3 g cap used to lose it: it slid out of the fingers at
 :attr:`~robosimstudio.specs.ObjectSpec.impedance`:
 
 - ``finger_priority=1``: the fingers' own MuJoCo contact class is the law of
-  what they touch, where the default mixes it with the part's softer one. Held,
-  the cap then creeps 0.014 mm/s at most and breaks away at 1.98 N m about its
-  axis (``tests/test_thread_grasp``).
+  what they touch, where the default mixes it with the part's softer one. Mixed,
+  a loose cap closed on and lifted is lost; with it the cap comes up with the
+  hand and creeps 0.015 mm/s in the jaws (``tests/test_thread_grasp``).
 - ``rigid_gap`` of 2 mm: Newton's default reports a contact from 100 mm away,
   and every finger shape did, 380 of them before the hand had touched anything
-  and 951 at the busiest step, at half the speed. With it the cap chore peaks at
-  240 contacts of the 2048 this table allows.
+  and 951 at the busiest step, at half the speed. With it two arms unscrewing a
+  cap peak at 262 contacts of the 2048 this table allows.
 
-1200 Hz is where a hand's ordinary roughness stays inside a thread's play: the
-unscrewing example passes at 600 Hz as well, with less margin (the flanks hold
-20 N there and let go under 80 N; at 1920 Hz they hold 100 N). The left YAM
-unscrewing a cap runs at 0.76 x real time on an RTX PRO 6000, graph-captured.
+1200 Hz is where a hand's ordinary roughness stays inside a thread's play. Two
+YAM arms unscrewing a cap run at 0.75 x real time on an RTX PRO 6000,
+graph-captured (``examples/08_demos/unscrew_the_cap``).
 
 It is for rigid bodies, as :data:`~robosimstudio.specs.MUJOCO_500HZ` is, and
 needs a GPU: MuJoCo's C library takes no contacts from outside, so a CPU build

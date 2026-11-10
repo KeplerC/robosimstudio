@@ -170,9 +170,9 @@ class CollisionSpec:
             it touches. A part built by Newton arrives with a softer impedance
             than a hand's MJCF states (``solimp`` 0.9 to 0.95 against the YAM's
             0.998), and under a Newton collision pipeline the mix let a 3 g cap
-            held with 50 N a jaw creep out of the fingers at 4 to 5 mm/s; at 1
-            it stays within 0.014 mm/s (``tests/test_thread_grasp``). Read by
-            MuJoCo only.
+            closed on with 50 N a jaw slide out of the fingers and drop; at 1
+            it comes up with the hand and creeps 0.015 mm/s
+            (``tests/test_thread_grasp``). Read by MuJoCo only.
         rigid_contact_max: Contact-buffer ceiling for the main pipeline. 0
             keeps Newton's sizing, which is derived from the settled scene.
         collide_every: Run the main pipeline's narrow phase every this many
