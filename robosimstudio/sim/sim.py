@@ -284,10 +284,11 @@ class Sim(EnvBase):
     def _make_contact_probe(self):
         """A contact probe, unless the scene cannot support one.
 
-        A scene whose MuJoCo solver does not own its collision pipeline has no
-        geom table to map through, and a caller may legitimately not need
-        contacts -- so this returns ``None`` rather than raising, and the
-        predicates that need it fail closed.
+        A scene with no MuJoCo island has no geom table to map through, and a
+        caller may legitimately not need contacts -- so this returns ``None``
+        rather than raising, and the predicates that need it fail closed. A
+        MuJoCo island fed Newton's contacts (``use_mujoco_contacts=False``) has
+        one, and is read like any other.
         """
         try:
             from robosimstudio.core.probes import ContactProbe

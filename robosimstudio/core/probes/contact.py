@@ -205,10 +205,13 @@ class ContactProbe(ContactQueries):
     every query after it is numpy over a few dozen rows.
 
     Args:
-        solver: The :class:`newton.solvers.SolverMuJoCo` stepping the scene. It
-            must own its collision pipeline (``use_mujoco_contacts=True``);
-            with contacts handed in from outside there is no geom table to map
-            through.
+        solver: The :class:`newton.solvers.SolverMuJoCo` stepping the scene,
+            whichever pipeline finds its contacts. With MuJoCo's own it reads
+            what MuJoCo detected; fed Newton's (``use_mujoco_contacts=False``,
+            as ``rss.THREAD_60HZ`` stages) it reads the same buffer, which the
+            solver fills from Newton's contacts with the geoms they belong to:
+            a 3 g cap at rest reads its 0.029 N, and a YAM's jaws on it their
+            50 N each (``tests/test_thread_grasp``).
         model: The finalized model.
         dt: The substep timestep [s], which converts constraint force to
             impulse.
@@ -227,8 +230,8 @@ class ContactProbe(ContactQueries):
 
         if getattr(solver, "mjc_geom_to_newton_shape", None) is None:
             raise RuntimeError(
-                "SolverMuJoCo has no geom->shape table; contact-based success tests need the "
-                "MuJoCo backend running its own collision pipeline (use_mujoco_contacts=True)."
+                "SolverMuJoCo has no geom->shape table; contact-based success tests need a "
+                "MuJoCo backend, with its own collision pipeline or fed Newton's."
             )
         self.geom_to_shape = solver.mjc_geom_to_newton_shape.numpy()[self.world]
         self._host = mjdata.host_side(solver)
@@ -336,8 +339,8 @@ class FleetContactProbe:
 
         if getattr(solver, "mjc_geom_to_newton_shape", None) is None:
             raise RuntimeError(
-                "SolverMuJoCo has no geom->shape table; contact-based success tests need the "
-                "MuJoCo backend running its own collision pipeline (use_mujoco_contacts=True)."
+                "SolverMuJoCo has no geom->shape table; contact-based success tests need a "
+                "MuJoCo backend, with its own collision pipeline or fed Newton's."
             )
         table = solver.mjc_geom_to_newton_shape.numpy()
         # One table per world, rebased so a shape index means what it means on
