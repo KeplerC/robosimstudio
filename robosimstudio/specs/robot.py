@@ -294,6 +294,14 @@ class GripperSpec:
             fingertip *body origins*, which on the i2rt YAM is 84.5 degrees wrong
             and whose origins move apart as the blades close.
 
+        grasp_points: Other points on the hand a part may be held at, as
+            ``(name, point)`` pairs in :attr:`tcp_body`'s frame [m]. The tool
+            centre is where the pads are, and on a hand whose pads stand off the
+            wrist's roll axis a part held there orbits the wrist when the wrist
+            turns. A hand that can also close on that axis names the point
+            ``"roll_axis"``, and :meth:`tcp_for` says where to send the tool
+            centre so the named point lands on the part: what a routine that
+            turns a cap, a knob or a bulb asks for.
         finger_bodies: Body label suffixes of the finger links, per side, for
             contact-based grasp tests. **Empty disables those tests silently**:
             :meth:`~robosimstudio.core.probes.contact.ContactProbe.check_grasp`
@@ -371,6 +379,7 @@ class GripperSpec:
     tcp_offset_rot: Quat = (0.0, 0.0, 0.0, 1.0)
     approach_axis: Vec3 = (0.0, 0.0, 1.0)
     close_axis: Vec3 = (0.0, 1.0, 0.0)
+    grasp_points: tuple[tuple[str, Vec3], ...] = ()
 
     # ----------------------------------------------------------- the fingers
     finger_bodies: tuple[tuple[str, ...], ...] = ()
@@ -460,6 +469,31 @@ class GripperSpec:
             joint_q=joint_q,
         )
 
+    def tcp_for(self, point: str, position: Vec3, quat: Quat) -> Vec3:
+        """Where the tool centre goes so that a named grasp point is at ``position``.
+
+        Args:
+            point: A name in :attr:`grasp_points`.
+            position: Where that point should be, world [m].
+            quat: The grasp frame's world orientation there, xyzw: the one the
+                tool centre is sent with.
+
+        Returns:
+            The tool centre's world position [m] for that pose of the hand.
+
+        Raises:
+            KeyError: If the hand names no such point, listing the ones it has.
+        """
+        points = dict(self.grasp_points)
+        if point not in points:
+            raise KeyError(f"hand {self.name!r} has no grasp point {point!r}; it has {sorted(points)}")
+        # The offset in the body's frame, turned into the grasp frame and then into the world.
+        tx, ty, tz = (float(v) for v in self.tcp_offset)
+        gx, gy, gz = (float(v) for v in points[point])
+        mx, my, mz = _turn(quat, _turn(_conjugate(self.tcp_offset_rot), (tx - gx, ty - gy, tz - gz)))
+        px, py, pz = (float(v) for v in position)
+        return (px + mx, py + my, pz + mz)
+
     def for_arm(self, arm_name: str) -> GripperSpec:
         """This hand with ``{arm}`` substituted, for the arm it sits on.
 
@@ -481,6 +515,21 @@ class GripperSpec:
             mount_body=fmt(self.mount_body),
             suction_pad=fmt(self.suction_pad),
         )
+
+
+def _conjugate(quat: Quat) -> Quat:
+    x, y, z, w = (float(v) for v in quat)
+    return (-x, -y, -z, w)
+
+
+def _turn(quat: Quat, vector: Vec3) -> Vec3:
+    """``vector`` rotated by a unit quaternion (xyzw)."""
+    x, y, z, w = (float(v) for v in quat)
+    vx, vy, vz = (float(v) for v in vector)
+    # v + 2 w (q x v) + 2 q x (q x v)
+    cx, cy, cz = y * vz - z * vy, z * vx - x * vz, x * vy - y * vx
+    dx, dy, dz = y * cz - z * cy, z * cx - x * cz, x * cy - y * cx
+    return (vx + 2.0 * (w * cx + dx), vy + 2.0 * (w * cy + dy), vz + 2.0 * (w * cz + dz))
 
 
 @dataclass(frozen=True, kw_only=True)
