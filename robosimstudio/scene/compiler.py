@@ -812,6 +812,8 @@ def _build_base(
         )
         embodiment.build_into(builder, episode)
         embodiment.apply_actuation(builder)
+        if collision.finger_priority:
+            embodiment.prioritize_fingers(builder, int(collision.finger_priority))
         entities.append(embodiment)
     elif binding.arm_mounts:
         raise ValueError(

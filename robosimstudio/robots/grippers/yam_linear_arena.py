@@ -49,7 +49,14 @@ from robosimstudio.specs import ActuationSpec, GripperSpec
 
 from ..registry import register_gripper
 
-__all__ = ["CLAMP", "FINGER_OPEN", "GRASP_SITE_OFFSET", "GRASP_SITE_QUAT_XYZW", "YAM_LINEAR_ARENA"]
+__all__ = [
+    "CLAMP",
+    "FINGER_OPEN",
+    "GRASP_SITE_OFFSET",
+    "GRASP_SITE_QUAT_XYZW",
+    "ROLL_AXIS_GRASP",
+    "YAM_LINEAR_ARENA",
+]
 
 GRASP_SITE_OFFSET = (0.0, -0.044, 0.130)
 """The measured grip point, in the wrist frame [m] -- NOT the MJCF's site.
@@ -66,6 +73,19 @@ anyone looked.
 """
 GRASP_SITE_QUAT_XYZW = (0.0, 0.0, -0.70710678, 0.70710678)
 """A -90 degree twist about z, so the grasp frame matches the site's."""
+
+ROLL_AXIS_GRASP = (0.0, 0.0, 0.0957)
+"""A second grip point, on the wrist's roll axis, in the wrist frame [m].
+
+Each fingertip is an A-frame: the pad plate 44 mm off the wrist axis, and a
+strip running back from the plate's tip to the finger's root, its inner face in
+the pad's plane. The strip is the one part of a finger that crosses the wrist
+axis, where its face spans 87.0 to 104.4 mm down it; this is the middle of that
+span. A part closed on here turns about its own axis when joint 6 turns, which
+is how this hand unscrews a cap; held at the pads it would orbit the wrist. The
+wrist's own collider reaches 65 mm down the axis, so about 30 mm of a part fits
+above this point. Measured off the colliders with the hand at 15 mm of travel.
+"""
 
 FINGER_OPEN = 0.0475
 """Finger travel at full open [m] -- the *joint's* upper limit.
@@ -123,6 +143,7 @@ YAM_LINEAR_ARENA = register_gripper(
         # declared axes closes the jaws *along* the object instead of across it.
         close_axis=(1.0, 0.0, 0.0),
         approach_axis=(0.0, 0.0, 1.0),
+        grasp_points=(("roll_axis", ROLL_AXIS_GRASP),),
         # Measured the same way, on tape_peel/handle -- a task that leaves this
         # hand's colliders alone, which matters: a suite that retrofits the
         # fingertips would have this measure its retrofit.

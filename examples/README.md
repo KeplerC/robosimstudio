@@ -90,6 +90,10 @@
 |---|---|---|
 | <img src="08_demos/wipe_the_bar/media/wipe_the_bar.webp" width="240"> | <img src="08_demos/route_the_cable/media/route_the_cable.webp" width="240"> | <img src="08_demos/fold_the_towel/media/fold_the_towel.webp" width="240"> |
 
+| [Unscrew the cap](08_demos/unscrew_the_cap/unscrew_the_cap.py) | [Screw in the bulb](08_demos/screw_in_the_bulb/screw_in_the_bulb.py) |
+|---|---|
+| <img src="08_demos/unscrew_the_cap/media/unscrew_the_cap.webp" width="240"> | <img src="08_demos/screw_in_the_bulb/media/screw_in_the_bulb.webp" width="240"> |
+
 ## [09 Teleoperation](09_teleop/README.md)
 
 | [Leader arm](09_teleop/00_leader_arm.py) | [Force feedback](09_teleop/01_force_feedback.py) |

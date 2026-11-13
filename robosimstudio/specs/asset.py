@@ -367,6 +367,13 @@ class ObjectSpec:
             builder's default of 2500.
         kd: Contact damping for the imported shapes, or ``None`` for the
             builder's default of 100.
+        impedance: MuJoCo contact impedance of this object's shapes, in (0, 1):
+            ``solimp``'s ``d0`` and ``dwidth`` both, over a 1 mm width. ``None``
+            keeps Newton's 0.9 to 0.95. It is how hard MuJoCo holds a contact at
+            a given step rate, friction included, and it is stated per object
+            for the reason :attr:`ke` is: the claim is about this part. A screw
+            thread's flanks at 0.998 are ten times as stiff as at the default,
+            at 600 Hz (``robosimstudio_materials.thread``). Read by MuJoCo only.
 
             **These exist because a mesh imported on its own arrives softer than
             the same mesh imported inside an MJCF, by a factor of four hundred.**
@@ -500,6 +507,7 @@ class ObjectSpec:
     contact_gap: float | None = None
     ke: float | None = None
     kd: float | None = None
+    impedance: float | None = None
     color: Vec3 | None = None
     finish: Finish | None = None
     visual_markers: tuple[tuple[Vec3, float, Vec3], ...] = ()
@@ -516,6 +524,8 @@ class ObjectSpec:
         """
         if not self.category:
             object.__setattr__(self, "category", _category_of(self.name))
+        if self.impedance is not None and not 0.0 < float(self.impedance) < 1.0:
+            raise ValueError(f"object {self.name!r}: impedance must be inside (0, 1), got {self.impedance!r}")
 
 
 @dataclass(frozen=True, kw_only=True)

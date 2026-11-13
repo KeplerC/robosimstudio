@@ -179,6 +179,26 @@ def _wiped(film) -> tuple[bool, str]:
     return cleaned >= 0.9, f"{cleaned:.3f} of the stripe clean (need 0.9)"
 
 
+def _cap_off(film) -> tuple[bool, str]:
+    """The unscrewing demo's own measures: the cap lifted clear of a bottle that stayed in the other hand."""
+    m = _script(film).measures(film.sim)
+    ok = m["cap_over_rim"] >= 0.03 and m["bottle_moved"] <= 0.006 and m["bottle_lean_deg"] <= 1.5
+    return ok, (
+        f"cap {1000 * m['cap_over_rim']:.1f} mm over the rim (need 30), the bottle moved "
+        f"{1000 * m['bottle_moved']:.1f} mm (at most 6) and leans {m['bottle_lean_deg']:.1f} degrees (at most 1.5)"
+    )
+
+
+def _bulb_home(film) -> tuple[bool, str]:
+    """The lamp demo's own measures: the eyelet on the holder's centre contact, the lamp's weight through it, and lit."""
+    m = _script(film).measures(film.sim)
+    ok = abs(m["eyelet_over_contact"]) <= 5.0e-5 and m["contact_force"] >= 0.1 and m["lit"]
+    return ok, (
+        f"eyelet {1000 * m['eyelet_over_contact']:.2f} mm over the centre contact (within 0.05), "
+        f"{m['contact_force']:.2f} N on it (need 0.1), {'lit' if m['lit'] else 'dark'}"
+    )
+
+
 def _kept_bend(film) -> tuple[bool, str]:
     """The cable with plastic memory is still bent after the hand let go: straightness under 0.9."""
     import numpy as np
@@ -955,6 +975,16 @@ DRAFTS = (
     ),
     routine(
         "examples/08_demos/fold_the_towel/fold_the_towel.py", speed=2.0, success="the towel is folded:", done=_folded
+    ),
+    # 33 s and 41 s of scene: at 3x and 4x each stroke of the wrist is under a second of clip.
+    routine(
+        "examples/08_demos/unscrew_the_cap/unscrew_the_cap.py", speed=3.0, success="the cap is off:", done=_cap_off
+    ),
+    routine(
+        "examples/08_demos/screw_in_the_bulb/screw_in_the_bulb.py",
+        speed=4.0,
+        success="the lamp is home:",
+        done=_bulb_home,
     ),
 )
 
