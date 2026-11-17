@@ -78,7 +78,7 @@
     ;
     ; A staging key is overridden as one clause, so the peel documents restate
     ; the whole pairing -- (:work-arm left) and (:arms-solid true) together.
-    (:embodiment yam_bimanual (:work-arm right) (:support-arm left) (:arms-solid true))
+    (:embodiment yam (:work-arm right) (:support-arm left) (:arms-solid true))
     ; The one rig, registered aimed at polish's drum contact -- the aim the
     ; calibration was transplanted onto, so `strip` stages it as is. Every
     ; other family aims it at its own work: (:cameras assets.<family>.layout:<NAME>_VIEWS).
