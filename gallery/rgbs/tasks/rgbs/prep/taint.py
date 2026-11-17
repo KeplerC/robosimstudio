@@ -723,6 +723,12 @@ class EntityPrepTaint(Entity):
         )
 
     # ------------------------------------------------------------------- read
+    @property
+    def cells_ut(self) -> np.ndarray:
+        """Every cell's (axial [m], angle [rad]) on the tube, in the order :meth:`read`'s
+        ``intensity`` lists them: where a policy aims what is still blue."""
+        return self._cell_ut_np
+
     def read(self, world: int = 0, *, at: Any = None) -> dict[str, Any]:
         """One world's field, read back to the host. One device copy per instant.
 
