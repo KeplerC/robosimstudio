@@ -269,6 +269,12 @@ class TestAnArmWithABaseBody(unittest.TestCase):
     def test_a_hand_welded_on_rides_the_moved_wrist(self) -> None:
         """``panda_robotiq`` welds its 2F-85 on after the arm is placed: the tool centre, seen
         from the base, is where it is on the robot left standing at its own mount."""
+        from robosimstudio.paths import resolve_path
+
+        try:  # the 2F-85 is kept on the Hub, fetched on request; the error says how
+            resolve_path("embodiments/robotiq_2f85/2f85.xml")
+        except FileNotFoundError as missing:
+            self.skipTest(str(missing))
         import newton
 
         import robosimstudio as rss
