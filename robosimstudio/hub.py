@@ -37,7 +37,7 @@ __all__ = ["DATASET", "REVISION", "RemoteFile", "fetch", "files", "url"]
 DATASET = "keplerccc/robosimstudio-agentic-real2sim"
 """The dataset everything here lives in."""
 
-REVISION = "446cfdc595d4327e52b6683c7bca143360e86da9"
+REVISION = "67e7b1729973344fc1978ed495bc978ca2019ece"
 """The dataset commit this checkout was written against."""
 
 PUBLIC = "https://huggingface.co"
