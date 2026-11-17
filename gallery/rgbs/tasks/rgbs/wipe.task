@@ -1,0 +1,270 @@
+; -*- mode: lisp -*-
+; ---------------------------------------------------------------------------
+; AUTHORED -- the simulated twin of the Surface Preparing clip: a chrome grab
+; bar bolted into two black blocks on a gridded work mat, a blue marker stripe
+; drawn along its crown, and a white kitchen sponge on the mat past the near
+; block. The right arm takes the sponge, presses it onto the bar and wipes the
+; stripe off along the bar's length while the left arm steadies the bar at its
+; far elbow; then the sponge goes back where it came from.
+;
+; WHAT MAKES THIS ONE INTERESTING, and it is not the same thing as polish. There
+; the tool is fixed and every mark has to be carried to it. Here the ABRASIVE is
+; the thing that is carried: a block of foam picked up off the mat, taken to the
+; work, and put back. The bar is a FIXTURE with a handle -- the real one is
+; bolted into its blocks and does not leave the bench -- so nothing but the bar
+; reacts the press, and the whole wipe force goes into the foam's wrap round the
+; tube. (It was a free 22 mm bar with end cubes on two rest pads for the whole
+; of the suite's earlier life, laid out so the support arm COULD lift it; one
+; hand at one end never got it airborne -- assets/prep/PROVENANCE.md -- and the
+; clip's bar is not lifted either.)
+;
+; AND THE ABRASIVE IS FOAM, WHICH IS WHY THE BAR IS ROUND. A rigid pad on a
+; cylinder touches a line. Foam wraps it and touches an ARC, and how much of an
+; arc is a function of how hard it is pressed -- measured on the 22 mm
+; calibration pair with rgbs/scripts/rgbs_prep_bench.py, reading the
+; co-simulation's own per-sample contacts:
+;
+;     overdrive   0 mm    1     2     3     4     6     8
+;     force       0.00 N  0.09  0.46  1.06  1.82  3.60  5.64
+;     wrap        43 deg  53    73    87    95    112   126
+;
+; The stripe is a 4 mm marker line on the crown, so reach round the tube is not
+; what this variant asks for. What it asks for is TRAVEL -- the stripe is 200 mm
+; long against a 75 mm sponge -- and a real press: the field's pressure floor
+; cuts the feathered edge of a light one, and the working hand leans 35 degrees
+; along the bar as the real one does, which lifts the sponge's far edge so the
+; contact patch trails the hand.
+;
+; THE PRESS IS A THRESHOLD BEFORE IT IS A DIAL, and for a reason that is an
+; artefact of nothing. SuperDex's penalty contact carries a padding band, so at
+; zero overdrive there are already 292 contact samples spanning 43 degrees of
+; the bar carrying 0.002 N between them. The field's pressure floor is what
+; stops a policy cleaning the bar by holding the sponge near it.
+;
+; Removal is a per-cell irreversible Preston-law field (rate = k_p * pressure *
+; sliding speed) owned by the `taint` entity, with pressure MEASURED -- each
+; contact sample carries its own quadrature area -- rather than divided by a
+; stated nominal patch. Nothing here can un-wipe a cell. The law is isotropic
+; and says nothing about direction: what the stripe's cells see is decided
+; entirely by whether the foam has reached them.
+; ---------------------------------------------------------------------------
+
+(define (problem WIPE_THE_BAR_CLEAN)
+
+
+  (:language pick up the sponge, wipe the marker stripe off the grab bar with it,
+             and put the sponge back down where it came from)
+
+  ; The cell, the pairing (right wipes, left steadies, arms solid), the
+  ; control mode and the episode count are rgbs.suite's; this is the delta.
+  (:staging
+    ; Two engines. The arms, the bar and the blocks are Newton's through
+    ; MuJoCo, the sponge is SuperDex's on a host island. See rgbs/tasks/rgbs/staging.py.
+    (:physics surface_prep_superdex@v1)
+    ; The suite rig, aimed at the bar's crown mid-run -- the air the wipe
+    ; happens in. The overhead cannot hold the whole 404 mm bar and the sponge
+    ; past its block at this aim (the blocks sit at 0.77 of its half-frame, the
+    ; sponge past the edge); the top, photo and inset views hold everything.
+    (:cameras prep.layout:WIPE_VIEWS)
+    ; Multi-phase: steady the bar, take the sponge, press and three out-and-
+    ; back stroke cycles with a re-seat at the far end, set it back down,
+    ; retreat both hands, and a two second settled hold. Generous on purpose:
+    ; the shipped routine finishes well inside this, and the budget is sized
+    ; for the strokes a lighter-pressing or worse-aimed one needs. ; CAL
+    (:max-steps 12000)
+    ; polish's and box_decant's stiffened servos, for the same reason:
+    ; pressing a part against a compliant tool at a commanded force is
+    ; task-space positioning under contact, and at the MJCF's own 300 gain
+    ; the TCP lags ~10 mm -- more than the whole press range the routine's
+    ; force loop works in.
+    (:arm-actuation (:ke 1600) (:kd 70))
+    (:gripper-actuation (:ke 20000) (:kd 20))
+  )
+
+  (:objects
+    ; A welded object: it has a handle (the goal reads hands-clear off it and
+    ; the routine reads its pose) and it never moves. Placed by its record.
+    bar - grab_bar
+    ; The stripe: state the BAR CARRIES, published by the task's taint field
+    ; entity, the way polish's marks publish and peel's film publishes its bond
+    ; field. No rigid body answers to this name and no clause below reads it
+    ; through one -- published states only.
+    taint - prep_taint
+    ; Declared here so the goal's references resolve. It is not an object
+    ; handle: it is a block of foam on a foreign engine.
+    sponge - prep_sponge
+  )
+
+  ; Placed by their records: where the mat and the blocks stand is
+  ; prep/layout.py's arithmetic, the clip's measurements written down.
+  ; Two block records rather than one `bar_block`, because a record that
+  ; builds a thing builds it in one place -- each stands under the leg the bar
+  ; spec drops at its end.
+  (:fixtures
+    mat        - prep_mat
+    block_near - prep_block_near
+    block_far  - prep_block_far
+  )
+
+  ; No regions: the set-down is scored on the sponge being off the bar, still,
+  ; and out of both hands, not on a box in space.
+
+  ; -------------------------------------------------------------------------
+  ; The world an episode starts in, re-verified after settling at every reset.
+  ;
+  ; Only the taint is stated, and that is deliberate. A field read is true at
+  ; the reset instant. The two obvious neighbours are not, and both were
+  ; measured false at reset and true a dozen steps later in the two sibling
+  ; suites that tried them:
+  ; * a contact-force clause -- the force atom smooths over ten steps and its
+  ;   window is empty at verification, so it reads a dropout as zero
+  ; * anything jaw-based -- the stall test needs a standing position error that
+  ;   does not exist before the first control step
+  ; Both quantities stay observable every step below.
+  (:init
+    (tainted taint)
+  )
+
+  ; -------------------------------------------------------------------------
+  ; ONE LATCH OVER EVERYTHING: the stripe clean AND the sponge put down -- off
+  ; the bar, still, out of both hands -- held for two simulated seconds so a
+  ; bounce or a lingering finger cannot buy the verdict.
+  ;
+  ; (>= (cleaned-fraction taint) 0.95)
+  ;     The field is monotone by construction, so the latch is belt-and-braces
+  ;     -- but `once` is still right: the verdict is about the episode.
+  ;
+  ; (not (sponge-on-bar taint))
+  ;     No part of the contact patch is pressing above the removal floor: the
+  ;     sponge is off the bar. Without this the clock could start during the
+  ;     routine's re-seat at the far end of the stripe, where the sponge inches
+  ;     down a millimetre at a time and the hand sits just outside the bar's
+  ;     hands-clear sphere.
+  ;
+  ; (< (sponge-speed taint) 0.02)
+  ;     The sponge is still. Published by the field off the node positions the
+  ;     co-simulation bridge writes back every control step, because the
+  ;     library's own instrument, next line, cannot see a host-island body.
+  ;
+  ; (< (settle-speed sponge) 0.02)
+  ;     The library's particle measure. It reads 0.0 for this sponge for the
+  ;     whole episode -- a carry at 0.1 m/s included -- because the host island
+  ;     never writes Newton's particle velocities. Kept so the clause reads the
+  ;     way every other deformable's does and starts holding the day the
+  ;     instrument works; the line above is what holds the verdict off today.
+  ;
+  ; (> (hands-clear bar) 0.10)
+  ;     BOTH hands away from the bar -- `tcp-distance` reads the work arm
+  ;     only, and this episode ends with two hands to clear. Measured from the
+  ;     bar's centre, so the steadying hand at the far elbow (170 mm along)
+  ;     reads clear even while it holds; the clause is about the wiping hand.
+  ;     100 mm against a 94 mm jaw span. ; CAL
+  (:goal
+    (once
+      (And
+        (>= (cleaned-fraction taint) 0.95)
+        (hold-for 2.0
+          (And
+            (not (sponge-on-bar taint))
+            (< (sponge-speed taint) 0.02)
+            (< (settle-speed sponge) 0.02)
+            (> (hands-clear bar) 0.10)
+          )
+        )
+      )
+    )
+  )
+
+  ; -------------------------------------------------------------------------
+  ; Progress toward the cleaning gate, clipped, UNMASKED -- polish's form. The
+  ; set-down clauses are deliberately NOT folded into the scalar: reward
+  ; measures how much got cleaned, and release is a condition on when the
+  ; verdict counts. A wipe-force budget belongs in a later gentle variant,
+  ; after the bench has measured clean-run and abusive-run populations -- an
+  ; uncalibrated threshold is worth less than the number it thresholds.
+  (:reward (progress (cleaned-fraction taint) (:gate 0.95)))
+
+  ; -------------------------------------------------------------------------
+  ; Recorded every step, gating nothing -- the quantities this suite exists to
+  ; calibrate. `wipe-force` is the future gentle-variant budget, `slide-speed`
+  ; is what separates a wipe from a stamp, `sponge-speed` beside `settle-speed`
+  ; is the live instrument beside the dead one, and `patches-remaining` reads
+  ; 1 until the stripe is nine tenths gone.
+  (:observe
+    (patches-remaining taint)
+    (wipe-force taint)
+    (slide-speed taint)
+    (sponge-on-bar taint)
+    (sponge-speed taint)
+    (settle-speed sponge)
+    (hands-clear bar)
+  )
+
+  ; -------------------------------------------------------------------------
+  ; The privileged sim.* surface, and the scripted routine that spends it. No
+  ; graph yet: the routine IS the reference solution here, the way box_decant's
+  ; and cable_route's are, and it is what `--solve routine` drives. The same
+  ; choreography plays on the live page (rgbs/scripts/surface_cleaning.py).
+  (:artifacts
+    (:tools "tools:register_surface_prep_tools")
+    (:routine "routine:RoutineSurfacePrep")
+  )
+
+  (:provenance
+    (:tier original)
+    (:source "Authored for this corpus from the Surface Preparing clip of the real
+              rig, measured off its frames and its overhead inset: a 25 mm
+              chrome grab bar with a 340 mm straight run on two elbows, its
+              legs dropping 50 mm into two 76 x 80 x 70 mm black blocks, on a
+              10 mm interlocking mat with a 25 mm grid on 300 mm tiles; a
+              50 x 75 x 30 mm kitchen sponge on the mat 70 mm past the near
+              block and 35 mm beyond the bar's line; a marker stripe along the
+              middle 200 mm of the crown. The bar is welded to the world, as
+              the real one is bolted to its blocks. The live page's twin of
+              the same clip (rgbs/scripts/surface_cleaning.py) builds this
+              scene from these records and plays this routine.")
+    (:note "Stripe 200 mm by 9 degrees of half-angle -- a ~4 mm line -- on 2.5 mm
+            cells, 243 of them, LONGER ALONG THE BAR THAN THE SPONGE IS, which
+            is what makes the wipe travel. Shorter than the photograph's stripe
+            on purpose: the working hand's far stroke stays a jaw's width clear
+            of the hand steadying the far elbow, and a stroke to the end of a
+            longer stripe shoved that hand off. Removal is a per-cell
+            irreversible field, so cleaned-fraction is monotone and `once`
+            latches nothing the world could take back. Pressure is the
+            engine's own per-sample force over its own quadrature area, so
+            unlike polish there is no stated nominal patch for k_p to be
+            fitted against and drift from. The shipped routine presses by
+            force -- descending a millimetre at a time until the field reads
+            4 N -- because the leaning hand puts the sponge's lowest point
+            somewhere no flat-grasp measurement predicts, and trims the seat
+            height between stroke segments because the arm sags differently
+            along the bar and the pinned foam creeps in the jaws. CAL-tagged
+            thresholds are re-measured against the shipped policy before
+            sign-off.")
+  )
+
+  ; THE ARENA YAM, as a second way to stand this variant. `yam_bimanual` is the
+  ; same I2RT arm as the native pairing -- 264 mm upper arm, 245 mm forearm, the
+  ; same joint ranges -- wearing the arena's `yam_linear_arena` hand instead of
+  ; the `linear_4310` blades, and standing 22 mm higher above the work surface
+  ; because that robot's mount clears its own play table.
+  ;
+  ; Stated per variant rather than on the suite, because the suite's members do
+  ; not agree on which arm works: `handle`, `panel` and `panel_gentle` override
+  ; the suite's `right` with `left`, and one suite-level row would claim the
+  ; wrong arm for three documents and collide with the row `handle` already
+  ; carries.
+  ;
+  ; What it does NOT claim: the two hands share no tool point -- the i2rt grasp
+  ; site is 134.7 mm down the gripper body's own axis, the arena's is 130 mm out
+  ; and 44 mm laterally off the wrist axis, with 12.14 mm of tip reach against
+  ; 35 mm -- so every constant fitted to the blades is a fact about that hand.
+  ; A row says how to stand the robot here, never that the pairing works.
+  ;
+  ; Measured 2026-09-06 by scripts/matrix.py: built, stepped 10 control steps
+  ; finite, work arm within HOME_ERR of its declared home.
+  (:hosts
+    (:host (:embodiment yam_bimanual (:work-arm right) (:support-arm left) (:arms-solid true))
+           (:notes "compiles; no policy"))
+  )
+)

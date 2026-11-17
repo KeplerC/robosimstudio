@@ -1,0 +1,301 @@
+; -*- mode: lisp -*-
+; ---------------------------------------------------------------------------
+; AUTHORED -- there is no upstream .bddl for this task.
+;
+; provenance.tier: designed
+; reference: channel routing.mp4, a bimanual cable-routing demonstration
+;
+; WHAT THE PROBLEM IS. Every other cable variant in this tree routes a rod
+; AGAINST fixtures it lies visibly on top of -- a peg it winds onto, a line of
+; spools it weaves between. This one puts the rod INSIDE a channel for most of
+; the episode, and what makes it hard is not aim: a pushed rod is a column, a
+; column buckles, and a buckled rod inside a tube stops being a rod being fed
+; and becomes a rod wedged against two walls.
+;
+; THE CHANNEL IS ON A BOX, AND THE BOX IS FREE. The reference clip's channel is
+; the lidded front edge of a plastic cable-management box standing on the mat,
+; and a person feeding a cable into it holds the box still with the other
+; hand. So the channel is an OBJECT here rather than a fixture: a 400 x 200 x
+; 100 mm box the cable is fed through, mirrored into the cable's solver two
+; ways, that the support hand pinches by its lid strip for the whole feed.
+;
+; THE CABLE IS TERMINATED, AND THE CONNECTOR IS WHAT THE BORE IS SIZED TO. A
+; 15 mm moulded plug in a 17 mm bore has 1 mm of clearance a side, against the
+; 10 mm cable's 3.5 -- so the tight dimension is the head, which is where a real
+; routing job has it. The head is rigid, wider than what trails it, and cannot
+; roll broadside (its diagonal is 18 mm), so it can tilt and snag but not turn
+; over. See tunnel/plug.py and tunnel/box.py::BORE.
+;
+; SUCCESS IS THAT THE FAR TIP CAME OUT AND WAS DRAWN CLEAR. Not that the cable
+; is near the box, not that it entered -- it started entered. The tip, past the
+; lid's far end and along the open ledge beyond it, with the rod still lying in
+; the bore behind it.
+;
+; THE SECOND CLAUSE IS LOAD-BEARING AND IS THE WHOLE REASON THIS ISN'T ONE
+; PREDICATE. `end_b` inside a box beyond the exit is satisfied perfectly well by
+; a policy that lets go, picks the cable up, and carries the tip around the
+; OUTSIDE of the box. A 250 mm channel has an outside, so the goal has to say
+; that the route went through it.
+; ---------------------------------------------------------------------------
+
+(define (problem THREAD_THE_CABLE_THROUGH_THE_CHANNEL)
+
+
+  (:language feed the cable into the cable box's channel and draw the plug out along the far ledge)
+
+  ; The cell, the control mode, the episode count and (:arms 2) are
+  ; rgbs.suite's; so is the pairing, and it is worth reading here anyway.
+  (:staging
+    ; THE RIGHT HAND FEEDS AND THE LEFT HAND HOLDS THE BOX, which is what the
+    ; reference clip shows and is not a cosmetic hold any more: the box is a
+    ; free body and nothing but the pinch keeps it where the regions were
+    ; measured. Two hands on the cable is the obvious reading of "bimanual"
+    ; and it does not fit: the only place a hand can take the rod is the 90 mm
+    ; between the flare and the free span that buckles behind it, and two
+    ; grippers do not share 90 mm.
+    ;
+    ; WHICH ARM DOES WHICH IS MEASURED. The two hands are mirror images, so the
+    ; same grasp orientation puts one across the cable and the other along it --
+    ; measured at the grasp, the right hand's jaws sit 69 mm apart across the
+    ; rod and 4 mm along it, and the left hand's sit 4 mm across and 56 mm
+    ; along. The hand that can actually hold a rod is the right one, so the
+    ; right one feeds. See routine_tunnel.py. That pairing is the suite's own
+    ; -- right works, left holds, arms solid -- so it is inherited.
+    (:physics cable_tunnel_960hz@v1)
+    ; The suite rig, aimed at the rod's axis mid-run, 97 mm up: the centre of
+    ; the lidded channel rather than of the work, because that is what puts the
+    ; hands' 90 mm outside the entry and the goal 300 mm the other way in one
+    ; frame.
+    (:cameras tunnel.layout:THREAD_VIEWS)
+    ; The routine's whole choreography: a settle, the support hand's descent
+    ; onto the lid, feed strokes of approach-close-push-release-lift until the
+    ; tip is out (five to nine of them -- a stroke nets about three quarters of
+    ; its push), the release, and the plug draw. A stroke costs up to 780 steps,
+    ; most of which is the release WAITING for the jaws to actually open: a pad
+    ; still on the cable drags it, so the wait is a condition rather than a
+    ; count (routine_tunnel.py::OPEN_WAIT). Six strokes and the draw is about
+    ; 5900. The ceiling is set above what the script needs rather than against
+    ; it, because what a POLICY needs is not what a script needs.
+    (:max-steps 8000)
+  )
+
+  ; Placed by their records: the box where the reach solve and the rod's tail
+  ; put it, and the rod laid straight through its mouth, level with the bore,
+  ; both tunnel/layout.py's.
+  (:objects
+    cable - tunnel_cable
+    ; A FREE BODY, and it was a fixture. The record declares domain rigid and
+    ; contacts with the cable; the composer mirrors it into the cable's island
+    ; two ways, so the feed can shove an unheld box and the support hand's
+    ; pinch is what stops it. Its bore is CLOSED -- walls, a lid, a floor --
+    ; rather than the open slot the clip's box has: an open channel is filled
+    ; from above, which makes the task a press, and a bore has only one way
+    ; through it.
+    box - cable_box
+  )
+
+  ; No fixtures. The table is the cell's, and everything else is the box.
+
+  ; -------------------------------------------------------------------------
+  ; THREE REGIONS, all boxes in the BOX's own frame, whose origin sits on the
+  ; bore axis at the centre of the lidded run, at the bore floor's level --
+  ; 100.5 mm above the table, which is the box's top: the mat, the shelf the
+  ; channel stands on and the ledge past it are one flat surface.
+  ;
+  ; A REGION CARRIES NO ROTATION. RegionHandle offsets a world-axis-aligned box
+  ; by its target's ORIGIN and applies nothing else -- the origin is re-read
+  ; from the live body, so a box that has been shoved carries its regions with
+  ; it, but a box that has been TURNED does not carry them round. Which is why
+  ; the box stands square to the bench with its run along +y, and why the
+  ; support hand holds it.
+  ;
+  ; These numbers are tunnel/box.py's BORE, RUN, BOX_LENGTH and
+  ; layout.py's EXIT_CLEAR written out by hand, because BDDL has no arithmetic.
+  ; tests/test_rgbs_tunnel.py reads both and fails when they disagree -- which
+  ; is the only thing standing between this file and the silent drift that a
+  ; retyped number always eventually is.
+  (:regions
+    ; The bore itself: 17 mm square, 250 mm long, floor to lid. Sized to the
+    ; plug (15 mm across) rather than to the 10 mm cable -- see box.py::BORE.
+    ; A capsule's CENTRE is what containment counts, and inside the channel a
+    ; 10 mm cable's centre can only be 3.5 mm off the axis, so the width here
+    ; is generous by construction and the y bound is what does the work.
+    (inside_bore
+      (:target box)
+      (:ranges ((-0.0085 -0.125 0.0085 0.125)))
+      (:z-range 0.0 0.017)
+    )
+    ; The exit half of the same bore, and it exists for the REWARD rather than
+    ; for the goal -- see below. Empty at t = 0 by construction: the seeded tip
+    ; sits 45 mm short of this box's near face, and the settle pulls it further
+    ; back, not forward.
+    (far_half
+      (:target box)
+      (:ranges ((-0.0085 0.000 0.0085 0.125)))
+      (:z-range 0.0 0.017)
+    )
+    ; Along the open ledge past the lid's far end, and far enough past it that
+    ; THE FEED ALONE DOES NOT REACH IT. The feed stops once `end_b` is 20 mm
+    ; past the exit, and one more full stroke from just under that reaches 75;
+    ; this box begins 80 mm past it, at +0.205, and what
+    ; closes the gap is the second hand letting go of the box, taking the plug
+    ; where it has emerged onto the ledge, and drawing it 70 mm clear -- so the
+    ; goal is a state that move is needed to reach rather than one the feed
+    ; happens to pass through. See layout.py::EXIT_CLEAR for the two clearances
+    ; that were wrong before this one. The far edge, +0.285, is 10 mm past the
+    ; box's own left end (+0.275); a head drawn off the ledge falls 100 mm and
+    ; leaves the z window. The z window is stated for the same reason both of
+    ; the others are: the default runs to 0.15, which is 127 mm above the lid,
+    ; and would count a cable carried over the top of the box.
+    (beyond_exit
+      (:target box)
+      (:ranges ((-0.020 0.205 0.020 0.285)))
+      (:z-range 0.0 0.030)
+    )
+  )
+
+  ; NO INIT CONSTRAINT. Both arms start at the embodiment's own home, touching
+  ; nothing -- the convention the weaves were deliberately moved to, and what
+  ; makes two runs comparable by eye.
+  ;
+  ; The tip's 80 mm inside the mouth is a SPAWN POSITION, not a held pose and not
+  ; a robot posture: the cable is laid in the shape the clip's own cable has --
+  ; flat on the mat behind the box, up the 130 mm hang this rod actually holds,
+  ; then along the bore axis and 80 mm past the entry face (assets/tunnel/
+  ; layout.py::cable_nodes). Laid straight along the axis instead, the 360 mm
+  ; behind the entry hangs in mid-air, falls, and levers the tip 33 mm back out
+  ; of the bore before a hand has moved. What that buys is that the episode
+  ; is the feed rather than the aim, which is the half of the problem worth
+  ; simulating -- a floppy tip found by a gripper is a task about perception,
+  ; and this one is a task about what a cable does once it is in.
+  (:init)
+
+  ; -------------------------------------------------------------------------
+  ; TWO GROUPS UNDER worst_of, and the grouping is the reward design.
+  ;
+  ; A DO-NOTHING POLICY SCORES ZERO. At t = 0 the tip is 80 mm in, so
+  ; `containment cable inside_bore` already reads about 0.18 -- seven capsules
+  ; of thirty-eight -- but `end_b` is nowhere near `beyond_exit`, so
+  ; the route group is 0/2 while release-and-rest is 2/2, and the min is 0. A
+  ; flat conjunction of these four clauses would have paid 0.5 for standing
+  ; still.
+  ;
+  ; THE 0.30 IS ARITHMETIC. When the tip has just cleared the exit, exactly the
+  ; run's 250 mm of a 440 mm rod is inside the bore -- 0.57. A rod that buckled
+  ; and folded on itself presents less; one that was carried around the outside
+  ; presents nearly none. 0.30 sits below the first and far above the second,
+  ; and well above the 0.18 the scene starts at.
+  ;
+  ; NOTHING LATCHES. A cable that pokes out, is let go of, and springs back into
+  ; the channel is scored where it ends up.
+  (:goal
+    (worst_of
+      (And
+        (>= (containment cable.end_b beyond_exit) 1.0)
+        (>= (containment cable inside_bore) 0.30)
+      )
+      (And
+        ; The FEEDING hand let go. Against the nearest segment, because release
+        ; is a claim about the whole rod -- a hand off the middle but closed on
+        ; one end has not let go.
+        ;
+        ; IT IS THE WORK ARM ONLY, AND THAT IS WORTH STATING BECAUSE THE OBVIOUS
+        ; READING IS WRONG. `tcp_distance` resolves one arm -- `handles.work_arm`
+        ; -- and measures from its tool centre (examples/10_rope/rod/measures.py). In a
+        ; bimanual layout the support hand can be closed on the cable while this
+        ; reads clear: measured on the conduit at 185 mm with the left hand
+        ; gripping the connector. So this clause says "the hand that was feeding
+        ; has come off", which is the thing worth asserting about a feed, and it
+        ; does not say the cable is untouched. The routine's own ordering
+        ; depends on knowing the difference -- see PULL_SEAT in routine_tunnel.py.
+        (> (tcp-distance cable) 0.05)
+        ; Still moving is still being fed. The mean of the segment SPEEDS, not
+        ; the speed of the mean.
+        (<= (speed cable) 0.05)
+      )
+    )
+  )
+
+  ; -------------------------------------------------------------------------
+  ; HOW FAR IT GOT, not what share of the goal is true.
+  ;
+  ; `fraction` is wrong here in the way adding_a_task.md warns about: with a
+  ; two-clause route group, a run that fed 230 of the 250 mm and stopped scores
+  ; identically to one that never moved. What is wanted is the front's progress
+  ; along the run, and that is what a share of the rod inside the FAR HALF is:
+  ; 0 until the tip passes the midpoint, then rising as the cable fills it, then
+  ; flat at 0.28 -- 125 mm of a 440 mm rod -- from the moment the tip reaches
+  ; the exit face onward.
+  ;
+  ; MEASURED OVER THE FAR HALF AND NOT THE WHOLE BORE, AND THE DIFFERENCE IS THE
+  ; IDLE FLOOR. The seeded tip already puts seven capsules inside
+  ; `inside_bore`, so a reward read there would pay a do-nothing policy against
+  ; a 0.30 gate -- about 0.6 for standing still, which is exactly the failure
+  ; adding_a_task.md says to run the idle floor to catch. Every other progress
+  ; reward in this corpus reads zero at t = 0 and so does this one.
+  ;
+  ; The 0.27 gate is a hair under the 0.284 a full far half reads, so the reward
+  ; saturates as the tip arrives at the exit rather than a stroke after it.
+  (:reward (progress (containment cable far_half) (:gate 0.27)))
+
+  ; -------------------------------------------------------------------------
+  ; Recorded every step, gating nothing.
+  ;
+  ; `straightness` is the one to read beside the reward. This rod starts
+  ; straight and then DRAPES -- its tail falls off the box's end to the table
+  ; -- so it runs well under 1.0 from the settle on, and what to read is the
+  ; trend: a run whose straightness falls while the reward stalls has folded
+  ; outside the mouth; one that stalls with it steady is jammed on friction.
+  ; Those are different failures and the reward alone cannot tell them apart.
+  (:observe
+    (once (>= (containment cable.end_b beyond_exit) 1.0))
+    (containment cable inside_bore)
+    (containment cable.midpoint inside_bore)
+    (straightness cable)
+    (speed cable)
+    (speed box)
+  )
+
+  (:artifacts
+    (:routine "routine:RoutineTunnel")
+  )
+
+  (:provenance
+    (:tier designed)
+    (:source "authored beside cable_route, after the bimanual cable-routing clip channel routing.mp4")
+    (:note "A 0.44 m 38-capsule rod at 10 mm gauge with a 15 mm moulded plug, fed through the
+            250 mm lidded channel of a free 400 x 200 x 100 mm cable box with a 17 mm square
+            bore and a flared mouth. Gauge and capsule pitch are cable_route's weave rod, reused
+            so the bend stiffness derives at material parity by the same arithmetic against the
+            same reference. The box is sized off the clip's mat grid and power strip; the run and
+            the rod's length are set together by the bench (the tail has to land on the table)
+            and the route (the rod has to cover the run, the exit clearance and a tail). The
+            80 mm seed, the 0.30 share and the 80 mm exit region are all pinned to the geometry
+            above rather than fitted to a run; the seed's 33 mm of settle slip is measured.")
+  )
+
+  ; THE ARENA YAM, as a second way to stand this variant. `yam_bimanual` is the
+  ; same I2RT arm as the native pairing -- 264 mm upper arm, 245 mm forearm, the
+  ; same joint ranges -- wearing the arena's `yam_linear_arena` hand instead of
+  ; the `linear_4310` blades, and standing 22 mm higher above the work surface
+  ; because that robot's mount clears its own play table.
+  ;
+  ; Stated per variant rather than on the suite, because the suite's members do
+  ; not agree on which arm works: `handle`, `panel` and `panel_gentle` override
+  ; the suite's `right` with `left`, and one suite-level row would claim the
+  ; wrong arm for three documents and collide with the row `handle` already
+  ; carries.
+  ;
+  ; What it does NOT claim: the two hands share no tool point -- the i2rt grasp
+  ; site is 134.7 mm down the gripper body's own axis, the arena's is 130 mm out
+  ; and 44 mm laterally off the wrist axis, with 12.14 mm of tip reach against
+  ; 35 mm -- so every constant fitted to the blades is a fact about that hand.
+  ; A row says how to stand the robot here, never that the pairing works.
+  ;
+  ; Measured 2026-09-06 by scripts/matrix.py: built, stepped 10 control steps
+  ; finite, work arm within HOME_ERR of its declared home.
+  (:hosts
+    (:host (:embodiment yam_bimanual (:work-arm right) (:support-arm left) (:arms-solid true))
+           (:notes "compiles; no policy"))
+  )
+)

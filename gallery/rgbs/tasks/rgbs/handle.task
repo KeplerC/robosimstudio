@@ -1,0 +1,248 @@
+; -*- mode: lisp -*-
+; ============================================================================
+; PROBLEM -- what to DO. `tape_peel/handle`, as extended BDDL.
+;
+; AUTHORED -- there is no upstream .bddl for this task.
+;
+; provenance.tier: reproduction
+; source-of-record: robosimstudio/tasks/tape_peel/suite.py (deleted by this port)
+; upstream:         AutoPeel (ICRA 2025), via the reference tape_render /
+;                   tape_traj implementation.
+;
+; Compare this against the same task's hand-written Python suite: every number
+; that used to sit in `metadata` as an untyped tuple is here as a typed clause,
+; and every number that describes the TAPE rather than the task has gone to
+; rgbs/tasks/rgbs/assets/peel/tape/, where what a thing is belongs.
+;
+; WHAT MAKES THIS ONE INTERESTING. It is the first document with a LATCHING
+; goal. `once` freezes success and lets reward keep moving, which is not a
+; detail: a broken bond never re-forms, so a peel is not something the world can
+; undo -- but the quantity behind it goes on changing, and the shipped evaluator
+; reports the live number all the way down. A `once` that latched both would
+; freeze reward at the instant of success and diverge from every recorded trace
+; on the descending edge.
+;
+; Sections marked [EXTENSION] are ours. The rest is standard BDDL and means what
+; it means upstream.
+; ============================================================================
+
+(define (problem PEEL_THE_TAPE_BY_ITS_HANDLE)
+
+
+  (:language pull the tape strip off the box by its handle)
+
+  ; Typed by the PLACED records: `tape_handle` is the tape's declaration with
+  ; the factory that lays it along this layout's longer, lower box with its
+  ; rigid pull-tab, and the box record is that box welded where the handle
+  ; tip lands on the measured grasp point. Where things are is the asset's
+  ; own arithmetic (peel/layout.py); a document names the thing.
+  (:objects
+    tape - tape_handle
+  )
+
+  (:fixtures
+    ; The box the strip is stuck to. Scenery: take it away and there is nothing
+    ; to peel off, which is the line between a fixture and furniture.
+    box - peel_box_handle
+  )
+
+  ; -------------------------------------------------------------- [EXTENSION]
+  ; :staging -- what BDDL cannot say, and what LIBERO supplies through harness
+  ; convention instead: which cell, which robot, which cameras, which physics,
+  ; how many episodes. Recorded rather than defaulted, because a task whose
+  ; scene came from a convention should say which convention. The cell, the
+  ; control mode and the episode count are rgbs.suite's; this is the delta.
+  (:staging
+    ; The LEFT arm peels and no arm supports. The suite's pairing is
+    ; right-works/left-holds, and a staging key is overridden as one clause,
+    ; so the whole pairing is restated -- including (:arms-solid true): only
+    ; one arm peels, but the other stands over the same box while it does,
+    ; and an idle arm is exactly the one nothing was checking.
+    (:embodiment yam_i2rt (:work-arm left) (:arms-solid true))
+    (:physics cloth_vbd@ref)          ; a named arrangement, never a solver config
+    ; The suite rig, aimed just above the box top -- where the bond line is
+    ; and where the peel front travels. The aim is the layout's arithmetic, so
+    ; the aimed rig is a constant of the layout module, named as an artifact.
+    (:cameras peel.layout:HANDLE_VIEWS)
+    ; One arm does the work; the hosted pairings below include one-armed
+    ; robots, which is what this line admits.
+    (:arms 1)
+    ; The shipped routine peels well inside 900: its phases are 50 + 30 + 60
+    ; + 40 + 220 = 400 control steps. A graph driving the same path needs
+    ; roughly twice that -- it settles between stages, opens and closes the
+    ; gripper against a settle count of its own, and burns steps idling
+    ; while a node does non-tool work. Measured: at 900 the lift was still
+    ; streaming when the episode truncated, which scores a peel that was
+    ; progressing as a total failure.
+    (:max-steps 1800)
+  )
+
+  ; -------------------------------------------------------------- [EXTENSION]
+  ; :hosts -- the pairings that stand a foreign robot in this cell.
+  ;
+  ; Each row says only "here is how to stand this robot here", never that the
+  ; pairing WORKS: that is a claim about the matrix, discovered by running it,
+  ; and a file asserting it would go stale with nothing to notice. Both the
+  ; first two are confirmed by scripts/matrix.py: they compile and hold their
+  ; declared home posture to 0.0000 rad over a settle. No graph and no routine
+  ; claim -- "it stands there correctly" is a long way from "it can reach the
+  ; tab", and the matrix does not pretend otherwise.
+  ;
+  ; `yam_i2rt` is not here: it is what these variants are NATIVELY staged on
+  ; since the merge, and a row declaring it as a hosted pairing would be
+  ; declaring the task's own staging as an alternative to itself.
+  ; `yam_bimanual` took its place -- it is the robot these layouts were
+  ; calibrated against, and keeping it reachable is what lets the pre-merge
+  ; numbers be re-run. `ur5` is six joints and a hand that was welded on
+  ; rather than shipped with the arm; the one-armed layout is where a new
+  ; robot arrives, since nothing here needs a second hand to hold anything.
+  (:hosts
+    (:host (:embodiment yam_bimanual (:work-arm left))  (:notes "compiles; no policy"))
+    (:host (:embodiment panda        (:work-arm right)) (:notes "compiles; no policy"))
+    (:host (:embodiment ur5          (:work-arm right)) (:notes "compiles; no policy"))
+  )
+
+  ; Standard :init, using the domain's own state words. Both are CONSTRAINTS to
+  ; be satisfied and verified after settling, not a layout -- which is true of
+  ; upstream BDDL's init too, and is the part every harness quietly fills in.
+  ;
+  ; `anchored` is what makes this layout the layout it is: the tab is held at its
+  ; as-laid pose until a gripper takes it, which turns a drooping flap into a
+  ; package pull-tab an arm can reach. The withdrawn `along_x` stated no such
+  ; thing, and that single missing clause was the whole difference between the
+  ; two variants' starting worlds -- and the reason its tab was out of reach.
+  (:init
+    (adhered tape)
+    (anchored tape)
+  )
+
+  ; -------------------------------------------------------------- [EXTENSION]
+  ; The goal, with two things standard BDDL lacks:
+  ;
+  ;   (once ...)   a temporal modal. The verdict is STICKY: a broken bond never
+  ;                re-forms, so a peel is not something the world can undo, and
+  ;                a non-sticky reading would let a successful peel un-succeed
+  ;                because the tape fell over.
+  ;
+  ;   (>= ... )    a graded comparison over a measure. Boolean predicates cannot
+  ;                express "essentially every bond has let go".
+  ;
+  ; 0.95, not 1.0: a handful of bonds under the far edge can sit inside their
+  ; break threshold indefinitely while the film is plainly off the box, and a
+  ; benchmark that waits for them measures patience.
+  ;
+  ; Stated over `broken-fraction` and NOT over `(<= (bond-fraction tape) 0.05)`,
+  ; which is the same sentence and not the same test. The shipped evaluator
+  ; compares the broken share against 0.95; the complement compares 1 - s
+  ; against 0.05, and in binary floating point those disagree the moment the
+  ; fraction lands exactly on the gate. A port copies the comparison, not the
+  ; arithmetic identity.
+  (:goal
+    (once (>= (broken-fraction tape) 0.95))
+  )
+
+  ; -------------------------------------------------------------- [EXTENSION]
+  ; :reward -- separate from the goal, and it has to be. Reward is not "the share
+  ; of goal predicates satisfied" in six of the nine shipped evaluators: this one
+  ; is progress toward a gate, clipped. Note it keeps moving while the verdict is
+  ; latched -- `once` latches SUCCESS ONLY.
+  ;
+  ; The gate is the goal's gate, deliberately. Where they differ (film_peel gates
+  ; reward at its success fraction while its goal also demands the film survived)
+  ; the difference is the point; here there is none, and writing 0.95 twice is
+  ; what makes that visible rather than assumed.
+  (:reward (progress (broken-fraction tape) (:gate 0.95)))
+
+  ; -------------------------------------------------------------- [EXTENSION]
+  ; :observe -- recorded every step, never gating. These are the quantities
+  ; nobody has calibrated. Reporting them uncalibrated is how they get
+  ; calibrated; thresholding them uncalibrated is how a benchmark ends up
+  ; measuring an arbitrary constant.
+  ;
+  ; `peel-front` is the interesting one. A peel is not "some bonds broke", it is
+  ; a FRONT travelling from the tab inwards, so it counts contiguous fully-broken
+  ; width-rows starting at the tab -- a strip torn out of the middle scores 0
+  ; here and a high broken fraction, which is exactly the distinction it exists
+  ; to make. It is reported monotonically, and that is a property of the
+  ; instrument rather than of this task: an apparent retreat is noise on a row
+  ; that was marginal, not the tape re-adhering.
+  ;
+  ; `held-ever` is what separates "the grasp failed" from "the peel failed". A
+  ; run that reports neither leaves the two indistinguishable.
+  (:observe
+    (peel-front tape)
+    (peel-front-rows tape)
+    (clear tape)
+    (held tape)
+    (held-count tape)
+    (held-ever tape)
+  )
+
+  ; -------------------------------------------------------------- [EXTENSION]
+  ; :artifacts -- a solution is a thing that RUNS, so it stays code and is
+  ; referenced by path. The task is data; the policy is not.
+  ;
+  ; A GRAPH AND NO ROUTINE, since G2. `tape_peel.routine:PeelRoutine` was named
+  ; here and solved this layout; the graph solves it strictly better, measured
+  ; over seven fresh processes each -- `broken_fraction` 1.000 against 0.956,
+  ; `peel_front` 1.000 against 0.933, `clear` 1.000 against 0.825, with no
+  ; variance on either side. Two policies for one peel is two things to keep
+  ; true, and the one that was kept is the one that plans each leg from the live
+  ; pose instead of replaying a plan.
+  (:artifacts
+    (:tools   "tools:register_tape_peel_tools")
+    (:graph gt "graphs/peel_gt")
+  )
+
+  ; -------------------------------------------------------------- [EXTENSION]
+  ; :policy-params -- inputs to the ARTIFACT, not statements about the world.
+  ; Typed and fenced off deliberately: the moment routine parameters mix with
+  ; goal parameters, the untyped side channel this refactor exists to delete has
+  ; been reinvented under a new name.
+  ;
+  ; And they are RECORDS, not the source of truth, which is the second half of
+  ; the same lesson. The suite's `metadata` carried `peel_arm: left` beside a
+  ; binding that already said `work-arm left`, and `grasp_mode: pinch` beside a
+  ; layout that already had a rigid handle -- two copies of two facts, each free
+  ; to disagree with its original. The policy reads the originals: which arm
+  ; works comes from the pairing, and a pinch is what you use on a tab that is
+  ; presented rather than drooping -- the graph's `reach` node derives exactly
+  ; that from the tab's own rigidity.
+  ;
+  ; `(routine-solves true)` was here and has moved to :provenance as
+  ; `tab-reachable`. It was a verdict about a policy, which is what this
+  ; section's fence says it does not carry, and with the routine deleted it would
+  ; have been a verdict about nothing. What was true underneath is a fact about
+  ; the layout: this tab is somewhere the arm can reach.
+  (:policy-params
+    (layout handle)
+    (peel-arm left)
+    (grasp-mode pinch)
+  )
+
+  (:provenance
+    (:tier reproduction)
+    (:source "AutoPeel (ICRA 2025)")
+    ; Whether the work arm can put its tool where this layout leaves the tab.
+    ; True here, and it is what this variant exists to be: the pull-tab is pinned
+    ; rigid at box-top height, every accuracy-critical landmark solves under a
+    ; tenth of a millimetre, and the graph takes it 7/7. `along_x` stated the
+    ; other half of the pair -- false, with the graph refusing at `reach` 7/7
+    ; without moving -- until it was withdrawn. It is a fact about the pairing,
+    ; not a verdict on any policy.
+    (:tab-reachable true)
+    (:note "No published benchmark defines success for a deformable task like
+            this, so the goal is designed. The one quantity with a reference to
+            calibrate against is the broken-bond fraction, and it was
+            calibrated on the withdrawn along_x layout rather than this one:
+            133 bonds formed on that flat strip as in the reference, and their
+            aggregate hold matched its 2.0 N. No variant reproduces that
+            measurement now; what survives it is the material constants it fitted,
+            in peel/tape.py. This layout is the manipulation reference -- a
+            tab the arm can actually reach, where every accuracy-critical
+            landmark solves under a millimetre and the shipped policy peels the
+            whole strip. The scripted routine this document used to name peeled
+            96% of the bonds here; it was deleted in G2 and the graph exceeds
+            it.")
+  )
+)

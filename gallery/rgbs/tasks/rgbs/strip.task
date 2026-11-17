@@ -1,0 +1,247 @@
+; ---------------------------------------------------------------------------
+; AUTHORED -- replicates a real rig (reference video IMG_2462: two YAM arms, a
+; Dremel-style rotary tool clamped SIDEWAYS to a stand at the back of a mat --
+; nose forward at the arms, fifteen degrees down -- a 25 mm polishing drum on
+; a mandrel in its collet, and a small rest ledge on the column). The arms pick
+; a white plastic strip off the mat, press its marked top face UP against the
+; spinning drum's BARREL, and rub each blue mark away.
+;
+; WHAT MAKES THIS ONE INTERESTING. The bit is FIXED, so every mark has to be
+; brought to it: the strip is carried up to the drum, pressed, RUBBED, lifted
+; clear and SHIFTED along its own length before the next mark can reach it.
+; Both hands hold it for all of that -- the marks sit at 0 and +-33 mm and the
+; hands at +-58 mm, so a mark is reached by translating the whole rigid body,
+; both arms with it.
+;
+; AND THE RUB HAS A DIRECTION. The drum works on its side, so its contact is a
+; band 10 mm along the spindle and 12-15 mm across it -- against a mark that is
+; 18 mm across the strip and 8 mm along it. Most of every mark is therefore out
+; of reach of any one press: measured, a press held at any depth from 1 to 6 mm
+; of overdrive clears 0.68 of a mark and then stops, against a gate of 0.95.
+; The rest is reached by rubbing the strip ALONG the spindle axis, toward and
+; away from the arms.
+;
+; Rubbing the other way -- sideways, along the strip's own long axis -- reaches
+; nothing and cannot be held. Nothing, because the band is already wider than
+; the mark in that direction. Cannot be held, because that is the direction the
+; drum's surface runs in: read straight off the solver's contact table at a
+; 3.3 N press, the tangential force is 3.45 N across the spindle and 0.00 N
+; along it, so a rub one way costs the full mu * press Coulomb drag through an
+; end-on pinch whose couple is only as wide as the strip is thick, and a rub
+; the other way costs nothing the contact can supply. Neither fact is written
+; into the removal law. Both are what this geometry does.
+;
+; The drag is also what the GRASP has to survive, and that is the hard part of
+; this task. It is mu * press in the strip's own plane -- the same order as the
+; pads' whole friction budget -- and the pads' budget is not a constant: a
+; position-servoed finger presses with whatever standing position error the part
+; holds its jaws open by, and every press erodes it. Measured over three marks
+; with the grip left alone: 40 N at the close, 8 N after the first mark, and the
+; strip on the bench during the third. Two things answer it, both recorded with
+; their numbers in rgbs/tasks/rgbs/routine_polish.py -- a force HOLD on the fingers
+; (``GripHold``) and a press at half the overdrive this first shipped with.
+;
+; Removal is a per-cell irreversible Preston-law field (rate = k_p * pressure
+; * sliding speed) owned by the `marks` entity. Nothing here can un-polish. The
+; law is isotropic and says nothing about direction: what a mark's cells see is
+; decided entirely by whether the barrel's band has passed over them.
+; ---------------------------------------------------------------------------
+
+(define (problem POLISH_THE_MARKED_STRIP)
+
+
+  (:language polish the blue marks off the plastic strip with the rotary tool
+             then set it back down on its rest)
+
+  ; The cell, the pairing (right works, left holds, arms solid), the control
+  ; mode and the episode count are rgbs.suite's; this is the delta. So is the
+  ; rig: rgbs_views@v1 is registered aimed at THIS variant's drum contact,
+  ; because polish's overhead camera is the one the whole suite's rig was
+  ; calibrated from, so `strip` stages it as is and every other family aims
+  ; it at its own work.
+  (:staging
+    ; Contact-rich rigid press against a velocity-driven spindle; the probe
+    ; feed needs MuJoCo's own contact table. See rgbs/tasks/rgbs/staging.py.
+    (:physics polish_960hz@v1)
+    ; Multi-phase: dual pick, carry, per-spot press/rub/poll rounds for three
+    ; marks, set-down, release, retreat, then a 2 s settled hold. Both hands
+    ; hold throughout. Generous on purpose -- the budget is sized for the rubs a
+    ; harder-pressing or worse-aimed policy needs, not for the shipped one.
+    (:max-steps 12000)
+    ; The usbc bimanual's stiffened servos, for the same reason: pressing a
+    ; rigid part against a fixture is task-space positioning under contact,
+    ; and at the MJCF's own 300 gain the TCP lags ~10 mm -- more than the
+    ; whole press stroke.
+    (:arm-actuation (:ke 1600) (:kd 70))
+    (:gripper-actuation (:ke 20000) (:kd 20))
+  )
+
+  (:objects
+    strip - polish_strip
+    ; The blue marks: state the STRIP CARRIES, published by the task's mark
+    ; field entity, the way peel's film publishes its bond field. No rigid
+    ; body answers to this name and no clause below reads it through one --
+    ; published states only.
+    marks - polish_markfield
+  )
+
+  ; Placed by their records: where each stands is polish/layout.py's
+  ; arithmetic. The rails are two records because a record that builds a
+  ; thing builds it in one place; their height is a measured decision, and
+  ; the layout module says why.
+  (:fixtures
+    mat       - polish_mat
+    rest      - parts_rest
+    rail_near - polish_rail_near
+    rail_far  - polish_rail_far
+    machine   - rotary_polisher
+  )
+
+  ; No regions: the set-down is scored on contact with the rest the strip came
+  ; off, not on a box in space. The rest is what holds the strip's ends clear of
+  ; the mat so a hand can take it end-on at all -- see rgbs/tasks/rgbs/polish/layout.py.
+
+  ; -------------------------------------------------------------------------
+  ; The world an episode starts in, re-verified after settling at every reset.
+  ;
+  ; Only the marks are stated, deliberately. Two candidate clauses were
+  ; measured false AT THE RESET INSTANT and true a dozen steps later, and an
+  ; init that warns on every clean episode teaches people to ignore the
+  ; warning:
+  ; * `(spinning machine)` -- the environment zeroes every joint velocity
+  ;   AFTER entity resets, so the drum re-spins from rest over the next
+  ;   ~0.15 s (well before the arms reach anything, long after the check);
+  ; * `(>= (contact-force strip mat) ...)` -- the force atom's 10-step
+  ;   smoothing window is empty at verification and reads a dropout as zero.
+  ; Both quantities stay observable every step below; the graph gates on
+  ; `spinning` itself before it presses.
+  (:init
+    (marked marks)
+  )
+
+  ; -------------------------------------------------------------------------
+  ; ONE LATCH OVER EVERYTHING: all marks polished AND the strip back on the
+  ; mat, released by BOTH hands, settled -- held for two simulated seconds so
+  ; a bounce or a lingering finger cannot buy the verdict.
+  ;
+  ; (>= (polished-fraction marks) 0.95)
+  ;     The field is monotone by construction, so the latch is belt-and-braces
+  ;     -- but `once` is still right: the verdict is about the episode, and
+  ;     the strip's later travels must not be able to take it back.
+  ;
+  ; (>= (contact-force strip rest) 0.05) and (<= (speed strip) 0.02)
+  ;     Set down ON THE MAT and at rest. The force atom smooths over ten
+  ;     steps, so the solver's contact dropouts cannot restart the hold-for
+  ;     clock.
+  ;
+  ; (not (gripped strip.body))
+  ;     The work arm's jaws are not stalled at the strip's width.
+  ;
+  ; (> (hands-clear strip) 0.10)
+  ;     BOTH hands away -- `tcp-distance` reads the work arm only, and this
+  ;     episode ends with two hands to clear. 100 mm against an 85 mm jaw
+  ;     span.  ; CAL
+  (:goal
+    (once
+      (And
+        (>= (polished-fraction marks) 0.95)
+        (hold-for 2.0
+          (And
+            (>= (contact-force strip rest) 0.05)
+            (<= (speed strip) 0.02)
+            (not (gripped strip.body))
+            (> (hands-clear strip) 0.10)
+          )
+        )
+      )
+    )
+  )
+
+  ; -------------------------------------------------------------------------
+  ; Progress toward the polish gate, clipped, UNMASKED -- panel.task's form.
+  ; A press-force budget belongs in a later `strip_gentle` variant, after the
+  ; gt graph has measured clean-run and abusive-run populations; an
+  ; uncalibrated threshold is worth less than the number it thresholds. The
+  ; set-down clauses are deliberately NOT folded into the scalar: reward
+  ; measures how much got polished; release is a condition on when the verdict
+  ; counts.
+  (:reward (progress (polished-fraction marks) (:gate 0.95)))
+
+  ; -------------------------------------------------------------------------
+  ; Recorded every step, gating nothing -- the quantities this suite exists to
+  ; calibrate. `press-force` is the future gentle-variant budget;
+  ; `spots-remaining` is what makes a trace legible ("stalled at 2 remaining"
+  ; vs "finished"); `disc-speed` shows the drum bogging down under a press.
+  (:observe
+    (spots-remaining marks)
+    (press-force marks)
+    (strip-on-bit marks)
+    (disc-speed machine)
+    (gripped strip.body)
+    (hands-clear strip)
+    (speed strip)
+  )
+
+  ; -------------------------------------------------------------------------
+  ; A graph, and no routine: the per-mark shift choreography and the rub rounds
+  ; polled against the field are closed-loop by construction, which is what a
+  ; graph is for.
+  (:artifacts
+    (:tools "tools:register_polish_tools")
+    (:graph gt "graphs/polish_gt")
+  )
+
+  (:provenance
+    (:tier original)
+    (:source "Authored for this corpus from a reference video and photograph of
+              the real rig: bimanual YAM arms, a Dremel-style rotary tool
+              clamped SIDEWAYS to a vertical stand over a work mat -- nose
+              forward at the arms and fifteen degrees down -- a 25 mm polishing
+              drum on a mandrel, worked on its barrel, and a rest ledge the
+              reference operator regrasps on. The ledge is modelled and
+              reachable; this variant's schedule does not use it, having
+              measured that it does not need to. The tool hung NOSE-DOWN in the
+              first build of this task, presenting the drum's flat end face,
+              which is not how a polishing drum is used and made the rub's
+              direction unmeasurable.")
+    (:note "Strip 150x25x4 mm rigid box; marks are three 8x20 mm patches spread
+            along the top face -- WIDER ACROSS THE STRIP THAN THE DRUM IS LONG,
+            which is what makes the rub necessary -- reached by shifting the
+            whole strip under a fixed bit with both hands still on it. An
+            earlier schedule put the strip down and regrasped between marks on
+            the premise that the marks were spread wider than one grasp window;
+            measured, they are not. A single hand does hold the strip,
+            measured; what it cannot do is react the press torque at 78 mm of
+            lever on a 4 mm-wide grip couple, nor the drum's drag through a rub
+            -- see rgbs/tasks/rgbs/graphs/polish_gt/README.md.
+            Removal is a per-cell irreversible field; polished-fraction is
+            monotone, so `once` latches nothing the world could take back.
+            CAL-tagged thresholds are re-measured against the shipped graph
+            before sign-off.")
+  )
+
+  ; THE ARENA YAM, as a second way to stand this variant. `yam_bimanual` is the
+  ; same I2RT arm as the native pairing -- 264 mm upper arm, 245 mm forearm, the
+  ; same joint ranges -- wearing the arena's `yam_linear_arena` hand instead of
+  ; the `linear_4310` blades, and standing 22 mm higher above the work surface
+  ; because that robot's mount clears its own play table.
+  ;
+  ; Stated per variant rather than on the suite, because the suite's members do
+  ; not agree on which arm works: `handle`, `panel` and `panel_gentle` override
+  ; the suite's `right` with `left`, and one suite-level row would claim the
+  ; wrong arm for three documents and collide with the row `handle` already
+  ; carries.
+  ;
+  ; What it does NOT claim: the two hands share no tool point -- the i2rt grasp
+  ; site is 134.7 mm down the gripper body's own axis, the arena's is 130 mm out
+  ; and 44 mm laterally off the wrist axis, with 12.14 mm of tip reach against
+  ; 35 mm -- so every constant fitted to the blades is a fact about that hand.
+  ; A row says how to stand the robot here, never that the pairing works.
+  ;
+  ; Measured 2026-09-06 by scripts/matrix.py: built, stepped 10 control steps
+  ; finite, work arm within HOME_ERR of its declared home.
+  (:hosts
+    (:host (:embodiment yam_bimanual (:work-arm right) (:support-arm left) (:arms-solid true))
+           (:notes "compiles; no policy"))
+  )
+)

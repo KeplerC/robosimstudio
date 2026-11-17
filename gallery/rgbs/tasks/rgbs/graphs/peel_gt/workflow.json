@@ -1,0 +1,503 @@
+{
+  "version": 3,
+  "meta": {
+    "name": "rgbs_peel_gt",
+    "description": "Peel the adhesive strip off the box. Perception is a slot with two bodies behind a router: sim.get_tab reads the tab off the particles, and a camera body is declared and skipped because open-robot-skills is absent here. The peel itself is five legs the graph plans as it flies them -- two joint-space transits, two straight strokes at the tab -- with the wrist chosen once, up front, by whether the arm can hold it where it matters. The film is carried by sim.attach because closing rigid fingers on a sub-millimetre sheet does not grip it, and the layout's own pull-tab pin is released only after the hold is proven."
+  },
+  "nodes": {
+    "perceive_tab": {
+      "type": "router",
+      "script": "scripts/route_perception.py",
+      "inputs": {
+        "perception": {
+          "$ref": "in.perception"
+        }
+      }
+    },
+    "perceive_tab_oracle": {
+      "type": "subgraph",
+      "ref": "perceive_tab_oracle_sg"
+    },
+    "perceive_tab_vision": {
+      "type": "subgraph",
+      "ref": "perceive_tab_vision_sg"
+    },
+    "peel": {
+      "type": "subgraph",
+      "ref": "peel_sg"
+    },
+    "verify": {
+      "type": "subgraph",
+      "ref": "verify_sg"
+    },
+    "done": {
+      "type": "end",
+      "status": "success"
+    },
+    "abort": {
+      "type": "end",
+      "status": "failure",
+      "recovery": [
+        {
+          "tool": "sim.detach",
+          "inputs": {}
+        },
+        {
+          "tool": "robot.open_gripper",
+          "inputs": {}
+        }
+      ]
+    }
+  },
+  "edges": [
+    [
+      "START",
+      "perceive_tab"
+    ]
+  ],
+  "conditional_edges": {
+    "perceive_tab": {
+      "router_field": null,
+      "mapping": {
+        "oracle": "perceive_tab_oracle",
+        "vision": "perceive_tab_vision"
+      }
+    },
+    "perceive_tab_oracle": {
+      "router_field": "exit",
+      "mapping": {
+        "found": "peel",
+        "not_found": "abort",
+        "errored": "abort"
+      }
+    },
+    "perceive_tab_vision": {
+      "router_field": "exit",
+      "mapping": {
+        "found": "peel",
+        "not_found": "abort",
+        "errored": "abort"
+      }
+    },
+    "peel": {
+      "router_field": "exit",
+      "mapping": {
+        "lifted": "verify",
+        "missed": "abort",
+        "unreachable": "abort",
+        "errored": "abort"
+      }
+    },
+    "verify": {
+      "router_field": "exit",
+      "mapping": {
+        "peeled": "done",
+        "partial": "abort"
+      }
+    }
+  },
+  "subgraphs": {
+    "perceive_tab_oracle_sg": {
+      "skill": "generic",
+      "inputs": {},
+      "outputs": {
+        "tab_point": {
+          "$ref": "read.tab_point"
+        },
+        "tab_peel_dir": {
+          "$ref": "read.tab_peel_dir"
+        },
+        "tab_feature": {
+          "$ref": "read.tab_feature"
+        },
+        "tab_rigid": {
+          "$ref": "read.tab_rigid"
+        },
+        "tab_grasp_radius_m": {
+          "$ref": "read.tab_grasp_radius_m"
+        },
+        "tab_hold_radius_m": {
+          "$ref": "read.tab_hold_radius_m"
+        },
+        "tab_anchored": {
+          "$ref": "read.tab_anchored"
+        },
+        "tab_entity": {
+          "$ref": "read.tab_entity"
+        }
+      },
+      "nodes": {
+        "read": {
+          "type": "script",
+          "script": "scripts/perceive_tab_oracle.py",
+          "inputs": {}
+        },
+        "found": {
+          "type": "noop"
+        },
+        "not_found": {
+          "type": "noop"
+        }
+      },
+      "edges": [
+        [
+          "START",
+          "read"
+        ],
+        [
+          "found",
+          "END"
+        ],
+        [
+          "not_found",
+          "END"
+        ]
+      ],
+      "conditional_edges": {
+        "read": {
+          "router_field": "route",
+          "mapping": {
+            "found": "found",
+            "not_found": "not_found"
+          }
+        }
+      },
+      "exit": {
+        "router_field": null,
+        "success_values": [
+          "found",
+          "not_found"
+        ]
+      },
+      "on_error": "errored"
+    },
+    "perceive_tab_vision_sg": {
+      "skill": "generic",
+      "inputs": {},
+      "outputs": {
+        "tab_point": {
+          "$ref": "read.tab_point"
+        },
+        "tab_peel_dir": {
+          "$ref": "read.tab_peel_dir"
+        },
+        "tab_feature": {
+          "$ref": "read.tab_feature"
+        },
+        "tab_rigid": {
+          "$ref": "read.tab_rigid"
+        },
+        "tab_grasp_radius_m": {
+          "$ref": "read.tab_grasp_radius_m"
+        },
+        "tab_hold_radius_m": {
+          "$ref": "read.tab_hold_radius_m"
+        },
+        "tab_anchored": {
+          "$ref": "read.tab_anchored"
+        },
+        "tab_entity": {
+          "$ref": "read.tab_entity"
+        }
+      },
+      "nodes": {
+        "read": {
+          "type": "script",
+          "script": "scripts/perceive_tab_vision.py",
+          "inputs": {}
+        },
+        "found": {
+          "type": "noop"
+        },
+        "not_found": {
+          "type": "noop"
+        }
+      },
+      "edges": [
+        [
+          "START",
+          "read"
+        ],
+        [
+          "found",
+          "END"
+        ],
+        [
+          "not_found",
+          "END"
+        ]
+      ],
+      "conditional_edges": {
+        "read": {
+          "router_field": "route",
+          "mapping": {
+            "found": "found",
+            "not_found": "not_found"
+          }
+        }
+      },
+      "exit": {
+        "router_field": null,
+        "success_values": [
+          "found",
+          "not_found"
+        ]
+      },
+      "on_error": "errored"
+    },
+    "peel_sg": {
+      "skill": "generic",
+      "inputs": {
+        "tab_point": "Vec3",
+        "tab_peel_dir": "Vec3",
+        "tab_feature": "str",
+        "tab_rigid": "bool",
+        "tab_grasp_radius_m": "float",
+        "tab_hold_radius_m": "float",
+        "tab_anchored": "bool",
+        "tab_entity": "str"
+      },
+      "outputs": {},
+      "nodes": {
+        "reach": {
+          "type": "script",
+          "script": "scripts/reach_peel.py",
+          "inputs": {
+            "tab_point": {
+              "$ref": "in.tab_point"
+            },
+            "tab_peel_dir": {
+              "$ref": "in.tab_peel_dir"
+            },
+            "tab_feature": {
+              "$ref": "in.tab_feature"
+            },
+            "tab_rigid": {
+              "$ref": "in.tab_rigid"
+            },
+            "tab_grasp_radius_m": {
+              "$ref": "in.tab_grasp_radius_m"
+            },
+            "tab_hold_radius_m": {
+              "$ref": "in.tab_hold_radius_m"
+            },
+            "tab_anchored": {
+              "$ref": "in.tab_anchored"
+            },
+            "tab_entity": {
+              "$ref": "in.tab_entity"
+            }
+          }
+        },
+        "unreachable": {
+          "type": "noop"
+        },
+        "open": {
+          "type": "tool",
+          "tool": "robot.open_gripper",
+          "inputs": {
+            "settle_steps": 20
+          }
+        },
+        "approach": {
+          "type": "script",
+          "script": "scripts/move_joint.py",
+          "inputs": {
+            "pose": {
+              "$ref": "reach.via"
+            },
+            "orientation": {
+              "$ref": "reach.orientation"
+            },
+            "waypoints": 50,
+            "gate": false
+          }
+        },
+        "sink": {
+          "type": "script",
+          "script": "scripts/move_joint.py",
+          "inputs": {
+            "pose": {
+              "$ref": "reach.pre"
+            },
+            "orientation": {
+              "$ref": "reach.orientation"
+            },
+            "waypoints": 30
+          }
+        },
+        "descend": {
+          "type": "script",
+          "script": "scripts/move_linear.py",
+          "inputs": {
+            "pose": {
+              "$ref": "reach.grasp"
+            },
+            "orientation": {
+              "$ref": "reach.orientation"
+            },
+            "waypoints": 60
+          }
+        },
+        "close": {
+          "type": "tool",
+          "tool": "robot.close_gripper",
+          "inputs": {
+            "settle_steps": 40
+          }
+        },
+        "latch": {
+          "type": "script",
+          "script": "scripts/latch_film.py",
+          "inputs": {
+            "entity": {
+              "$ref": "reach.entity"
+            },
+            "feature": {
+              "$ref": "reach.feature"
+            },
+            "hold_radius_m": {
+              "$ref": "reach.hold_radius_m"
+            },
+            "grasp_radius_m": {
+              "$ref": "reach.grasp_radius_m"
+            },
+            "anchored": {
+              "$ref": "reach.anchored"
+            }
+          }
+        },
+        "missed": {
+          "type": "noop"
+        },
+        "lift": {
+          "type": "script",
+          "script": "scripts/move_linear.py",
+          "inputs": {
+            "pose": {
+              "$ref": "reach.lift"
+            },
+            "orientation": {
+              "$ref": "reach.orientation"
+            },
+            "waypoints": 220
+          }
+        },
+        "lifted": {
+          "type": "noop"
+        }
+      },
+      "edges": [
+        [
+          "START",
+          "reach"
+        ],
+        [
+          "open",
+          "approach"
+        ],
+        [
+          "approach",
+          "sink"
+        ],
+        [
+          "close",
+          "latch"
+        ],
+        [
+          "lifted",
+          "END"
+        ],
+        [
+          "missed",
+          "END"
+        ],
+        [
+          "unreachable",
+          "END"
+        ]
+      ],
+      "conditional_edges": {
+        "reach": {
+          "router_field": "route",
+          "mapping": {
+            "reachable": "open",
+            "unreachable": "unreachable"
+          }
+        },
+        "sink": {
+          "router_field": "route",
+          "mapping": {
+            "moved": "descend",
+            "unreachable": "unreachable"
+          }
+        },
+        "descend": {
+          "router_field": "route",
+          "mapping": {
+            "moved": "close",
+            "unreachable": "unreachable"
+          }
+        },
+        "latch": {
+          "router_field": "route",
+          "mapping": {
+            "held": "lift",
+            "missed": "missed"
+          }
+        },
+        "lift": {
+          "router_field": "route",
+          "mapping": {
+            "moved": "lifted",
+            "unreachable": "unreachable"
+          }
+        }
+      },
+      "exit": {
+        "router_field": null,
+        "success_values": [
+          "lifted",
+          "missed",
+          "unreachable"
+        ]
+      },
+      "on_error": "errored"
+    },
+    "verify_sg": {
+      "skill": "generic",
+      "inputs": {
+        "tab_entity": "str"
+      },
+      "outputs": {},
+      "nodes": {
+        "check": {
+          "type": "script",
+          "script": "scripts/verify_peel.py",
+          "inputs": {
+            "entity": {
+              "$ref": "in.tab_entity"
+            }
+          }
+        }
+      },
+      "edges": [
+        [
+          "START",
+          "check"
+        ],
+        [
+          "check",
+          "END"
+        ]
+      ],
+      "exit": {
+        "router_field": "route",
+        "success_values": [
+          "peeled",
+          "partial"
+        ]
+      }
+    }
+  }
+}
