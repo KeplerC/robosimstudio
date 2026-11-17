@@ -412,6 +412,12 @@ intact, so at material parity this rod is not the column the figure
 describes. The stroke no longer runs along that chord anyway -- see the
 choreography: it lifts first."""
 
+ENTRY_HOLD = 0.035
+"""Where along the lid the feeding hand pinches it once the feed is done [m],
+in from the entry face: far enough that its fingers, which reach 32 mm back
+from the grasp site toward the wrist, stay over the lid rather than the flare.
+It holds the box while the other hand draws the connector."""
+
 HOLD_FROM_EXIT = 0.015
 """Where along the lid the support hand pinches it [m], short of the exit.
 
@@ -1722,10 +1728,55 @@ class RoutineTunnel:
                 f"advance so far {self.advance * 1e3:.1f} mm, refused {self.refused}"
             )
 
-        # --- the feeding hand clears ------------------------------------------
-        yield from self._leg(
-            self.work, [x_bore - 0.16, push_from, carry_z + 0.06], quat, gate=False, speed=0.20, label="retreat"
-        )
+        # --- the feeding hand takes the box by its lid at the entry end --------
+        # So the draw pulls the cable through the box rather than the box along
+        # the table: the box is a free 350 g body on a slick foot, and drawn with
+        # nothing holding it, it rode 152 mm with the connector and the cable
+        # never moved through it. The same pinch the support hand took at the
+        # exit end, taken at the entry end once the feed is done.
+        entry_hold = bool(self.support and self.hold)
+        if entry_hold:
+            lid_half = BORE / 2 + WALL
+            lid = self._from_box([0.0, -RUN / 2 + ENTRY_HOLD, (BORE + ROOF) / 2])
+            lid_over = self._from_box([0.0, -RUN / 2 + ENTRY_HOLD, BORE + ROOF + SUPPORT_OVER])
+            here = np.asarray(self.env.arm(self.work).ee_pose(self.env.state)[0], dtype=np.float64)
+            yield from self._leg(
+                self.work,
+                [float(here[0]), float(here[1]), float(lid_over[2]) + 0.03],
+                quat,
+                gate=False,
+                speed=0.10,
+                label="up off the riser",
+            )
+            yield from self._leg(
+                self.work,
+                [float(v) for v in lid_over],
+                quat,
+                grip=self._finger_for(lid_half + LID_CLEAR),
+                gate=False,
+                speed=0.15,
+                label="over the entry lid",
+            )
+            yield from self._hold(15)
+            off = self._settled_offset(self.work, lid_over)
+            yield from self._leg(
+                self.work,
+                [float(lid[0]) - off[0], float(lid[1]) - off[1], float(lid[2])],
+                quat,
+                gate=False,
+                speed=0.04,
+                label="down on the entry lid",
+            )
+            yield from self._hold(15)
+            self.grip[self.work] = self._finger_for(lid_half - HOLD_ENGAGE)
+            yield from self._hold(40)
+            lq = self._finger_q(self.work) * 1e3
+            self._say(f"entry hold: fingers q {lq[0]:.1f}/{lq[1]:.1f} mm (asked {self.grip[self.work] * 1e3:.1f})")
+        else:
+            # --- the feeding hand clears --------------------------------------
+            yield from self._leg(
+                self.work, [x_bore - 0.16, push_from, carry_z + 0.06], quat, gate=False, speed=0.20, label="retreat"
+            )
 
         # --- the left hand lets go of the box and takes the connector ----------
         # The half of the job the feed cannot do. A pushed cable stops where the
@@ -1738,7 +1789,9 @@ class RoutineTunnel:
             self._watching_box = False
             if self.hold:
                 self.grip[self.support] = self._open(self.support)
-                yield from self._hold(20)
+                # Until the jaws READ open: the finger servo this document states closes and opens at
+                # 50 mm/s, and lifted after a fixed 20 steps the hand carried the box 100 mm up and away.
+                yield from self._await_open(self.support)
                 yield from self._leg(
                     self.support,
                     [x_bore, exit_y - HOLD_FROM_EXIT, over_z],
@@ -1874,7 +1927,9 @@ class RoutineTunnel:
             yield from self._hold(20)
 
             self.grip[self.support] = self._open(self.support)
-            yield from self._hold(20)
+            # Until the jaws READ open: the finger servo this document states closes and opens at
+            # 50 mm/s, and lifted after a fixed 20 steps the hand carried the box 100 mm up and away.
+            yield from self._await_open(self.support)
             yield from self._leg(
                 self.support,
                 [x_bore - 0.10, grab_y + PULL, ledge_z + BORE + ROOF + SUPPORT_OVER + 0.04],
@@ -1882,6 +1937,24 @@ class RoutineTunnel:
                 gate=False,
                 speed=0.20,
                 label="head retreat",
+            )
+        if entry_hold:
+            # The entry hand lets go last and goes well clear: the goal's
+            # release clause reads this hand's distance from the cable.
+            self.grip[self.work] = self._open(self.work)
+            # Until the jaws READ open: the finger servo this document states closes and opens at
+            # 50 mm/s, and lifted after a fixed 20 steps the hand carried the box 100 mm up and away.
+            yield from self._await_open(self.work)
+            yield from self._leg(
+                self.work, [float(v) for v in lid_over], quat, gate=False, speed=0.10, label="off the entry lid"
+            )
+            yield from self._leg(
+                self.work,
+                [float(lid_over[0]) - 0.16, float(lid_over[1]) - 0.04, float(lid_over[2]) + 0.06],
+                quat,
+                gate=False,
+                speed=0.20,
+                label="retreat",
             )
         yield from self._hold(SETTLE)
         env.request_termination("tunnel feed script complete")
