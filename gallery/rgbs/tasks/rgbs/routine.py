@@ -4,16 +4,17 @@
 Main ships no routine runner (``robosimstudio_bench.solutions.routines`` is
 left out of the release, and a document naming ``(:routine ...)`` is refused at
 lowering), so a variant whose solution is a routine names it in its
-``(:policy-params (routine "MODULE:CLASS"))`` instead, and this class runs it::
+``(:policy-params (routine "MODULE:CLASS"))`` instead, and this class runs it.
+``gallery/rgbs/jobs.py`` points ``bench_run`` at it::
 
-    ROBOSIMSTUDIO_TASK_ROOTS=$PWD/gallery/rgbs/tasks uv run python scripts/bench_run.py \\
-        --task rgbs/seam --solve gallery.rgbs.tasks.rgbs.routine:SolutionRoutine
+    RGBS_VARIANTS=seam uv run python scripts/bench_run.py --jobs gallery/rgbs/jobs.py
 
-``bench_run`` imports this module by its dotted path from the checkout, which is
-a second import of this file beside the task loader's. So it imports nothing of
-the suite at module level: the routine class comes from the copy the task
-loader already executed (:func:`~robosimstudio_bench.taskbuild.discovery.task_module`),
-and the suite's registrations run once.
+A task directory is imported under a package named for its root's path, so the
+job file works that dotted name out rather than a user typing it. This module
+imports nothing of the suite at module level all the same: the routine class
+comes from the copy the task loader executed
+(:func:`~robosimstudio_bench.taskbuild.discovery.task_module`), so the suite's
+registrations run once however this module was reached.
 """
 
 from __future__ import annotations
