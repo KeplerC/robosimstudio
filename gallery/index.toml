@@ -78,13 +78,15 @@ note = "A knife cuts a sushi roll into slices on a checkered board; the rice and
 project = "robosimstudio-real2sim"
 id = "rice"
 title = "Spilled rice: sweep it into a dustpan"
-status = "video"
+status = "verified"
+verified_on = "c3c0f3c"
+code = "gallery/robosimstudio-real2sim/rice"
 robot = "YAM"
-media = ["sweep.mp4"]
-source = "Twin built by a coding agent from a Pexels photo"
+media = ["sweep.mp4", "wide.mp4"]
+source = "Twin built by a coding agent from a Pexels photo; ported to current main by Codex and accepted by a reviewer agent"
 links = ["https://www.pexels.com/photo/8108179/"]
 licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
-note = "Two YAM arms sweep a pile of spilled rice into a dustpan. Filmed in October 2026 on older code; not yet ported to current main."
+note = "6,420 grains of spilled rice as live MPM particles. One YAM hand pinches a dustpan, the other sweeps the rice in with a wooden pusher, then the pan is lifted and tipped toward the camera: 79.7% of the grains end in the pan. Check and every physics replay pass on current main."
 
 [[entry]]
 project = "robosimstudio-real2sim"
@@ -162,13 +164,15 @@ note = "A rendered still of the twin: paper stacks, folded cranes and an instruc
 project = "robosimstudio-real2sim"
 id = "plate-rack"
 title = "Plate rack: put six plates away on a shelf"
-status = "video"
-robot = "YAM (i2rt)"
-media = ["plates.mp4"]
-source = "Designed scene, no reference photo"
-links = []
-licence = "Apache-2.0"
-note = "Two YAM arms take turns lifting stoneware plates out of drying racks and standing them in the slots of a plate shelf. Filmed in September 2026 on older code; its port gets a kitchen background from a photo."
+status = "verified"
+verified_on = "c3c0f3c"
+code = "gallery/robosimstudio-real2sim/plate-rack"
+robot = "YAM"
+media = ["plates.mp4", "rack.mp4"]
+source = "Designed scene, staged in a kitchen built from a Pexels photo; ported to current main by Codex and accepted by a reviewer agent"
+links = ["https://www.pexels.com/photo/33375679/"]
+licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
+note = "Two YAM arms take turns lifting six stoneware plates out of drying racks by their rims and standing them in the slots of a plate shelf, every plate within 2 degrees of vertical, in a vintage kitchen modelled from the photo. Check and the physics replays pass on current main; with the plates twice as heavy the first one tilts 5.6 degrees, so the grip has little margin."
 
 [[entry]]
 project = "robosimstudio-real2sim"
