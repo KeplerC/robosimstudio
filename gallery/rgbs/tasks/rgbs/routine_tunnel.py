@@ -38,11 +38,14 @@ along the bore axis (``tunnel/layout.py::cable_nodes``) -- so the pinch
 is neither on a table nor in mid-air: 90 mm back from the entry the cable lies
 88 mm under the axis and 10 mm above the mat, nearly flat, and the push drives
 it up the hang and in. Each regrasp reads where the cable actually is
-(:meth:`RoutineTunnel._rod_at`) rather than assuming a height, and the push is
-driven along the line from there to the mouth, which keeps the rod ahead of the
-pinch a straight column rather than levering it against the lip.
+(:meth:`RoutineTunnel._pinch_capsule`) rather than assuming a height -- the hang
+the first stroke pinches becomes a riser beside the box once the slack is fed
+in -- and the push carries it up to the bore's own line clear of the flare,
+which keeps the rod ahead of the pinch a straight column rather than levering
+it against the lip.
 
-Nothing here uses the latch. ``cable_route`` found that its own latch was
+Nothing here uses the latch, and the document's cable is built without one
+(``tunnel/layout.py``, ``allow_grasp_latch``). ``cable_route`` found that its own latch was
 covering for a hand that never touched the rod -- with the pin disabled its weave
 made zero gripper-vs-rod contacts and moved the cable 0.1 mm -- and a pin that
 does all the work cannot be told apart from a grasp by looking at the score. A
