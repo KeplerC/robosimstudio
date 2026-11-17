@@ -832,7 +832,7 @@ media = ["carton-tape-cutting.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "A YAM arm picks a box cutter off the mat and draws it along a carton's sealing tape while the other arm pins the carton. Partial on current main: it parts 0.60 to 0.67 of the tape's cells against the 0.95 gate. On the YAM the drawn blade drifts 5 to 7 mm toward the far flap at both ends of the tape on every pass and leaves the near strip whole there, and the fingertip hook that should lift the far flap does not open it and shoves the carton."
+note = "A YAM arm picks a box cutter off the mat and draws it along a carton's sealing tape while the other arm pins the carton. Partial on current main: it parts 0.60 to 0.67 of the tape's cells against the 0.95 gate. On the YAM the blade crosses the seam on a slant, so near each end of the tape it parts only one of the two strips, and the fingertip hook that should then lift the far flap does not open it and shoves the carton."
 
 [[entry]]
 project = "rgbs"
