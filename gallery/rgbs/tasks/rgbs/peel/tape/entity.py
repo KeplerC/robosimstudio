@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """``SpecTape`` and ``EntityTape``: the generic cloth, plus the tape's physics.
 
-:class:`SpecTape` subclasses :class:`~robosimstudio.domains.cloth.ClothSpec` and
+:class:`SpecTape` subclasses :class:`~robosimstudio_materials.cloth.ClothSpec` and
 adds the fields adhesion needs; :class:`EntityTape` subclasses
-:class:`~robosimstudio.domains.cloth.EntityCloth` and adds the bond field and
+:class:`~robosimstudio_materials.cloth.EntityCloth` and adds the bond field and
 the handle pin. Neither the generic cloth entity nor the compiler learns that
 adhesive tape exists -- the spec names its entity, the registry resolves it, and
 everything tape-specific stays in this directory.
@@ -45,7 +45,7 @@ from typing import Any
 
 import newton
 import numpy as np
-from robosimstudio.domains.cloth import TAPE_MATERIAL, ClothMaterialSpec, ClothSpec, EntityCloth
+from robosimstudio_materials.cloth import TAPE_MATERIAL, ClothMaterialSpec, ClothSpec, EntityCloth
 
 from robosimstudio.assetlib.vocabulary.measures import cloth_lifted, held_particles
 from robosimstudio.core.pipeline import ScenePipeline, SubstepHooks
@@ -143,7 +143,7 @@ class SpecTape(ClothSpec):
     one place for it to go stale.
     """
 
-    entity: str = "tape"
+    entity: str = "peel_tape"
     surface_center: tuple[float, float, float] = (0.0, 0.0, 0.0)
     surface_half: tuple[float, float, float] = (0.1, 0.08, 0.06)
     surface_quat: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
@@ -157,7 +157,7 @@ class SpecTape(ClothSpec):
     material: ClothMaterialSpec = field(default_factory=lambda: TAPE_MATERIAL)
 
 
-@register_entity("tape")
+@register_entity("peel_tape")
 class EntityTape(EntityCloth):
     """A tape strip: the generic cloth, with bonds and a handle pin."""
 

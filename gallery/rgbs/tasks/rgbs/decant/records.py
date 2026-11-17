@@ -166,7 +166,7 @@ SEAL_TAPE = register_asset(
             ),
             StateSpec(
                 name="sealed",
-                measure="cut_fraction",
+                measure="tape_cut_fraction",
                 op="<=",
                 value=0.05,
                 summary="Essentially untouched: no more than a twentieth of the tape parted.",
@@ -174,7 +174,7 @@ SEAL_TAPE = register_asset(
             ),
             StateSpec(
                 name="cut",
-                measure="cut_fraction",
+                measure="tape_cut_fraction",
                 op=">=",
                 value=0.95,
                 summary="Essentially open: at least 95% of the tape's cells parted.",
@@ -189,7 +189,7 @@ SEAL_TAPE = register_asset(
         ),
         published=(
             PublishedState(
-                name="cut_fraction",
+                name="tape_cut_fraction",
                 type="float",
                 tier="perceivable",
                 range=(0.0, 1.0),

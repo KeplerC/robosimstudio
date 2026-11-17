@@ -256,8 +256,10 @@
     (speed box)
   )
 
-  (:artifacts
-    (:routine "routine:RoutineTunnel")
+
+  (:policy-params
+    ; Main ships no routine runner: routine.py:SolutionRoutine reads this and runs it.
+    (routine "routine_tunnel:RoutineTunnel")
   )
 
   (:provenance
@@ -274,28 +276,4 @@
             above rather than fitted to a run; the seed's 33 mm of settle slip is measured.")
   )
 
-  ; THE ARENA YAM, as a second way to stand this variant. `yam_bimanual` is the
-  ; same I2RT arm as the native pairing -- 264 mm upper arm, 245 mm forearm, the
-  ; same joint ranges -- wearing the arena's `yam_linear_arena` hand instead of
-  ; the `linear_4310` blades, and standing 22 mm higher above the work surface
-  ; because that robot's mount clears its own play table.
-  ;
-  ; Stated per variant rather than on the suite, because the suite's members do
-  ; not agree on which arm works: `handle`, `panel` and `panel_gentle` override
-  ; the suite's `right` with `left`, and one suite-level row would claim the
-  ; wrong arm for three documents and collide with the row `handle` already
-  ; carries.
-  ;
-  ; What it does NOT claim: the two hands share no tool point -- the i2rt grasp
-  ; site is 134.7 mm down the gripper body's own axis, the arena's is 130 mm out
-  ; and 44 mm laterally off the wrist axis, with 12.14 mm of tip reach against
-  ; 35 mm -- so every constant fitted to the blades is a fact about that hand.
-  ; A row says how to stand the robot here, never that the pairing works.
-  ;
-  ; Measured 2026-09-06 by scripts/matrix.py: built, stepped 10 control steps
-  ; finite, work arm within HOME_ERR of its declared home.
-  (:hosts
-    (:host (:embodiment yam_bimanual (:work-arm right) (:support-arm left) (:arms-solid true))
-           (:notes "compiles; no policy"))
-  )
 )

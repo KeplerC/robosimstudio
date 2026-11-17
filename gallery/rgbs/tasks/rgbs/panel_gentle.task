@@ -37,7 +37,7 @@
     ; 0.0 mm (routine_peel.py records the band). (:arms-solid true) matters
     ; more here than it did with one arm working: both hands are over one
     ; 147 mm phone and the peel arc passes over the holding hand.
-    (:embodiment yam_i2rt (:work-arm right) (:support-arm left) (:arms-solid true))
+    (:embodiment yam_bimanual (:work-arm right) (:support-arm left) (:arms-solid true))
     ; A named arrangement, never a solver config. It is the tape suite's
     ; cloth_vbd@ref with one number changed, and every floor kept: 60 Hz over
     ; 20 substeps with 80 VBD iterations is a stability FLOOR rather than a
@@ -202,7 +202,6 @@
   ; them exactly as the handle graph does.
   (:artifacts
     (:tools   "tools:register_tape_peel_tools")
-    (:routine "routine:RoutineFilmPeel")
   )
 
   ; -------------------------------------------------------------------------
@@ -222,6 +221,8 @@
   ; and a document that could not ask for a different one could not produce
   ; the violent peel it is written to catch.
   (:policy-params
+    ; Main ships no routine runner: routine.py:SolutionRoutine reads this and runs it.
+    (routine "routine_peel:RoutineFilmPeel")
     (peel-speed 0.05)
     (peel-rise 0.55)
   )
@@ -243,25 +244,4 @@
             scoring.")
   )
 
-  ; THE ARENA YAM, as a second way to stand this task. `yam_bimanual` is the
-  ; same I2RT arm as the native pairing -- 264 mm upper arm, 245 mm forearm,
-  ; the same joint ranges -- wearing the arena's `yam_linear_arena` hand
-  ; instead of the `linear_4310` blades, and standing 22 mm higher above the
-  ; work surface because that robot's mount clears its own play table.
-  ;
-  ; What that changes, and why this row claims only that it compiles: the two
-  ; hands do not share a tool point. The i2rt grasp site sits 134.7 mm down
-  ; the gripper body's own axis; the arena's is 130 mm out and **44 mm
-  ; laterally off** the wrist axis, with 12.14 mm of tip reach against 35 mm.
-  ; Every constant this suite measured against the blades -- the jaw-gap fit,
-  ; the grip commands, the clearances -- is a fact about `linear_4310` and
-  ; not about the arm. A row says how to stand the robot here, never that the
-  ; pairing works: that is the matrix's to discover, and the policy's to earn.
-  ;
-  ; Measured 2026-09-06 by scripts/matrix.py: built, stepped 10 control steps
-  ; finite, work arm within HOME_ERR of its declared home.
-  (:hosts
-    (:host (:embodiment yam_bimanual (:work-arm left) (:arms-solid true))
-           (:notes "compiles; no policy"))
-  )
 )

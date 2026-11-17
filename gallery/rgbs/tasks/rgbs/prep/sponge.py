@@ -95,13 +95,13 @@ def prep_sponge(*, at: tuple[float, float, float]):
     high and drops onto the mat, and the drape it lands in is the start state.
 
     The domain is imported here rather than at module scope, which is what
-    every other consumer of it in this tree does: ``robosimstudio.domains.soft``
+    every other consumer of it in this tree does: ``robosimstudio_materials.soft``
     is a domain *pack*, shipped from the repo's top-level ``domains/`` and
     installed into ``robosimstudio/_domain_packs``, so there is no
-    ``robosimstudio/domains/soft`` on disk for an import sorter to resolve and
+    ``robosimstudio_materials/soft.py`` on disk for an import sorter to resolve and
     the module gets filed as third-party beside numpy.
     """
-    from robosimstudio.domains.soft import SOFT_FOAM, SoftSpec
+    from robosimstudio_materials.soft import SOFT_FOAM, SoftSpec
 
     x, y, z = (float(v) for v in at)
     return SoftSpec(

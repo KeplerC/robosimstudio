@@ -170,7 +170,7 @@
   ; -- held for one simulated second so a bounce or a lingering finger cannot
   ; buy the verdict.
   ;
-  ; (>= (cut-fraction seam) 0.95)
+  ; (>= (tape-cut-fraction seam) 0.95)
   ;     The field is monotone by construction, so the latch is belt-and-braces
   ;     -- but `once` is still right: the verdict is about the episode, and the
   ;     carton's later travels must not be able to take it back.
@@ -200,7 +200,7 @@
   (:goal
     (once
       (And
-        (>= (cut-fraction seam) 0.95)
+        (>= (tape-cut-fraction seam) 0.95)
         (>= (flap-far-open seam) 0.63)
         (hold-for 1.0
           (And
@@ -227,7 +227,7 @@
   ; The set-down and the flap are deliberately NOT folded into the scalar:
   ; reward measures how much of the tape got cut, and the rest is a condition
   ; on when the verdict counts.
-  (:reward (progress (cut-fraction seam) (:gate 0.95)))
+  (:reward (progress (tape-cut-fraction seam) (:gate 0.95)))
 
   ; -------------------------------------------------------------------------
   ; Recorded every step, gating nothing -- the quantities this suite exists to
@@ -267,15 +267,14 @@
   ; A scripted routine. Every leg is solved end to end and gated on its worst
   ; residual before it is driven; the press is set by where the seat stops
   ; rather than by a servo, and the draw is a straight leg at that height.
-  (:artifacts
-    (:routine "routine:RoutineBoxDecant")
-  )
 
   ; Inputs to the artifact, not statements about the world. They restate the
   ; constants routine_decant.py reads (GRIP_X, PASSES, CUT_TILT) so a reader
   ; of the document sees the choreography's knobs; the routine is what
   ; consumes them.
   (:policy-params
+    ; Main ships no routine runner: routine.py:SolutionRoutine reads this and runs it.
+    (routine "routine_decant:RoutineBoxDecant")
     (cut-arm right)
     (pin-arm left)
     (grasp-station 0.030)
@@ -314,28 +313,4 @@
             before sign-off.")
   )
 
-  ; THE ARENA YAM, as a second way to stand this variant. `yam_bimanual` is the
-  ; same I2RT arm as the native pairing -- 264 mm upper arm, 245 mm forearm, the
-  ; same joint ranges -- wearing the arena's `yam_linear_arena` hand instead of
-  ; the `linear_4310` blades, and standing 22 mm higher above the work surface
-  ; because that robot's mount clears its own play table.
-  ;
-  ; Stated per variant rather than on the suite, because the suite's members do
-  ; not agree on which arm works: `handle`, `panel` and `panel_gentle` override
-  ; the suite's `right` with `left`, and one suite-level row would claim the
-  ; wrong arm for three documents and collide with the row `handle` already
-  ; carries.
-  ;
-  ; What it does NOT claim: the two hands share no tool point -- the i2rt grasp
-  ; site is 134.7 mm down the gripper body's own axis, the arena's is 130 mm out
-  ; and 44 mm laterally off the wrist axis, with 12.14 mm of tip reach against
-  ; 35 mm -- so every constant fitted to the blades is a fact about that hand.
-  ; A row says how to stand the robot here, never that the pairing works.
-  ;
-  ; Measured 2026-09-06 by scripts/matrix.py: built, stepped 10 control steps
-  ; finite, work arm within HOME_ERR of its declared home.
-  (:hosts
-    (:host (:embodiment yam_bimanual (:work-arm right) (:support-arm left) (:arms-solid true))
-           (:notes "compiles; no policy"))
-  )
 )

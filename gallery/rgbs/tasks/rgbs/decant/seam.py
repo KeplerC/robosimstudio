@@ -1078,7 +1078,7 @@ class EntitySealTape(Entity):
         state = self.read(world, at=instant(context))
         out = {
             **self._carton_states(getattr(context, "body_q", None), world),
-            "cut_fraction": state["cut_fraction"],
+            "tape_cut_fraction": state["cut_fraction"],
             "intact_fraction": state["intact_fraction"],
             "cut_run": state["cut_run"],
             "press_force": float(state["press_force"]),

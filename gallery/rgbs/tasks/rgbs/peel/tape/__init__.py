@@ -96,7 +96,7 @@ recipe below survive both a re-mesh and a box that moved.
 
 TAPE = register_asset(
     AssetRecord(
-        name="tape",
+        name="peel_tape",
         summary="An adhesive strip bonded to a surface, which peels when pulled off it.",
         tags=("tape", "adhesive", "strip"),
         features=(

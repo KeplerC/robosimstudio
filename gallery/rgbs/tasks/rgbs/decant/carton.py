@@ -259,6 +259,25 @@ class EntityShippingCarton(EntityRigid):
         self._published_at: tuple[Any, dict[str, float]] | None = None
 
     # ------------------------------------------------------------------ build
+    def _add_primitive(self, builder: newton.ModelBuilder, pose) -> None:
+        """The floor's free body, as ``EntityRigid`` builds it but with the articulation left open.
+
+        ``add_body`` closes a one-joint articulation around the free joint, and the
+        flap hinges hang off this body, so :meth:`build` declares the articulation
+        once the hinges exist.
+        """
+        xform = wp.transform(tuple(float(v) for v in pose[:3]), wp.quat(*[float(v) for v in pose[3:7]]))
+        body = builder.add_link(xform=xform, label=self.spec.name)
+        self._free_joint = builder.add_joint_free(child=body, label=f"{self.spec.name}_free_joint")
+        self.coord_start = int(builder.joint_q_start[self._free_joint])
+        self.dof_start = int(builder.joint_qd_start[self._free_joint])
+        self.body = body
+        self.spec.shape.add_to(
+            builder, body=body, xform=wp.transform_identity(), label=self.spec.name, cfg=self._contact_cfg(builder)
+        )
+        if self.spec.mass is not None:
+            set_body_mass(builder, body, float(self.spec.mass))
+
     def build(self, builder: newton.ModelBuilder, episode) -> None:
         # The free body, the free joint, the articulation and the FLOOR.
         super().build(builder, episode)
@@ -338,7 +357,9 @@ class EntityShippingCarton(EntityRigid):
             self.flap_shapes.append(int(shape))
             self.flap_coords.append(int(builder.joint_q_start[j]))
             self.flap_dofs.append(int(builder.joint_qd_start[j]))
-        builder.add_articulation(self.flap_joints, label=f"{spec.name}_flaps")
+        # One articulation, the free joint and both hinges: Newton 1.7 refuses a
+        # joint whose parent body sits in another articulation.
+        builder.add_articulation([self._free_joint, *self.flap_joints], label=f"{spec.name}_articulation")
 
         # `_add_primitive` already set the declared mass, on the FLOOR alone --
         # the walls did not exist yet. `set_body_mass` rescales and preserves

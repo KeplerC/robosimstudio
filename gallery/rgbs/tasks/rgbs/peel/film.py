@@ -50,7 +50,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
-from robosimstudio.domains.cloth import TAPE_MATERIAL, ClothMaterialSpec
+from robosimstudio_materials.cloth import TAPE_MATERIAL, ClothMaterialSpec
 
 from robosimstudio.assetlib.record import AssetRecord
 from robosimstudio.assetlib.registry import register_asset

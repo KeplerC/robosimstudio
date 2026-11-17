@@ -29,7 +29,7 @@ the bench rather than inherited:
 
 from __future__ import annotations
 
-from robosimstudio.domains.rod import (
+from robosimstudio_materials.rod import (
     CableLatchSpec,
     EntityCable,
     RodSpec,

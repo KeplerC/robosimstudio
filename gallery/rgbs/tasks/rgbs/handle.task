@@ -58,7 +58,7 @@
     ; so the whole pairing is restated -- including (:arms-solid true): only
     ; one arm peels, but the other stands over the same box while it does,
     ; and an idle arm is exactly the one nothing was checking.
-    (:embodiment yam_i2rt (:work-arm left) (:arms-solid true))
+    (:embodiment yam_bimanual (:work-arm left) (:arms-solid true))
     (:physics cloth_vbd@ref)          ; a named arrangement, never a solver config
     ; The suite rig, aimed just above the box top -- where the bond line is
     ; and where the peel front travels. The aim is the layout's arithmetic, so
@@ -77,30 +77,6 @@
     (:max-steps 1800)
   )
 
-  ; -------------------------------------------------------------- [EXTENSION]
-  ; :hosts -- the pairings that stand a foreign robot in this cell.
-  ;
-  ; Each row says only "here is how to stand this robot here", never that the
-  ; pairing WORKS: that is a claim about the matrix, discovered by running it,
-  ; and a file asserting it would go stale with nothing to notice. Both the
-  ; first two are confirmed by scripts/matrix.py: they compile and hold their
-  ; declared home posture to 0.0000 rad over a settle. No graph and no routine
-  ; claim -- "it stands there correctly" is a long way from "it can reach the
-  ; tab", and the matrix does not pretend otherwise.
-  ;
-  ; `yam_i2rt` is not here: it is what these variants are NATIVELY staged on
-  ; since the merge, and a row declaring it as a hosted pairing would be
-  ; declaring the task's own staging as an alternative to itself.
-  ; `yam_bimanual` took its place -- it is the robot these layouts were
-  ; calibrated against, and keeping it reachable is what lets the pre-merge
-  ; numbers be re-run. `ur5` is six joints and a hand that was welded on
-  ; rather than shipped with the arm; the one-armed layout is where a new
-  ; robot arrives, since nothing here needs a second hand to hold anything.
-  (:hosts
-    (:host (:embodiment yam_bimanual (:work-arm left))  (:notes "compiles; no policy"))
-    (:host (:embodiment panda        (:work-arm right)) (:notes "compiles; no policy"))
-    (:host (:embodiment ur5          (:work-arm right)) (:notes "compiles; no policy"))
-  )
 
   ; Standard :init, using the domain's own state words. Both are CONSTRAINTS to
   ; be satisfied and verified after settling, not a layout -- which is true of

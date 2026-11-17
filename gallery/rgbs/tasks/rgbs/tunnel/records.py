@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from robosimstudio.domains.rod.declare import Rod
+from robosimstudio_materials.rod.declare import Rod
 
 from robosimstudio.assetlib.record import AssetRecord
 from robosimstudio.assetlib.registry import register_asset
