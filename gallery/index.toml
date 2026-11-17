@@ -14,7 +14,7 @@ about = "Scenes rebuilt in RoboSimStudio by a coding agent from one stock photo,
 [[project]]
 id = "abc130"
 title = "ABC-130k twins"
-about = "Twins of real teleoperated episodes from the [ABC-130k](https://huggingface.co/datasets/XDOF/ABC-130k) dataset (XDOF), built by a coding agent on the dataset's own YAM station and checked by a reviewer agent. Each clip swipes between the recorded cameras and the simulation."
+about = "Twins of real teleoperated episodes from the [ABC-130k](https://huggingface.co/datasets/XDOF/ABC-130k) dataset (XDOF), built by a coding agent on the dataset's own YAM station and checked by a reviewer agent. Each clip is the simulation, replaying the recorded episode on the twin."
 
 [[project]]
 id = "vabar"
@@ -32,7 +32,7 @@ id = "kitchen"
 title = "Kitchen counter: sweep up coffee grounds and beans"
 status = "video"
 robot = "YAM"
-media = ["sweep.mp4", "beans.mp4", "water.mp4", "reveal.mp4"]
+media = ["sweep.mp4", "beans.mp4", "water.mp4"]
 source = "Twin built by a coding agent from two Pexels photos"
 links = ["https://www.pexels.com/photo/10568265/", "https://www.pexels.com/photo/10568268/"]
 licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
@@ -44,7 +44,7 @@ id = "parcel"
 title = "Parcels on a rug: brush RSS into dust, peel a label"
 status = "video"
 robot = "YAM"
-media = ["brush.mp4", "peel.mp4", "reveal.mp4"]
+media = ["brush.mp4", "peel.mp4"]
 source = "Twin built by a coding agent from a Pexels photo"
 links = ["https://www.pexels.com/photo/4440794/"]
 licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
@@ -56,7 +56,7 @@ id = "pancakes"
 title = "Pancakes: drizzle honey over the stack"
 status = "video"
 robot = "YAM"
-media = ["drizzle.mp4", "close.mp4", "reveal.mp4"]
+media = ["drizzle.mp4", "close.mp4"]
 source = "Twin built by a coding agent from a Pexels photo"
 links = ["https://www.pexels.com/photo/5662197/"]
 licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
@@ -80,7 +80,7 @@ id = "rice"
 title = "Spilled rice: sweep it into a dustpan"
 status = "video"
 robot = "YAM"
-media = ["sweep.mp4", "reveal.mp4"]
+media = ["sweep.mp4"]
 source = "Twin built by a coding agent from a Pexels photo"
 links = ["https://www.pexels.com/photo/8108179/"]
 licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
@@ -92,7 +92,7 @@ id = "knot"
 title = "Rope: tie an overhand knot"
 status = "video"
 robot = "YAM"
-media = ["knot.mp4", "reveal.mp4"]
+media = ["knot.mp4"]
 source = "Twin built by a coding agent from an Unsplash photo"
 links = ["https://unsplash.com/photos/Q53l02MF69c"]
 licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
@@ -116,11 +116,11 @@ id = "plant"
 title = "Alocasia on a sideboard"
 status = "scene"
 robot = "none yet"
-media = ["reveal.mp4"]
+media = ["still.jpg"]
 source = "Twin built by a coding agent from an Unsplash photo"
 links = ["https://unsplash.com/photos/Mfjb8E7LjWQ"]
 licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
-note = "The photo wipes into its simulated twin. No robot task in it is filmed yet."
+note = "A rendered still of the twin. No robot task in it is filmed yet."
 
 [[entry]]
 project = "robosimstudio-real2sim"
@@ -128,11 +128,11 @@ id = "giftwrap"
 title = "Gift pouch with a card and pencils"
 status = "scene"
 robot = "none yet"
-media = ["reveal.mp4"]
+media = ["still.jpg"]
 source = "Twin built by a coding agent from a Pexels photo"
 links = ["https://www.pexels.com/photo/3850592/"]
 licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
-note = "The photo wipes into its simulated twin; the pouch is cloth. No robot task in it is filmed yet."
+note = "A rendered still of the twin; the pouch is cloth. No robot task in it is filmed yet."
 
 [[entry]]
 project = "robosimstudio-real2sim"
@@ -140,11 +140,11 @@ id = "workshop"
 title = "Scrubbing brush by a workshop wall"
 status = "scene"
 robot = "none yet"
-media = ["reveal.mp4"]
+media = ["still.jpg"]
 source = "Twin built by a coding agent from two Unsplash photos"
 links = ["https://unsplash.com/photos/mHdaRVIBq0g", "https://unsplash.com/photos/4v0mqRgdzVI"]
 licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
-note = "The photo wipes into its simulated twin. No robot task in it is filmed yet."
+note = "A rendered still of the twin. No robot task in it is filmed yet."
 
 [[entry]]
 project = "robosimstudio-real2sim"
@@ -200,11 +200,11 @@ id = "load-the-cups-into-the-dish-rack"
 title = "Load the cups into the dish rack"
 status = "video"
 robot = "YAM (ABC station)"
-media = ["swipe.mp4"]
+media = ["sim.mp4"]
 source = "ABC-130k episode 1fd6abd2-04e6-4547-8e8e-64000fce2b6e (XDOF)"
 links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
-licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
-note = "Accepted by the reviewer agent after four rounds. Filmed in November 2026 on older code."
+licence = "Simulation: Apache-2.0. Twin of an ABC-130k episode (Apache-2.0)."
+note = "The simulation through the station's top camera, replaying the recorded episode. Accepted by the reviewer agent after four rounds. Filmed in November 2026 on older code."
 
 [[entry]]
 project = "abc130"
@@ -212,11 +212,11 @@ id = "unscrew-the-bottle-caps"
 title = "Unscrew the bottle caps"
 status = "video"
 robot = "YAM (ABC station)"
-media = ["swipe.mp4"]
+media = ["sim.mp4"]
 source = "ABC-130k episode 08ea7673-84c2-4d4c-a03c-0159fe0a9f39 (XDOF)"
 links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
-licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
-note = "Accepted by the reviewer agent after six rounds. Filmed in November 2026 on older code."
+licence = "Simulation: Apache-2.0. Twin of an ABC-130k episode (Apache-2.0)."
+note = "The simulation through the station's top camera, replaying the recorded episode. Accepted by the reviewer agent after six rounds. Filmed in November 2026 on older code."
 
 [[entry]]
 project = "abc130"
@@ -224,11 +224,11 @@ id = "fold-and-stack-the-towels"
 title = "Fold and stack the towels"
 status = "video"
 robot = "YAM (ABC station)"
-media = ["swipe.mp4"]
+media = ["sim.mp4"]
 source = "ABC-130k episode 02e198aa-f57b-4bec-a54b-e297165d3090 (XDOF)"
 links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
-licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
-note = "Held after six review rounds: the folded towel lands as a heap, because cloth stiffness trades the pickup against the landing. Filmed in November 2026 on older code."
+licence = "Simulation: Apache-2.0. Twin of an ABC-130k episode (Apache-2.0)."
+note = "The simulation through the station's top camera, replaying the recorded episode. Held after six review rounds: the folded towel lands as a heap, because cloth stiffness trades the pickup against the landing. Filmed in November 2026 on older code."
 
 [[entry]]
 project = "abc130"
@@ -236,11 +236,11 @@ id = "fold-and-stack-the-t-shirts"
 title = "Fold and stack the t shirts"
 status = "video"
 robot = "YAM (ABC station)"
-media = ["swipe.mp4"]
+media = ["sim.mp4"]
 source = "ABC-130k episode ee576206-07d7-4a1e-8bd6-2d8861ab49f4 (XDOF)"
 links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
-licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
-note = "Parked after three review rounds: the shirt never leaves the basket, so the task does not happen yet. Filmed in November 2026 on older code."
+licence = "Simulation: Apache-2.0. Twin of an ABC-130k episode (Apache-2.0)."
+note = "The simulation through the station's top camera, replaying the recorded episode. Parked after three review rounds: the shirt never leaves the basket, so the task does not happen yet. Filmed in November 2026 on older code."
 
 [[entry]]
 project = "abc130"
@@ -248,11 +248,11 @@ id = "put-the-credit-cards-into-the-card-holder"
 title = "Put the credit cards into the card holder"
 status = "video"
 robot = "YAM (ABC station)"
-media = ["swipe.mp4"]
+media = ["sim.mp4"]
 source = "ABC-130k episode 4b83ef22-b691-49f3-be68-cc9cb95b3ca8 (XDOF)"
 links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
-licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
-note = "Parked after seven review rounds: the holder falls out of the hand before the handover. Filmed in November 2026 on older code."
+licence = "Simulation: Apache-2.0. Twin of an ABC-130k episode (Apache-2.0)."
+note = "The simulation through the station's top camera, replaying the recorded episode. Parked after seven review rounds: the holder falls out of the hand before the handover. Filmed in November 2026 on older code."
 
 [[entry]]
 project = "abc130"
@@ -260,11 +260,11 @@ id = "take-the-snacks-out-of-the-paper-bag"
 title = "Take the snacks out of the paper bag"
 status = "video"
 robot = "YAM (ABC station)"
-media = ["swipe.mp4"]
+media = ["sim.mp4"]
 source = "ABC-130k episode 5b5db5d1-cc48-427e-b460-8ce1997dadf2 (XDOF)"
 links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
-licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
-note = "Parked after three review rounds: the first pinch misses the bag, so the snacks are never taken out. Filmed in November 2026 on older code."
+licence = "Simulation: Apache-2.0. Twin of an ABC-130k episode (Apache-2.0)."
+note = "The simulation through the station's top camera, replaying the recorded episode. Parked after three review rounds: the first pinch misses the bag, so the snacks are never taken out. Filmed in November 2026 on older code."
 
 [[entry]]
 project = "abc130"
@@ -272,11 +272,11 @@ id = "take-the-wine-glass-off-the-wine-glass-rack"
 title = "Take the wine glass off the wine glass rack"
 status = "video"
 robot = "YAM (ABC station)"
-media = ["swipe.mp4"]
+media = ["sim.mp4"]
 source = "ABC-130k episode ee85f350-e3ce-4d15-ab16-5bacf388147a (XDOF)"
 links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
-licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
-note = "Parked after five review rounds: the rack is never carried and the glass is never taken. Filmed in November 2026 on older code."
+licence = "Simulation: Apache-2.0. Twin of an ABC-130k episode (Apache-2.0)."
+note = "The simulation through the station's top camera, replaying the recorded episode. Parked after five review rounds: the rack is never carried and the glass is never taken. Filmed in November 2026 on older code."
 
 [[entry]]
 project = "abc130"
@@ -284,11 +284,11 @@ id = "wrap-the-headphones"
 title = "Wrap the headphones"
 status = "video"
 robot = "YAM (ABC station)"
-media = ["swipe.mp4"]
+media = ["sim.mp4"]
 source = "ABC-130k episode 582e7482-eb90-4258-9d68-1a628654c7ed (XDOF)"
 links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
-licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
-note = "Parked after three review rounds: the station was not calibrated, so the grasp on the headband misses. Filmed in November 2026 on older code."
+licence = "Simulation: Apache-2.0. Twin of an ABC-130k episode (Apache-2.0)."
+note = "The simulation through the station's top camera, replaying the recorded episode. Parked after three review rounds: the station was not calibrated, so the grasp on the headband misses. Filmed in November 2026 on older code."
 
 [[entry]]
 project = "vabar"

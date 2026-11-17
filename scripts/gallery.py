@@ -13,14 +13,18 @@ Usage, from the repository root::
     uv run python scripts/gallery.py --check            # exit 1 if a page is stale or the manifest is wrong
     uv run python -m robosimstudio.hub fetch gallery/rgbs/strip-polishing   # one entry's files, here
 
+Every clip is kept twice on the Hub: the mp4, and a short looping WebP of it that
+GitHub draws inline, so a page shows every clip playing and each links to its mp4.
+
 Maintainers publish new clips in two steps. ``stage`` encodes them from a local
 sources file (outside the repository: it names paths on one machine) into a
-folder laid out like the dataset, with a poster per entry and the dataset card;
-``upload`` sends that folder, moves ``REVISION`` to the new commit and rewrites
-the pages::
+folder laid out like the dataset, with a WebP per clip, a poster per entry and
+the dataset card; ``upload`` sends that folder, moves ``REVISION`` to the new
+commit and rewrites the pages (``--prune`` also deletes what the manifest no
+longer names)::
 
     uv run python scripts/gallery.py stage SOURCES.toml OUT/
-    uv run --with huggingface_hub python scripts/gallery.py upload OUT/
+    uv run --with huggingface_hub python scripts/gallery.py upload OUT/ [--prune]
 
 A sources file maps ``"<project>/<entry>"`` to ``{ "<clip>.mp4" = "/path/to/source" }``,
 optionally with ``poster = "/path/to/image"`` (otherwise a frame of the first clip).
@@ -33,6 +37,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -41,6 +46,9 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from robosimstudio import hub  # noqa: E402
+
+sys.path.insert(0, str(REPO / "scripts"))
+from recording.encode import write_webp  # noqa: E402
 
 STATUSES = {
     "verified": "runs on current main and passes the harness checks; the commit it was checked on is given",
@@ -53,6 +61,13 @@ MEDIA = re.compile(r"[a-z0-9][a-z0-9_-]*\.(mp4|jpg|png)")
 SHA = re.compile(r"[0-9a-f]{7,40}")
 FORBIDDEN_STAGE = re.compile(r"(^|/)(auth\.json|codexhome|logs|review|\.env|gallery\.json)(/|$)|\.jsonl$")
 MAX_STAGED = 200_000_000
+PREVIEW_WIDTH = 480
+"""A preview WebP's width in pixels: three to a row on a GitHub page."""
+PREVIEW_FPS = 10
+PREVIEW_MAX_S = 12.0
+"""A longer clip is sped up to play in this long, at most 8 times: a preview shows the whole chore."""
+PREVIEW_BUDGET = 2_000_000
+"""Bytes per preview: GitHub's image proxy serves it, and a page of forty must still load."""
 HEADER = "<!-- written by scripts/gallery.py from gallery/index.toml; edit the manifest, not this page -->\n"
 
 
@@ -116,6 +131,11 @@ def _asset(entry: dict, name: str, revision: str | None = None) -> str:
     return hub.url(f"gallery/{entry['project']}/{entry['id']}/media/{name}", revision, endpoint=hub.PUBLIC)
 
 
+def preview(name: str) -> str:
+    """What a page shows for one clip: its WebP; a still is shown as itself."""
+    return f"{Path(name).stem}.webp" if name.endswith(".mp4") else name
+
+
 def _status(entry: dict) -> str:
     if entry["status"] == "verified":
         return f"verified on main ({entry['verified_on'][:7]})"
@@ -128,18 +148,20 @@ def _links(entry: dict) -> str:
 
 
 def project_page(project: dict, entries: list[dict]) -> str:
-    """One project's page: a grid of posters, each linking to its clip, then a table of the details."""
+    """One project's page: every clip playing, three to a row, each linking to its mp4; then the details."""
     lines = [f"# {project['title']}\n", HEADER, f"{project['about'].strip()}\n", "[All projects](../README.md)\n"]
-    lines.append("<table>")
-    for row in range(0, len(entries), 3):
-        lines.append("<tr>")
-        for entry in entries[row : row + 3]:
-            lines.append(
-                f'<td width="33%" valign="top"><a href="{_asset(entry, entry["media"][0])}">'
-                f'<img src="{_asset(entry, "poster.jpg")}" width="100%" alt="{entry["title"]}"></a><br>'
-                f"<b>{entry['title']}</b><br><sub>{_status(entry)} · {entry['robot']}</sub></td>"
+    cells = []
+    for entry in entries:
+        for name in entry["media"]:
+            label = f" ({Path(name).stem})" if len(entry["media"]) > 1 else ""
+            cells.append(
+                f'<td width="33%" valign="top"><a href="{_asset(entry, name)}">'
+                f'<img src="{_asset(entry, preview(name))}" width="100%" alt="{entry["title"]}{label}"></a><br>'
+                f"<b>{entry['title']}</b>{label}<br><sub>{_status(entry)} · {entry['robot']}</sub></td>"
             )
-        lines.append("</tr>")
+    lines.append("<table>")
+    for row in range(0, len(cells), 3):
+        lines += ["<tr>", *cells[row : row + 3], "</tr>"]
     lines.append("</table>\n")
     lines.append("| Entry | Status | Clips | Source | Licence | Note |")
     lines.append("|---|---|---|---|---|---|")
@@ -161,8 +183,9 @@ def index_page(projects: list[dict], entries: list[dict]) -> str:
     lines = [
         "# Gallery\n",
         HEADER,
-        "Tasks built with RoboSimStudio, by project. Every clip is hosted on Hugging Face, in the dataset",
-        f"[{hub.DATASET}](https://huggingface.co/datasets/{hub.DATASET}); a card links to its clip.\n",
+        "Tasks built with RoboSimStudio, by project, in simulation. Every clip is hosted on Hugging Face, in the",
+        f"dataset [{hub.DATASET}](https://huggingface.co/datasets/{hub.DATASET}); each project's page plays them all,",
+        "and each links to its full-length video.\n",
         "| Status | Meaning |",
         "|---|---|",
         *(f"| {k} | {v} |" for k, v in STATUSES.items()),
@@ -173,7 +196,7 @@ def index_page(projects: list[dict], entries: list[dict]) -> str:
     for project in projects:
         own = [e for e in entries if e["project"] == project["id"]]
         verified = sum(e["status"] == "verified" for e in own)
-        cover = f'<img src="{_asset(own[0], "poster.jpg")}" width="160" alt="">' if own else ""
+        cover = f'<img src="{_asset(own[0], preview(own[0]["media"][0]))}" width="240" alt="">' if own else ""
         lines.append(f"| [{project['title']}]({project['id']}/README.md) | {len(own)} | {verified} | {cover} |")
     lines += [
         "",
@@ -259,6 +282,23 @@ def _still(src: Path, out: Path, at: float | None = None) -> None:
     subprocess.run([*cmd, "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", str(out)], check=True)
 
 
+def _webp(src: Path, out: Path) -> None:
+    """A looping preview of a clip: :data:`PREVIEW_WIDTH` wide, at most :data:`PREVIEW_MAX_S` long, in budget."""
+    from PIL import Image
+
+    speed = min(8.0, max(1.0, _duration(src) / PREVIEW_MAX_S))
+    with tempfile.TemporaryDirectory() as tmp:
+        vf = f"setpts=PTS/{speed:.4f},fps={PREVIEW_FPS},scale={PREVIEW_WIDTH}:-2:flags=lanczos"
+        cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", vf, "-an", f"{tmp}/f%05d.png"]
+        subprocess.run(cmd, check=True)
+        frames = [Image.open(p).convert("RGB") for p in sorted(Path(tmp).glob("f*.png"))]
+        if not frames:
+            raise SystemExit(f"{src}: no frames to preview")
+        written = write_webp(frames, out, PREVIEW_FPS, budget=PREVIEW_BUDGET)
+    if not written["fits"]:
+        raise SystemExit(f"{out}: {written['bytes']} bytes at the lowest quality, over {PREVIEW_BUDGET}")
+
+
 def _source(key: str, name: str, given: str) -> Path:
     """A staging source, refused when it is a credential, a log, a symlink or not a file."""
     src = Path(given).expanduser()
@@ -312,6 +352,8 @@ def stage(sources_file: Path, out: Path) -> list[Path]:
         partial = target.with_name(f".{target.stem}.part{target.suffix}")
         if how == "frame":
             _still(src, partial, at=0.55 * _duration(src) if src.suffix == ".mp4" else None)
+        elif how == "webp":
+            _webp(src, partial)
         else:
             (_encode if target.suffix == ".mp4" else _still)(src, partial)
         partial.replace(target)
@@ -321,7 +363,9 @@ def stage(sources_file: Path, out: Path) -> list[Path]:
     clips = [job for job in jobs if job[2] is None]
     with ThreadPoolExecutor(max_workers=6) as pool:
         written = list(pool.map(make, clips))
-    written += [make(job) for job in jobs if job[2] is not None]
+        previews = [(target, target.with_suffix(".webp"), "webp") for _, target, _ in clips if target.suffix == ".mp4"]
+        written += list(pool.map(make, previews))
+    written += [make(job) for job in jobs if job[2] == "frame"]
     record_path.write_text(json.dumps(record, indent=1, sort_keys=True), encoding="utf-8")
     (out / "README.md").write_text(card(projects, entries), encoding="utf-8")
     written.append(out / "README.md")
@@ -334,11 +378,21 @@ def stage(sources_file: Path, out: Path) -> list[Path]:
     return written
 
 
-def upload(folder: Path, message: str) -> str:
+def needed(entries: list[dict]) -> set[str]:
+    """Every dataset path the manifest names under ``gallery/``: each clip, its WebP, and each entry's poster."""
+    return {
+        f"gallery/{e['project']}/{e['id']}/media/{n}"
+        for e in entries
+        for n in {*e["media"], *(preview(m) for m in e["media"]), "poster.jpg"}
+    }
+
+
+def upload(folder: Path, message: str, *, prune: bool = False) -> str:
     """Send a staged folder to the dataset; pin ``REVISION`` to the new commit only if it holds every clip.
 
-    The manifest's clips and posters are checked against the new commit before anything
-    is pinned: a partial upload leaves ``REVISION`` and the pages where they were.
+    The manifest's clips, previews and posters are checked against the new commit before anything
+    is pinned: a partial upload leaves ``REVISION`` and the pages where they were. ``prune`` first
+    deletes, in the same commit, every file under ``gallery/`` that the manifest no longer names.
     """
     from huggingface_hub import HfApi
 
@@ -346,22 +400,21 @@ def upload(folder: Path, message: str) -> str:
         rel = path.relative_to(folder).as_posix()
         if path.is_symlink() or FORBIDDEN_STAGE.search(rel) or ".part." in path.name:
             raise SystemExit(f"refusing to upload {rel}")
+    _, entries = load()
+    want = needed(entries)
+    staged = {p.relative_to(folder).as_posix() for p in (folder / "gallery").rglob("*") if p.is_file()}
+    stale = sorted(f.path for f in hub.files("gallery") if f.path not in want and f.path not in staged) if prune else []
     info = HfApi().upload_folder(
         folder_path=str(folder),
         repo_id=hub.DATASET,
         repo_type="dataset",
         commit_message=message,
         ignore_patterns=[".stage.json"],
+        delete_patterns=stale or None,
     )
     revision = info.oid
     present = {f.path for f in hub.files("gallery", revision)}
-    _, entries = load()
-    missing = [
-        path
-        for e in entries
-        for n in [*e["media"], "poster.jpg"]
-        if (path := f"gallery/{e['project']}/{e['id']}/media/{n}") not in present
-    ]
+    missing = sorted(want - present)
     if missing:
         raise SystemExit(
             f"uploaded as {revision}, but it lacks files the manifest names; REVISION not moved:\n  "
@@ -378,7 +431,7 @@ def upload(folder: Path, message: str) -> str:
     for path, page in pages().items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(page, encoding="utf-8")
-    print(f"uploaded {folder} as {revision}; REVISION pinned; pages rewritten")
+    print(f"uploaded {folder} as {revision}; {len(stale)} stale files deleted; REVISION pinned; pages rewritten")
     return revision
 
 
@@ -405,12 +458,15 @@ def main(argv: list[str] | None = None) -> int:
     sending = sub.add_parser("upload", help="upload a staged folder and pin REVISION to it")
     sending.add_argument("folder", type=Path)
     sending.add_argument("-m", "--message", default="gallery: clips and posters")
+    sending.add_argument(
+        "--prune", action="store_true", help="also delete files under gallery/ the manifest no longer names"
+    )
     args = parser.parse_args(argv)
     if args.command == "stage":
         stage(args.sources, args.out)
         return 0
     if args.command == "upload":
-        upload(args.folder, args.message)
+        upload(args.folder, args.message, prune=args.prune)
         return 0
     wrong = problems()
     if not re.fullmatch(r"[0-9a-f]{40}", hub.REVISION):
