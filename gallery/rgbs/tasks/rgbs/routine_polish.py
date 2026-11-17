@@ -53,6 +53,7 @@ import numpy as np
 import warp as wp
 
 from robosimstudio.arms import arm_id_of
+from robosimstudio.core.bus import BusTimeout
 from robosimstudio.domains.rigid.measures.jaws import GAP_BAND, STALL_MARGIN
 from robosimstudio.solvers import grasp_quat
 from robosimstudio.solvers.motion.path import stream_hz
@@ -264,7 +265,14 @@ had let go without ever slipping visibly. At 60 N the hands settle at +-61 mm,
 the strip still moves only 0.3 mm, and 34-38 N a pad survives the carry.
 
 The ceiling is over-squeeze, not friction: run to a commanded width instead
-and the ramp walks both hands from +-58 mm out to +-83 mm."""
+and the ramp walks both hands from +-58 mm out to +-83 mm.
+
+On ``yam`` the gate is never reached: under this task's 20 kN/m finger
+servo the arena hand's pads press the strip 7-10.5 N at the ``hold`` width, so
+the close runs its whole ramp and the hold then keeps 17-23 N a pad through
+every press (measured 2026-11-17, one episode). That carries the strip through
+all three marks; the number stays the i2rt hand's because nothing here needed
+it moved."""
 
 PRE_OPEN = 0.021
 """How far past the strip's half-thickness each jaw stands while approaching [m].
@@ -427,6 +435,8 @@ class ToolsPolish:
         """The force hold: see :class:`GripHold`. Armed by a gated close."""
         self._shapes: dict[str, list[int]] = {}
         self._grasp: dict[str, np.ndarray] = {}
+        self._signs: dict[str, float] = {}
+        """Per arm, the closing sense it holds the strip in; see :meth:`_close_sign`."""
         self._grasp_q: dict[str, np.ndarray] = {}
         """Per arm, the TCP's measured offset in the strip's own frame [m].
 
@@ -475,7 +485,7 @@ class ToolsPolish:
         """Collider shapes per FINGER, and the strip's, resolved once.
 
         Per finger, not per hand, and that is the whole point -- see
-        :meth:`pad_forces`. Keys are ``"strip"`` and ``f"{arm}/{finger}"``.
+        :meth:`pad_forces`. Keys are ``"strip"`` and ``f"{arm}/{side}"``, side 0 or 1.
         """
         if not self._shapes:
             # The model indices are resolved against, which replicated is the
@@ -483,13 +493,18 @@ class ToolsPolish:
             # ``strip`` label per world, and the per-world contact view rebases
             # its shapes to the template, so a set naming every world's strip is
             # the wrong question asked of the right table.
-            labels = list(self.env.scene.index_model.shape_label)
+            model = self.env.scene.index_model
+            labels = list(model.shape_label)
+            shape_body = model.shape_body.numpy()
             self._shapes["strip"] = [s for s, l in enumerate(labels) if l.split("/")[-1] == "strip"]
-            for name in self.env.scene.embodiment.iks:
-                for finger in ("tip_left", "tip_right"):
-                    tail = f"{name}_{finger}"
-                    self._shapes[f"{name}/{finger}"] = [
-                        s for s, l in enumerate(labels) if tail in l and "visual" not in l
+            # Each finger by the hand's own finger bodies, not by a link name:
+            # the i2rt hand calls them `{arm}_tip_*`, the arena hand
+            # `{arm}_link_*_finger`.
+            embodiment = self.env.scene.embodiment
+            for name in embodiment.iks:
+                for side, bodies in enumerate(embodiment.arms[name].finger_bodies):
+                    self._shapes[f"{name}/{side}"] = [
+                        int(s) for s in np.flatnonzero(np.isin(shape_body, list(bodies))) if "visual" not in labels[s]
                     ]
         return self._shapes
 
@@ -562,7 +577,7 @@ class ToolsPolish:
         strip = shapes["strip"]
 
         def grip(name: str) -> float:
-            pads = [shapes.get(f"{name}/{finger}", []) for finger in ("tip_left", "tip_right")]
+            pads = [shapes.get(f"{name}/{side}", []) for side in (0, 1)]
             forces = [float(np.linalg.norm(view.pairwise_force(strip, pad))) for pad in pads if pad]
             return min(forces) if forces else 0.0
 
@@ -641,11 +656,41 @@ class ToolsPolish:
         # convention rather than a solver failure -- asked for the width
         # instead, the wrist rolls the other way and the jaws end up vertical
         # (measured both directions by tip-to-tip separation).
-        close = _qrot(strip_q, np.array([0.0, 0.0, 1.0]))
+        #
+        # Of the two closing senses -- the jaws are symmetric, so a hand may
+        # roll half a turn about its approach and grip the same -- each arm
+        # takes the one it can reach (:meth:`_close_sign`). On the i2rt blades
+        # the grip point is on the wrist axis and the two are one pose; on
+        # the yam's arena hand it is 44 mm off that axis, the two senses stand
+        # the wrist 88 mm apart, and the two arms need opposite ones.
+        sign = self._signs.get(name, 1.0)
+        close = _qrot(strip_q, np.array([0.0, 0.0, sign]))
         return np.asarray(
             grasp_quat(hand.approach_axis, hand.close_axis, hand.tcp_offset_rot, approach, close),
             dtype=np.float64,
         )
+
+    def _close_sign(self, name: str, station: float, strip_p: np.ndarray, strip_q: np.ndarray) -> float:
+        """Which closing sense this arm takes the strip in: +1 or -1 along its normal.
+
+        The one whose grasp pose at the pick station solves closer, decided once
+        and kept for the episode, so every later pose of this hand is the same
+        hold. Measured on yam: the sense the i2rt build used is 0.0 mm
+        for the right arm and 5.8 mm / 3.7 degrees out for the left, which
+        closed on nothing; the other sense is 0.0 mm for the left.
+        """
+        if name not in self._signs:
+            ik = self.env.arm(name)
+            seed = np.asarray(self.env.state.joint_q.numpy(), dtype=np.float64)
+            target = strip_p + _qrot(strip_q, np.array([float(station), 0.0, GRASP_LIFT]))
+            scored = []
+            for sign in (1.0, -1.0):
+                self._signs[name] = sign
+                quat = self._site_quat(name, strip_q, station)
+                pos_err, rot_err = ik.pose_errors(ik.solve_q_full(seed, target, quat), target, quat)
+                scored.append((float(pos_err) + 0.01 * float(rot_err), sign))
+            self._signs[name] = min(scored)[1]
+        return self._signs[name]
 
     def _flat_strip_quat(self) -> np.ndarray:
         """The strip's carry orientation: long axis along world y."""
@@ -690,6 +735,8 @@ class ToolsPolish:
         if local is None:
             local = np.array([float(station), 0.0, GRASP_LIFT])
         held_q = self._grasp_q.get(name)
+        if held_q is None:
+            self._close_sign(name, station, strip_p, strip_q)
         quat = self._site_quat(name, strip_q, station) if held_q is None else _qmul(strip_q, held_q)
         return strip_p + _qrot(strip_q, local), quat
 
@@ -988,11 +1035,24 @@ class ToolsPolish:
         return {"waited": self._wait_for_step(int(steps), timeout_s=60.0)}
 
     def _wait_for_step(self, steps: int, timeout_s: float = 10.0) -> int:
+        """Let ``steps`` control steps pass, parked on the bus.
+
+        Through :meth:`SimBus.wait_for_step` rather than a sleep-and-poll: a
+        parked wait is what lets a lockstep clock advance, and a polling one
+        holds it -- under ``--clock lockstep`` the episode ended at step one,
+        the graph having "held the clock for 30 s without parking"."""
         start = int(self.bus.snapshot.step)
+        seen = start
         deadline = time.monotonic() + timeout_s
-        while int(self.bus.snapshot.step) < start + steps and time.monotonic() < deadline:
-            time.sleep(0.002)
-        return int(self.bus.snapshot.step) - start
+        while seen < start + int(steps):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                break
+            try:
+                seen = int(self.bus.wait_for_step(after=seen, timeout=remaining).step)
+            except BusTimeout:
+                break
+        return seen - start
 
     def wait_polish(
         self, spot: int = 1, until: float = 0.95, max_steps: int = 600, stall_steps: int = 150

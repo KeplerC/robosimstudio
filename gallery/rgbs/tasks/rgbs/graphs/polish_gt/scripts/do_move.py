@@ -54,7 +54,7 @@ def run(
         delta = [contact[i] - centre[i] for i in range(3)]
         along = sum(delta[i] * normal[i] for i in range(3))
         shift = [delta[i] - along * normal[i] for i in range(3)]
-        correct = {role: shift for role in (holders or ["work", "support"])}
+        correct = dict.fromkeys(holders or ["work", "support"], shift)
 
     plan = ctx.tool(
         "sim.plan_strip_move",

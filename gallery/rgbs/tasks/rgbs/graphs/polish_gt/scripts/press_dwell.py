@@ -27,9 +27,7 @@ class Output(TypedDict):
     waited: int
 
 
-def run(
-    ctx: NodeContext, spot: int, until: float = 0.95, max_steps: int = 600, stall_steps: int = 150
-) -> Output:
+def run(ctx: NodeContext, spot: int, until: float = 0.95, max_steps: int = 600, stall_steps: int = 150) -> Output:
     result = ctx.tool(
         "sim.wait_polish", spot=int(spot), until=float(until), max_steps=int(max_steps), stall_steps=int(stall_steps)
     )

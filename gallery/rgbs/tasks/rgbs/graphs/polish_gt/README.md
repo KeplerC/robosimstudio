@@ -7,6 +7,28 @@ The graph behind one of `rgbs`'s nine variants. It was `polish/strip`'s, in
 uv run python scripts/bench_run.py --task rgbs/strip --solve graph --graph gt --episodes 0:3
 ```
 
+## On `yam` (ported 2026-11-17)
+
+Measured on the i2rt YAM below; it now runs on `yam`, the arena hand, with the
+layout and every constant unchanged. Three things moved, all in
+`routine_polish.py`:
+
+- **Each arm picks its closing sense.** The jaws are symmetric, so a hand may
+  roll half a turn about its approach and grip the same. On the i2rt blades the
+  two are one pose; on `yam` the grip point is 44 mm off the wrist axis, the two
+  stand the wrist 88 mm apart, and the sense the i2rt build used is 5.8 mm /
+  3.7 degrees out of the left arm's reach at its pick station (it closed on
+  nothing). `ToolsPolish._close_sign` takes whichever solves closer, per arm.
+- **The pads are the hand's own finger bodies**, not links named `*_tip_*`.
+- **The waits park on the bus** (`SimBus.wait_for_step`), so the graph runs
+  under `--clock lockstep`, which `gallery/rgbs/jobs.py` uses.
+
+The 30 N close gate is never reached on this hand: the pads press 7-10.5 N at
+the `hold` width, and `GripHold` then keeps 17-23 N a pad through every press.
+One episode, three runs under lockstep (two on the pre-rename library):
+SUCCESS 1.00 at 5879 steps each, `polished-fraction` 1.000, the strip on its
+rest at 0.16 N, hands 142 mm clear.
+
 ## Schedule
 
 ```

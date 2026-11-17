@@ -31,8 +31,15 @@ class Output(TypedDict):
     waited: int
 
 
-def run(ctx: NodeContext, width: str, arm: str = "work", settle_steps: int = 36,
-        ramp_steps: int = 24, until_force: float = 0.0, hold_force: float = -1.0) -> Output:
+def run(
+    ctx: NodeContext,
+    width: str,
+    arm: str = "work",
+    settle_steps: int = 36,
+    ramp_steps: int = 24,
+    until_force: float = 0.0,
+    hold_force: float = -1.0,
+) -> Output:
     result = ctx.tool(
         "sim.set_grip",
         width=width,

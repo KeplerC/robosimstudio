@@ -1,7 +1,9 @@
 """Regenerate polish/strip's three per-mark subgraphs. Kept as a script because
 the three differ only in a spot index and hand-editing 1500 lines of JSON three
 times is how a graph acquires an asymmetry nobody meant."""
-import json, pathlib
+
+import json
+import pathlib
 
 P = pathlib.Path("rgbs/tasks/rgbs/graphs/polish_gt/workflow.json")
 STATIONS = {"work": -0.058, "support": 0.058}
@@ -54,8 +56,7 @@ def spot_subgraph(tag, spot_x, spot_index, approach):
         "lift": move("liftoff", spot_x),
         f"{tag}_dwell_0": poll(spot_index),
     }
-    edges = [["START", "approach"], ["approach", "press"], ["ok", "END"], ["lift", "ok"],
-             ["press", f"{tag}_dwell_0"]]
+    edges = [["START", "approach"], ["approach", "press"], ["ok", "END"], ["lift", "ok"], ["press", f"{tag}_dwell_0"]]
     conditional = {}
     for r in range(1, ROUNDS + 1):
         rub, dwell = f"{tag}_rub_{r}", f"{tag}_dwell_{r}"
@@ -64,8 +65,13 @@ def spot_subgraph(tag, spot_x, spot_index, approach):
         edges.append([rub, dwell])
         conditional[f"{tag}_dwell_{r - 1}"] = {"router_field": "route", "mapping": {"done": "lift", "more": rub}}
     conditional[f"{tag}_dwell_{ROUNDS}"] = {"router_field": "route", "mapping": {"done": "lift", "more": "lift"}}
-    return {"skill": "generic", "nodes": nodes, "edges": edges, "conditional_edges": conditional,
-            "exit": {"router_field": None, "success_values": ["ok"]}}
+    return {
+        "skill": "generic",
+        "nodes": nodes,
+        "edges": edges,
+        "conditional_edges": conditional,
+        "exit": {"router_field": None, "success_values": ["ok"]},
+    }
 
 
 w = json.loads(P.read_text())
