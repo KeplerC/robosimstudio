@@ -20,7 +20,7 @@ is empty and :attr:`~robosimstudio.specs.GripperSpec.finger_token` is cleared,
 because the token is the prefix scan's silent path: left at ``"finger"``, the
 YAM's own ``right_left_finger`` would be swept in as this hand's and driven as
 a mirrored pair. An arm that carries this hand and still has fingers of its own
-in its file names its arm joints explicitly (``yam_bimanual_suction`` does), so
+in its file names its arm joints explicitly (``yam_suction`` does), so
 the fingers stay undriven and the arm chain stays six joints. Its span is 0
 (:attr:`~robosimstudio.specs.GripperSpec.effective_span`), so no grasp-fit test
 offers it a part to pinch.

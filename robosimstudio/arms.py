@@ -19,10 +19,10 @@ the model's layout and nothing may reorder it.
 
 Before this module the facade used declaration order for both. That is correct
 exactly when the work arm is declared first, which every shipped binding happened
-to satisfy: ``yam_i2rt`` lists ``(right, left)`` and claims ``work_arm="right"``;
-``yam_bimanual`` lists ``(left, right)`` and tape claims ``work_arm="left"``. The
+to satisfy: the since-retired ``yam_i2rt`` listed ``(right, left)`` and claimed
+``work_arm="right"``; ``yam`` lists ``(left, right)`` and tape claims ``work_arm="left"``. The
 exception was the one cross-embodiment pairing declared at the time -- the
-since-retired cable pick-and-place variant on ``yam_bimanual``, which claimed
+since-retired cable pick-and-place variant on ``yam``, which claimed
 ``work_arm="right"`` against a robot that declares ``left`` first. There,
 ``arm_id=0`` resolved to the **idle** hand, and every ``robot.*`` call in a
 graph would have driven it. Its successor row, the cable-routing variant on the

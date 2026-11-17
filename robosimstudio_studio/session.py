@@ -936,7 +936,7 @@ class StudioSession:
         # do outright, and `SceneHandles.work_arm`'s own docstring says why that
         # is wrong: the two YAM cells order their arms oppositely, so insertion
         # order picks a different physical hand on different robots. Clicking an
-        # object aims whichever arm is active, so on `yam_i2rt` the page was
+        # object aims whichever arm is active, so on the (since retired) `yam_i2rt` the page was
         # reaching for the task's object with the hand not doing the task.
         self.active_arm = env.handles.work_arm or next(iter(self.arms), "")
         # The panels that need a *document* -- the task menu, the goal readout,

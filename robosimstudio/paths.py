@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 """Where vendored assets live, and how a spec's path resolves to a file.
 
-Assets are repo furniture, not source: 78 MB of meshes and MJCF under the
-checkout's ``assets/``, one directory per provenance, each recorded in
-``PROVENANCE.md`` with where it came from and what changed on the way in. A spec
-names a path relative to that root; an absolute path is passed through, which is
-what lets a scratch asset be tried without vendoring it first.
+Assets are repo furniture, not source: 45 MB of meshes and MJCF under the
+checkout's ``assets/`` (the YAM, the Panda and the suction cup, the robots the
+examples use), one directory per provenance, each recorded in ``PROVENANCE.md``
+with where it came from and what changed on the way in. A spec names a path
+relative to that root; an absolute path is passed through, which is what lets a
+scratch asset be tried without vendoring it first.
+
+**A robot no example uses is kept on the Hugging Face Hub instead** (:data:`REMOTE`):
+the Robotiq 2F-85 the ``panda_robotiq`` pairing wears. It is fetched once, on
+request, into :func:`hub_cache`, and resolves from there afterwards; until then a
+lookup fails with the one command that fetches it. Nothing downloads on its own.
 
 **Most assets are not found here at all.** A task carries its own geometry
 beside the declaration that owns it, and ``register_asset`` resolves those
@@ -29,9 +35,32 @@ from pathlib import Path
 
 from robosimstudio.specs import AssetSpec
 
-__all__ = ["asset_root", "resolve_asset", "resolve_path"]
+__all__ = ["REMOTE", "asset_root", "hub_cache", "resolve_asset", "resolve_path"]
 
 _ENV_VAR = "ROBOSIMSTUDIO_ASSETS"
+
+REMOTE = {"embodiments/robotiq_2f85": "robots/robotiq_2f85"}
+"""Asset folders kept on the Hub rather than in git: the path a spec names -> the dataset folder holding it."""
+
+
+def hub_cache() -> Path:
+    """Where fetched Hub files live, one folder per pinned revision, so a checkout never reads another's.
+
+    ``ROBOSIMSTUDIO_HUB_CACHE`` moves it; the default is ``~/.cache/robosimstudio/hub/<revision>``.
+    """
+    from robosimstudio import hub
+
+    base = os.environ.get("ROBOSIMSTUDIO_HUB_CACHE", "~/.cache/robosimstudio/hub")
+    return Path(base).expanduser() / hub.REVISION
+
+
+def _remote(path: Path) -> tuple[str, Path] | None:
+    """The dataset folder and the cached file for a spec path kept on the Hub, or None for one kept in git."""
+    posix = path.as_posix()
+    for prefix, remote in REMOTE.items():
+        if posix == prefix or posix.startswith(prefix + "/"):
+            return remote, hub_cache() / remote / posix[len(prefix) :].lstrip("/")
+    return None
 
 
 def _candidate_roots() -> list[Path]:
@@ -124,6 +153,15 @@ def resolve_path(path: str | Path) -> Path:
             found = root / candidate
             if found.exists():
                 return found.resolve()
+        remote = _remote(candidate)
+        if remote is not None:
+            folder, cached = remote
+            if cached.exists():
+                return cached.resolve()
+            raise FileNotFoundError(
+                f"asset {path!s} is kept on the Hugging Face Hub, not in git, and has not been fetched yet. "
+                f"Fetch it once with: python -m robosimstudio.hub fetch {folder} --dest {hub_cache()}"
+            )
         candidate = asset_root() / candidate
     if not candidate.exists():
         searched = ", ".join(str(root) for root in _candidate_roots())

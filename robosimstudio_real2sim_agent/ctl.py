@@ -1080,7 +1080,7 @@ TWIN_SCENE = '''# SPDX-License-Identifier: Apache-2.0
 import robosimstudio as rss
 
 scene = rss.Scene(cell="bench_075", name="{name}")
-scene.add(rss.robot("yam_bimanual"))
+scene.add(rss.robot("yam"))
 '''
 
 TWIN_REPORT = """# {name}

@@ -7,7 +7,7 @@ thing about the registered file, and these are the claims that make it the same
 robot in the new place, each measured on a built scene:
 
 * each base body lands on its pose in the work-surface frame -- on the
-  collapsed ``yam_bimanual``, read off the collider the file puts on the base,
+  collapsed ``yam``, read off the collider the file puts on the base,
   since the collapse folds the base body itself into the world;
 * the layout builds exactly what a moved copy of the file builds -- the
   workaround this replaces -- body for body;
@@ -79,7 +79,7 @@ def _yam_file() -> Path:
     from robosimstudio.paths import resolve_asset
     from robosimstudio.robots.registry import get_embodiment
 
-    return Path(resolve_asset(get_embodiment("yam_bimanual").asset))
+    return Path(resolve_asset(get_embodiment("yam").asset))
 
 
 def _base_from_puck(sim, side: str) -> np.ndarray:
@@ -130,7 +130,7 @@ class TestTheYamArmsStandWhereArmsAtSays(unittest.TestCase):
     def setUpClass(cls) -> None:
         import robosimstudio as rss
 
-        cls.sim = _build(rss.robot("yam_bimanual", arms_at=KEYBOX))
+        cls.sim = _build(rss.robot("yam", arms_at=KEYBOX))
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -148,7 +148,7 @@ class TestTheYamArmsStandWhereArmsAtSays(unittest.TestCase):
         """The registered file, its spec untouched -- cross-arm collisions as the robot states them."""
         from robosimstudio.robots.registry import get_embodiment
 
-        registered = get_embodiment("yam_bimanual")
+        registered = get_embodiment("yam")
         built = self.sim.scene.embodiment
         self.assertEqual(registered.asset, built.spec.asset)
         self.assertEqual(
@@ -161,7 +161,7 @@ class TestTheYamArmsStandWhereArmsAtSays(unittest.TestCase):
         """Same joints, coordinates, bodies, shapes and filtered pairs as the default build."""
         import robosimstudio as rss
 
-        default = _build(rss.robot("yam_bimanual"))
+        default = _build(rss.robot("yam"))
         try:
             mine, theirs = self.sim.model, default.model
             for field in ("joint_count", "joint_coord_count", "joint_dof_count", "body_count", "shape_count"):
@@ -214,10 +214,10 @@ class TestTheSameLayoutAsAMovedCopy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             copy = Path(folder) / "arms.xml"
             tree.write(copy, encoding="unicode")
-            moved = replace(get_embodiment("yam_bimanual"), asset=rss.AssetSpec(path=str(copy)))
+            moved = replace(get_embodiment("yam"), asset=rss.AssetSpec(path=str(copy)))
             # The copy's arm poses are relative to its root, which at= stands at the surface frame's origin.
             oracle = _build(rss.robot(moved, at=(0.0, 0.0, 0.0)))
-        sim = _build(rss.robot("yam_bimanual", arms_at=KEYBOX))
+        sim = _build(rss.robot("yam", arms_at=KEYBOX))
         try:
             poses = []
             for one in (sim, oracle):

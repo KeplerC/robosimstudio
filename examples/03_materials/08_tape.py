@@ -36,7 +36,7 @@ def main():
     # [N] per finger. Damped so the jaws reach the tab in 0.4 s: at kd 60 they hit it at 8 mm a step.
     grip = rss.ActuationSpec(target_ke=1500.0, target_kd=240.0, effort_limit=12.0)
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     left, right = yam.arms
     yam = rss.replace(yam, arms=(left, rss.replace(right, home_q=over_tab)))
 

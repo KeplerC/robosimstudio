@@ -21,7 +21,7 @@ class TestASoftBodyOnVbdFalls(unittest.TestCase):
         physics = rss.replace(rss.GENERIC, backends=tuple(e for e in rss.GENERIC.backends if e[0] != "soft"))
         scene = rss.Scene(cell="void", physics=physics, name="vbd_soft")
         # With a robot the arrangement couples, and the solvers copy the flags they are built with.
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         body = scene.add(
             rss.SoftSpec(name="block", size=(0.04, 0.04, 0.02), cells=(4, 4, 2), pose=(0.0, 0.0, 0.3), settle_frames=0)
         )

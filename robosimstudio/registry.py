@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import warnings
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -112,6 +113,9 @@ class Registry[T]:
         self._origins: dict[str, str] = {}
         self._loaded = False
         self._loading = False
+        self._aliases: dict[str, str] = {}
+        self._retired: dict[str, str] = {}
+        self._warned: set[str] = set()
 
     def register(self, name: str, value: T, *, origin: str = "") -> T:
         if name in self._items:
@@ -243,8 +247,31 @@ class Registry[T]:
         finally:
             self._loading = False
 
+    def alias(self, old: str, new: str) -> None:
+        """Keep a renamed entry's old name working: it resolves to ``new`` with a warning, once per process.
+
+        An alias is not an entry. It is not listed by :meth:`names`, so nothing that
+        enumerates the registry offers two names for one thing; it exists so code
+        written against the old name keeps running while it is moved over.
+        """
+        self._aliases[old] = new
+
+    def retire(self, name: str, why: str) -> None:
+        """Make a removed entry's name fail with ``why`` instead of a bare "unknown name"."""
+        self._retired[name] = why
+
     def get(self, name: str) -> T:
         self.load()
+        if name not in self._items and name in self._aliases:
+            new = self._aliases[name]
+            if name not in self._warned:
+                self._warned.add(name)
+                warnings.warn(
+                    f"{self.kind} {name!r} is now called {new!r}; use the new name", FutureWarning, stacklevel=2
+                )
+            return self.get(new)
+        if name not in self._items and name in self._retired:
+            raise KeyError(f"{self.kind} {name!r} was retired: {self._retired[name]}")
         if name not in self._items:
             raise KeyError(
                 f"unknown {self.kind} {name!r}; registered: {sorted(self._items)}"
@@ -272,7 +299,7 @@ class Registry[T]:
 
     def __contains__(self, name: str) -> bool:
         self.load()
-        return name in self._items
+        return name in self._items or name in self._aliases
 
     def __iter__(self) -> Iterator[tuple[str, T]]:
         self.load()

@@ -37,7 +37,7 @@ def main() -> None:
     diameter = 0.08  # the band at rest [m]
     in_front = (0.5819, 1.1118, 0.3863, 0.7255, 0.5819, 0.0)  # the right arm's home, as in 03_materials/04_band [rad]
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     arms = (yam.arms[0], rss.replace(yam.arms[1], home_q=in_front))
     with contextlib.suppress(ValueError):  # registered by an earlier run in this process
         register_embodiment(rss.replace(yam, name="yam_pegboard", arms=arms))

@@ -30,7 +30,7 @@ def main():
     over_tab = (0.3322, 2.1402, 1.8639, -1.2957, 0.0003, 0.3322)
     grip = rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=12.0)  # [N] per finger
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     left, right = yam.arms
     yam = rss.replace(yam, arms=(left, rss.replace(right, home_q=over_tab)))
 

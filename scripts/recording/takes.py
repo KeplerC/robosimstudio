@@ -951,7 +951,11 @@ DRAFTS = (
         needs=("superdex",),
     ),
     routine(
-        "examples/08_demos/route_the_cable/route_the_cable.py", speed=2.0, success="the cable is routed:", done=_routed
+        "examples/08_demos/route_the_cable/route_the_cable.py",
+        speed=2.0,
+        success="the cable is routed:",
+        done=_routed,
+        budget=1_800_000,  # 45 s of a busy board on the YAM: 1.5 MB held it only below quality 46
     ),
     routine(
         "examples/08_demos/fold_the_towel/fold_the_towel.py", speed=2.0, success="the towel is folded:", done=_folded

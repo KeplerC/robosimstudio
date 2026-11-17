@@ -50,7 +50,7 @@
       "open_ticks": 2128.0,
       "closed_ticks": 2765.0
     },
-    "note": "Sample: one physical right YAM leader, against the yam_bimanual model. ticks_per_radian is the direct-drive constant 4096/(2*pi) of an STS3215 rather than a per-joint fit; offset_ticks and the gripper endpoints were captured on this unit and do not transfer to another arm or another adapter. Calibrate your own with scripts/calibrate_leader_arms.py."
+    "note": "Sample: one physical right YAM leader, against the yam model. ticks_per_radian is the direct-drive constant 4096/(2*pi) of an STS3215 rather than a per-joint fit; offset_ticks and the gripper endpoints were captured on this unit and do not transfer to another arm or another adapter. Calibrate your own with scripts/calibrate_leader_arms.py."
   },
   "5AE6080669": {
     "label": "left",
@@ -103,6 +103,6 @@
       "open_ticks": 1604.0,
       "closed_ticks": 2365.0
     },
-    "note": "Sample: one physical left YAM leader, against the yam_bimanual model. ticks_per_radian is the direct-drive constant 4096/(2*pi) of an STS3215 rather than a per-joint fit; offset_ticks and the gripper endpoints were captured on this unit and do not transfer to another arm or another adapter. Calibrate your own with scripts/calibrate_leader_arms.py."
+    "note": "Sample: one physical left YAM leader, against the yam model. ticks_per_radian is the direct-drive constant 4096/(2*pi) of an STS3215 rather than a per-joint fit; offset_ticks and the gripper endpoints were captured on this unit and do not transfer to another arm or another adapter. Calibrate your own with scripts/calibrate_leader_arms.py."
   }
 }

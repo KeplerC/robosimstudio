@@ -305,7 +305,7 @@ def parse_staging(section: dict[str, Any]) -> Staging:
     """Read a parsed ``:staging`` section into a :class:`Staging`.
 
     The section arrives in the parser's ``_plain`` shape: ``(:embodiment
-    yam_bimanual (:work-arm left))`` is ``{"embodiment": ["yam_bimanual",
+    yam (:work-arm left))`` is ``{"embodiment": ["yam",
     [":work-arm", "left"]]}``.
 
     Raises:

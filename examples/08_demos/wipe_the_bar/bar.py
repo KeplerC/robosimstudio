@@ -366,7 +366,7 @@ class MarkerStripe(rss.Entity):
 def scene(layout: Layout = LAYOUT) -> rss.Scene:
     """Two YAMs at home with their hands open, the gridded mat, the blocks, the bar, and the sponge on the mat."""
     sc = rss.Scene(cell="bench_075", name="wipe_the_bar", physics=PHYSICS)
-    sc.add(rss.robot("yam_i2rt", arm=ARM, gripper=GRIPPER))
+    sc.add(rss.robot("yam", arm=ARM, gripper=GRIPPER))
     fixture = rss.SimRequirements(domain="static", contacts=rss.contacts_with("objects", "robot", "deformables"))
     hx, hy = rss.get_cell("bench_075").half[:2]
     t = layout.mat_thickness / 2

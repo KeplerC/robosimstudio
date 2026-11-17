@@ -258,7 +258,7 @@ class TestTheTiersUnderLoad(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075", name="heavy_plate", physics=rss.MUJOCO_500HZ)
-        scene.add(rss.robot("yam_bimanual_suction"))
+        scene.add(rss.robot("yam_suction"))
         scene.add(rss.box(name="plate", half=(0.075, 0.075, HALF_THICKNESS), at=(0.0, -0.31, 0.003), mass=2.0))
         cls.sim = scene.build(control_mode="joint_position")
         cls.session = open_session(cls.sim, 9632)
@@ -328,7 +328,7 @@ class TestGenericHoldsByWrench(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075", name="generic_plate")
-        scene.add(rss.robot("yam_bimanual_suction"))
+        scene.add(rss.robot("yam_suction"))
         scene.add(rss.box(name="plate", half=(0.075, 0.075, HALF_THICKNESS), at=(0.0, -0.31, 0.003), mass=0.3))
         cls.sim = scene.build(control_mode="joint_position")
         cls.session = open_session(cls.sim, 9633)

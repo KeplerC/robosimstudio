@@ -93,7 +93,7 @@ class TestTheBrushOnItsOwnGrip(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075", name="brush_own_grip")
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         cls.brush = scene.add(rss.brush(name="brush", at=AT))
         cls.sim = _build(scene)
         cls.built = _body_q(cls.sim)
@@ -151,7 +151,7 @@ class TestASoftFieldCannotHoldItsGrip(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075", name="brush_soft")
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         brush = scene.add(rss.brush(name="brush", at=AT, material="soft", rows=12, columns=12))
         sim = _build(scene)
         try:
@@ -173,7 +173,7 @@ class TestTheBrushOnANamedHandle(unittest.TestCase):
         import robosimstudio as rss
         from robosimstudio.robots.registry import get_embodiment
 
-        yam = get_embodiment("yam_bimanual")
+        yam = get_embodiment("yam")
         left, right = yam.arms
         yam = rss.replace(yam, arms=(left, rss.replace(right, home_q=OVER_BRUSH)))
         scene = rss.Scene(cell="bench_075", name="brush_named", physics=rss.BRUSH_60HZ)

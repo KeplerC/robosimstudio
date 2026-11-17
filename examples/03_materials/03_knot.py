@@ -29,7 +29,7 @@ def main():
 
     engine = rss.backend("superdex", substeps=2, feedback="off")  # the fingers drive the rope by pose
     physics = rss.replace(rss.GENERIC, backends=(("rod", engine), *rss.GENERIC.backends))
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     yam = rss.replace(yam, arms=tuple(rss.replace(a, home_q=over_tail[a.name]) for a in yam.arms))
 
     scene = rss.Scene(cell="bench_075", physics=physics, name="knot")

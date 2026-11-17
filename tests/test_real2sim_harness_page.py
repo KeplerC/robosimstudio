@@ -28,7 +28,7 @@ SCENE = """import robosimstudio as rss
 from robosimstudio_studio.routine import hand, reach
 
 scene = rss.Scene(cell="bench_075", name="live-reach")
-scene.add(rss.robot("yam_bimanual"))
+scene.add(rss.robot("yam"))
 scene.add(rss.sheet(name="towel", size=(0.2, 0.2), cells=(10, 10), at=(-0.1, -0.1, 0.02)))
 scene.add(rss.CameraSpec(name="top", eye=(0.6, 0.0, 1.6), look_at=(0.6, 0.0, 0.75), width=320, height=240))
 LIFT = 0.05

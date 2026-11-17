@@ -29,7 +29,7 @@ def _scene():
 
     scene = rss.Scene(cell="bench_075", physics=rss.MUJOCO_500HZ)
     scene.add(rss.box(name="cube", half=(0.025, 0.025, 0.025), at=(0.0, 0.1, 0.03)))
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     return scene.build()
 
 
@@ -291,7 +291,7 @@ class TestDeformables(unittest.TestCase):
         from robosimstudio_materials.cloth import sheet
 
         scene = rss.Scene(cell="bench_075")
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         scene.add(sheet(name="towel", at=(-0.15, -0.2, 0.08), size=(0.12, 0.12), cells=(8, 8), color=(0.8, 0.2, 0.2)))
         cls.sim = scene.build()
         cls.camera = _camera("top", eye=(0.51, -0.14, 1.3), look_at=(0.51, -0.13, 0.75))  # world: the bench is at x 0.6

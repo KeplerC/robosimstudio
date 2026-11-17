@@ -510,7 +510,7 @@ class EntityRod(Centerline, Entity):
     def _decompose_working_tips(self, builder: newton.ModelBuilder) -> None:
         """CoACD the working arm's fingertip colliders, the reference's own step.
 
-        The linear_4310 tip is a non-convex mesh; through the proxy pipeline
+        A blade fingertip (the retired linear_4310's was the case) is a non-convex mesh; through the proxy pipeline
         its raw triangles give the rod a flickering contact patch and the
         friction grip bleeds. The reference decomposes the *active* arm's tips
         (threshold 0.3, up to 6 hulls) and falls back to a convex hull with a

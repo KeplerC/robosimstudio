@@ -20,7 +20,7 @@ is live, the target *is* the achieved pose, so there is no restoring error left
 and the wrench has only inertia and the joint limits to work against.
 
 **Each arm's own links.** ``ArmHandle.shapes`` cannot say which arm a link
-belongs to -- it is filled for contact exclusion and on ``yam_bimanual`` both
+belongs to -- it is filled for contact exclusion and on ``yam`` both
 arms list the same 112 shapes. Slackening by that would let go of the arm
 nobody is touching, and stop its gizmo working mid-drag.
 """
@@ -35,7 +35,7 @@ TIER = "medium"
 """Builds a bimanual scene on a GPU and steps it."""
 
 CELL = "void"
-EMBODIMENT = "yam_bimanual"
+EMBODIMENT = "yam"
 
 
 def _scene():

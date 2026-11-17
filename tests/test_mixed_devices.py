@@ -33,7 +33,7 @@ class TestACpuMaterialInAGpuScene(unittest.TestCase):
         if not wp.is_cuda_available():
             raise unittest.SkipTest("needs a GPU: this is a GPU scene with a CPU material in it")
         scene = rss.Scene(cell="bench_075", name="mixed")  # GENERIC: soft on SuperDex, cloth on VBD
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         scene.add(rss.sheet(name="towel_gpu", size=(0.2, 0.2), cells=(12, 12), at=(-0.25, -0.1, 0.02)))
         on_the_cpu = rss.SimRequirements(domain="cloth", backend=rss.backend("superdex", substeps=2))
         scene.add(rss.sheet(name="towel_cpu", size=(0.2, 0.2), cells=(12, 12), at=(0.05, -0.1, 0.02), sim=on_the_cpu))

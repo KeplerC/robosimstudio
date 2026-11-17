@@ -100,12 +100,13 @@ Notes:
   in several parts held by fixed joints is built as one body.
 - `rss.articulated` builds a jointed object (a cabinet, a door) from a USD stage;
   see [Import a SimReady asset](../04_extending/README.md#import-a-simready-asset).
-- A scene holds one robot. A two-arm pair such as `yam_bimanual` is one robot.
+- A scene holds one robot. A two-arm pair such as `yam` is one robot.
 - A scene needs at least one thing that moves, or `build()` raises.
 
 The registered robots are `panda`, `panda_robotiq`, `panda_robotiq_roll`,
-`yam_bimanual`, `yam_bimanual_suction` (a vacuum cup on the right arm),
-`yam_i2rt` and `yam_i2rt_arena_narrow`.
+`yam` and `yam_suction` (a vacuum cup on the right arm). `panda_robotiq`'s
+Robotiq 2F-85 is kept on the Hugging Face Hub; fetch it once with the command
+its error names.
 
 ## Placing things
 
@@ -121,7 +122,7 @@ What `at` places depends on the kind:
 - `robot`: the base. Leave `at` out and a registered robot stands at its own
   mount, at the edge of the work surface.
 - `arms_at`: one arm's base, for a cell whose arms stand on separate mounts.
-  `rss.robot("yam_bimanual", arms_at={"left": (-0.36, 0.2, 0.06)})` puts the
+  `rss.robot("yam", arms_at={"left": (-0.36, 0.2, 0.06)})` puts the
   left arm's base body there, in the same frame and spelling as `at`. The pose
   is absolute, not relative to `at`, and an arm left out stays where `at` puts it.
 

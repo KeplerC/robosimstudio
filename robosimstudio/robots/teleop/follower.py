@@ -2,7 +2,7 @@
 """The simulated arm a YAM leader drives, and the drive that makes it worth driving.
 
 A leader arm is a joint configuration read every tick, so the arm that follows
-it is whichever shipped robot has the same joints: **``yam_bimanual``** -- two
+it is whichever shipped robot has the same joints: **``yam``** -- two
 arms of six revolute joints and a grip each, the layout a bimanual YAM leader's
 calibration describes. It is used as it is registered. What changes for
 teleoperation is only how hard its servos chase their targets, and that is an
@@ -14,11 +14,8 @@ override the scene applies rather than a second robot in the registry::
     scene = rss.Scene(cell="bench_075")
     scene.add(rss.robot(YAM_FOLLOWER, arm=YAM_TELEOP_ARM, gripper=YAM_TELEOP_GRIP))
 
-An override, so the stock ``yam_bimanual`` is untouched: its own gains are the
-hardware's actuator classes and other scenes are measured against them. The
-same two specs fit ``yam_i2rt_arena_narrow``, which wears the same hand and
-actuator classes on a different arm model; the measurements below were not
-repeated there.
+An override, so the stock ``yam`` is untouched: its own gains are the
+hardware's actuator classes and other scenes are measured against them.
 """
 
 from __future__ import annotations
@@ -27,7 +24,7 @@ from robosimstudio.specs import ActuationSpec
 
 __all__ = ["YAM_FOLLOWER", "YAM_TELEOP_ARM", "YAM_TELEOP_GRIP"]
 
-YAM_FOLLOWER = "yam_bimanual"
+YAM_FOLLOWER = "yam"
 """The registered robot a bimanual YAM leader drives."""
 
 YAM_TELEOP_ARM = ActuationSpec(
@@ -57,7 +54,7 @@ YAM_TELEOP_ARM = ActuationSpec(
     #     2000/750         26 ms      0.0247           0.0%
     #     4000/3000        18 ms      0.0194           0.0%   <- here, = the reference
     #
-    # Repeated for this file on ``yam_bimanual`` in a bare ``bench_075`` scene,
+    # Repeated for this file on ``yam`` in a bare ``bench_075`` scene,
     # the same hand as a synthetic one stepped in a tight loop (no serial
     # thread, no page), so the taus are a little shorter and the shape is the
     # same:

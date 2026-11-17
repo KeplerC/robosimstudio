@@ -49,7 +49,7 @@ Source: [`01_render.py`](01_render.py)
 import robosimstudio as rss
 
 scene = rss.Scene(cell="bench_075")
-scene.add(rss.robot("yam_bimanual"))
+scene.add(rss.robot("yam"))
 scene.add(rss.box(name="cube", half=(0.025,) * 3, at=(0, 0.1, 0.2)))
 scene.add(rss.sheet(name="towel", size=(0.3, 0.3), cells=(20, 20), at=(-0.15, -0.3, 0.05)))
 sim = scene.build(control_mode="joint_position")

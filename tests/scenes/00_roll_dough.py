@@ -33,7 +33,7 @@ def main():
     # jaws closing along y, across the handle. Solved with ``sim.arm("right").solve_q_full``.
     over_roller = (0.0, 1.4922, 1.2524, -1.3311, 0.0, 0.0)
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     left, right = yam.arms
     yam = rss.replace(yam, arms=(left, rss.replace(right, home_q=over_roller)))
 

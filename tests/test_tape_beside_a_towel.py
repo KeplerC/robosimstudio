@@ -33,7 +33,7 @@ def _build():
     import robosimstudio as rss
 
     scene = rss.Scene(cell="bench_0728", physics=rss.TAPE_60HZ, name="tape_beside_a_towel")
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     towel = rss.sheet(
         name="towel", size=(0.1, 0.1), cells=(10, 10), at=(0.1, 0.1, 0.02), material=rss.materials.TERRY_TOWELLING
     )
@@ -86,7 +86,7 @@ def _build_contact():
     import robosimstudio as rss
 
     scene = rss.Scene(cell="bench_0728", physics=rss.TAPE_60HZ, name="contact_labels_and_a_notify")
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     scene.add(rss.box(name="box", half=(0.05, 0.06, 0.025), at=(0.0, -0.08, 0.025), mass=0.5))
     for name, x, stuck in (("loose", -0.04, False), ("stuck", 0.01, True)):
         label = rss.tape(name=name, on="box", at=(x, -0.11, 0.0505), size=(0.03, 0.05), cells=(6, 10), tab=0.0)

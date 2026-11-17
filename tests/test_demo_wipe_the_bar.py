@@ -71,7 +71,9 @@ class TestWipeTheBar(unittest.TestCase):
         assert "session" in inspect.signature(routine).parameters
         cls.session.add_routines({"Wipe the bar": routine})
         panel = cls.session.panels[-1]
-        tick(cls.session, 20)
+        # 1.5 s: the YAM's fingers start shut and open under the demo's damped servo (80 mm/s at most),
+        # reaching full open in about 1.2 s; the sponge settles in the same time.
+        tick(cls.session, 90)
         sponge, stripe, ik = sim["sponge"], sim["stripe"].entity, cls.session.arms["right"].ik
         cls.latch, bridge, gripper = bar.latch(sim), sponge.entity.bridge, sim.gripper("right")
         cls.start = {

@@ -107,7 +107,7 @@ class TestBothArmsClaimTheWholeRobot(unittest.TestCase):
     """Measured, and the reason the tiebreak exists.
 
     `ArmHandle.shapes` is filled for contact *exclusion*, where "everything
-    belonging to this arm" sensibly means the whole robot -- on `yam_bimanual`
+    belonging to this arm" sensibly means the whole robot -- on `yam`
     the left and right lists are the same 112 shapes. Read as identity that makes
     every click on a link ambiguous, and breaking the tie alphabetically would
     select the left arm on one robot and the right on another, which is the exact

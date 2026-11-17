@@ -124,7 +124,7 @@ class MyChain(rss.Entity):
 
 def main():
     cell = "void"
-    embodiment = "yam_bimanual"
+    embodiment = "yam"
     links = 24
 
     # Declare the kind: its role, what it touches by default, and that it is not welded to the world.

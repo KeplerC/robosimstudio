@@ -44,7 +44,7 @@ class TestItDrawsWhatTiledDraws(unittest.TestCase):
         scene = rss.Scene(cell="bench_075", render=replace(LAB, scenery=""))
         scene.add(rss.box(name="cube", half=(0.025, 0.025, 0.025), at=(0.0, 0.1, 0.03), color=(0.2, 0.4, 0.9)))
         scene.add(sheet(name="towel", at=(-0.15, -0.2, 0.05), size=(0.12, 0.12), cells=(8, 8), color=(0.8, 0.2, 0.2)))
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         cls.sim = scene.build()
         cls.sim.run(20)
 

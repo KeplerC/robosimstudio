@@ -65,11 +65,11 @@ def _words(result: dict) -> dict[str, bool | None]:
     return {c["name"]: c["ok"] for c in result["checks"]}
 
 
-def linear_4310_clamp():
+def yam_hand_clamp():
     """The registered YAM's arena hand's own servo (its 50 N clamp), or None where it has none."""
     from robosimstudio.robots.registry import get_embodiment, resolve_gripper
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     hand = resolve_gripper(yam, yam.arms[0])
     return getattr(hand, "actuation", None)
 
@@ -767,7 +767,7 @@ def _sim(name: str, labels: list[str], thing_labels: tuple[str, ...] = ()):
 
 class RobotTable(unittest.TestCase):
     def test_a_yam_by_name(self) -> None:
-        self.assertEqual(physics.real_arm_torque(_sim("yam_bimanual", [])), physics.ARM_TORQUE["yam"])
+        self.assertEqual(physics.real_arm_torque(_sim("yam", [])), physics.ARM_TORQUE["yam"])
 
     def test_a_ur10_is_not_capped_as_a_ur5(self) -> None:
         self.assertEqual(physics.real_arm_torque(_sim("ur10e_pair", [])), physics.ARM_TORQUE["ur10"])
@@ -1218,7 +1218,7 @@ class StudyLines(unittest.TestCase):
         with mock.patch.object(physics, "_robot_joint_labels", side_effect=lambda s: list(s.model.joint_label)):
             robotiq = sim(["l_hand_right_driver_joint", "l_hand_right_follower_joint"])
             self.assertEqual(physics.real_hand(robotiq, arm), "robotiq_2f85")
-            self.assertEqual(physics.real_hand(sim([], name="yam_bimanual"), arm), "yam")
+            self.assertEqual(physics.real_hand(sim([], name="yam"), arm), "yam")
             self.assertIsNone(physics.real_hand(sim(["j1"], name="arm"), arm))
 
     def test_a_ball_ends_the_same_however_it_turned(self) -> None:
@@ -1316,7 +1316,7 @@ class StudyLines(unittest.TestCase):
     def test_the_robot_line_holds_the_robot_to_the_registered_one(self) -> None:
         runs = _clean_runs()
         same = {
-            "name": "yam_bimanual",
+            "name": "yam",
             "registered": True,
             "file": "",
             "arm": "",
@@ -1344,7 +1344,7 @@ class StudyLines(unittest.TestCase):
         from robosimstudio.robots.registry import EMBODIMENTS, get_embodiment, register_embodiment
 
         EMBODIMENTS.load()
-        yam = get_embodiment("yam_bimanual")
+        yam = get_embodiment("yam")
         here = Path(__file__).resolve().parent / "twin_robot_probe" / "arms.xml"
         own = replace(yam, name="study_twin_registered_yam", asset=rss.AssetSpec(path=str(here)))
         register_embodiment(own)
@@ -1356,9 +1356,9 @@ class StudyLines(unittest.TestCase):
         self.assertEqual(
             physics.robot_departures(sim(yam)),
             {
-                "name": "yam_bimanual",
+                "name": "yam",
                 "registered": True,
-                "as": "yam_bimanual",
+                "as": "yam",
                 "file": "",
                 "arm": "",
                 "gripper": "",
@@ -1372,14 +1372,14 @@ class StudyLines(unittest.TestCase):
             gripper_actuation=rss.ActuationSpec(target_ke=2000, target_kd=40, effort_limit=500),
         )
         read = physics.robot_departures(sim(renamed))
-        self.assertEqual((read["registered"], read["as"]), (True, "yam_bimanual"), "a renamed YAM is still the YAM")
+        self.assertEqual((read["registered"], read["as"]), (True, "yam"), "a renamed YAM is still the YAM")
         self.assertIn("gripper servo is the twin's own", read["gripper"])
         swapped = physics.robot_departures(sim(replace(yam, enable_self_collisions=True, gripper="franka_hand")))
         self.assertIn("enable_self_collisions", swapped["other"])
         self.assertEqual(swapped["hand"], "", "each YAM arm names its own hand, so the robot-wide one is not used")
         same_file = replace(yam, asset=rss.AssetSpec(path=str(physics._robot_file(yam))))
         self.assertEqual(physics.robot_departures(sim(same_file))["file"], "", "the same file, however it is named")
-        hand = linear_4310_clamp()
+        hand = yam_hand_clamp()
         if hand is not None:
             clamp = physics.robot_departures(sim(replace(yam, gripper_actuation=hand)))
             self.assertEqual(clamp["gripper"], "", "gripper= the hand's own servo is no departure")
@@ -1395,7 +1395,7 @@ class StudyLines(unittest.TestCase):
         from robosimstudio.robots.registry import EMBODIMENTS, get_embodiment
 
         EMBODIMENTS.load()
-        yam = get_embodiment("yam_bimanual")
+        yam = get_embodiment("yam")
         folder = Path(tempfile.mkdtemp(prefix="twin-robot-"))
         copy = folder / "arms.xml"
         copy.write_text(physics._robot_file(yam).read_text().replace('pos="0 0.3', 'pos="0 0.31'))  # an arm moved
@@ -1405,18 +1405,18 @@ class StudyLines(unittest.TestCase):
         def sim(spec):
             return types.SimpleNamespace(scene=types.SimpleNamespace(embodiment=types.SimpleNamespace(spec=spec)))
 
-        for name in ("yam_bimanual", "keybox_yam"):
+        for name in ("yam", "keybox_yam"):
             read = physics.robot_departures(sim(replace(yam, name=name, asset=rss.AssetSpec(path=str(copy)))))
-            self.assertEqual((read["registered"], read["as"]), (True, "yam_bimanual"), name)
-            self.assertIn("is a copy of the registered yam_bimanual", read["file"])
+            self.assertEqual((read["registered"], read["as"]), (True, "yam"), name)
+            self.assertIn("is a copy of the registered yam", read["file"])
         self.assertIs(
             physics.robot_departures(sim(replace(yam, name="ur", asset=rss.AssetSpec(path=str(own)))))["registered"],
             False,
             "a robot of the twin's own, nothing like a shipped one",
         )
-        suction = get_embodiment("yam_bimanual_suction")
+        suction = get_embodiment("yam_suction")
         read = physics.robot_departures(sim(replace(suction, name="twin_suction")))
-        self.assertEqual((read["as"], read["hand"], read["gripper"]), ("yam_bimanual_suction", "", ""))
+        self.assertEqual((read["as"], read["hand"], read["gripper"]), ("yam_suction", "", ""))
 
     def test_drawn_parts_that_do_not_collide_fail_past_a_centimetre(self) -> None:
         runs = _clean_runs()
