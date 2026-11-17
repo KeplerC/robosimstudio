@@ -1,0 +1,867 @@
+# The gallery's manifest: one [[project]] per folder under gallery/, one [[entry]] per item.
+# scripts/gallery.py writes gallery/README.md and each project's README.md from it, and --check holds them to it.
+# Clips live on the Hugging Face Hub under gallery/<project>/<id>/media/ (see robosimstudio/hub.py).
+#
+# status: verified (ported, passes the harness on main: set code and verified_on) | partial (ported, task not
+#         completed or a check fails: set code) | video (older code, not ported) | scene (no robot task filmed yet)
+# media:  clip and still names under media/; the first is the one a card links to. poster.jpg is always there.
+
+[[project]]
+id = "robosimstudio-real2sim"
+title = "Real to sim"
+about = "Scenes rebuilt in RoboSimStudio by a coding agent from one stock photo, with a YAM doing a chore in each, and three scenes designed without a reference photo. A scene's code moves into this folder when it is ported to current main."
+
+[[project]]
+id = "abc130"
+title = "ABC-130k twins"
+about = "Twins of real teleoperated episodes from the [ABC-130k](https://huggingface.co/datasets/XDOF/ABC-130k) dataset (XDOF), built by a coding agent on the dataset's own YAM station and checked by a reviewer agent. Each clip swipes between the recorded cameras and the simulation."
+
+[[project]]
+id = "vabar"
+title = "VABAR"
+about = "Tasks from the VABAR benchmark (Variational Automation Benchmark for Agentic Robotics): tool sorting, tool hanging, cable routing, gear meshing and USB-C insertion, filmed in September 2026 with the first policy that solved each one, or its best attempt when none did."
+
+[[project]]
+id = "rgbs"
+title = "Bench tasks"
+about = "Contact-rich bench tasks with deformable materials: wiping, polishing, tape and film peeling, cutting carton tape and threading a cable through a conduit, filmed in September 2026."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "kitchen"
+title = "Kitchen counter: sweep up coffee grounds and beans"
+status = "video"
+robot = "YAM"
+media = ["sweep.mp4", "beans.mp4", "water.mp4", "reveal.mp4"]
+source = "Twin built by a coding agent from two Pexels photos"
+links = ["https://www.pexels.com/photo/10568265/", "https://www.pexels.com/photo/10568268/"]
+licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
+note = "Two YAM arms sweep spilled coffee grounds and beans into a dustpan and mop up water on a counter rebuilt from the photos. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "parcel"
+title = "Parcels on a rug: brush RSS into dust, peel a label"
+status = "video"
+robot = "YAM"
+media = ["brush.mp4", "peel.mp4", "reveal.mp4"]
+source = "Twin built by a coding agent from a Pexels photo"
+links = ["https://www.pexels.com/photo/4440794/"]
+licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
+note = "A YAM brushes the letters RSS into dust on a carton, then peels a shipping label off another. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "pancakes"
+title = "Pancakes: drizzle honey over the stack"
+status = "video"
+robot = "YAM"
+media = ["drizzle.mp4", "close.mp4", "reveal.mp4"]
+source = "Twin built by a coding agent from a Pexels photo"
+links = ["https://www.pexels.com/photo/5662197/"]
+licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
+note = "A YAM lifts the honey dipper and drizzles a thin, coiling stream over the pancakes. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "sushi"
+title = "Sushi roll: slice it on the board"
+status = "video"
+robot = "YAM"
+media = ["slice.mp4", "close.mp4"]
+source = "Twin built by a coding agent from an Unsplash photo"
+links = ["https://unsplash.com/photos/R9wRLbNwbek"]
+licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
+note = "A knife cuts a sushi roll into slices on a checkered board; the rice and filling are particles. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "rice"
+title = "Spilled rice: sweep it into a dustpan"
+status = "video"
+robot = "YAM"
+media = ["sweep.mp4", "reveal.mp4"]
+source = "Twin built by a coding agent from a Pexels photo"
+links = ["https://www.pexels.com/photo/8108179/"]
+licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
+note = "Two YAM arms sweep a pile of spilled rice into a dustpan. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "knot"
+title = "Rope: tie an overhand knot"
+status = "video"
+robot = "YAM"
+media = ["knot.mp4", "reveal.mp4"]
+source = "Twin built by a coding agent from an Unsplash photo"
+links = ["https://unsplash.com/photos/Q53l02MF69c"]
+licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
+note = "Two YAM arms tie an overhand knot in a straight cable. The knot is tied on a bare bench, not yet in the twin of the coiled rope. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "anthurium"
+title = "Anthurium: water the plant"
+status = "video"
+robot = "YAM"
+media = ["water.mp4"]
+source = "Twin built by a coding agent from an Unsplash photo"
+links = ["https://unsplash.com/photos/eyR5MNVAMQw"]
+licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
+note = "A YAM waters a potted anthurium, whose leaves and flowers bend under the stream. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "plant"
+title = "Alocasia on a sideboard"
+status = "scene"
+robot = "none yet"
+media = ["reveal.mp4"]
+source = "Twin built by a coding agent from an Unsplash photo"
+links = ["https://unsplash.com/photos/Mfjb8E7LjWQ"]
+licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
+note = "The photo wipes into its simulated twin. No robot task in it is filmed yet."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "giftwrap"
+title = "Gift pouch with a card and pencils"
+status = "scene"
+robot = "none yet"
+media = ["reveal.mp4"]
+source = "Twin built by a coding agent from a Pexels photo"
+links = ["https://www.pexels.com/photo/3850592/"]
+licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
+note = "The photo wipes into its simulated twin; the pouch is cloth. No robot task in it is filmed yet."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "workshop"
+title = "Scrubbing brush by a workshop wall"
+status = "scene"
+robot = "none yet"
+media = ["reveal.mp4"]
+source = "Twin built by a coding agent from two Unsplash photos"
+links = ["https://unsplash.com/photos/mHdaRVIBq0g", "https://unsplash.com/photos/4v0mqRgdzVI"]
+licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
+note = "The photo wipes into its simulated twin. No robot task in it is filmed yet."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "origami"
+title = "Origami cranes on a desk"
+status = "scene"
+robot = "none yet"
+media = ["still.jpg"]
+source = "Twin built by a coding agent from an Unsplash photo"
+links = ["https://unsplash.com/photos/i-M4aLbZrdo"]
+licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
+note = "A rendered still of the twin: paper stacks, folded cranes and an instruction sheet. No robot task in it is filmed yet."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "plate-rack"
+title = "Plate rack: put six plates away on a shelf"
+status = "video"
+robot = "YAM (i2rt)"
+media = ["plates.mp4"]
+source = "Designed scene, no reference photo"
+links = []
+licence = "Apache-2.0"
+note = "Two YAM arms take turns lifting stoneware plates out of drying racks and standing them in the slots of a plate shelf. Filmed in September 2026 on older code; its port gets a kitchen background from a photo."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "label"
+title = "Box: stick an RSS shipping label on it"
+status = "video"
+robot = "YAM"
+media = ["label.mp4", "close.mp4"]
+source = "Designed scene, no reference photo"
+links = []
+licence = "Apache-2.0"
+note = "A YAM peels an RSS shipping label off its backing and presses it onto a box; the label is tape. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "robosimstudio-real2sim"
+id = "brush-rss"
+title = "Brush: write RSS in dust"
+status = "video"
+robot = "YAM"
+media = ["brush.mp4", "close.mp4"]
+source = "Designed scene, no reference photo"
+links = []
+licence = "Apache-2.0"
+note = "A YAM drags a bristle brush through a layer of dust on a mat to write the letters RSS. Filmed in October 2026 on older code; not yet ported to current main."
+
+[[entry]]
+project = "abc130"
+id = "load-the-cups-into-the-dish-rack"
+title = "Load the cups into the dish rack"
+status = "video"
+robot = "YAM (ABC station)"
+media = ["swipe.mp4"]
+source = "ABC-130k episode 1fd6abd2-04e6-4547-8e8e-64000fce2b6e (XDOF)"
+links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
+licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
+note = "Accepted by the reviewer agent after four rounds. Filmed in November 2026 on older code."
+
+[[entry]]
+project = "abc130"
+id = "unscrew-the-bottle-caps"
+title = "Unscrew the bottle caps"
+status = "video"
+robot = "YAM (ABC station)"
+media = ["swipe.mp4"]
+source = "ABC-130k episode 08ea7673-84c2-4d4c-a03c-0159fe0a9f39 (XDOF)"
+links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
+licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
+note = "Accepted by the reviewer agent after six rounds. Filmed in November 2026 on older code."
+
+[[entry]]
+project = "abc130"
+id = "fold-and-stack-the-towels"
+title = "Fold and stack the towels"
+status = "video"
+robot = "YAM (ABC station)"
+media = ["swipe.mp4"]
+source = "ABC-130k episode 02e198aa-f57b-4bec-a54b-e297165d3090 (XDOF)"
+links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
+licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
+note = "Held after six review rounds: the folded towel lands as a heap, because cloth stiffness trades the pickup against the landing. Filmed in November 2026 on older code."
+
+[[entry]]
+project = "abc130"
+id = "fold-and-stack-the-t-shirts"
+title = "Fold and stack the t shirts"
+status = "video"
+robot = "YAM (ABC station)"
+media = ["swipe.mp4"]
+source = "ABC-130k episode ee576206-07d7-4a1e-8bd6-2d8861ab49f4 (XDOF)"
+links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
+licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
+note = "Parked after three review rounds: the shirt never leaves the basket, so the task does not happen yet. Filmed in November 2026 on older code."
+
+[[entry]]
+project = "abc130"
+id = "put-the-credit-cards-into-the-card-holder"
+title = "Put the credit cards into the card holder"
+status = "video"
+robot = "YAM (ABC station)"
+media = ["swipe.mp4"]
+source = "ABC-130k episode 4b83ef22-b691-49f3-be68-cc9cb95b3ca8 (XDOF)"
+links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
+licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
+note = "Parked after seven review rounds: the holder falls out of the hand before the handover. Filmed in November 2026 on older code."
+
+[[entry]]
+project = "abc130"
+id = "take-the-snacks-out-of-the-paper-bag"
+title = "Take the snacks out of the paper bag"
+status = "video"
+robot = "YAM (ABC station)"
+media = ["swipe.mp4"]
+source = "ABC-130k episode 5b5db5d1-cc48-427e-b460-8ce1997dadf2 (XDOF)"
+links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
+licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
+note = "Parked after three review rounds: the first pinch misses the bag, so the snacks are never taken out. Filmed in November 2026 on older code."
+
+[[entry]]
+project = "abc130"
+id = "take-the-wine-glass-off-the-wine-glass-rack"
+title = "Take the wine glass off the wine glass rack"
+status = "video"
+robot = "YAM (ABC station)"
+media = ["swipe.mp4"]
+source = "ABC-130k episode ee85f350-e3ce-4d15-ab16-5bacf388147a (XDOF)"
+links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
+licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
+note = "Parked after five review rounds: the rack is never carried and the glass is never taken. Filmed in November 2026 on older code."
+
+[[entry]]
+project = "abc130"
+id = "wrap-the-headphones"
+title = "Wrap the headphones"
+status = "video"
+robot = "YAM (ABC station)"
+media = ["swipe.mp4"]
+source = "ABC-130k episode 582e7482-eb90-4258-9d68-1a628654c7ed (XDOF)"
+links = ["https://huggingface.co/datasets/XDOF/ABC-130k"]
+licence = "Recorded footage: ABC-130k, Apache-2.0. Simulation: Apache-2.0."
+note = "Parked after three review rounds: the station was not calibrated, so the grasp on the headband misses. Filmed in November 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-hammer"
+title = "Tool sorting, hammer from a cluttered bin"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-hammer.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda picks the hammer out of a cluttered bin and places it in its labelled compartment. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-syringe-sharps-box"
+title = "Tool sorting, syringe into the sharps box"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-syringe-sharps-box.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda picks a syringe off the workbench and drops it through the hole in the top of a sharps disposal box. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-mixed-pile"
+title = "Tool sorting, mixed pile of four"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-mixed-pile.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda sorts a cluttered pile of four tools into the compartments labelled for each type. Did not complete its task (score 0.75). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-bench-consumables"
+title = "Tool sorting, bench consumables"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-bench-consumables.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda sorts eight bench consumables out of one bin into the labelled compartments of another. Did not complete its task (score 0.50). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-wiring-kit"
+title = "Tool sorting, wiring bench kit"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-wiring-kit.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda sorts eight wiring bench items out of one bin into the labelled compartments of another. Did not complete its task (score 0.38). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-separated-tools"
+title = "Tool sorting, four separated tools"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-separated-tools.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "The four-tool sort with the tools laid out apart in the source bin instead of piled. Did not complete its task (score 0.25). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-hand-tools"
+title = "Tool sorting, eight hand tools"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-hand-tools.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda works on a pile of eight hand tools to be sorted into labelled compartments. Did not complete its task (score 0.00). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-power-tools"
+title = "Tool sorting, power tools and a syringe"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-power-tools.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda works on a pile of cordless drills and clamps, with a syringe to drop into a sharps box. Did not complete its task (score 0.00). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-electrical-kit"
+title = "Tool sorting, electrical kit"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-electrical-kit.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda works on a pile of eight electrical kit items to be sorted into labelled compartments. Did not complete its task (score 0.00). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-electrical-kit-usd"
+title = "Tool sorting, electrical kit loaded from USD"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-electrical-kit-usd.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "The electrical kit sort with every object imported from a USD stage that also carries its physics description. Did not complete its task (score 0.00). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-sorting-electrical-kit-usd-geometry"
+title = "Tool sorting, electrical kit with USD geometry only"
+status = "video"
+robot = "Franka Panda"
+media = ["tool-sorting-electrical-kit-usd-geometry.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "The electrical kit sort with USD supplying only the object geometry. Did not complete its task (score 0.00). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-one-wrench"
+title = "Tool hanging, one wrench"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-one-wrench.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM picks a wrench off the bench and hangs it on a pegboard hook. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-two-wrenches"
+title = "Tool hanging, two wrenches"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-two-wrenches.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM hangs two wrenches on two pegboard hooks. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-two-wrenches-in-order"
+title = "Tool hanging, two wrenches in a set order"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-two-wrenches-in-order.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM hangs the 19 mm wrench on the left hook, then the 17 mm wrench on the right hook. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-one-pair-of-scissors"
+title = "Tool hanging, one pair of scissors"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-one-pair-of-scissors.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM picks a pair of scissors off the bench and hangs it on a pegboard hook. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-two-pairs-of-scissors"
+title = "Tool hanging, two pairs of scissors"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-two-pairs-of-scissors.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM hangs two pairs of scissors on two pegboard hooks. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-two-pairs-of-scissors-in-order"
+title = "Tool hanging, two pairs of scissors in a set order"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-two-pairs-of-scissors-in-order.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM hangs one pair of scissors on the left hook, then the other on the right hook. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-one-pair-of-pliers"
+title = "Tool hanging, one pair of pliers"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-one-pair-of-pliers.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM hangs a pair of pliers on a triangular pegboard support. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-two-pairs-of-pliers"
+title = "Tool hanging, two pairs of pliers"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-two-pairs-of-pliers.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM hangs two pairs of pliers on two pegboard supports. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-one-screwdriver"
+title = "Tool hanging, one screwdriver into the holder"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-one-screwdriver.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM stands a screwdriver upright in a small box holder on the pegboard. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-two-screwdrivers-in-order"
+title = "Tool hanging, two screwdrivers into marked holes"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-two-screwdrivers-in-order.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM inserts one screwdriver into the left marked hole of a rack, then a second into the right. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "tool-hanging-two-screwdrivers"
+title = "Tool hanging, two screwdrivers into the holder"
+status = "video"
+robot = "YAM"
+media = ["tool-hanging-two-screwdrivers.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A bimanual YAM stands screwdrivers upright in a box holder on the pegboard. Did not complete its task (score 0.50). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-wrap-around-a-peg"
+title = "Cable wrap around a peg"
+status = "video"
+robot = "YAM"
+media = ["cable-wrap-around-a-peg.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "One hand winds a cable around a peg while the other hand anchors it. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-four-staggered-stations"
+title = "Cable weave through four staggered stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-four-staggered-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between four pegs set in two rows, alternating sides. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-five-stations"
+title = "Cable weave through five stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-five-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between five pegs, alternating sides. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-two-stations-into-port"
+title = "Cable weave through two stations into a port"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-two-stations-into-port.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between two pegs and route its free end into a port. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-drawn-board-three-stations"
+title = "Cable weave, randomly drawn board of three stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-drawn-board-three-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between three pegs whose layout is drawn fresh for the episode. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-drawn-board-four-stations"
+title = "Cable weave, randomly drawn board of four stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-drawn-board-four-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between four pegs whose layout is drawn fresh for the episode. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-drawn-board-five-stations"
+title = "Cable weave, randomly drawn board of five stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-drawn-board-five-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between five pegs whose layout is drawn fresh for the episode. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-drawn-board-six-stations"
+title = "Cable weave, randomly drawn board of six stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-drawn-board-six-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between six pegs whose layout is drawn fresh for the episode. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-six-staggered-stations"
+title = "Cable weave through six staggered stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-six-staggered-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between six staggered pegs, alternating sides. Did not complete its task (score 0.83). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-dressing-five-panel-cleats"
+title = "Cable dressed through five panel cleats into a port"
+status = "video"
+robot = "YAM"
+media = ["cable-dressing-five-panel-cleats.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms dress a cable through five panel cleats and route its free end toward a port. Did not complete its task (score 0.83). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-four-stations"
+title = "Cable weave through four stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-four-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between four pegs in a line, alternating sides. Did not complete its task (score 0.75). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-three-stations-into-port"
+title = "Cable weave through three stations into a port"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-three-stations-into-port.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between three pegs and route its free end toward a port. Did not complete its task (score 0.75). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-three-stations"
+title = "Cable weave through three stations"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-three-stations.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between three pegs, alternating sides. Did not complete its task (score 0.67). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "cable-weave-four-stations-on-an-arc"
+title = "Cable weave through four stations on an arc"
+status = "video"
+robot = "YAM"
+media = ["cable-weave-four-stations-on-an-arc.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two YAM arms weave a cable between four pegs set on a curve, alternating sides. Did not complete its task (score 0.50). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "gear-meshing-two-gears"
+title = "Gear meshing, two gears"
+status = "video"
+robot = "Franka Panda"
+media = ["gear-meshing-two-gears.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda puts two spur gears on their pegs so they mesh, then presses the start button. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "gear-meshing-three-gear-train"
+title = "Gear meshing, three-gear train"
+status = "video"
+robot = "Franka Panda"
+media = ["gear-meshing-three-gear-train.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda puts three spur gears on their pegs so they mesh, then presses the start button. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "gear-meshing-four-gear-train"
+title = "Gear meshing, four-gear train"
+status = "video"
+robot = "Franka Panda"
+media = ["gear-meshing-four-gear-train.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A Franka Panda puts four spur gears on their pegs so they mesh, then presses the start button. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "gear-meshing-four-gear-train-half-built"
+title = "Gear meshing, four-gear train started half built"
+status = "video"
+robot = "Franka Panda"
+media = ["gear-meshing-four-gear-train-half-built.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "Two gears are already on the board; a Franka Panda adds the other two and presses the start button. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "usbc-insertion-fixed-port"
+title = "USB-C insertion into a fixed port"
+status = "video"
+robot = "YAM"
+media = ["usbc-insertion-fixed-port.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "A YAM arm mates a double-scale USB-C plug into a receptacle bolted to the bench. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "vabar"
+id = "usbc-insertion-held-bulkhead"
+title = "USB-C insertion into a hand-held bulkhead"
+status = "video"
+robot = "YAM"
+media = ["usbc-insertion-held-bulkhead.mp4"]
+source = "VABAR benchmark task, filmed in RoboSimStudio"
+links = []
+licence = "Clip: Apache-2.0. Scene meshes come from several sources and are not redistributed here."
+note = "One YAM arm mates a double-scale USB-C plug into a bulkhead receptacle the other arm holds in the air. Did not complete its task (score 0.99). Filmed in September 2026 on older code."
+
+[[entry]]
+project = "rgbs"
+id = "bar-wipe-with-sponge"
+title = "Bar wiping with a foam sponge"
+status = "video"
+robot = "YAM"
+media = ["bar-wipe-with-sponge.mp4"]
+source = "RoboSimStudio bench task"
+links = []
+licence = "Apache-2.0"
+note = "A YAM arm picks up a foam sponge and wipes marker stains off a metal bar resting on its stands. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "rgbs"
+id = "strip-polishing"
+title = "Polishing marks off a strip"
+status = "video"
+robot = "YAM"
+media = ["strip-polishing.mp4"]
+source = "RoboSimStudio bench task"
+links = []
+licence = "Apache-2.0"
+note = "Two YAM arms hold a plastic strip against a fixed spinning bit to polish blue marks off it. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "rgbs"
+id = "carton-tape-cutting"
+title = "Cutting a carton's sealing tape"
+status = "video"
+robot = "YAM"
+media = ["carton-tape-cutting.mp4"]
+source = "RoboSimStudio bench task"
+links = []
+licence = "Apache-2.0"
+note = "A YAM arm cuts the sealing tape along a carton's top seam with a box cutter, then sets the knife back on its rest. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "rgbs"
+id = "cable-through-conduit"
+title = "Threading a cable through a conduit"
+status = "video"
+robot = "YAM"
+media = ["cable-through-conduit.mp4"]
+source = "RoboSimStudio bench task"
+links = []
+licence = "Apache-2.0"
+note = "YAM arms feed a USB-C cable through a closed conduit and draw the connector out of the far end. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "rgbs"
+id = "tape-strip-peel"
+title = "Peeling a tape strip off a box"
+status = "video"
+robot = "YAM"
+media = ["tape-strip-peel.mp4"]
+source = "RoboSimStudio bench task"
+links = []
+licence = "Apache-2.0"
+note = "A YAM arm pulls an adhesive tape strip off a box by its handle. Completed its task. Filmed in September 2026 on older code."
+
+[[entry]]
+project = "rgbs"
+id = "protective-film-peel"
+title = "Peeling protective film off a panel"
+status = "video"
+robot = "YAM"
+media = ["protective-film-peel.mp4"]
+source = "RoboSimStudio bench task"
+links = []
+licence = "Apache-2.0"
+note = "A YAM arm peels the protective film off a panel. Completed its task. Filmed in September 2026 on older code."
