@@ -1,247 +1,83 @@
 ; -*- mode: lisp -*-
-; ---------------------------------------------------------------------------
-; AUTHORED -- there is no upstream .bddl for this task.
+; ============================================================================
+; PROBLEM -- peel the protective film off a phone.
 ;
-; provenance.tier: designed
-; source-of-record: robosimstudio/tasks/film_peel/suite.py (deleted by this port)
-; re-staged 2026-09-10 onto the clip's phone (sample_videos/film peeling.mp4)
+; AUTHORED -- there is no upstream .bddl for this task. The adhesion model
+; follows AutoPeel (ICRA 2025), as the library tape states it; the phone and
+; film are sized off sample_videos/film peeling.mp4.
 ;
-; THE HALF THAT IS NOT IN THE VIDEO. A clean peel and one that tears the film
-; are the SAME FOOTAGE. They differ only in a tension the episode passed
-; through, and a measure read at the final step cannot see it -- which is the
-; whole reason this suite exists and the whole reason `peak` exists.
+; RE-AUTHORED for main (2026-11). The October variant leaned the phone back 30
+; degrees in a welded cradle and carried the film's end with a particle latch.
+; Here the film is the library's tape: its top end is turned up into a rigid
+; pull tab the pads close on, and nothing but the pads and the bonds moves it.
+; A tape sticks only to a free body on its own VBD island, and a free phone
+; leaning in a cradle is rocked off its rest by the pull, which breaks every
+; bond the film carries; so the phone lies face up on the bench, where it rests
+; exactly as it is built. peel/layout.py has the numbers.
 ;
-; This file is `panel.task` with ONE NUMBER ADDED: the 0.30 N tension budget
-; below. Everything else -- the scene, the sheet, the peel gate, the reward
-; measure, the artifacts -- is identical, deliberately, so that a diff of the
-; two documents is a diff of what the budget does and of nothing else. Where
-; `panel` merely RECORDS the load, this one SCORES on it, in two places that
-; have to agree: the goal's second clause and the reward's mask.
-; ---------------------------------------------------------------------------
+; GENTLY. This is `panel` with ONE CLAUSE ADDED: the phone may never rise off
+; its stand -- its centre never more than 6 mm over where it lies (0.819 m on
+; bench_075). A clean peel and one that hauls the phone up by its film can end
+; on the same frame; they differ in what the episode passed through, which is
+; what `peak` reads. The October variant budgeted the film's peak tension; the
+; library tape has no tension measure, and a pull hard enough to matter lifts
+; the free phone's edge. Not its speed: a free VBD body at rest reads 3-50
+; mm/s of jitter before a hand comes near it.
+; ============================================================================
 
 (define (problem PEEL_THE_FILM_OFF_THE_PHONE_GENTLY)
 
+  (:language peel the protective film off the phone without lifting the phone off its stand)
 
-  (:language peel the protective film off the phone without tearing it)
-
-  ; The cell, the control mode and the episode count are rgbs.suite's; this is
-  ; the delta.
-  (:staging
-    ; The suite's own pairing, restated because this document used to override
-    ; it: the RIGHT hand peels and the LEFT hand holds the phone. That is the
-    ; clip -- the left YAM pinches the phone's bottom-left corner across its
-    ; thickness and holds it while the right YAM takes the film at the top edge
-    ; -- and it is also the reach: the tab stands at the phone's raised top
-    ; edge on the centreline, and the right arm solves the pinch, the whole
-    ; peel arc back down the face and the carry to the mat on its own side to
-    ; 0.0 mm (routine_peel.py records the band). (:arms-solid true) matters
-    ; more here than it did with one arm working: both hands are over one
-    ; 147 mm phone and the peel arc passes over the holding hand.
-    (:embodiment yam_bimanual (:work-arm right) (:support-arm left) (:arms-solid true))
-    ; A named arrangement, never a solver config. It is the tape suite's
-    ; cloth_vbd@ref with one number changed, and every floor kept: 60 Hz over
-    ; 20 substeps with 80 VBD iterations is a stability FLOOR rather than a
-    ; choice -- at a coarser dt the film tunnels through the substrate, and a
-    ; drag on top of that escalates to NaN, and a thinner film than the tape's
-    ; makes that worse. The one change is a 2 mm rigid contact gap where the
-    ; reference leaves Newton's 0.1 m: two hands of 50-piece fingertips over
-    ; one 147 mm phone store thousands of within-ten-centimetres pairs, more
-    ; than MuJoCo's 2048 slots, and the overflow kills the process mid-peel
-    ; (measured; peel/layout.py records the counts). `handle` keeps the
-    ; reference arrangement: one hand on one box never gets near the ceiling.
-    (:physics cloth_vbd_bimanual@v1)
-    ; The suite rig, aimed at the centre of the phone's glass in the face's own
-    ; plane -- where the film is bonded and where the peel front travels. Its
-    ; two clip views (photo, inset) frame the phone the way the reference does.
-    (:cameras peel.layout:PANEL_VIEWS)
-    ; Two arms: one peels and one holds the phone.
-    (:arms 2)
-    ; The routine's take is about 1200 control steps at its 0.05 m/s peel:
-    ; ~200 for the holding hand to arrive and stall on the corner, ~150 for
-    ; the pinch and latch, ~500 for the arc, ~300 for the carry, the drop and
-    ; both retreats. 1800 leaves room for the arc to run its full 0.36 m.
-    (:max-steps 1800)
-  )
-
-  ; Typed by the PLACED records: `film_phone` is the film's declaration with
-  ; the factory that lays it up the phone's glass, tab running on past the
-  ; raised top edge. Where things are is the asset's own arithmetic
-  ; (peel/layout.py, peel/phone.py); a document names the thing.
+  ; The phone first: a tape sticks to a body built before it.
   (:objects
+    phone - phone
     film - film_phone
   )
 
+  ; What the phone lies on: the clip's printed stand, flat rather than leaning.
   (:fixtures
-    ; The phone the film is stuck to, welded leaning back 30 degrees at the
-    ; centreline with its bottom edge toward the arms, and the printed stand it
-    ; leans in. Both are scenery with collision: the holding hand closes on the
-    ; phone's corner, and the stand is what the pad under that corner must not
-    ; touch -- which is why it is narrower than the clip's (phone.py).
-    phone - phone
-    cradle - phone_cradle
+    stand - phone_stand
   )
 
-  ; No regions. Nothing here is scored on being inside a box.
-
-  ; The film starts stuck down, and its tab starts held: a drooping flap and a
-  ; presented one are different starting worlds. Both are constraints to be
-  ; verified after settling, not a layout -- where the sheet is laid is the
-  ; loader's business.
-  (:init
-    (adhered film)
+  (:staging
+    (:embodiment yam (:work-arm left) (:arms-solid true))
+    (:physics rgbs_tape_60hz@v1)
+    ; The left arm peels, as on `handle`; the finger servo is handle's too.
+    (:gripper-actuation (:ke 4000) (:kd 240) (:effort-limit 12))
+    (:cameras peel.layout:PANEL_VIEWS)
+    (:arms 1)
+    (:max-steps 3000)
   )
 
-  ; -------------------------------------------------------------------------
-  ; TWO CLAUSES, and the second is the whole suite.
-  ;
-  ; (once (>= (broken-fraction film) 0.95))
-  ;     Peeled. STICKY, because a broken bond never re-forms -- a peel is not
-  ;     something the world can undo, and a non-sticky reading would let a
-  ;     successful peel un-succeed because the film fell over. 0.95 rather than
-  ;     1.0: a handful of bonds under the far edge can sit inside their break
-  ;     threshold indefinitely while the film is plainly off, and waiting for
-  ;     them measures patience.
-  ;
-  ; (<= (peak (peel-excess film)) 0.30)
-  ;     Gently. `peel-excess` is the intact bonds' total restoring force NET OF
-  ;     THE STANDING LOAD the field carries before anything touches it (a
-  ;     placement artefact -- see rgbs/tasks/rgbs/peel/film.py), so the
-  ;     budget is stated against a peel rather than against a build convention.
-  ;
-  ;     NOT LATCHED, and it must not be. The peel latches; a budget can be blown
-  ;     AFTER the peel completes, so latching the peel and then and-ing a budget
-  ;     would let a policy finish gently and then wrench. Evaluated fresh every
-  ;     step -- coherent because `peak` is monotone, so once the budget is blown
-  ;     success can never come back.
-  ;
-  ; -------------------------------------------------------------------------
-  ; WHERE 0.30 N COMES FROM. Transcribed verbatim from the Python's budget_note,
-  ; because a threshold whose justification survives only in a deleted file is a
-  ; threshold nothing can check:
-  ;
-  ;   gated on peel GEOMETRY, not speed. Speed does not separate a gentle peel
-  ;   from a violent one because the cohesive-zone model is rate-independent
-  ;   (force is k times opening, and a bond breaks on displacement) -- measured
-  ;   on the original 60 mm film as 0.0490 N at the shipped lift speed against
-  ;   0.0447 N at 5.5x. Pulling at the wrong ANGLE does separate them. Measured
-  ;   on the flat-panel scene this document used to stage, with the measured
-  ;   hand (grip point at the pads, not the MJCF site), the full-pose pinch
-  ;   (jaws across the film, roll solved, both pi-twins tried against the wrist
-  ;   limit) and the whole handle column latched -- a clamp bar, not a point
-  ;   grip: the shipped peel peaked at 0.1601 N; a top-down grasp (lift waypoint
-  ;   solving 94.9 mm off) peaked at 0.7521 N at the same ~0.95 broken fraction.
-  ;   0.30 N sat 1.9x above the clean peel -- headroom for a policy less exact
-  ;   than the script -- and 2.5x below the mis-angled one.
-  ;
-  ; THAT NUMBER WAS MEASURED ON THE FLAT PANEL, AND THIS IS THE PHONE. The
-  ; sheet is now 140 x 60 mm on a face leaning back 30 degrees, folded back on
-  ; itself by a routine rather than hauled in a line by the graph, and the
-  ; budget has NOT been re-derived for it: it stands as the number it was, and
-  ; what the routine's peel peaks at against it is recorded by the run
-  ; (`peak_excess` in its row extras), not adjusted here. Re-measure before
-  ; tuning it, in either direction.
   (:goal
     (And
-      (once (>= (broken-fraction film) 0.95))
-      (<= (peak (peel-excess film)) 0.30)
+      (once (>= (peeled-fraction film) 0.95))
+      (<= (peak (height phone)) 0.825)
     )
   )
 
-  ; -------------------------------------------------------------------------
-  ; Progress toward the peel gate, masked to zero by the SAME budget the goal
-  ; gates on.
-  ;
-  ; Zeroed rather than reduced, and that is the point of the mask: a film peeled
-  ; 80% of the way and then torn is not 0.8 of a success, and a reward that
-  ; merely dipped would let a policy trade tearing against speed. Reward and
-  ; success have to agree about what counts, or a policy is being paid to do the
-  ; wrong thing -- so the mask is written out here rather than inherited, and
-  ; the two 0.30s are checked against each other by the port's test.
-  ;
-  ; Note the progress keeps moving after the verdict latches. `once` latches
-  ; SUCCESS ONLY.
   (:reward
-    (progress (broken-fraction film)
+    (progress (peeled-fraction film)
               (:gate 0.95)
-              (:gated-by (<= (peak (peel-excess film)) 0.30))))
+              (:gated-by (<= (peak (height phone)) 0.825))))
 
-  ; -------------------------------------------------------------------------
-  ; Recorded every step, gating nothing -- the quantities nobody has calibrated.
-  ;
-  ; `peel-front` is the one worth reading beside the broken fraction: a peel is
-  ; a FRONT travelling from the tab down the face, so a sheet torn out of the
-  ; middle scores a high broken fraction and a front of zero, and those are
-  ; different outcomes. `held` separates a failed grasp from a failed peel,
-  ; which a run reporting neither leaves indistinguishable -- and since the
-  ; re-staging it reads the routine's latch as well as a pinch, so it is true
-  ; through the peel rather than only while the pads happen to be on the tab.
   (:observe
-    (peel-front film)
-    (peel-tension film)
-    (rest-tension film)
-    (worst-bond film)
-    (film-clear film)
-    (held film)
+    (bonded-fraction film)
   )
 
-  ; -------------------------------------------------------------------------
-  ; A ROUTINE AND NO GRAPH, since the re-staging. This document shipped the
-  ; tape suite's graph `gt` on the argument that nothing about peeling is
-  ; tape-specific -- a film laid flat on a block was peeled by the same
-  ; straight haul from a latched tab. On the phone that argument stops
-  ; holding: the film lies on a face leaning back 30 degrees and comes off
-  ; folded back on itself DOWN the face, an arc the graph's one `lift`
-  ; landmark cannot state, and a second hand has to hold the phone first.
-  ; `handle` keeps the graph; the two film variants ship
-  ; routine_peel.py:RoutineFilmPeel, which measures the clip's
-  ; choreography in gated legs and reads the film's own published states
-  ; between them.
-  ;
-  ; The tools stay: `sim.get_tab` and `sim.release_anchor` are the layout's
-  ; oracle and its anchor, and a future graph over this layout would call
-  ; them exactly as the handle graph does.
-  (:artifacts
-    (:tools   "tools:register_tape_peel_tools")
-  )
-
-  ; -------------------------------------------------------------------------
-  ; Inputs to the ARTIFACT, not statements about the world: what the routine
-  ; reads, and nothing it does not. Which arm peels comes from the pairing
-  ; above; the pinch is what a rigid pull-tab gets.
-  ;
-  ; `peel-speed` is how fast the latched tab travels [m/s] -- the episode's
-  ; clock, not a load knob, because the cohesive-zone model is rate-independent.
-  ; `peel-rise` is the arc's slope in the face's frame: metres the tab rises
-  ; off the glass per metre it travels back down it. The pads stay parallel to
-  ; the glass so the film folds back on itself; the rise keeps the folded sheet
-  ; clear of the hand holding the phone. Both are routine_peel.py's measured
-  ; defaults, restated here so a reader asking "how fast, how steep" does not
-  ; have to open a policy module -- and `peel-rise` is the knob this variant
-  ; exists to have: the peel ANGLE is what the tension budget separates on,
-  ; and a document that could not ask for a different one could not produce
-  ; the violent peel it is written to catch.
   (:policy-params
     ; Main ships no routine runner: routine.py:SolutionRoutine reads this and runs it.
-    (routine "routine_peel:RoutineFilmPeel")
-    (peel-speed 0.05)
-    (peel-rise 0.55)
+    (routine "routine_peel:RoutineTapePeel")
+    (sheet film)
   )
 
   (:provenance
     (:tier designed)
-    (:source "AutoPeel (ICRA 2025) for the adhesion model; sample_videos/film peeling.mp4 for the layout")
-    ; A semicolon starts a comment ANYWHERE, including inside what looks like a
-    ; quoted string -- BDDL has no strings. The calibration block above is a
-    ; comment for exactly that reason: it contains two prose semicolons, and
-    ; either of them inside a (:note "...") would have swallowed the closing
-    ; paren and the rest of the file with it.
+    (:source "AutoPeel (ICRA 2025) for the adhesion model; sample_videos/film peeling.mp4 for the phone and film")
     (:note "No published benchmark defines success for a deformable task like
-            this, so the goal is designed. The layout is the clip's -- a phone
-            leaning in a stand on the centreline -- placed where both grasps
-            and the whole peel arc solve on this robot, which is a little
-            further from the arms than the clip has it. What changes from the
-            handle variant is the substrate, the film, the second hand and the
-            scoring.")
+            this, so the goal is designed: 95% of the film's bonds let go. The
+            film is the library's paper-label sheet at half its tack, laid 60 x
+            140 mm over a 72 x 147 mm phone.")
   )
-
 )
