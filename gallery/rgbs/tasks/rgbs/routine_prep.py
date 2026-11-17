@@ -2,11 +2,10 @@
 """The surface-prep suite's privileged ``sim.*`` tools, and the choreography that spends them.
 
 The half of this suite that answers the task rather than states it: the measured
-surface a policy is given (:class:`ToolsSurfacePrep`), the hold that lets a hand
-carry a foreign engine's foam (:class:`SpongeHold`), and the take itself
+surface a policy is given (:class:`ToolsSurfacePrep`) and the take itself
 (:class:`Wiper`) -- the support hand steadying the bar at its far elbow, the
 work hand taking the sponge, leaning 35 degrees along the bar, pressing to a
-force, stroking the stripe off, and putting the sponge back. :class:`Wiper` is
+force, stroking the stripe, and putting the sponge back, once per stroke. :class:`Wiper` is
 one generator that both the benchmark's scripted policy
 (:class:`RoutineSurfacePrep`, which yields actions into ``Env.step``) and the
 live page (``rgbs/scripts/surface_cleaning.py``, which steps the sim itself)
@@ -46,12 +45,15 @@ recorded here from the old numbers; it was an artifact and is retracted.
 The one measurement from that period that still stands is where the pads are:
 see :data:`PAD_CONTACT_OFFSET`.
 
-**The pins are a latch, not the grasp.** The jaws carry the sponge on their own
-through a lift and the strokes; :class:`SpongeHold` only insures that against
-the press. So it pins the small patch under the pads rather than the waist set:
-the waist is 58% of the lattice, and pinned that way the block stops being foam
--- it deforms 0.06 mm under a press and drives 3.2 mm into the bar instead of
-conforming to it.
+**Nothing holds the sponge but the jaws.** The October build pinned the foam
+under the pads to the hand (a SuperDex node pin re-aimed every step), which is a
+latch and is gone. Held by the pads' squeeze and friction alone -- 14 N a finger,
+firm foam with SuperDex's stickiest regularised friction -- the block carries
+fine and creeps and turns in the jaws through a stroke, and is out of them by
+the second. So the take puts it back on the mat after every stroke and takes it
+up again, re-centred. ``examples/08_demos/wipe_the_bar`` measured the same
+friction-only grasp at 0.69-0.76 of its stripe over three takes, with the foam
+sliding 69-226 mm in the hand.
 
 **``sim.attach`` will lie to you.** It registers against this sponge (the entity
 carries particles), reports ``attached: true``, and does nothing: it appends a
@@ -59,9 +61,6 @@ carries particles), reports ``attached: true``, and does nothing: it appends a
 later, in ``after``, over the whole actor range, every control step. Nothing
 raises and the sponge simply stays where it was.
 
-The pins are re-aimed from the **pad** frames and never from the wrist body: a
-wrist is 130 mm behind the grip point on this hand, so a hold carried on the
-wrist frame rotates the foam about a point it is not held at.
 """
 
 from __future__ import annotations
@@ -79,7 +78,6 @@ from .prep.layout import LAYOUT, Layout
 
 __all__ = [
     "RoutineSurfacePrep",
-    "SpongeHold",
     "ToolsSurfacePrep",
     "Wiper",
     "register_surface_prep_tools",
@@ -134,24 +132,6 @@ wrong side of the hand -- it is not a per-collider body-local offset here, and
 all fifty decomposed pieces of one fingertip report the same value. Take tool
 geometry from contacts on a working grasp; do not compute it."""
 
-PIN_RADIUS = 0.014
-"""How far from a pad's contact point a node may be and still be pinned [m].
-
-Sized to the pad, not to the block: about a 28 mm disc on each gripped face,
-which on this lattice takes roughly a tenth of the nodes instead of the waist
-set's 58%. Everything outside it is free foam, which is the whole point -- the
-sponge has to conform around a 25 mm tube, and a block pinned through its
-middle cannot."""
-
-PIN_STIFFNESS = 4000.0
-PIN_DAMPING = 20.0
-"""Compliant node constraints, not a weld.
-
-The engine's own constraint, so the pinned patch still argues with contact and
-inertia: the foam under the pads deforms against the bar while the band above it
-tracks the hand. ``tests/test_superdex.py`` uses 3000/15 for a straight squash;
-this is a little stiffer because the hold has to survive a lateral drag."""
-
 SETTLE = 20
 """Control steps to let a close equilibrate before anything is read."""
 
@@ -176,23 +156,28 @@ z 0.86 to 0.88 world and the reach sweep never cleared anything much higher;
 layout. 40 mm lifts the foam clear of the crown, which is all a crossing needs,
 and the force loop's travel budget is this plus 30 mm."""
 
+GRIP_DEPTH = 0.006
+"""How far below the block's centre the pads close [m]: the drag of a stroke acts
+at the foam's underside, and every millimetre the pads sit nearer it is a shorter
+lever turning the block in the jaws."""
+
 TILT_DEG = 35.0
 """How far the working hand leans along the bar for the wipe [deg].
 
 The real hand comes in leaning along the bar. Measured on the page, 35-50
 degrees is the band the arm holds through a whole stroke at the -90 degree jaw
 roll; upright (0) the wrist runs out of orientation at the far end of the stripe.
-The lean lifts the sponge's far edge, so the contact patch trails the pinned
+The lean lifts the sponge's far edge, so the contact patch trails the held
 centre by about a third of the block -- which is why the strokes overrun the
 stripe (:data:`OVERRUN_FAR`)."""
 
-PRESS_N = 4.0
+PRESS_N = 3.0
 """What the force loop presses to, read off the taint field [N].
 
 A newton clears the crown under the 22 mm calibration (the ±40 deg stations
-needed ~1 N and 3 mm of overdrive); 4 N keeps the whole contact patch well over
-the field's 300 Pa floor through a stroke, at a load the pinned grasp carries
-without the foam creeping out of the jaws."""
+needed ~1 N and 3 mm of overdrive). 3 N rather than the latched build's 4: held
+by friction alone the block's drag is what turns it in the jaws, and the first
+stroke cleaned 0.54 at 3 N against 0.04 at 4 (one take each)."""
 
 STROKE_SPEED = 0.06
 """Along the bar, during a stroke [m/s]. Removal is pressure times sliding
@@ -200,11 +185,10 @@ speed, so a stationary press removes nothing; 60 mm/s is what the clip's hand
 does and what keeps a segment's IK inside the gate."""
 
 STROKE_CYCLES = 3
-"""Out-and-back cycles before the take gives up. The stripe clears in one or two
-at 4 N; the third is the budget for a press that seated light."""
-
-STROKE_SEGMENTS = 4
-"""Segments per stroke, with a seat trim between them. See :meth:`Wiper._stroke`."""
+"""Strokes, each on a fresh grasp, before the take stops (main's wipe_the_bar, with
+the foam latched: 0.91, 0.94, 0.95 and 0.95-0.96 of the stripe after each of four).
+Three, because without the latch a re-taken block has come back out of the jaws
+before a third press in every take so far."""
 
 OVERRUN_NEAR = 0.025
 OVERRUN_FAR = 0.045
@@ -213,21 +197,20 @@ OVERRUN_FAR = 0.045
 Both ends overrun the stripe: measured on the page, the end tenths of the stripe
 were what stayed blue (38 % and 8 % cleared) when the strokes turned at the
 block's own edge. The far end runs further because the leaning hand's contact
-patch trails the pinned centre toward the near end."""
+patch trails the held centre toward the near end."""
 
 HAND_CLEAR = 0.025
 """A stroke never comes within this of the steadying hand's pads [m] -- a
 jaw's half-width plus a margin. A stroke to the end of a longer stripe shoved
 that hand off the bar."""
 
-TRIM_STEP = 0.0015
 TRIM_BOUNDS = (-0.015, 0.008)
-"""The running seat-height trim [m]: a step per segment, bounded. See :meth:`Wiper._stroke`."""
+"""How far a stroke's press-following may take the hand from its seat [m]. See :meth:`Wiper._follow`."""
 
-RESEAT_LIFT = 0.008
-RESEAT_TRAVEL = 0.020
-"""The re-seat at the far end: start this far above the near seat's height and
-spend at most this much travel finding the force again [m]."""
+FOLLOW_GAIN, FOLLOW_RATE = 4.0e-5, 0.004
+"""How a stroke holds its press (:meth:`Wiper._follow`): the hand goes down (or up)
+0.04 mm a control step per newton short (or over), at most 4 mm/s [m/N, m/s].
+examples/08_demos/wipe_the_bar's numbers, measured on this scene."""
 
 PATCH_CLEARED = 0.96
 """When the take stops stroking. Over the document's 0.95 gate, so an exit
@@ -269,7 +252,17 @@ DOWN_QUAT = (1.0, 0.0, 0.0, 0.0)
 """Tool +z onto world -z, xyzw: every grasp on this bench is top-down."""
 
 
-def wipe_quat(tilt_deg: float = 0.0) -> np.ndarray:
+JAW_ROLL_DEG = -90.0
+"""The working hand's roll for the pick and the wipe [deg]: the jaws close across
+the bar, on the sponge's 75 x 30 mm sides.
+
+Closing them along the bar instead (180, which reaches the leaning stroke as
+well) was tried for a friction-only grasp and is worse: held on its small end
+faces, the block swings about the jaw axis the moment the crown presses it off
+centre, and it reached the bar beside the crown at 0.58 N."""
+
+
+def wipe_quat(tilt_deg: float = 0.0, roll_deg: float = -90.0) -> np.ndarray:
     """Top-down, rolled so the jaws close across world x (across the sponge's
     50 mm axis, so its 75 mm axis lies along the bar), then tilted about world x
     by ``tilt_deg`` -- the real hand comes in leaning along the bar.
@@ -281,7 +274,8 @@ def wipe_quat(tilt_deg: float = 0.0) -> np.ndarray:
     tool's own **y** (:data:`PAD_CONTACT_OFFSET`'s measured contact pairs, at
     +-15 mm), so the roll is what decides which sponge axis the jaws squeeze.
     """
-    q = quat_multiply((0.0, 0.0, -math.sin(math.pi / 4.0), math.cos(math.pi / 4.0)), DOWN_QUAT)
+    r = math.radians(roll_deg)
+    q = quat_multiply((0.0, 0.0, math.sin(r / 2.0), math.cos(r / 2.0)), DOWN_QUAT)
     t = math.radians(tilt_deg)
     return np.asarray(quat_multiply((math.sin(t / 2.0), 0.0, 0.0, math.cos(t / 2.0)), q), dtype=np.float64)
 
@@ -343,55 +337,6 @@ def _slerp(q0, q1, t: float) -> np.ndarray:
     return (math.sin((1.0 - t) * th) * q0 + math.sin(t * th) * q1) / math.sin(th)
 
 
-class SpongeHold:
-    """The foam, carried by the hand that closed on it.
-
-    A post-step hook rather than something a tool does once, for
-    :class:`~tasks.polish.tools.GripHold`'s reason: the hand moves *between*
-    tool calls, and a graph's tools only run between motions. Every control step
-    this re-aims the pin targets to where the grasped patch would be if it were
-    rigidly attached to the pad frame -- so the band the jaws hold follows the
-    hand exactly, and everything below it is still foam.
-
-    Installed idempotently and retired with the episode, which is the same
-    lifecycle a reset gives it: ``EnvBase`` drops every hook a policy added, and
-    the bridge's ``restore_rest`` drops every pin, so the next grasp starts from
-    nothing rather than from a stale id.
-    """
-
-    def __init__(self, tools: ToolsSurfacePrep) -> None:
-        self.tools = tools
-        self.pin: int | None = None
-        self.arm: str = ""
-        self.local: np.ndarray | None = None
-        """The pinned nodes in the pad frame, captured at the close."""
-
-    def install(self) -> None:
-        hooks = self.tools.env.post_step_hooks
-        if self not in hooks:
-            hooks.append(self)
-
-    def arm_hold(self, arm: str, pin: int, local: np.ndarray) -> None:
-        self.arm, self.pin, self.local = arm, int(pin), np.asarray(local, dtype=np.float64)
-        self.install()
-
-    def disarm(self) -> None:
-        self.pin, self.local, self.arm = None, None, ""
-
-    def __call__(self, env) -> None:
-        if self.pin is None or self.local is None:
-            return
-        pos, quat = env.arm(self.arm).ee_pose(env.state)
-        targets = np.asarray(pos, dtype=np.float64) + np.array(
-            [_qrot(np.asarray(quat, dtype=np.float64), row) for row in self.local]
-        )
-        try:
-            self.tools.bridge.set_pin_targets(self.pin, targets)
-        except (KeyError, IndexError):
-            # The pin went with an episode reset; the next grasp makes another.
-            self.disarm()
-
-
 class ToolsSurfacePrep:
     """The suite's privileged tool implementations.
 
@@ -406,7 +351,6 @@ class ToolsSurfacePrep:
         self.env = env
         self.bus = bus
         self.layout = layout
-        self._hold = SpongeHold(self)
         self._bridge = None
         self._sponge_nodes: np.ndarray | None = None
         self._carry: dict[str, Any] | None = None
@@ -492,32 +436,6 @@ class ToolsSurfacePrep:
                 np.asarray(self._sponge().set_indices("sponge/waist"), dtype=np.int64) + self._particle_offset()
             )
         return self._sponge_nodes
-
-    def _pad_patch(self, name: str, gap: float) -> np.ndarray:
-        """The nodes under the two pads, chosen in the hand's own frame.
-
-        A disc of radius :data:`PIN_RADIUS` on each gripped face, rather than
-        the waist band: the jaws hold the sponge by themselves now, so the pins
-        only have to insure that against the press, and pinning 58% of the
-        lattice makes the block behave like a rigid one.
-
-        Falls back to the waist set if the discs come up nearly empty -- which
-        means the pads are not where this thinks they are, and a latch on the
-        wrong nodes is worse than a coarse one.
-        """
-        parts = self._sponge_parts()
-        q = self.env.pipeline.state_0.particle_q.numpy()[parts]
-        pos, quat = self.env.arm(name).ee_pose(self.env.state)
-        inv = _qconj(np.asarray(quat, dtype=np.float64))
-        local = np.array([_qrot(inv, row - np.asarray(pos, dtype=np.float64)) for row in q])
-        off = np.asarray(PAD_CONTACT_OFFSET, dtype=np.float64)
-        # Distance measured IN the face plane, not in space: the two discs are
-        # a jaw-gap apart along y, so a spatial radius would have to span the
-        # block to reach either of them.
-        in_plane = np.hypot(local[:, 0] - off[0], local[:, 2] - off[2]) <= PIN_RADIUS
-        on_face = np.abs(local[:, 1] - off[1]) >= 0.5 * float(gap) - PIN_RADIUS
-        chosen = parts[in_plane & on_face]
-        return chosen if len(chosen) >= 8 else self._waist()
 
     def entries(self) -> list[tuple[str, Any, str]]:
         return [
@@ -606,7 +524,6 @@ class ToolsSurfacePrep:
                 "sponge_centroid": [float(v) for v in sponge_q.mean(axis=0)],
                 "sponge_underside": float(sponge_q[:, 2].min()),
                 "sponge_half_along_bar": half_along,
-                "sponge_held": self._hold.pin is not None,
                 "arms": {},
             }
             for role in ("work", "support"):
@@ -667,61 +584,34 @@ class ToolsSurfacePrep:
         return {"arm": name, "gap": gap, "command": target, "ramp_steps": steps}
 
     def grip_sponge(self, arm: str = "work", gap: float = GRIP_GAP) -> dict[str, Any]:
-        """Take the sponge: close the jaws, then pin the foam under the pads to the pad frame.
+        """Take the sponge: close the jaws on it, and nothing else holds it.
 
-        The jaws are closed first and the pins captured *after*, so what is
-        carried is where the foam actually ended up under the pads rather than
-        where it was before they touched it.
+        The foam is carried by the pads' squeeze and its friction alone. How far
+        the block's underside hangs below the hand is measured once the jaws have
+        closed, off the whole block, because every later press is set from it.
         """
         name = self._arm_name(arm)
         self.set_grip(gap, arm=name)
 
         def capture() -> dict[str, Any]:
-            nodes = self._pad_patch(name, gap)
-            q = self.env.pipeline.state_0.particle_q.numpy()[nodes]
             pos, quat = self.env.arm(name).ee_pose(self.env.state)
-            inv = _qconj(np.asarray(quat, dtype=np.float64))
-            local = np.array([_qrot(inv, row - np.asarray(pos, dtype=np.float64)) for row in q])
-            pin = self.bridge.pin_nodes(
-                "sponge", nodes, q.copy(), stiffness=PIN_STIFFNESS, damping=PIN_DAMPING, world=self._world
-            )
-            self._hold.arm_hold(name, pin, local)
-            # How far the block's own underside hangs below the hand, measured
-            # at the grasp rather than assumed. Taking it from the PINNED band
-            # instead reads 6 mm where the sponge is 30 mm thick and drives
-            # every later press 10 mm too deep -- the rig error that turned a
-            # 0.6 N press into 37 N in rgbs/scripts/rgbs_prep_bench.py.
             whole = self.env.pipeline.state_0.particle_q.numpy()[self._sponge_parts()]
             self._carry = {
                 "underside_drop": float(pos[2]) - float(whole[:, 2].min()),
                 "quat": [float(v) for v in quat],
             }
-            return {"nodes": int(len(nodes)), "pin": int(pin), "underside_drop": self._carry["underside_drop"]}
+            return {"underside_drop": self._carry["underside_drop"]}
 
         out = self.bus.call(capture)
         self._wait_for_step(SETTLE)
-        return {"arm": name, "gap": float(gap), "held": True, **out}
+        return {"arm": name, "gap": float(gap), **out}
 
     def release_sponge(self, arm: str = "work") -> dict[str, Any]:
-        """Let go: drop the pins first, then open the jaws.
-
-        In that order. Opening first leaves the foam hanging on the pins with
-        nothing under it, and the release then reads as a sponge that teleports
-        when the pins go.
-        """
+        """Let go: open the jaws."""
         name = self._arm_name(arm)
-        pin = self._hold.pin
-
-        def drop() -> None:
-            if pin is not None:
-                self.bridge.unpin(pin)
-            self._hold.disarm()
-
-        self.bus.call(drop)
         self._carry = None
-        self._wait_for_step(SETTLE)
         self.set_grip("open", arm=name)
-        return {"arm": name, "released": pin is not None}
+        return {"arm": name, "released": True}
 
     # --------------------------------------------------------------------- plan
     def _solve_path(self, ik, targets: list[tuple[np.ndarray, np.ndarray]]) -> list[list[float]]:
@@ -1001,18 +891,18 @@ class Wiper:
     * The support hand steadies the bar at the far elbow's tangent point,
       approached from :data:`SUPPORT_STANDOFF` above; low approaches swept the
       elbow. Skipped, with a note, if its IK misses by over 5 mm or 15 deg.
-    * The work hand picks the sponge top-down at the -90 deg jaw roll, so the
-      75 mm axis lies along the bar, and pins the foam under the pads.
-    * It crosses at clearance leaning :data:`TILT_DEG` along the bar and
-      presses BY FORCE -- a millimetre at a time until the field reads
-      :data:`PRESS_N` -- with a travel budget of the clearance plus 30 mm.
-    * Strokes run between :func:`stroke_span`'s ends in
-      :data:`STROKE_SEGMENTS` segments with a running seat trim, and after the
-      first outward stroke the far end is re-seated by force too: the arm sags
-      differently at the far end of its reach.
-    * The sponge goes back where it came from, upright; both hands retreat;
-      :data:`TAIL` settled steps make the goal's two-second hold happen inside
-      the take.
+    * Per stroke, the work hand picks the sponge top-down at the -90 deg jaw
+      roll (:data:`JAW_ROLL_DEG`), so the 75 mm axis lies along the bar, and
+      holds it by the pads' contact alone.
+    * It carries it up, past a gate short of the near block and over the
+      stripe leaning :data:`TILT_DEG` along the bar, and presses BY FORCE -- a
+      millimetre at a time until the field reads :data:`PRESS_N`.
+    * One stroke runs between :func:`stroke_span`'s ends, one way, the low edge
+      trailing, the hand following the press every control step
+      (:meth:`_follow`).
+    * The sponge goes back where it came from, upright, and is taken up again
+      for the next stroke; both hands retreat; :data:`TAIL` settled steps make
+      the goal's two-second hold happen inside the take.
 
     The live page's twin of the clip (``rgbs/scripts/surface_cleaning.py``)
     plays exactly this on exactly this scene.
@@ -1046,10 +936,7 @@ class Wiper:
         self.steady = bool(steady)
         self.verbose = bool(verbose)
         self.tools = ToolsSurfacePrep(sim, _DirectBus(), layout=layout)
-        """Built per take on purpose: it owns the :class:`SpongeHold`, and
-        ``EnvBase.reset`` has just dropped every post-step hook a policy added
-        and the bridge every pin, so a carried-over hold would re-aim an id that
-        no longer exists."""
+        """Built per take, so nothing a previous episode's tools cached survives a reset."""
         self.arms = arm_slots(sim)
         self.work = sim.handles.work_arm or self.arms[0]
         self.support = sim.handles.support_arm or (self.arms[1] if len(self.arms) > 1 else "")
@@ -1066,7 +953,6 @@ class Wiper:
         self.cleaned = 0.0
         self.press_n = 0.0
         self.slide = 0.0
-        self.pinned_nodes = 0
         self.steadied = False
         self.phase = "idle"
 
@@ -1110,13 +996,24 @@ class Wiper:
     def sponge_points(self) -> np.ndarray:
         return self.sim.pipeline.state_0.particle_q.numpy()[self._sponge_particles()]
 
-    def reach(self, arm: str, target, quat) -> tuple[float, float]:
-        """How well ``arm`` can hold ``quat`` at ``target`` [world]: (mm, deg)."""
+    def reach(self, arm: str, target, quat, knots: int = 8) -> tuple[float, float]:
+        """How well ``arm`` can hold ``quat`` at ``target`` [world]: (mm, deg).
+
+        Solved the way a leg reaches it, chained along the straight line from
+        where the hand is: one solve from the home seed straight to the far
+        elbow fell into a wrong branch and read 192.7 mm / 90 degrees for a pose
+        the arm holds at 0.0."""
         ik = self.sim.arm(arm)
         target = np.asarray(target, dtype=np.float64)
         quat = np.asarray(quat, dtype=np.float64)
-        sol = ik.solve_q_full(self.seed[arm].copy(), target, quat)
-        p, r = ik.pose_errors(sol, target, quat)
+        start, q_start = ik.ee_pose(self.sim.state)
+        start = np.asarray(start, dtype=np.float64)
+        seed = self.seed[arm].copy()
+        for k in range(1, int(knots) + 1):
+            f = k / int(knots)
+            q_k = _slerp(np.asarray(q_start, dtype=np.float64), quat, f)
+            seed = ik.solve_q_full(seed, start + (target - start) * f, q_k)
+        p, r = ik.pose_errors(seed, target, quat)
         return p * 1e3, math.degrees(r)
 
     def _leg(
@@ -1210,43 +1107,21 @@ class Wiper:
             yield from self._tick()
 
     def _take_hold(self) -> None:
-        """Pin the foam under the pads to the pad frame, and carry it there.
+        """Measure the grasp the jaws made; nothing is pinned.
 
-        :meth:`ToolsSurfacePrep.grip_sponge`'s capture, without its bus round
-        trips: the nodes are chosen AFTER the jaws have closed, so what is
-        carried is where the foam actually ended up under the pads rather than
-        where it was before they touched it.
+        The underside drop is taken off the WHOLE block once the jaws have
+        closed: every later press is set from it, and the foam is held by the
+        pads' squeeze and friction alone, so it is where the jaws left it.
         """
         sim, tools, arm = self.sim, self.tools, self.work
-        nodes = tools._pad_patch(arm, self.grip_gap)
-        q = sim.pipeline.state_0.particle_q.numpy()[nodes]
         pos, quat = sim.arm(arm).ee_pose(sim.state)
-        pos = np.asarray(pos, dtype=np.float64)
-        inv = _qconj(np.asarray(quat, dtype=np.float64))
-        local = np.array([_qrot(inv, row - np.asarray(pos, dtype=np.float64)) for row in q])
-        pin = tools.bridge.pin_nodes(
-            "sponge", nodes, q.copy(), stiffness=PIN_STIFFNESS, damping=PIN_DAMPING, world=tools._world
-        )
-        tools._hold.arm_hold(self.work, pin, local)
-        # Off the WHOLE block, never off the pinned band: the pinned nodes are a
-        # disc at mid-height, so measuring the hang from them reads 6 mm where
-        # the sponge is 30 mm thick and drives every press 10 mm too deep.
         whole = sim.pipeline.state_0.particle_q.numpy()[self._sponge_nodes()]
         self.drop = float(pos[2]) - float(whole[:, 2].min())
-        self.pinned_nodes = int(len(nodes))
         tools._carry = {"underside_drop": self.drop, "quat": [float(v) for v in quat]}
-        self._say(f"holding the sponge: {len(nodes)} nodes pinned, underside {self.drop * 1e3:.1f} mm below the TCP")
+        self._say(f"holding the sponge by contact: underside {self.drop * 1e3:.1f} mm below the TCP")
 
     def _let_go(self) -> None:
-        """Drop the pins, in that order relative to the jaws.
-
-        Opening first leaves the foam hanging on the pins with nothing under it,
-        and the release then reads as a sponge that teleports when they go.
-        """
-        hold = self.tools._hold
-        if hold.pin is not None:
-            self.tools.bridge.unpin(hold.pin)
-        hold.disarm()
+        """Forget the grasp; the jaws open next."""
         self.tools._carry = None
 
     def _sponge_nodes(self) -> np.ndarray:
@@ -1281,37 +1156,45 @@ class Wiper:
         self._say(f"{label}: seated {spent * 1e3:.0f} mm down at {force:.2f} N")
         return z
 
-    def _stroke(self, a, b, quat, label: str, segments: int = STROKE_SEGMENTS):
-        """Walk from ``a`` to ``b`` in segments, trimming the seat height between
-        them so the press stays near its target: the arm sags differently along
-        the bar and the pinned foam creeps in the jaws, so one seat height
-        measured at one end reads 1.3 N at the other and 20 N a stroke later.
-        """
+    def _follow(self, a, b, quat, label: str):
+        """Slide from ``a`` to ``b`` at :data:`STROKE_SPEED`, nudging the hand down or
+        up every control step to hold the press (main's wipe_the_bar stroke).
+
+        The arm sags differently along its reach -- one fixed height pressed
+        0.7 N at one end and 11 N at the other -- so the height tracks the
+        field's press reading: 0.04 mm a step per newton short or over, at most
+        4 mm/s, and within :data:`TRIM_BOUNDS` of the seat."""
+        ik = self.sim.arm(self.work)
         a, b = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
-        for i in range(int(segments)):
-            p1 = a + (b - a) * (i + 1) / segments
-            yield from self._leg(
-                self.work,
-                [p1[0], p1[1], p1[2] + self.trim],
-                quat,
-                speed=self.speed,
-                label=f"{label}.{i}",
-                max_rot=CARRY_MAX_ROT,
-            )
+        hz = 60.0
+        steps = max(1, math.ceil(float(np.linalg.norm(b[:2] - a[:2])) / self.speed * hz))
+        rate = FOLLOW_RATE / hz
+        z, seat = float(a[2]), float(a[2])
+        seed = self.seed[self.work]
+        for k in range(1, steps + 1):
+            p = a + (b - a) * k / steps
             field = self._field()
-            force = float(field["wipe_force"]) if field["touching"] else 0.0
-            if force < 0.6 * self.press_n_target:
-                self.trim -= TRIM_STEP
-            elif force > 2.5 * self.press_n_target:
-                self.trim += TRIM_STEP
-            self.trim = float(np.clip(self.trim, *TRIM_BOUNDS))
+            press = float(field["wipe_force"]) if field["touching"] else 0.0
+            z = float(
+                np.clip(
+                    z - np.clip(FOLLOW_GAIN * (self.press_n_target - press), -rate, rate),
+                    seat + TRIM_BOUNDS[0],
+                    seat + TRIM_BOUNDS[1],
+                )
+            )
+            seed = ik.solve_q_full(seed, np.array([p[0], p[1], z]), quat)
+            self.held[self.work] = np.asarray(seed, dtype=np.float64)[list(ik.arm_coords)]
+            yield from self._tick()
+        self.seed[self.work] = np.asarray(seed, dtype=np.float64)
+        self._field()
+        self._say(f"{label}: cleaned {self.cleaned:.2f}, press {self.press_n:.2f} N")
 
     # ------------------------------------------------------------- the take
     def steps(self):
         """The whole take, without stepping: one yield per control step."""
         sim, L = self.sim, self.layout
-        wq = wipe_quat(self.tilt)  # the wipe: leaning along the bar
-        pq = wipe_quat(0.0)  # the pick and the set-down: top-down
+        wq = wipe_quat(self.tilt, JAW_ROLL_DEG)  # the wipe: leaning along the bar
+        pq = wipe_quat(0.0, JAW_ROLL_DEG)  # the pick and the set-down: top-down
         bar_body = int(sim.handles.entity("bar").body)
         pose = sim.pipeline.state_0.body_q.numpy()[bar_body]
         bar = np.asarray(pose[:3], dtype=np.float64)
@@ -1351,129 +1234,112 @@ class Wiper:
                 yield from self._ramp_grip(self.support, tube + SUPPORT_GRIP_EXTRA, steps=40)
                 yield from self._hold_steps(SETTLE)
 
-        # --- the pick ---------------------------------------------------------
-        # The PADS onto the block, not the TCP: a 7 mm trim on this hand.
-        self.phase = "pick"
-        centroid = self.sponge_points().mean(axis=0)
-        pick = centroid - _qrot(pq, np.asarray(PAD_CONTACT_OFFSET, dtype=np.float64))
-        yield from self._leg(
-            self.work, pick + np.array([0.0, 0.0, 0.10]), pq, speed=0.20, label="over the sponge", gate=False
-        )
-        yield from self._hold_steps(20)
-        yield from self._leg(self.work, pick, pq, speed=0.05, label="down onto the sponge", gate=False)
-        yield from self._hold_steps(20)
-        yield from self._ramp_grip(self.work, self.grip_gap, steps=60)
-        yield from self._hold_steps(SETTLE)
-        self._take_hold()
-        yield from self._hold_steps(SETTLE)
-
-        # --- to the bar --------------------------------------------------------
-        self.phase = "carry"
-        clear_z = crown + self.drop + self.clearance
-        half_sponge = 0.5 * L.sponge_size[1]
-        # The hand leans toward +y, which lifts the sponge's far edge: the
-        # contact patch trails the pinned centre by a third of the block. So the
-        # far end of the stroke runs a block-third past the stripe, up to the
-        # elbow; the near end stops where the block's own edge reaches -- and
-        # never within a jaw's width of the steadying hand.
-        u0, u1 = stroke_span(L, half_sponge)
-        way = self._reachable(
-            self.work,
-            [
-                ([pick[0], pick[1], clear_z], pq, "lift the sponge, upright"),
-                ([pick[0], pick[1], clear_z], wq, "lift the sponge, leaning"),
-                ([pick[0], pick[1], pick[2] + 0.06], pq, "lift the sponge a little"),
-            ],
-        )
-        if way is not None:
-            yield from self._leg(self.work, way[0], way[1], speed=0.10, label=way[2], max_rot=CARRY_MAX_ROT)
-        yield from self._hold_steps(10)
+        # --- pick, wipe once, put it down; again ----------------------------------
+        # Held by friction alone, the block creeps and turns in the jaws through
+        # a stroke and is out of them by the second (cleaned 0.35 and 0.55 in
+        # two takes, both losing it on stroke 1). So every stroke gets a fresh
+        # grasp: the sponge goes back to the mat after each one and is taken up
+        # again where it lies, the pads re-centred on it.
+        L_half = 0.5 * L.sponge_size[1]
+        u0, u1 = stroke_span(L, L_half)
+        before_block = bar + along * -(L.leg_u + L.block_inset[1] + L.block_half[1] + 0.020)
         start = bar + along * u0
-        yield from self._leg(
-            self.work,
-            [start[0], start[1], clear_z],
-            wq,
-            speed=0.10,
-            label="over the near end of the stripe, leaning",
-            max_rot=CARRY_MAX_ROT,
-        )
-        yield from self._hold_steps(10)
-        seat_z = yield from self._press(
-            (start[0], start[1]),
-            clear_z,
-            wq,
-            target_n=self.press_n_target,
-            max_travel=self.clearance + 0.030,
-            label="press onto the bar",
-        )
-        seat = np.array([start[0], start[1], seat_z])
-        yield from self._hold_steps(SETTLE)
-        self._field()
-        self._say(f"pressing at {self.press_n:.2f} N, cleaned {self.cleaned:.2f}")
-
-        # --- the wipe ----------------------------------------------------------
-        self.phase = "wipe"
         far = bar + along * u1
-        far_seat = np.array([far[0], far[1], seat_z])
+        self.taken = 0
+        pick = None
         for cycle in range(self.cycles):
-            yield from self._stroke(seat, far_seat, wq, f"stroke {cycle} out")
-            self._say(
-                f"cycle {cycle} out: cleaned {self.cleaned:.2f}, press {self.press_n:.2f} N, trim {self.trim * 1e3:+.1f} mm"
+            # --- the pick ------------------------------------------------------
+            # The PADS onto the block, not the TCP: a 7 mm trim on this hand.
+            self.phase = "pick"
+            centroid = self.sponge_points().mean(axis=0)
+            pick = centroid - _qrot(pq, np.asarray(PAD_CONTACT_OFFSET, dtype=np.float64))
+            pick[2] -= GRIP_DEPTH
+            yield from self._leg(
+                self.work, pick + np.array([0.0, 0.0, 0.10]), pq, speed=0.20, label="over the sponge", gate=False
             )
-            if cycle == 0:
-                # The arm sags differently at the far end of its reach: re-seat
-                # there by force too, and stroke between the two seats.
-                far_z = yield from self._press(
-                    (far[0], far[1]),
-                    far_seat[2] + self.trim + RESEAT_LIFT,
-                    wq,
-                    target_n=self.press_n_target,
-                    max_travel=RESEAT_TRAVEL,
-                    label="re-seat at the far end",
-                )
-                far_seat = np.array([far[0], far[1], far_z - self.trim])
-            if self.cleaned >= PATCH_CLEARED:
-                break
-            yield from self._stroke(far_seat, seat, wq, f"stroke {cycle} back")
-            self._say(
-                f"cycle {cycle} back: cleaned {self.cleaned:.2f}, press {self.press_n:.2f} N, trim {self.trim * 1e3:+.1f} mm"
-            )
-            if self.cleaned >= PATCH_CLEARED:
-                break
-        pos, _ = sim.arm(self.work).ee_pose(sim.state)
-        yield from self._leg(
-            self.work, [pos[0], pos[1], clear_z], wq, speed=0.06, label="off the bar", max_rot=CARRY_MAX_ROT
-        )
-        yield from self._hold_steps(10)
+            yield from self._hold_steps(20)
+            yield from self._leg(self.work, pick, pq, speed=0.05, label="down onto the sponge", gate=False)
+            yield from self._hold_steps(20)
+            yield from self._ramp_grip(self.work, self.grip_gap, steps=60)
+            yield from self._hold_steps(SETTLE)
+            self._take_hold()
+            self.taken += 1
+            yield from self._hold_steps(SETTLE)
 
-        # --- put it back ---------------------------------------------------------
-        # Where it came from, upright, which is what the clip does. The goal's
-        # clock starts when the sponge is off the bar, still and out of both
-        # hands, so the set-down is not raced against it.
-        self.phase = "return"
-        way = self._reachable(
-            self.work,
-            [
-                ([pick[0], pick[1], pick[2] + 0.06], wq, "back over the mat, leaning"),
-                ([pick[0], pick[1], pick[2] + 0.06], pq, "back over the mat, upright"),
-                ([pick[0], pick[1], pick[2] + 0.03], wq, "back over the mat, low"),
-            ],
-        )
-        if way is not None:
-            yield from self._leg(self.work, way[0], way[1], speed=0.12, label=way[2], max_rot=CARRY_MAX_ROT)
-        yield from self._hold_steps(10)
-        yield from self._leg(
-            self.work,
-            [pick[0], pick[1], pick[2] + 0.002],
-            pq,
-            speed=0.05,
-            label="set the sponge down, upright",
-            max_rot=CARRY_MAX_ROT,
-        )
-        yield from self._hold_steps(10)
-        self._let_go()
-        yield from self._ramp_grip(self.work, "open", steps=30)
-        yield from self._hold_steps(15)
+            # --- to the bar ----------------------------------------------------
+            # Main's wipe_the_bar path, measured on this scene: straight up off
+            # the mat, upright, then to a gate short of the near block at the
+            # crossing height, then over the stripe, leaning. A straight line
+            # from the lift to the stripe swept the foam into the near elbow.
+            self.phase = "carry"
+            clear_z = crown + self.drop + self.clearance
+            gate = np.array([0.5 * (pick[0] + bar[0]), before_block[1], clear_z])
+            up = pick + np.array([0.0, 0.0, 0.10])
+            yield from self._leg(self.work, up, pq, speed=0.10, label="up off the mat", max_rot=CARRY_MAX_ROT)
+            way = self._reachable(self.work, [(gate, wq, "to the gate, leaning"), (gate, pq, "to the gate, upright")])
+            if way is not None:
+                yield from self._leg(self.work, way[0], way[1], speed=0.10, label=way[2], max_rot=CARRY_MAX_ROT)
+            yield from self._leg(
+                self.work,
+                [start[0], start[1], clear_z],
+                wq,
+                speed=0.10,
+                label="over the near end of the stripe, leaning",
+                max_rot=CARRY_MAX_ROT,
+            )
+            yield from self._hold_steps(12)
+
+            # --- one stroke ----------------------------------------------------
+            # One way only, the low edge trailing: stroked back with the hand
+            # still leaning, the low edge leads and digs into the crown (main
+            # measured the press going 0.6 -> 7.6 N in two thirds of a second).
+            self.phase = "wipe"
+            seat_z = yield from self._press(
+                (start[0], start[1]),
+                clear_z,
+                wq,
+                target_n=self.press_n_target,
+                max_travel=self.clearance + 0.015,
+                label=f"press {cycle}",
+            )
+            if self.press_n >= 0.5 * self.press_n_target:
+                yield from self._follow(
+                    np.array([start[0], start[1], seat_z]), np.array([far[0], far[1], seat_z]), wq, f"stroke {cycle}"
+                )
+            else:
+                self._say(f"cycle {cycle}: nothing pressing at the end of the travel; the sponge is out of the jaws")
+            pos, _ = sim.arm(self.work).ee_pose(sim.state)
+            yield from self._leg(
+                self.work, [pos[0], pos[1], clear_z], wq, speed=0.06, label="", max_rot=CARRY_MAX_ROT, gate=False
+            )
+            yield from self._hold_steps(10)
+
+            # --- put it back -------------------------------------------------------
+            # Where it came from, upright, which is what the clip does.
+            self.phase = "return"
+            way = self._reachable(
+                self.work, [(gate, wq, "back to the gate, leaning"), (gate, pq, "back to the gate, upright")]
+            )
+            if way is not None:
+                yield from self._leg(self.work, way[0], way[1], speed=0.10, label=way[2], max_rot=CARRY_MAX_ROT)
+            yield from self._leg(self.work, up, pq, speed=0.10, label="back over the mat", max_rot=CARRY_MAX_ROT)
+            yield from self._hold_steps(10)
+            yield from self._leg(
+                self.work,
+                [pick[0], pick[1], pick[2] + 0.002],
+                pq,
+                speed=0.05,
+                label="set the sponge down, upright",
+                max_rot=CARRY_MAX_ROT,
+            )
+            yield from self._hold_steps(10)
+            self._let_go()
+            yield from self._ramp_grip(self.work, "open", steps=30)
+            yield from self._hold_steps(15)
+            self._field()
+            if self.cleaned >= PATCH_CLEARED:
+                break
+            yield from self._leg(self.work, up, pq, speed=0.10, label="", gate=False)
         yield from self._leg(self.work, [pick[0], pick[1], pick[2] + 0.16], pq, speed=0.10, label="retreat", gate=False)
         if self.steadied:
             yield from self._ramp_grip(self.support, "open", steps=30)
@@ -1546,7 +1412,6 @@ class RoutineSurfacePrep:
             "cleaned": float(w.cleaned),
             "press_n": float(w.press_n),
             "slide_mm_s": float(w.slide * 1e3),
-            "pinned_nodes": float(w.pinned_nodes),
             "underside_drop_mm": float(w.drop * 1e3),
             "trim_mm": float(w.trim * 1e3),
             "steadied": float(w.steadied),

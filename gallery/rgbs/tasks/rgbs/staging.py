@@ -241,7 +241,12 @@ SURFACE_PREP_PHYSICS = register_arrangement(
                     enable_multiccd=True,
                 ),
             ),
-            ("soft", backend("superdex", substeps=2)),
+            # The foam's push on a body is capped at what moves that body
+            # `feedback_dv_max` in a control step. A YAM fingertip is 71 g, so the
+            # default 0.5 m/s is 2.1 N against the jaws' 8-14 N and they close
+            # through the sponge; 5 m/s is 21 N (measured for
+            # examples/08_demos/wipe_the_bar, the same scene).
+            ("soft", backend("superdex", substeps=2, feedback_dv_max=5.0)),
         ),
         collision=CollisionSpec(contact_ke=6.0e4, contact_kd=500.0, rigid_contact_max=8192, rigid_gap=2.0e-4),
     ),

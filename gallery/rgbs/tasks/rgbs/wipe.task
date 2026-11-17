@@ -78,7 +78,12 @@
     ; the TCP lags ~10 mm -- more than the whole press range the routine's
     ; force loop works in.
     (:arm-actuation (:ke 1600) (:kd 70))
-    (:gripper-actuation (:ke 20000) (:kd 20))
+    ; The jaws close no faster than 80 mm/s (undamped they shut through the
+    ; sponge, wipe_the_bar's measurement) and squeeze the foam with 14 N a
+    ; finger: nothing but that squeeze holds it. At wipe_the_bar's 8 N (and a
+    ; 4 N press) the first stroke cleaned 0.04 of the stripe; at 14 N and 3 N,
+    ; 0.54 (one take each).
+    (:gripper-actuation (:ke 20000) (:kd 20) (:effort-limit 14) (:joint-damping 100))
   )
 
   (:objects

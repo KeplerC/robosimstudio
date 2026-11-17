@@ -28,6 +28,8 @@ run ~2 mm apart even at 5 mm nodes.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from robosimstudio.assetlib import AssetRecord, register_asset
@@ -101,7 +103,7 @@ def prep_sponge(*, at: tuple[float, float, float]):
     ``robosimstudio_materials/soft.py`` on disk for an import sorter to resolve and
     the module gets filed as third-party beside numpy.
     """
-    from robosimstudio_materials.soft import SOFT_FOAM, SoftSpec
+    from robosimstudio_materials.soft import FIRM_FOAM, SoftSpec
 
     x, y, z = (float(v) for v in at)
     return SoftSpec(
@@ -109,7 +111,11 @@ def prep_sponge(*, at: tuple[float, float, float]):
         size=SIZE,
         cells=CELLS,
         pose=(x, y, z + SURFACE_CLEARANCE),
-        material=SOFT_FOAM,
+        # Firm foam with as much static friction as SuperDex's regularised law
+        # gives: squeezed at 8 N a finger, the YAM's narrow jaws flow the soft
+        # kitchen foam out between the pads until they meet, and this one comes
+        # up (examples/08_demos/wipe_the_bar measured both).
+        material=replace(FIRM_FOAM, friction_falloff=1.0e-4),
         particle_sets=(("face", _lower_face), ("waist", _waist)),
         settle_frames=30,
         color=SPONGE_WHITE,
