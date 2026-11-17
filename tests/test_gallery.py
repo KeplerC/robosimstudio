@@ -92,12 +92,23 @@ class TestTheGallery(unittest.TestCase):
         (root / "gallery" / "tasks").mkdir()
         self.assertTrue(any("gallery/tasks/" in line for line in _tool().problems(root)))
 
-    def test_every_project_page_links_each_entry_to_its_clip_and_poster(self) -> None:
+    def test_every_clip_plays_on_its_page_and_links_to_its_video(self) -> None:
         tool = _tool()
-        root = _root(self, GOOD)
+        root = _root(self, GOOD.replace('["clip.mp4"]', '["clip.mp4", "close.mp4", "still.jpg"]'))
         page = tool.pages(root)[root / "gallery" / "p" / "README.md"]
-        self.assertIn("gallery/p/e/media/clip.mp4", page)
-        self.assertIn("gallery/p/e/media/poster.jpg", page)
+        for name in ("clip", "close"):
+            self.assertIn('href="https://huggingface.co/datasets/', page)
+            self.assertIn(f"gallery/p/e/media/{name}.mp4", page)
+            self.assertIn(f"gallery/p/e/media/{name}.webp", page)
+        self.assertIn("gallery/p/e/media/still.jpg", page)
+
+    def test_an_upload_must_hold_each_clip_its_preview_and_the_poster(self) -> None:
+        tool = _tool()
+        entry = {"project": "p", "id": "e", "media": ["clip.mp4", "still.jpg"]}
+        self.assertEqual(
+            {f"gallery/p/e/media/{n}" for n in ("clip.mp4", "clip.webp", "still.jpg", "poster.jpg")},
+            tool.needed([entry]),
+        )
 
 
 if __name__ == "__main__":
