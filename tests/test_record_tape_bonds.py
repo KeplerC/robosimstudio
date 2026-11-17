@@ -32,15 +32,18 @@ class TestATapesBondsDoNotStopTheRecording(unittest.TestCase):
             self.assertNotIn("label/bond_index", recorder._anchors)
 
     def test_a_step_skips_a_bond_index_array(self) -> None:
-        import inspect
-
-        from robosimstudio.record import recorder as module
-
-        # The per-step read is the same attribute test as the anchors', and it
-        # must not reach for ``bond_active`` on the array either.
-        source = inspect.getsource(module.EpisodeRecorder)
-        self.assertNotIn("bonds.bond_active is not None", source)
-        self.assertNotIn("bonds.bond_idx is not None", source)
+        tape = SimpleNamespace(carries_particles=True, bonds=np.arange(12, dtype=np.int32))
+        body_q = SimpleNamespace(numpy=lambda: np.zeros((2, 7), dtype=np.float32))
+        env = SimpleNamespace(
+            state=SimpleNamespace(body_q=body_q),
+            model=SimpleNamespace(particle_count=0),
+            scene=SimpleNamespace(by_name={"label": tape}, handles=SimpleNamespace(live_shapes=None)),
+        )
+        with tempfile.TemporaryDirectory() as root:
+            recorder = EpisodeRecorder(root, RecordSpec(enabled=True, record_video=False))
+            recorder._record_privileged(env)
+            self.assertIn("body_q", recorder._privileged)
+            self.assertNotIn("label_bond_active", recorder._privileged)
 
 
 if __name__ == "__main__":
