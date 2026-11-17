@@ -30,13 +30,15 @@ about = "Contact-rich bench tasks with deformable materials: wiping, polishing, 
 project = "robosimstudio-real2sim"
 id = "kitchen"
 title = "Kitchen counter: sweep up coffee grounds and beans"
-status = "video"
+status = "verified"
+verified_on = "a2a4f53"
+code = "gallery/robosimstudio-real2sim/kitchen"
 robot = "YAM"
-media = ["sweep.mp4", "beans.mp4", "water.mp4"]
-source = "Twin built by a coding agent from two Pexels photos"
+media = ["sweep.mp4", "wide.mp4"]
+source = "Twin built by a coding agent from two Pexels photos; ported to current main by Codex and accepted by a reviewer agent"
 links = ["https://www.pexels.com/photo/10568265/", "https://www.pexels.com/photo/10568268/"]
 licence = "Photo: Pexels licence. Clips and simulation: Apache-2.0."
-note = "Two YAM arms sweep spilled coffee grounds and beans into a dustpan and mop up water on a counter rebuilt from the photos. Filmed in October 2026 on older code; not yet ported to current main."
+note = "Spilled coffee grounds (8,638 MPM particles) and 30 beans on a kitchen counter rebuilt from the photos. One YAM hand pinches a dustpan, the other sweeps with a wooden pusher, then the pan is lifted 105 mm: 89.8% of the grounds end in the pan, and a trail of grounds stays along the sweep path. Check and every physics replay pass on current main."
 
 [[entry]]
 project = "robosimstudio-real2sim"
