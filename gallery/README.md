@@ -2,8 +2,9 @@
 
 <!-- written by scripts/gallery.py from gallery/index.toml; edit the manifest, not this page -->
 
-Tasks built with RoboSimStudio, by project. Every clip is hosted on Hugging Face, in the dataset
-[keplerccc/robosimstudio-agentic-real2sim](https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim); a card links to its clip.
+Tasks built with RoboSimStudio, by project, in simulation. Every clip is hosted on Hugging Face, in the
+dataset [keplerccc/robosimstudio-agentic-real2sim](https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim); each project's page plays them all,
+and each links to its full-length video.
 
 | Status | Meaning |
 |---|---|
@@ -14,10 +15,10 @@ Tasks built with RoboSimStudio, by project. Every clip is hosted on Hugging Face
 
 | Project | Entries | Verified | |
 |---|---|---|---|
-| [Real to sim](robosimstudio-real2sim/README.md) | 14 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/67e7b1729973344fc1978ed495bc978ca2019ece/gallery/robosimstudio-real2sim/kitchen/media/poster.jpg" width="160" alt=""> |
-| [ABC-130k twins](abc130/README.md) | 8 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/67e7b1729973344fc1978ed495bc978ca2019ece/gallery/abc130/load-the-cups-into-the-dish-rack/media/poster.jpg" width="160" alt=""> |
-| [VABAR](vabar/README.md) | 42 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/67e7b1729973344fc1978ed495bc978ca2019ece/gallery/vabar/tool-sorting-hammer/media/poster.jpg" width="160" alt=""> |
-| [Bench tasks](rgbs/README.md) | 6 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/67e7b1729973344fc1978ed495bc978ca2019ece/gallery/rgbs/bar-wipe-with-sponge/media/poster.jpg" width="160" alt=""> |
+| [Real to sim](robosimstudio-real2sim/README.md) | 14 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/4b4f945ef6e4d60f8567f6f991078e7496413570/gallery/robosimstudio-real2sim/kitchen/media/sweep.webp" width="240" alt=""> |
+| [ABC-130k twins](abc130/README.md) | 8 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/4b4f945ef6e4d60f8567f6f991078e7496413570/gallery/abc130/load-the-cups-into-the-dish-rack/media/sim.webp" width="240" alt=""> |
+| [VABAR](vabar/README.md) | 42 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/4b4f945ef6e4d60f8567f6f991078e7496413570/gallery/vabar/tool-sorting-hammer/media/tool-sorting-hammer.webp" width="240" alt=""> |
+| [Bench tasks](rgbs/README.md) | 6 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/4b4f945ef6e4d60f8567f6f991078e7496413570/gallery/rgbs/bar-wipe-with-sponge/media/bar-wipe-with-sponge.webp" width="240" alt=""> |
 
 An entry's files (its clips, and for a ported scene its meshes and references) come down with:
 
