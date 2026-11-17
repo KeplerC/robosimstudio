@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """A tape's bonds are an index array, and recording an episode with one in it records.
 
-``EpisodeRecorder`` writes a cloth's bond anchors once per episode, read off the bond object
-the old peel tape carried (``bond_idx``, ``bond_anchor``, ``rows``). ``robosimstudio_materials.tape``
-keeps its bonds as a plain integer array, which has none of them, and the recorder raised on
-it at the episode's first step and turned itself off: a tape task ran and scored and wrote no
-episode.
+``EpisodeRecorder`` writes a cloth's bond anchors once per episode and its live bonds every
+step, read off the bond object the old peel tape carried (``bond_idx``, ``bond_anchor``,
+``rows``, ``bond_active``). ``robosimstudio_materials.tape`` keeps its bonds as a plain integer
+array, which has none of them, and the recorder raised on it and turned itself off: a tape
+task ran and scored and wrote no episode.
 """
 
 from __future__ import annotations
@@ -30,6 +30,17 @@ class TestATapesBondsDoNotStopTheRecording(unittest.TestCase):
             recorder = EpisodeRecorder(root, RecordSpec(enabled=True, record_video=False))
             recorder._record_anchors(env)
             self.assertNotIn("label/bond_index", recorder._anchors)
+
+    def test_a_step_skips_a_bond_index_array(self) -> None:
+        import inspect
+
+        from robosimstudio.record import recorder as module
+
+        # The per-step read is the same attribute test as the anchors', and it
+        # must not reach for ``bond_active`` on the array either.
+        source = inspect.getsource(module.EpisodeRecorder)
+        self.assertNotIn("bonds.bond_active is not None", source)
+        self.assertNotIn("bonds.bond_idx is not None", source)
 
 
 if __name__ == "__main__":
