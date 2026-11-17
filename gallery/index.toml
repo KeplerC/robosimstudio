@@ -24,7 +24,7 @@ about = "Tasks from the VABAR benchmark (Variational Automation Benchmark for Ag
 [[project]]
 id = "rgbs"
 title = "Bench tasks"
-about = "Contact-rich bench tasks with deformable materials: wiping, polishing, tape and film peeling, cutting carton tape and threading a cable through a conduit, filmed in September 2026."
+about = "Contact-rich bench tasks with deformable materials: wiping, polishing, tape and film peeling, cutting carton tape and threading a cable through a conduit. Ported to current main on the YAM, where the robot moves things only by finger contact, and re-filmed path traced in November 2026."
 
 [[entry]]
 project = "robosimstudio-real2sim"
@@ -798,70 +798,79 @@ note = "One YAM arm mates a double-scale USB-C plug into a bulkhead receptacle t
 project = "rgbs"
 id = "bar-wipe-with-sponge"
 title = "Bar wiping with a foam sponge"
-status = "video"
+status = "partial"
+code = "gallery/rgbs/tasks/rgbs"
 robot = "YAM"
 media = ["bar-wipe-with-sponge.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "A YAM arm picks up a foam sponge and wipes marker stains off a metal bar resting on its stands. Completed its task. Filmed in September 2026 on older code."
+note = "A YAM arm picks a foam sponge up in its jaws and wipes a marker stripe off a grab bar while the other arm steadies the bar. Partial on current main: it cleans 0.71 of the stripe against the 0.95 gate. Held by the jaws' squeeze alone (the old task pinned the foam to the hand), the sponge creeps and turns in the jaws during a stroke; main's wipe-the-bar demo measures the same 0.69 to 0.76 without its latch."
 
 [[entry]]
 project = "rgbs"
 id = "strip-polishing"
 title = "Polishing marks off a strip"
-status = "video"
+status = "verified"
+code = "gallery/rgbs/tasks/rgbs"
+verified_on = "6e45297"
 robot = "YAM"
 media = ["strip-polishing.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "Two YAM arms hold a plastic strip against a fixed spinning bit to polish blue marks off it. Completed its task. Filmed in September 2026 on older code."
+note = "Two YAM arms lift a plastic strip off the mat by their fingertips' grip alone, hold it against a fixed spinning bit and rub its three blue marks off, then set it back on its rest. On current main: polished fraction 1.00 against the 0.95 gate, in 5879 of 12000 control steps, the strip still on its rest and the hands 142 mm clear."
 
 [[entry]]
 project = "rgbs"
 id = "carton-tape-cutting"
 title = "Cutting a carton's sealing tape"
-status = "video"
+status = "partial"
+code = "gallery/rgbs/tasks/rgbs"
 robot = "YAM"
 media = ["carton-tape-cutting.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "A YAM arm cuts the sealing tape along a carton's top seam with a box cutter, then sets the knife back on its rest. Completed its task. Filmed in September 2026 on older code."
+note = "A YAM arm picks a box cutter off the mat and draws it along a carton's sealing tape while the other arm pins the carton. Partial on current main: it parts 0.60 to 0.67 of the tape's cells against the 0.95 gate. On the YAM the blade crosses the seam on a slant, so near each end of the tape it parts only one of the two strips, and the fingertip hook that should then lift the far flap does not open it and shoves the carton."
 
 [[entry]]
 project = "rgbs"
 id = "cable-through-conduit"
 title = "Threading a cable through a conduit"
-status = "video"
+status = "partial"
+code = "gallery/rgbs/tasks/rgbs"
 robot = "YAM"
 media = ["cable-through-conduit.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "YAM arms feed a USB-C cable through a closed conduit and draw the connector out of the far end. Completed its task. Filmed in September 2026 on older code."
+note = "YAM arms feed a USB-C cable through a closed conduit by pinching it behind the mouth, stroke by stroke, while the other hand holds the conduit's lid. Partial on current main: the cable is fed 196 mm and its tip comes out past the exit, but the second hand's grab for the plug lands 50 mm short of it, so the draw pulls the conduit instead of the plug and the goal's 'plug beyond the exit' clause reads 0 against 1.0."
 
 [[entry]]
 project = "rgbs"
 id = "tape-strip-peel"
 title = "Peeling a tape strip off a box"
-status = "video"
+status = "verified"
+code = "gallery/rgbs/tasks/rgbs"
+verified_on = "6e45297"
 robot = "YAM"
 media = ["tape-strip-peel.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "A YAM arm pulls an adhesive tape strip off a box by its handle. Completed its task. Filmed in September 2026 on older code."
+note = "A YAM arm closes its pads on the rigid pull tab of a 140 mm tape strip and peels the strip off a box, with nothing but finger contact holding the tab. Re-authored on the library's tape for current main: peeled fraction 0.952 against the 0.95 gate, in 972 control steps."
 
 [[entry]]
 project = "rgbs"
 id = "protective-film-peel"
 title = "Peeling protective film off a panel"
-status = "video"
+status = "verified"
+code = "gallery/rgbs/tasks/rgbs"
+verified_on = "6e45297"
 robot = "YAM"
 media = ["protective-film-peel.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "A YAM arm peels the protective film off a panel. Completed its task. Filmed in September 2026 on older code."
+note = "A YAM arm closes its pads on the pull tab of a phone's protective film and peels the film off the phone, which lies on a stand. Re-authored on the library's tape for current main: peeled fraction 0.955 against the 0.95 gate, in 839 control steps; the gentle variant, which also keeps the phone on its stand, passes too."

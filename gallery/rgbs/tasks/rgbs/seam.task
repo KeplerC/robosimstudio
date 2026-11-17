@@ -1,0 +1,316 @@
+; ---------------------------------------------------------------------------
+; AUTHORED -- replicates a receiving-bench errand: two YAM arms, a taped
+; parcel carton on the gridded work mat, and a palm-sized safety cutter lying
+; on the mat beside it. The work arm (right) takes the cutter, PIERCES the
+; tape on the top join and DRAWS the blade along it; the support arm (left)
+; pins the carton's far end against the draw; the cutter goes back down on the
+; mat; and the work arm hooks the FAR flap up and over with a fingertip. That
+; is the whole of sample_videos/box_decanting.mp4, and this document is its
+; twin: the carton stands where the clip's does, its long axis along the
+; bench, the tape is the clip's short yellow strip across the middle of the
+; join, and the cutter is the clip's tool.
+;
+; WHAT MAKES THIS ONE INTERESTING. The tape is not cut by touching it. It is cut
+; by a press and a travel AT ONCE, and either alone does nothing:
+;
+;     d(intact)/dt = -k_c * (press - f_pierce) * |v_draw|   for press >= f_pierce
+;                  =  0                                     otherwise
+;
+; The offset in the force term is the whole task: it makes the press a THRESHOLD
+; rather than a dial, and both of the errand's failures then fall out of the law
+; and the contact model rather than being scripted. Measured on this geometry
+; with a servo holder carrying the cutter at the same 50-degree nose-down hold
+; the arm uses (rgbs/scripts/rgbs_decant_bench.py --cut), one out-and-back draw
+; per row, the carton pinned:
+;
+;     overdrive [mm]  0.5   0.75   1.0    1.5    2.0    3.0
+;     press [N]       0.69  2.29   3.50  13.03  19.21  12.36
+;     cut             0.000 0.000  0.000  0.750  0.708  0.875
+;     skate [mm]      128   129     48      6      2      1
+;
+; * BELOW THE GATE THE BLADE SKATES. Not "cuts slowly" -- cuts NOTHING. A blade
+;   drawn the full length of the tape at 0.69 N leaves it sealed and travels
+;   128 mm doing it, and the run reads as a clean traverse with cut-fraction
+;   0.000. `blade-slip` is recorded every step so that shows up as "skated
+;   128 mm, cut 0.00" rather than going quiet.
+; * ABOVE THE GATE WITH NO TRAVEL IT STILL DOES NOTHING. |v_draw| is the blade's
+;   speed ALONG ITS OWN EDGE, so a stationary press severs only the cells under
+;   a 15 mm edge however hard it leans. A knife cuts by being drawn.
+;
+; AND THE GATE IS SET BY WHAT THE HAND CAN PUT THROUGH THE TOOL, not by what a
+; holder can. A hand holding a 100 mm cutter by its middle can press the tape
+; only until the tool's own nose corner lands on it, and that stand-off is
+; 11.2 mm at this hold. Measured on the arm, seating a millimetre at a time and
+; reading the blade against the flaps and the BODY against the flaps apart:
+;
+;     tip below the tape [mm]  -2.8  -4.7  -5.4  -7.1  -8.7  -9.1  -9.5  -10.5
+;     blade [N]                 0.0   0.0   1.8   2.8   4.7   5.2   4.8    0.0
+;     body  [N]                 0.0   0.0   0.0   0.0   0.0   0.0   1.4   20.3
+;
+; -- so this grasp delivers 3-5 N through the blade and then the tool rides on
+; its own nose and the knife is levered round in the jaws. `f_pierce` is 2.0 N
+; for that reason: 3.4x the cutter's own resting weight, and a clear 2-3 N
+; under what the arm has to give.
+;
+; AND PRESSING AT ALL LOSES THE CARTON. The carton is a FREE body -- a floating
+; base carrying two hinged flaps, not a fixture -- so the draw's mu*press walks
+; it across the mat. Measured UNPINNED, same rig, one full draw:
+;
+;     overdrive     1mm    2mm    3mm    4mm
+;     press [N]     2.47   4.69   5.59   5.17
+;     shift [mm]    0.50  96.38  96.86  96.24
+;
+; There is no window at all without a second hand: the very press that opens
+; the tape walks the carton 96 mm off the blade. That is what the support arm
+; is for, and `carton-shift` is recorded every step so the pin's contribution
+; is a measured number rather than a claim.
+;
+; THE JOIN IS OPEN AND THE TAPE BRIDGES IT. The two flaps' free edges stand
+; 12 mm apart along the whole seam -- the clip's carton shows the dark join,
+; and the errand ends with a fingertip (a 7 mm blade) put into it to hook the
+; far flap. A blade meeting a 12 mm slot cuts nothing (measured on the shipped
+; carton at a 2 mm slot: the knife slotted straight through), so the tape is
+; two RIGID strips, one on each flap, each reaching from the flap's top face
+; across half the gap so they meet at the centreline with zero gap and the
+; blade lands on a continuous plane. The severance cells are on the strips, so
+; cut-fraction is over the 100 mm of tape.
+;
+; Severing is a per-cell irreversible field owned by the `seam` entity, and
+; nothing here can re-seal it. The flaps are held shut by a hinge torque scaled
+; by the tape's REMAINING INTACT FRACTION, so opening the box is not a second
+; mechanism bolted on: it is what the cut leaves behind. Measured, at the flap's
+; free edge on the shipped carton: a sealed seam needs 120 N to force (a YAM
+; hand makes ~40), a half-cut one 80 N, a 20%-cut one 20 N, and a cut one
+; 0.7 N. The third of those is exactly why the goal's gate is 0.95 and not
+; something softer.
+; ---------------------------------------------------------------------------
+
+(define (problem CUT_THE_TAPE_AND_HOOK_THE_FAR_FLAP_OPEN)
+
+
+  (:language cut the yellow tape along the top join of the box with the safety
+             cutter then set the cutter back down on the mat and lift the far
+             flap open)
+
+  ; The cell, the pairing (right cuts, left pins, arms solid), the control
+  ; mode and the episode count are rgbs.suite's; this is the delta.
+  (:staging
+    ; Contact-rich rigid press against a hinged flap with a free base under it.
+    ; The field's press feed needs MuJoCo's own contact table, so
+    ; `use_mujoco_contacts` is not optional here. See rgbs/tasks/rgbs/staging.py.
+    (:physics box_decant_960hz@v1)
+    ; The suite rig, aimed at the middle of the tape -- derived from where the
+    ; carton stands and where its own frame puts the seam. Five cameras; the
+    ; `photo` and `inset` ones reproduce the clip's phone and its "RGBS View".
+    (:cameras decant.layout:SEAM_VIEWS)
+    ; Pick, carry, pin, pierce, draw passes, set-down, the flap hook, retreat,
+    ; then a settled hold. Generous on purpose -- sized for the passes a shyer
+    ; or worse-aimed policy needs, not for a shipped one.  ; CAL
+    (:max-steps 8000)
+    ; polish's and usbc's stiffened servos, for the same reason: driving a
+    ; blade into a flap at a commanded force is task-space positioning under
+    ; contact, and at the MJCF's own 300 gain the TCP lags ~10 mm -- more than
+    ; the whole pierce stroke, which the bench measures at 4-6 mm.
+    (:arm-actuation (:ke 1600) (:kd 70))
+    (:gripper-actuation (:ke 20000) (:kd 20))
+  )
+
+  (:objects
+    ; The carton: an ORDINARY FREE BODY carrying the floor and walls, with two
+    ; revolute flap links hung off it by this task's own entity -- the pattern
+    ; vabar/tasks/usbc_insert/entity.py already ships and steps. It keeps an
+    ; object handle, so the clauses below read its speed and its contact with
+    ; the mat the ordinary way. The hinges are the entity's, NOT the
+    ; `articulated` substrate's, whose runtime is declared and not built.
+    carton - shipping_carton
+    knife  - box_cutter
+    ; The tape: state the SEAM carries, published by this task's own field
+    ; entity, the way peel's film publishes its bond field and polish's strip
+    ; its marks. It also BUILDS the two strips the blade lands on, onto the
+    ; carton's flap links. No rigid body answers to this name and no clause
+    ; below reads it through one -- published states only.
+    seam   - seal_tape
+  )
+
+  ; Placed by its record: where the mat stands is decant/layout.py's
+  ; arithmetic. The one fixture; the cutter lies on the mat and goes back on
+  ; the mat, so there is no rest.
+  (:fixtures
+    mat  - decant_mat
+  )
+
+  ; No regions: nothing here is scored on being inside a box. The set-down is
+  ; scored on contact with the mat the cutter came off.
+
+  ; -------------------------------------------------------------------------
+  ; The world an episode starts in, re-verified after settling at every reset.
+  ;
+  ; Two clauses, and both are published states of entities whose reset is
+  ; bit-exact -- which is why they are the two that survived. Three candidates
+  ; were rejected as things that read false AT THE RESET INSTANT and true a
+  ; dozen steps later, and an init that warns on every clean episode teaches
+  ; people to ignore the warning. Recorded rather than deleted, because the next
+  ; author will reach for the same three:
+  ;   * (>= (contact-force carton mat) 0.05) -- polish dropped exactly this. The
+  ;     force atom's smoothing window is EMPTY at verification and reads a
+  ;     dropout as zero.
+  ;   * (<= (speed carton) 0.02) -- the carton is laid half a millimetre clear
+  ;     and is still settling when the check runs.
+  ;   * (not (gripped knife.body)) -- a jaw-stall test on a servo that has just
+  ;     been re-targeted, whose lag term is meaningless at step zero.
+  ; All three stay observable every step below.
+  (:init
+    (sealed seam)
+    (flaps-shut seam)
+  )
+
+  ; -------------------------------------------------------------------------
+  ; ONE LATCH OVER EVERYTHING: the tape cut, the far flap laid open, the
+  ; carton still where it was worked, the cutter put down and both hands off
+  ; -- held for one simulated second so a bounce or a lingering finger cannot
+  ; buy the verdict.
+  ;
+  ; (>= (tape-cut-fraction seam) 0.95)
+  ;     The field is monotone by construction, so the latch is belt-and-braces
+  ;     -- but `once` is still right: the verdict is about the episode, and the
+  ;     carton's later travels must not be able to take it back.
+  ;
+  ; (>= (flap-far-open seam) 0.63)
+  ;     The far flap past 69 degrees -- hooked up and over, which is the last
+  ;     thing the clip does. The near flap is NOT asked for: it stays shut
+  ;     with its half of the tape on it, as in the clip; `decant` asks for
+  ;     both. The hold torque is what makes this a consequence of the cut
+  ;     rather than a second mechanism: a sealed flap refuses an arm.
+  ;
+  ; (>= (contact-force carton mat) 0.05) and (<= (speed carton) 0.02)
+  ;     Still on the mat and at rest. Without these a policy that drags the
+  ;     carton off the bench mid-draw and finishes the cut in mid-air scores.
+  ;     The force atom smooths over ten steps, so the solver's contact dropouts
+  ;     cannot restart the hold-for clock.
+  ;
+  ; (>= (contact-force knife mat) 0.05)
+  ;     The cutter back on the mat it came off. A cut is not finished with a
+  ;     blade still in the seam, and a cutter left on the carton is not put
+  ;     down.
+  ;
+  ; (> (hands-clear knife) 0.10)
+  ;     BOTH hands away -- `tcp-distance` reads the work arm only, and this
+  ;     episode ends with two hands to clear. 100 mm against a 94 mm jaw
+  ;     span.  ; CAL
+  (:goal
+    (once
+      (And
+        (>= (tape-cut-fraction seam) 0.95)
+        (>= (flap-far-open seam) 0.63)
+        (hold-for 1.0
+          (And
+            (>= (contact-force carton mat) 0.05)
+            (<= (speed carton) 0.02)
+            (>= (contact-force knife mat) 0.05)
+            (> (hands-clear knife) 0.10)
+          )
+        )
+      )
+    )
+  )
+
+  ; -------------------------------------------------------------------------
+  ; Progress toward the cut gate, clipped, UNMASKED.
+  ;
+  ; A pin budget on `carton-shift` and a press budget on `press-force` both
+  ; belong in a later `seam_loose` variant, after a shipped policy has measured
+  ; pinned and unpinned populations. The bench numbers in the header are a
+  ; SERVO HOLDER's, not an arm's, and thresholding an arm on a holder's spread
+  ; is how a benchmark ends up measuring an arbitrary constant. polish defers
+  ; its own press budget for the same reason and says so.
+  ;
+  ; The set-down and the flap are deliberately NOT folded into the scalar:
+  ; reward measures how much of the tape got cut, and the rest is a condition
+  ; on when the verdict counts.
+  (:reward (progress (tape-cut-fraction seam) (:gate 0.95)))
+
+  ; -------------------------------------------------------------------------
+  ; Recorded every step, gating nothing -- the quantities this suite exists to
+  ; calibrate.
+  ;
+  ; `cut-run` is the one to read beside the fraction: a cut is a FRONT
+  ; travelling along the tape, so a policy that stabs holes scores a fraction
+  ; with no run, and those are different outcomes. Measured at 12 mm of
+  ; overdrive on the shipped carton: cut 0.227 with a run of 0.000, which is
+  ; exactly that failure.
+  ;
+  ; `press-force` and `blade-slip` are the two halves of a legible zero:
+  ; pressing at 4 N and drawing is a skate, pressing at 14 N and not drawing is
+  ; a stab, and a run reporting only cut-fraction 0.00 cannot tell you which.
+  (:observe
+    (cut-run seam)
+    (press-force seam)
+    (blade-slip seam)
+    (blade-on-seam seam)
+    (carton-shift seam)
+    (carton-yaw seam)
+    (flap-open seam)
+    (flap-far-open seam)
+    (flap-near-open seam)
+    ; The two rows apart. A station counts as `cut-run` only when BOTH its
+    ; rows are parted, so a fraction well over the run means the blade is
+    ; running to one side of the seam and cutting one flap's half of the tape
+    ; -- and these two are what say which.
+    (near-intact seam)
+    (far-intact seam)
+    (gripped knife.body)
+    (hands-clear knife)
+    (speed carton)
+  )
+
+  ; -------------------------------------------------------------------------
+  ; A scripted routine. Every leg is solved end to end and gated on its worst
+  ; residual before it is driven; the press is set by where the seat stops
+  ; rather than by a servo, and the draw is a straight leg at that height.
+
+  ; Inputs to the artifact, not statements about the world. They restate the
+  ; constants routine_decant.py reads (GRIP_X, PASSES, CUT_TILT) so a reader
+  ; of the document sees the choreography's knobs; the routine is what
+  ; consumes them.
+  (:policy-params
+    ; Main ships no routine runner: routine.py:SolutionRoutine reads this and runs it.
+    (routine "routine_decant:RoutineBoxDecant")
+    (cut-arm right)
+    (pin-arm left)
+    (grasp-station 0.030)
+    (draw-passes 4)
+    (cut-tilt 50)
+  )
+
+  (:provenance
+    (:tier original)
+    (:source "Authored for this corpus from sample_videos/box_decanting.mp4: a
+              receiving-bench decant with a sealed parcel carton, a palm-sized
+              safety cutter, one hand to steady and one to cut and then to
+              hook the flap. Dimensions are the clip's, measured against the
+              mat's 25 mm grid -- a 200 x 150 x 100 mm carton, 4 mm board, two
+              200 x 65 mm top flaps meeting across a 12 mm join, a 100 x 25 mm
+              strip of yellow tape across the middle of it -- and a 100 x 30 x
+              20 mm cutter with 15 mm of blade out.")
+    ; A semicolon starts a comment ANYWHERE, including inside what looks like a
+    ; quoted string -- BDDL has no strings. Every calibration note in this file
+    ; is a comment for exactly that reason.
+    (:note "Where the carton stands is a measurement before it is a placement.
+            The tape is drawn along world y toward the support arm, and a
+            chained full-pose sweep over the draw at its own height shows the
+            tilted hold solving at every station for a carton anywhere from
+            100 mm short of the bench's centre to 20 mm past it, with the
+            cutter's nose toward the working arm -- and 93-194 mm out at every
+            station with the nose leading. Where the carton actually stands,
+            60 mm short of centre, is set by the SECOND move: the arc that
+            hooks the far flap open solves at 0.0 mm there and is 33-69 mm out
+            from 20 mm short of centre onward. The layout module tabulates
+            both. The blade's collider is a 1.5 mm box, not a razor -- 7.5x the
+            arrangement's contact gap, so the contact stays conditioned.
+            Sharpness lives in the pierce gate, not in the geometry, the same
+            division polish makes between a drum's abrasive and Preston's law.
+            CAL-tagged thresholds are re-measured against a shipped policy
+            before sign-off.")
+  )
+
+)

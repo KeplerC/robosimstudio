@@ -1,0 +1,1257 @@
+{
+ "version": 3,
+ "meta": {
+  "name": "polish_strip_gt",
+  "description": "Polish three marks off the strip against the fixed spinning drum, bimanually, with ground truth. Dual pick off the mat, then BOTH hands hold the strip from there to the set-down: each mark is brought to the drum by shifting the whole rigid body 33 mm, hands travelling with it, because a single hand -- which holds the strip perfectly well -- cannot react the press torque: the mark is 78 mm from the grasp and the grip's couple is only as wide as the strip is thick. The gated close arms a force hold on the fingers, without which the grip bleeds from 40 N to nothing over three marks and the strip ends up on the bench. The drum is clamped SIDEWAYS, so it works on its barrel and its contact is a narrow band rather than a disc: every mark is pressed and then RUBBED back and forth ALONG the spindle axis, three cycles a round and up to three rounds, polled between rounds by sim.wait_polish's feedback dwell. The direction is not a choice. The drum's surface runs across its axis -- along the strip's own long axis -- so a rub that way works against the full mu*press drag in the one direction an end-on pinch cannot hold; a rub along the axis is perpendicular to it and nearly free. Shifts BETWEEN marks are still lift-and-shift, never an in-contact drag."
+ },
+ "nodes": {
+  "setup": {
+   "type": "subgraph",
+   "ref": "setup_sg"
+  },
+  "pick": {
+   "type": "subgraph",
+   "ref": "pick_sg"
+  },
+  "spotc": {
+   "type": "subgraph",
+   "ref": "spotc_sg"
+  },
+  "spotl": {
+   "type": "subgraph",
+   "ref": "spotl_sg"
+  },
+  "spotr": {
+   "type": "subgraph",
+   "ref": "spotr_sg"
+  },
+  "finish": {
+   "type": "subgraph",
+   "ref": "finish_sg"
+  },
+  "verify": {
+   "type": "subgraph",
+   "ref": "verify_sg"
+  },
+  "done": {
+   "type": "end",
+   "status": "success"
+  },
+  "abort": {
+   "type": "end",
+   "status": "failure",
+   "recovery": [
+    {
+     "tool": "sim.set_grip",
+     "inputs": {
+      "width": "open",
+      "arm": "work"
+     }
+    },
+    {
+     "tool": "sim.set_grip",
+     "inputs": {
+      "width": "open",
+      "arm": "support"
+     }
+    },
+    {
+     "tool": "robot.go_home",
+     "inputs": {}
+    }
+   ]
+  }
+ },
+ "edges": [
+  [
+   "START",
+   "setup"
+  ]
+ ],
+ "conditional_edges": {
+  "setup": {
+   "router_field": "exit",
+   "mapping": {
+    "ready": "pick",
+    "dead": "abort",
+    "errored": "abort"
+   }
+  },
+  "pick": {
+   "router_field": "exit",
+   "mapping": {
+    "held": "spotc",
+    "missed": "abort",
+    "errored": "abort"
+   }
+  },
+  "spotc": {
+   "router_field": "exit",
+   "mapping": {
+    "ok": "spotl",
+    "errored": "abort"
+   }
+  },
+  "spotl": {
+   "router_field": "exit",
+   "mapping": {
+    "ok": "spotr",
+    "errored": "abort"
+   }
+  },
+  "spotr": {
+   "router_field": "exit",
+   "mapping": {
+    "ok": "finish",
+    "errored": "abort"
+   }
+  },
+  "finish": {
+   "router_field": "exit",
+   "mapping": {
+    "ok": "verify",
+    "errored": "abort"
+   }
+  },
+  "verify": {
+   "router_field": "exit",
+   "mapping": {
+    "succeeded": "done",
+    "short": "abort"
+   }
+  }
+ },
+ "subgraphs": {
+  "setup_sg": {
+   "skill": "generic",
+   "inputs": {},
+   "outputs": {},
+   "nodes": {
+    "read": {
+     "type": "script",
+     "script": "scripts/read_state.py",
+     "inputs": {}
+    },
+    "ready": {
+     "type": "noop"
+    },
+    "dead": {
+     "type": "noop"
+    }
+   },
+   "edges": [
+    [
+     "START",
+     "read"
+    ],
+    [
+     "ready",
+     "END"
+    ],
+    [
+     "dead",
+     "END"
+    ]
+   ],
+   "exit": {
+    "router_field": null,
+    "success_values": [
+     "ready",
+     "dead"
+    ]
+   },
+   "on_error": "errored",
+   "conditional_edges": {
+    "read": {
+     "router_field": "route",
+     "mapping": {
+      "ready": "ready",
+      "not_spinning": "dead"
+     }
+    }
+   }
+  },
+  "pick_sg": {
+   "skill": "generic",
+   "inputs": {},
+   "outputs": {},
+   "nodes": {
+    "plan": {
+     "type": "script",
+     "script": "scripts/plan_pick.py",
+     "inputs": {
+      "station_work": -0.058,
+      "station_support": 0.058
+     }
+    },
+    "held": {
+     "type": "noop"
+    },
+    "missed": {
+     "type": "noop"
+    },
+    "a0_ready_w": {
+     "type": "script",
+     "script": "scripts/grip_arm.py",
+     "inputs": {
+      "width": "ready",
+      "arm": "work",
+      "settle_steps": 12
+     }
+    },
+    "a0_ready_s": {
+     "type": "script",
+     "script": "scripts/grip_arm.py",
+     "inputs": {
+      "width": "ready",
+      "arm": "support",
+      "settle_steps": 12
+     }
+    },
+    "a0_grip": {
+     "type": "script",
+     "script": "scripts/grip_arm.py",
+     "inputs": {
+      "width": "hold",
+      "arm": "both",
+      "settle_steps": 60,
+      "ramp_steps": 240,
+      "until_force": 30.0,
+      "hold_force": 45.0
+     }
+    },
+    "a0_check": {
+     "type": "script",
+     "script": "scripts/verify_hold.py",
+     "inputs": {
+      "which": "both"
+     }
+    },
+    "a0_capture": {
+     "type": "script",
+     "script": "scripts/capture_grasp.py",
+     "inputs": {}
+    },
+    "a1_ready_w": {
+     "type": "script",
+     "script": "scripts/grip_arm.py",
+     "inputs": {
+      "width": "ready",
+      "arm": "work",
+      "settle_steps": 12
+     }
+    },
+    "a1_ready_s": {
+     "type": "script",
+     "script": "scripts/grip_arm.py",
+     "inputs": {
+      "width": "ready",
+      "arm": "support",
+      "settle_steps": 12
+     }
+    },
+    "a1_grip": {
+     "type": "script",
+     "script": "scripts/grip_arm.py",
+     "inputs": {
+      "width": "hold",
+      "arm": "both",
+      "settle_steps": 60,
+      "ramp_steps": 240,
+      "until_force": 30.0,
+      "hold_force": 45.0
+     }
+    },
+    "a1_check": {
+     "type": "script",
+     "script": "scripts/verify_hold.py",
+     "inputs": {
+      "which": "both"
+     }
+    },
+    "a1_capture": {
+     "type": "script",
+     "script": "scripts/capture_grasp.py",
+     "inputs": {}
+    },
+    "a0_over": {
+     "type": "script",
+     "script": "scripts/move_pair.py",
+     "inputs": {
+      "arms": {
+       "$ref": "plan.arms"
+      },
+      "stage": "over",
+      "settle_steps": 30
+     }
+    },
+    "a0_desc": {
+     "type": "script",
+     "script": "scripts/move_pair.py",
+     "inputs": {
+      "arms": {
+       "$ref": "plan.arms"
+      },
+      "stage": "descend",
+      "settle_steps": 30
+     }
+    },
+    "a0_in": {
+     "type": "script",
+     "script": "scripts/move_pair.py",
+     "inputs": {
+      "arms": {
+       "$ref": "plan.arms"
+      },
+      "stage": "close_in",
+      "settle_steps": 60
+     }
+    },
+    "a1_over": {
+     "type": "script",
+     "script": "scripts/move_pair.py",
+     "inputs": {
+      "arms": {
+       "$ref": "plan.arms"
+      },
+      "stage": "over",
+      "settle_steps": 30
+     }
+    },
+    "a1_desc": {
+     "type": "script",
+     "script": "scripts/move_pair.py",
+     "inputs": {
+      "arms": {
+       "$ref": "plan.arms"
+      },
+      "stage": "descend",
+      "settle_steps": 30
+     }
+    },
+    "a1_in": {
+     "type": "script",
+     "script": "scripts/move_pair.py",
+     "inputs": {
+      "arms": {
+       "$ref": "plan.arms"
+      },
+      "stage": "close_in",
+      "settle_steps": 60
+     }
+    }
+   },
+   "edges": [
+    [
+     "START",
+     "plan"
+    ],
+    [
+     "held",
+     "END"
+    ],
+    [
+     "missed",
+     "END"
+    ],
+    [
+     "a0_ready_w",
+     "a0_ready_s"
+    ],
+    [
+     "a0_grip",
+     "a0_check"
+    ],
+    [
+     "a0_capture",
+     "held"
+    ],
+    [
+     "a1_ready_w",
+     "a1_ready_s"
+    ],
+    [
+     "a1_grip",
+     "a1_check"
+    ],
+    [
+     "a1_capture",
+     "held"
+    ],
+    [
+     "a0_ready_s",
+     "a0_over"
+    ],
+    [
+     "a0_over",
+     "a0_desc"
+    ],
+    [
+     "a0_desc",
+     "a0_in"
+    ],
+    [
+     "a0_in",
+     "a0_grip"
+    ],
+    [
+     "a1_ready_s",
+     "a1_over"
+    ],
+    [
+     "a1_over",
+     "a1_desc"
+    ],
+    [
+     "a1_desc",
+     "a1_in"
+    ],
+    [
+     "a1_in",
+     "a1_grip"
+    ]
+   ],
+   "exit": {
+    "router_field": null,
+    "success_values": [
+     "held",
+     "missed"
+    ]
+   },
+   "on_error": "errored",
+   "conditional_edges": {
+    "plan": {
+     "router_field": "route",
+     "mapping": {
+      "planned": "a0_ready_w"
+     }
+    },
+    "a0_check": {
+     "router_field": "route",
+     "mapping": {
+      "held": "a0_capture",
+      "missed": "a1_ready_w"
+     }
+    },
+    "a1_check": {
+     "router_field": "route",
+     "mapping": {
+      "held": "a1_capture",
+      "missed": "missed"
+     }
+    }
+   }
+  },
+  "spotc_sg": {
+   "skill": "generic",
+   "nodes": {
+    "approach": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "raise",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.0
+     }
+    },
+    "press": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "press",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.0,
+      "align_spot": 1
+     }
+    },
+    "ok": {
+     "type": "noop"
+    },
+    "lift": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "liftoff",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.0
+     }
+    },
+    "c_dwell_0": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 1,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "c_rub_1": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.0,
+      "align_spot": 1
+     }
+    },
+    "c_dwell_1": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 1,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "c_rub_2": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.0,
+      "align_spot": 1
+     }
+    },
+    "c_dwell_2": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 1,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "c_rub_3": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.0,
+      "align_spot": 1
+     }
+    },
+    "c_dwell_3": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 1,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    }
+   },
+   "edges": [
+    [
+     "START",
+     "approach"
+    ],
+    [
+     "approach",
+     "press"
+    ],
+    [
+     "ok",
+     "END"
+    ],
+    [
+     "lift",
+     "ok"
+    ],
+    [
+     "press",
+     "c_dwell_0"
+    ],
+    [
+     "c_rub_1",
+     "c_dwell_1"
+    ],
+    [
+     "c_rub_2",
+     "c_dwell_2"
+    ],
+    [
+     "c_rub_3",
+     "c_dwell_3"
+    ]
+   ],
+   "conditional_edges": {
+    "c_dwell_0": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "c_rub_1"
+     }
+    },
+    "c_dwell_1": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "c_rub_2"
+     }
+    },
+    "c_dwell_2": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "c_rub_3"
+     }
+    },
+    "c_dwell_3": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "lift"
+     }
+    }
+   },
+   "exit": {
+    "router_field": null,
+    "success_values": [
+     "ok"
+    ]
+   }
+  },
+  "spotl_sg": {
+   "skill": "generic",
+   "nodes": {
+    "approach": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "shift",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": -0.033
+     }
+    },
+    "press": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "press",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": -0.033,
+      "align_spot": 0
+     }
+    },
+    "ok": {
+     "type": "noop"
+    },
+    "lift": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "liftoff",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": -0.033
+     }
+    },
+    "l_dwell_0": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 0,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "l_rub_1": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": -0.033,
+      "align_spot": 0
+     }
+    },
+    "l_dwell_1": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 0,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "l_rub_2": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": -0.033,
+      "align_spot": 0
+     }
+    },
+    "l_dwell_2": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 0,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "l_rub_3": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": -0.033,
+      "align_spot": 0
+     }
+    },
+    "l_dwell_3": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 0,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    }
+   },
+   "edges": [
+    [
+     "START",
+     "approach"
+    ],
+    [
+     "approach",
+     "press"
+    ],
+    [
+     "ok",
+     "END"
+    ],
+    [
+     "lift",
+     "ok"
+    ],
+    [
+     "press",
+     "l_dwell_0"
+    ],
+    [
+     "l_rub_1",
+     "l_dwell_1"
+    ],
+    [
+     "l_rub_2",
+     "l_dwell_2"
+    ],
+    [
+     "l_rub_3",
+     "l_dwell_3"
+    ]
+   ],
+   "conditional_edges": {
+    "l_dwell_0": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "l_rub_1"
+     }
+    },
+    "l_dwell_1": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "l_rub_2"
+     }
+    },
+    "l_dwell_2": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "l_rub_3"
+     }
+    },
+    "l_dwell_3": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "lift"
+     }
+    }
+   },
+   "exit": {
+    "router_field": null,
+    "success_values": [
+     "ok"
+    ]
+   }
+  },
+  "spotr_sg": {
+   "skill": "generic",
+   "nodes": {
+    "approach": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "shift",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.033
+     }
+    },
+    "press": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "press",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.033,
+      "align_spot": 2
+     }
+    },
+    "ok": {
+     "type": "noop"
+    },
+    "lift": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "liftoff",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.033
+     }
+    },
+    "r_dwell_0": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 2,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "r_rub_1": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.033,
+      "align_spot": 2
+     }
+    },
+    "r_dwell_1": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 2,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "r_rub_2": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.033,
+      "align_spot": 2
+     }
+    },
+    "r_dwell_2": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 2,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    },
+    "r_rub_3": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "rub",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      },
+      "spot_x": 0.033,
+      "align_spot": 2
+     }
+    },
+    "r_dwell_3": {
+     "type": "script",
+     "script": "scripts/press_dwell.py",
+     "inputs": {
+      "spot": 2,
+      "until": 0.99,
+      "max_steps": 60,
+      "stall_steps": 60
+     }
+    }
+   },
+   "edges": [
+    [
+     "START",
+     "approach"
+    ],
+    [
+     "approach",
+     "press"
+    ],
+    [
+     "ok",
+     "END"
+    ],
+    [
+     "lift",
+     "ok"
+    ],
+    [
+     "press",
+     "r_dwell_0"
+    ],
+    [
+     "r_rub_1",
+     "r_dwell_1"
+    ],
+    [
+     "r_rub_2",
+     "r_dwell_2"
+    ],
+    [
+     "r_rub_3",
+     "r_dwell_3"
+    ]
+   ],
+   "conditional_edges": {
+    "r_dwell_0": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "r_rub_1"
+     }
+    },
+    "r_dwell_1": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "r_rub_2"
+     }
+    },
+    "r_dwell_2": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "r_rub_3"
+     }
+    },
+    "r_dwell_3": {
+     "router_field": "route",
+     "mapping": {
+      "done": "lift",
+      "more": "lift"
+     }
+    }
+   },
+   "exit": {
+    "router_field": null,
+    "success_values": [
+     "ok"
+    ]
+   }
+  },
+  "finish_sg": {
+   "skill": "generic",
+   "nodes": {
+    "to_mat": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "to_mat",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      }
+     }
+    },
+    "lower": {
+     "type": "script",
+     "script": "scripts/do_move.py",
+     "inputs": {
+      "motion": "lower",
+      "holders": [
+       "work",
+       "support"
+      ],
+      "stations": {
+       "work": -0.058,
+       "support": 0.058
+      }
+     }
+    },
+    "open_w": {
+     "type": "script",
+     "script": "scripts/grip_arm.py",
+     "inputs": {
+      "width": "open",
+      "arm": "work",
+      "settle_steps": 18
+     }
+    },
+    "open_s": {
+     "type": "script",
+     "script": "scripts/grip_arm.py",
+     "inputs": {
+      "width": "open",
+      "arm": "support",
+      "settle_steps": 18
+     }
+    },
+    "drop": {
+     "type": "script",
+     "script": "scripts/release_grasp.py",
+     "inputs": {
+      "arms": [
+       "work",
+       "support"
+      ]
+     }
+    },
+    "settle": {
+     "type": "script",
+     "script": "scripts/wait_settle.py",
+     "inputs": {
+      "steps": 150
+     }
+    },
+    "ok": {
+     "type": "noop"
+    },
+    "park": {
+     "type": "script",
+     "script": "scripts/park_pair.py",
+     "inputs": {
+      "roles": [
+       "work",
+       "support"
+      ]
+     }
+    }
+   },
+   "edges": [
+    [
+     "START",
+     "to_mat"
+    ],
+    [
+     "to_mat",
+     "lower"
+    ],
+    [
+     "lower",
+     "open_w"
+    ],
+    [
+     "open_w",
+     "open_s"
+    ],
+    [
+     "open_s",
+     "drop"
+    ],
+    [
+     "drop",
+     "park"
+    ],
+    [
+     "park",
+     "settle"
+    ],
+    [
+     "settle",
+     "ok"
+    ],
+    [
+     "ok",
+     "END"
+    ]
+   ],
+   "conditional_edges": {},
+   "exit": {
+    "router_field": null,
+    "success_values": [
+     "ok"
+    ]
+   }
+  },
+  "verify_sg": {
+   "skill": "generic",
+   "inputs": {},
+   "outputs": {},
+   "nodes": {
+    "check": {
+     "type": "script",
+     "script": "scripts/verify_done.py",
+     "inputs": {}
+    }
+   },
+   "edges": [
+    [
+     "START",
+     "check"
+    ],
+    [
+     "check",
+     "END"
+    ]
+   ],
+   "exit": {
+    "router_field": "route",
+    "success_values": [
+     "succeeded",
+     "short"
+    ]
+   }
+  }
+ }
+}

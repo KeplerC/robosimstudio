@@ -1,0 +1,74 @@
+; -*- mode: lisp -*-
+; ============================================================================
+; PROBLEM -- pull a tape strip off a box by its handle.
+;
+; AUTHORED -- there is no upstream .bddl for this task. The adhesion model
+; follows AutoPeel (ICRA 2025), as the library tape states it.
+;
+; RE-AUTHORED for main (2026-11). The October variant held the strip's end
+; with a particle latch that followed the hand, after releasing a kinematic pin
+; on its tab. Here the strip is the library's tape (robosimstudio_materials/
+; tape.py): its end is turned up into a rigid pull tab, the hand's pads close
+; on that tab and hold it by squeezing it, and nothing else moves the strip.
+; The box is a free body because a tape sticks only to a body on its own VBD
+; island; it stands on the bench under its own weight. peel/layout.py has the
+; numbers.
+; ============================================================================
+
+(define (problem PEEL_THE_TAPE_BY_ITS_HANDLE)
+
+  (:language pull the tape strip off the box by its handle)
+
+  ; The box first: a tape sticks to a body built before it.
+  (:objects
+    box - peel_box_handle
+    tape - tape_handle
+  )
+
+  (:staging
+    ; The LEFT arm peels, its jaws closing along the strip, and draws the tab
+    ; back over the strip toward the robot; the right stands at home, its base
+    ; on the bench's far side from the strip. A staging key is overridden as
+    ; one clause, so the pairing is restated whole.
+    (:embodiment yam (:work-arm left) (:arms-solid true))
+    (:physics rgbs_tape_60hz@v1)
+    ; The library tape's damped close (examples/06_tasks/08_tape_scored),
+    ; capped at 12 N a finger so the pads reach the tab without knocking it
+    ; aside, with the spring stiffened from 1500 to 4000 N/m so they stall on
+    ; it holding the whole 12 N rather than about 6: at 6 N the tab had crept
+    ; 6 mm in the pads by the time three quarters of a strip was off.
+    (:gripper-actuation (:ke 4000) (:kd 240) (:effort-limit 12))
+    (:cameras peel.layout:HANDLE_VIEWS)
+    (:arms 1)
+    (:max-steps 3000)
+  )
+
+  ; 0.95, not 1.0: a few bonds under the far end can sit inside their break
+  ; opening while the strip is plainly off. `once` latches success only: a
+  ; bond let go never re-forms, so a peel is not something the world undoes.
+  (:goal
+    (once (>= (peeled-fraction tape) 0.95))
+  )
+
+  (:reward (progress (peeled-fraction tape) (:gate 0.95)))
+
+  (:observe
+    (bonded-fraction tape)
+  )
+
+  (:policy-params
+    ; Main ships no routine runner: routine.py:SolutionRoutine reads this and runs it.
+    (routine "routine_peel:RoutineTapePeel")
+    (sheet tape)
+  )
+
+  (:provenance
+    (:tier reproduction)
+    (:source "AutoPeel (ICRA 2025), as robosimstudio_materials/tape.py states it")
+    (:note "No published benchmark defines success for a deformable task like
+            this, so the goal is designed: 95% of the strip's bonds let go. The
+            material is the library's paper label, the sheet the
+            examples/03_materials/08_tape drive peels whole, laid as the
+            October layout's 25 x 180 mm strip along an 83 x 223 x 73 mm box.")
+  )
+)

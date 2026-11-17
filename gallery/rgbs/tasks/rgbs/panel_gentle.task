@@ -1,0 +1,83 @@
+; -*- mode: lisp -*-
+; ============================================================================
+; PROBLEM -- peel the protective film off a phone.
+;
+; AUTHORED -- there is no upstream .bddl for this task. The adhesion model
+; follows AutoPeel (ICRA 2025), as the library tape states it; the phone and
+; film are sized off sample_videos/film peeling.mp4.
+;
+; RE-AUTHORED for main (2026-11). The October variant leaned the phone back 30
+; degrees in a welded cradle and carried the film's end with a particle latch.
+; Here the film is the library's tape: its top end is turned up into a rigid
+; pull tab the pads close on, and nothing but the pads and the bonds moves it.
+; A tape sticks only to a free body on its own VBD island, and a free phone
+; leaning in a cradle is rocked off its rest by the pull, which breaks every
+; bond the film carries; so the phone lies face up on the bench, where it rests
+; exactly as it is built. peel/layout.py has the numbers.
+;
+; GENTLY. This is `panel` with ONE CLAUSE ADDED: the phone may never rise off
+; its stand -- its centre never more than 6 mm over where it lies (0.819 m on
+; bench_075). A clean peel and one that hauls the phone up by its film can end
+; on the same frame; they differ in what the episode passed through, which is
+; what `peak` reads. The October variant budgeted the film's peak tension; the
+; library tape has no tension measure, and a pull hard enough to matter lifts
+; the free phone's edge. Not its speed: a free VBD body at rest reads 3-50
+; mm/s of jitter before a hand comes near it.
+; ============================================================================
+
+(define (problem PEEL_THE_FILM_OFF_THE_PHONE_GENTLY)
+
+  (:language peel the protective film off the phone without lifting the phone off its stand)
+
+  ; The phone first: a tape sticks to a body built before it.
+  (:objects
+    phone - phone
+    film - film_phone
+  )
+
+  ; What the phone lies on: the clip's printed stand, flat rather than leaning.
+  (:fixtures
+    stand - phone_stand
+  )
+
+  (:staging
+    (:embodiment yam (:work-arm left) (:arms-solid true))
+    (:physics rgbs_tape_60hz@v1)
+    ; The left arm peels, as on `handle`; the finger servo is handle's too.
+    (:gripper-actuation (:ke 4000) (:kd 240) (:effort-limit 12))
+    (:cameras peel.layout:PANEL_VIEWS)
+    (:arms 1)
+    (:max-steps 3000)
+  )
+
+  (:goal
+    (And
+      (once (>= (peeled-fraction film) 0.95))
+      (<= (peak (height phone)) 0.825)
+    )
+  )
+
+  (:reward
+    (progress (peeled-fraction film)
+              (:gate 0.95)
+              (:gated-by (<= (peak (height phone)) 0.825))))
+
+  (:observe
+    (bonded-fraction film)
+  )
+
+  (:policy-params
+    ; Main ships no routine runner: routine.py:SolutionRoutine reads this and runs it.
+    (routine "routine_peel:RoutineTapePeel")
+    (sheet film)
+  )
+
+  (:provenance
+    (:tier designed)
+    (:source "AutoPeel (ICRA 2025) for the adhesion model; sample_videos/film peeling.mp4 for the phone and film")
+    (:note "No published benchmark defines success for a deformable task like
+            this, so the goal is designed: 95% of the film's bonds let go. The
+            film is the library's paper-label sheet at half its tack, laid 60 x
+            140 mm over a 72 x 147 mm phone.")
+  )
+)

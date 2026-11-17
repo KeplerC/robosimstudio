@@ -175,8 +175,11 @@ class EpisodeRecorder:
         """
         entities = getattr(env.scene, "by_name", getattr(env.scene, "cloths", {}))
         for name, cloth in ((n, e) for n, e in entities.items() if getattr(e, "carries_particles", False)):
+            # Only a bond object carries these anchors. A tape's ``bonds`` is the plain index
+            # array of its attachments (robosimstudio_materials.tape), and reading
+            # ``bond_idx`` off it turned recording off for every tape task at the first step.
             bonds = getattr(cloth, "bonds", None)
-            if bonds is not None and bonds.bond_idx is not None:
+            if getattr(bonds, "bond_idx", None) is not None:
                 self._anchors[f"{name}/bond_index"] = np.asarray(bonds.bond_idx.numpy(), dtype=np.int32)
                 self._anchors[f"{name}/bond_anchor"] = np.asarray(bonds.bond_anchor.numpy(), dtype=np.float32)
                 self._anchors[f"{name}/bond_row"] = np.asarray(bonds.rows, dtype=np.int32)
@@ -354,7 +357,7 @@ class EpisodeRecorder:
             self._append_priv("particle_q", particle_q)
         for name, cloth in ((n, e) for n, e in env.scene.by_name.items() if e.carries_particles):
             bonds = getattr(cloth, "bonds", None)
-            if bonds is not None and bonds.bond_active is not None:
+            if getattr(bonds, "bond_active", None) is not None:
                 self._append_priv(f"{name}_bond_active", np.asarray(bonds.bond_active.numpy(), dtype=np.uint8))
         # The colours a running scene rewrites -- a mark polished off, a seam
         # parting -- are state as much as a pose is, and the only state a

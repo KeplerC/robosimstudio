@@ -1,0 +1,181 @@
+; ---------------------------------------------------------------------------
+; AUTHORED -- `seam`, continued: the same bench, the same carton, cutter and
+; tape, and the errand carried past the clip's last frame. Cut the tape, lay
+; BOTH flaps back, and lift what is inside out onto the mat.
+;
+; Everything the header of seam.task says about the cut law, the pierce gate,
+; the carton's shove and the flaps' hold is this variant's physics too, and is
+; not restated. What this document adds is the part in the carton and the
+; second half of the errand; what it changes is the goal.
+;
+; WHY THE PART IS ONLY HERE. `seam` ships the carton EMPTY on purpose: a part
+; rattling inside changes the base's inertia and so changes what the pin has to
+; react, and a cut measured on one carton would not transfer to the other. This
+; variant is the one that has to lift it out, so this is the one that has it.
+; ---------------------------------------------------------------------------
+
+(define (problem CUT_THE_TAPE_AND_LIFT_THE_CONTENTS_OUT)
+
+
+  (:language cut the yellow tape along the top join of the box with the safety
+             cutter then open the flaps and lift what is inside out onto the
+             mat)
+
+  ; The cell, the pairing (right cuts, left pins, arms solid), the control
+  ; mode and the episode count are rgbs.suite's; this is the delta.
+  (:staging
+    ; Contact-rich rigid press against a hinged flap with a free base under it.
+    ; The field's press feed needs MuJoCo's own contact table, so
+    ; `use_mujoco_contacts` is not optional here. See rgbs/tasks/rgbs/staging.py.
+    (:physics box_decant_960hz@v1)
+    ; The suite rig, aimed at the middle of the tape. One aim for both
+    ; variants: the set-down band is 170 mm away in -y, well inside the
+    ; overhead's footprint and the plan view's.
+    (:cameras decant.layout:SEAM_VIEWS)
+    ; `seam`'s budget plus the tail: two flap hooks, a regrasp onto the part,
+    ; the lift and the set-down, and the retries a two-stage errand needs.  ; CAL
+    (:max-steps 16000)
+    ; polish's and usbc's stiffened servos, for the same reason: driving a
+    ; blade into a flap at a commanded force is task-space positioning under
+    ; contact, and at the MJCF's own 300 gain the TCP lags ~10 mm -- more than
+    ; the whole pierce stroke, which the bench measures at 4-6 mm.
+    (:arm-actuation (:ke 1600) (:kd 70))
+    (:gripper-actuation (:ke 20000) (:kd 20))
+  )
+
+  (:objects
+    ; The carton: an ORDINARY FREE BODY carrying the floor and walls, with two
+    ; revolute flap links hung off it by this task's own entity -- the pattern
+    ; vabar/tasks/usbc_insert/entity.py already ships and steps. It keeps an
+    ; object handle, so the clauses below read its speed and its contact with
+    ; the mat the ordinary way. The hinges are the entity's, NOT the
+    ; `articulated` substrate's, whose runtime is declared and not built.
+    carton - shipping_carton
+    knife  - box_cutter
+    ; The tape: state the SEAM carries, published by this task's own field
+    ; entity, which also builds the two strips the blade lands on. No rigid
+    ; body answers to this name -- published states only.
+    seam   - seal_tape
+    ; What the box is for. See the header for why only this variant has it.
+    part   - carton_contents
+  )
+
+  ; Placed by its record: where the mat stands is decant/layout.py's
+  ; arithmetic. The one fixture; the cutter lies on the mat and goes back on
+  ; the mat, so there is no rest.
+  (:fixtures
+    mat  - decant_mat
+  )
+
+  ; Where the contents have to end up, in the MAT's own frame: the band
+  ; between the carton's -y end and the working arm, clear of where the cutter
+  ; lies (layout.DROP_CENTER, DROP_HALF). Note the inner pair of parens:
+  ; `:ranges` is a LIST of boxes, because a region may be several.
+  ;
+  ; `:z-range` is left at its (0.0 0.15) default, and that is a trap worth
+  ; naming rather than working around: a part still in the fingers 150 mm above
+  ; the mat satisfies this box. What refuses it is the `hold-for` below -- the
+  ; part at rest and both hands clear -- and NOT a narrower z-range, which would
+  ; instead fail a part legitimately resting on the mat's near edge.
+  (:regions
+    (mat_region (:target mat) (:ranges ((-0.110 -0.160 -0.010 -0.080)))))
+
+  ; -------------------------------------------------------------------------
+  ; The world an episode starts in, re-verified after settling at every reset.
+  ; seam.task's two clauses, for seam.task's reasons.
+  ;
+  ; Deliberately NOT `(containment part carton_region)`. Where the part starts
+  ; is its record's placement and there is no region on the carton to name it
+  ; against; declaring one purely so init could restate a spawn pose would be a
+  ; second copy of a fact that already has an owner. What matters -- that the
+  ; part is not ALREADY in the drop zone -- is checked by the non-trivial-start
+  ; rule against the goal itself.
+  (:init
+    (sealed seam)
+    (flaps-shut seam)
+  )
+
+  ; -------------------------------------------------------------------------
+  ; ONE LATCH OVER EVERYTHING: the tape cut, both flaps laid back, and then --
+  ; held for one simulated second -- the part at rest on the mat inside the
+  ; band, the carton still on the mat, the cutter put down on the mat and both
+  ; hands off the part.
+  ;
+  ; (>= (flap-open seam) 0.63)
+  ;     BOTH flaps past 69 degrees: the mean of the two hinges, so one flap
+  ;     laid flat and the other shut (0.5) does not pass. A hand has to go
+  ;     down into the carton, and it needs the whole opening.
+  ;
+  ; (>= (containment part mat_region) 1.0)
+  ;     The part wholly inside the band, on the mat. `hands-clear part` and
+  ;     `speed part` are what make that a set-down rather than a hover.
+  (:goal
+    (once
+      (And
+        (>= (tape-cut-fraction seam) 0.95)
+        (>= (flap-open seam) 0.63)
+        (hold-for 1.0
+          (And
+            (>= (containment part mat_region) 1.0)
+            (<= (speed part) 0.02)
+            (>= (contact-force carton mat) 0.05)
+            (>= (contact-force knife mat) 0.05)
+            (> (hands-clear part) 0.10)
+          )
+        )
+      )
+    )
+  )
+
+  ; -------------------------------------------------------------------------
+  ; Progress toward the cut gate, clipped, UNMASKED -- seam.task's reward,
+  ; for seam.task's reasons. The lift is a condition on when the verdict
+  ; counts, not a term in the scalar.
+  (:reward (progress (tape-cut-fraction seam) (:gate 0.95)))
+
+  ; -------------------------------------------------------------------------
+  ; Recorded every step, gating nothing. seam.task's set, plus the part.
+  (:observe
+    (cut-run seam)
+    (press-force seam)
+    (blade-slip seam)
+    (blade-on-seam seam)
+    (carton-shift seam)
+    (carton-yaw seam)
+    (flap-open seam)
+    (flap-far-open seam)
+    (flap-near-open seam)
+    (near-intact seam)
+    (far-intact seam)
+    (gripped knife.body)
+    (gripped part.body)
+    (hands-clear knife)
+    (hands-clear part)
+    (speed carton)
+    (speed part)
+  )
+
+  ; No routine. seam.task's choreography ends with the far flap hooked open;
+  ; the second half -- the near flap, the descent into the carton, the lift and
+  ; the set-down -- has not been driven to a verdict on this geometry, and a
+  ; routine that ships is one that finishes. The variant records under `idle`.
+
+  (:provenance
+    (:tier original)
+    (:source "Authored for this corpus from sample_videos/box_decanting.mp4,
+              carried one stage past the clip: the same parcel carton, safety
+              cutter and yellow tape as seam.task, with a 90 x 60 x 80 mm part
+              packed inside to be lifted out once both flaps are laid back.")
+    ; A semicolon starts a comment ANYWHERE, including inside what looks like a
+    ; quoted string -- BDDL has no strings. Every calibration note in this file
+    ; is a comment for exactly that reason.
+    (:note "The part's height is the load-bearing number: standing on the
+            carton floor its top face sits 16 mm below the rim, inside a YAM
+            fingertip's 35 mm of usable depth, so the lift is a grasp rather
+            than a fishing expedition. The carton's 142 mm opening against a
+            94 mm jaw span leaves 24 mm a side for the hand, asserted at build.
+            CAL-tagged thresholds are re-measured against a shipped policy
+            before sign-off.")
+  )
+
+)

@@ -1,0 +1,140 @@
+; -*- mode: lisp -*-
+; ---------------------------------------------------------------------------
+; What every rgbs variant shares, stated once: the first column of a suite
+; that was five, then nine, and is now eight variants of one.
+;
+; WHAT THIS IS. Peeling a bonded sheet off what it is stuck to, cutting a
+; sealed carton open and emptying it, feeding a cable through a closed bore,
+; polishing marks off a strip against a spinning bit, and wiping stains off a
+; bar with a foam sponge. Five jobs a person does at a bench with two hands,
+; which shipped as five task suites and are now eight documents beside this
+; file.
+;
+; WHY THEY MERGE. They already shared everything a benchmark cares about and
+; agreed about none of it. All five stood two YAM arms behind one table and
+; worked a small patch of it; all five wanted an overhead view and a close
+; one. But each declared its own table, aimed its own cameras and named its
+; own rig -- so a policy evaluated across the five saw a different observation
+; space for every task it was asked to do, and none of the differences meant
+; anything. This file is what that set of facts actually is.
+;
+; WHAT MERGING CHANGED, and it is two things. ONE TABLE: every variant stands
+; in bench_075. The four peel variants stood in bench_0728 -- the same table
+; 22 mm lower -- and moved; their layouts are all stated in the cell's
+; work-surface frame, so the arithmetic transplanted untouched. ONE RIG:
+; rgbs_views@v1 (staging.py) is the suite's only camera rig, three views at
+; one resolution, one pair of fields of view and one set of channels,
+; differing per variant only in where they are aimed. The geometry is
+; polish's because it is the only one that was calibrated against a real
+; overhead camera; a variant whose work sits elsewhere stages the same rig
+; aimed at its own layout, as a constant of the module that owns the layout.
+;
+; WHAT MERGING DID NOT CHANGE: the physics. Five arrangements arrive under the
+; names they were measured at, because a film integrated by VBD at 1/1200 s,
+; a foam sponge on a foreign engine and a rod under a coupled proxy are not
+; interchangeable and nothing about sharing a table says they are. So
+; (:physics ...) is NOT here; every document states its own.
+;
+; ONE ROBOT. The suite ran on yam_i2rt, the composed i2rt build with blade
+; fingertips; main retired that build, and every variant now stands on `yam`,
+; the arena YAM: the same arms, but a hand whose grip point is 44 mm off the
+; wrist axis, with a D405 camera on the wrist and 12 mm of fingertip past the
+; grip point against 35. Each routine records what that cost it where it was
+; measured; the peel variants were re-authored on the library's tape, whose
+; rigid pull tab a hand can hold by contact, because the old ones carried the
+; film on a particle latch.
+;
+; A variant beside this file inherits every clause below: its own :staging
+; clause wins KEY BY KEY (the three peel documents restate their embodiment,
+; because they work with the left arm and no support arm), its :objects and
+; :fixtures are its own, and its :artifacts merge by kind. No :fixtures are
+; shared: three families each stand a work mat somewhere different, and a
+; record that builds a thing builds it in one place.
+; ---------------------------------------------------------------------------
+
+(define (suite rgbs)
+
+  (:language "Eight bimanual bench jobs behind one calibrated camera rig: peel an
+              adhesive strip off a box or a protective film off a panel, cut a
+              sealed carton open and empty it, feed a cable through a closed
+              conduit, polish marks off a strip against a fixed spinning bit,
+              and wipe stains off a bar with a foam sponge (the YAM, both arms).")
+
+  (:staging
+    ; The one cell every variant stands in. It was bench_0728 for the peel
+    ; variants; see the header.
+    (:scene bench_075)
+    ; The RIGHT hand works and the LEFT hand holds, on five of the eight, and
+    ; the two arms are SOLID to each other on all eight. Each family measured
+    ; why: polish crosses both hands over one strip repeatedly and measured
+    ; link4 into link4 at 70-77 N; decant pins a carton with one hand while
+    ; the other draws a blade 80 mm from it for the length of the seam; prep
+    ; holds a 200 mm bar in the air with one hand while the other works along
+    ; it, so the two corridors overlap for the whole episode; tunnel feeds
+    ; with one hand while the other steadies the conduit; and in the peel
+    ; variants only one arm peels, but the other stands over the same box
+    ; while it does, and an idle arm is exactly the one nothing was checking.
+    ; The planners must keep each other's corridors clear. See
+    ; EmbodimentSpec.cross_arm_collisions.
+    ;
+    ; A staging key is overridden as one clause, so the peel documents restate
+    ; the whole pairing -- (:work-arm left) and (:arms-solid true) together.
+    (:embodiment yam (:work-arm right) (:support-arm left) (:arms-solid true))
+    ; The one rig, registered aimed at polish's drum contact -- the aim the
+    ; calibration was transplanted onto, so `strip` stages it as is. Every
+    ; other family aims it at its own work: (:cameras assets.<family>.layout:<NAME>_VIEWS).
+    (:cameras rgbs_views@v1)
+    (:control-mode joint_position)
+    (:episodes (:count 1) (:seed 0) (:sampler fixed))
+    ; Two arms: one works and one holds, and a one-armed robot is refused at
+    ; build rather than discovered mid-rollout. The three peel documents say
+    ; (:arms 1) for themselves -- one arm peels, and their hosted pairings
+    ; include one-armed robots.
+    (:arms 2)
+  )
+
+  ; -------------------------------------------------------------------------
+  ; How the bench looks under the path tracer: the real cell's gridded foam
+  ; mats, its oak ledge and slat wall, and the lab lighting. Every variant
+  ; renders under it; no variant's tools are here, because the three
+  ; registrars are kept apart on purpose (tools.py says why) and three of the
+  ; eight ship none.
+  (:artifacts
+    (:render "look:RGBS_LOOK")
+  )
+
+  (:provenance
+    (:source "Five suites merged onto one cell and one camera rig. peel: adhesion
+              after AutoPeel (ICRA 2025) restated in SI from the reference
+              tape_render/tape_traj implementation, with the film's constants
+              derived from published 60 um LDPE properties; box_decant, polish
+              and surface_prep authored for this corpus from reference video and
+              photographs of the real rig, each scoring an irreversible per-cell
+              surface field -- Preston's law fed by the solver's own contact
+              force, except surface_prep's, which is fed by the co-simulation
+              bridge because a foreign engine's foam has no geom in MuJoCo's
+              contact table; tunnel_route authored beside cable_route, whose rod
+              mechanism and coupled-proxy arrangement it inherits. The overhead
+              camera every variant now shares is polish's, solved 2026-08-04
+              against a calibration board on the real bench. Physics regimes
+              were probed before authoring: see
+              scripts/{polish,prep,decant,tunnel}_bench.py and the
+              tests/test_rgbs*.py modules.")
+  )
+
+  ; The order is curatorial and it is the order the five suites were authored
+  ; in, which is also roughly the order of how much of the bench each one
+  ; uses. A bare `rgbs` resolves to the first, so what leads matters:
+  ; `handle` does. It led the peel family from the start on the strength of
+  ; the manipulation it can be asked for -- the pull-tab is pinned rigid at
+  ; box-top height, every accuracy-critical landmark solves under a tenth of a
+  ; millimetre, and the shipped graph peels the whole strip. It carries the
+  ; adhesion constants too: bond stiffness, break distance and areal density
+  ; are the tape's own and not a layout's.
+  ;
+  ; `along_x` led this list until it was withdrawn. It was the layout the
+  ; adhesion physics was FITTED against -- 133 bonds holding 2.0 N on a flat
+  ; 26 x 6 cm strip -- and no variant here reproduces that measurement now.
+  ; The constants it fitted survive it, in peel/tape.py.
+  (:variants handle panel panel_gentle seam decant thread strip wipe)
+)
