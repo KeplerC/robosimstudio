@@ -1,4 +1,4 @@
-# Provenance — rgbs/tasks/rgbs/assets/polish (`strip`)
+# Provenance — gallery/rgbs/tasks/rgbs/assets/polish (`strip`)
 
 Everything here is **authored for this corpus**; no upstream meshes, no
 imported BDDL. The reference is a video of the real rig (`IMG_2462.MOV`,

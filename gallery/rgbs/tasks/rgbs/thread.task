@@ -170,8 +170,8 @@
   ; The tip's 80 mm inside the mouth is a SPAWN POSITION, not a held pose and not
   ; a robot posture: the cable is laid in the shape the clip's own cable has --
   ; flat on the mat behind the box, up the 130 mm hang this rod actually holds,
-  ; then along the bore axis and 80 mm past the entry face (assets/tunnel/
-  ; layout.py::cable_nodes). Laid straight along the axis instead, the 360 mm
+  ; then along the bore axis and 80 mm past the entry face
+  ; (tunnel/layout.py::cable_nodes). Laid straight along the axis instead, the 360 mm
   ; behind the entry hangs in mid-air, falls, and levers the tip 33 mm back out
   ; of the bore before a hand has moved. What that buys is that the episode
   ; is the feed rather than the aim, which is the half of the problem worth

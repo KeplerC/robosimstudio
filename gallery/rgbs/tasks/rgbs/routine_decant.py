@@ -548,12 +548,12 @@ class RoutineBoxDecant:
         """The arm configuration from which a chain of poses solves best.
 
         The full-pose solve is local: chained from wherever the arm stands, it
-        stays on that arm's branch, and the pick leaves the arm on one from which
-        the tilted hold cannot follow the tape to its far end (residuals of
-        20-30 mm, measured), while another branch follows all of it at 0.0 mm.
-        So the chain is tried from the current configuration and from ``tries``
-        deterministic perturbations of it, and the best start is returned with
-        its worst residual."""
+        stays on that arm's branch, and on ``yam`` the tilted hold's draw is a
+        reach where branches differ (the other of the two pick holds runs the
+        wrist roll into its stop at the far end of the tape). So the chain is
+        tried from the current configuration and from ``tries`` deterministic
+        perturbations of it, and the best start is returned with its worst
+        residual."""
         ik = self.env.arm(name)
         coords = list(ik.arm_coords)
         base = np.asarray(self.seed[name], dtype=np.float64)
