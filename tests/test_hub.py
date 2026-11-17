@@ -57,7 +57,15 @@ class _Hub(BaseHTTPRequestHandler):
         resolve = f"/datasets/{hub.DATASET}/resolve/rev1/"
         if parsed.path.startswith(tree):
             prefix = urllib.parse.unquote(parsed.path[len(tree) :])
-            under = [e for e in self.listing if e["path"].startswith(prefix + "/")]
+            recursive = "recursive=true" in parsed.query
+            under = [
+                e
+                for e in self.listing
+                if e["path"].startswith(prefix + "/") and (recursive or "/" not in e["path"][len(prefix) + 1 :])
+            ]
+            if not under:  # the real Hub: a missing path, or a single file, lists as 404
+                self._send(404, b"")
+                return
             page = int(urllib.parse.parse_qs(parsed.query).get("cursor", ["0"])[0])
             chunk = under[page : page + 1]
             headers = {}
@@ -98,7 +106,10 @@ class TestFetch(unittest.TestCase):
         for patch in patches:
             patch.start()
             self.addCleanup(patch.stop)
-        self.dest = Path(tempfile.mkdtemp())
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.dest = Path(scratch.name)
+        self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
 
     def test_files_land_at_their_dataset_paths(self) -> None:
@@ -126,6 +137,21 @@ class TestFetch(unittest.TestCase):
         _Hub.listing.append({"type": "file", "path": "gallery/p/e/../../../../escape.txt", "size": 1, "oid": "x"})
         with self.assertRaises(ValueError):
             hub.fetch("gallery/p/e", self.dest, quiet=True)
+
+    def test_a_single_file_is_fetched_by_its_path(self) -> None:
+        got = hub.fetch("gallery/p/e/notes.txt", self.dest, quiet=True)
+        self.assertEqual([self.dest.resolve() / "gallery/p/e/notes.txt"], got)
+        self.assertEqual(SMALL, got[0].read_bytes())
+
+    def test_a_local_file_with_other_bytes_is_not_overwritten_unless_asked(self) -> None:
+        mine = self.dest / "gallery/p/e/notes.txt"
+        mine.parent.mkdir(parents=True)
+        mine.write_bytes(b"my edit\n")
+        with self.assertRaises(FileExistsError):
+            hub.fetch("gallery/p/e", self.dest, quiet=True)
+        self.assertEqual(b"my edit\n", mine.read_bytes())
+        hub.fetch("gallery/p/e", self.dest, overwrite=True, quiet=True)
+        self.assertEqual(SMALL, mine.read_bytes())
 
     def test_an_empty_prefix_says_so(self) -> None:
         with self.assertRaises(FileNotFoundError):

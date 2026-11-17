@@ -29,6 +29,7 @@ optionally with ``poster = "/path/to/image"`` (otherwise a frame of the first cl
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -47,9 +48,9 @@ STATUSES = {
     "video": "a video from older code, not yet ported to current main",
     "scene": "the scene is rebuilt, but no robot task in it is filmed yet",
 }
-ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-MEDIA = re.compile(r"^[a-z0-9][a-z0-9_-]*\.(mp4|jpg|png)$")
-SHA = re.compile(r"^[0-9a-f]{7,40}$")
+ID = re.compile(r"[a-z0-9][a-z0-9-]*")
+MEDIA = re.compile(r"[a-z0-9][a-z0-9_-]*\.(mp4|jpg|png)")
+SHA = re.compile(r"[0-9a-f]{7,40}")
 FORBIDDEN_STAGE = re.compile(r"(^|/)(auth\.json|codexhome|logs|review|\.env|gallery\.json)(/|$)|\.jsonl$")
 MAX_STAGED = 200_000_000
 HEADER = "<!-- written by scripts/gallery.py from gallery/index.toml; edit the manifest, not this page -->\n"
@@ -68,18 +69,20 @@ def problems(root: Path = REPO) -> list[str]:
     known = set()
     for project in projects:
         pid = project.get("id", "")
-        if not ID.match(pid) or pid in known:
+        if not ID.fullmatch(pid) or pid in known:
             out.append(f"project {pid!r}: needs a unique lowercase id")
         for key in ("title", "about"):
             if not project.get(key):
                 out.append(f"project {pid}: no {key}")
         known.add(pid)
+        if not any(e.get("project") == pid for e in entries):
+            out.append(f"project {pid}: has no entries")
     seen = set()
     for entry in entries:
         name = f"{entry.get('project')}/{entry.get('id')}"
         if entry.get("project") not in known:
             out.append(f"{name}: project is not declared")
-        if not ID.match(entry.get("id", "")) or name in seen:
+        if not ID.fullmatch(str(entry.get("id", ""))) or name in seen:
             out.append(f"{name}: needs a unique lowercase id within its project")
         seen.add(name)
         for key in ("title", "robot", "source", "licence", "note"):
@@ -89,23 +92,28 @@ def problems(root: Path = REPO) -> list[str]:
         if status not in STATUSES:
             out.append(f"{name}: status {status!r} is not one of {', '.join(STATUSES)}")
         media = entry.get("media", [])
-        if not media or any(not MEDIA.match(m) for m in media) or media[0] == "poster.jpg":
-            out.append(f"{name}: media must be a non-empty list of lowercase .mp4/.jpg/.png names")
+        if (
+            not media
+            or any(not MEDIA.fullmatch(str(m)) for m in media)
+            or "poster.jpg" in media
+            or len(set(media)) != len(media)
+        ):
+            out.append(f"{name}: media must be distinct lowercase .mp4/.jpg/.png names, never poster.jpg")
         code = entry.get("code")
-        if status in ("verified", "partial"):
-            if not code or not (root / code).exists():
-                out.append(f"{name}: a {status} entry needs its code in the checkout (code = ...)")
-            elif not Path(code).is_relative_to(Path("gallery") / entry.get("project", "")):
-                out.append(f"{name}: its code must live under gallery/{entry.get('project')}/")
-        if status == "verified" and not SHA.match(entry.get("verified_on", "")):
+        if code and not Path(code).is_relative_to(Path("gallery") / str(entry.get("project", ""))):
+            out.append(f"{name}: its code must live under gallery/{entry.get('project')}/")
+        elif status in ("verified", "partial") and (not code or not (root / code).exists()):
+            out.append(f"{name}: a {status} entry needs its code in the checkout (code = ...)")
+        if status == "verified" and not SHA.fullmatch(str(entry.get("verified_on", ""))):
             out.append(f"{name}: a verified entry needs verified_on = the commit it was checked on")
     if (root / "gallery" / "tasks").exists():
         out.append("gallery/tasks/ must not exist: a top-level <dir>/tasks/ is loaded as a task collection")
     return out
 
 
-def _asset(entry: dict, name: str) -> str:
-    return hub.url(f"gallery/{entry['project']}/{entry['id']}/media/{name}")
+def _asset(entry: dict, name: str, revision: str | None = None) -> str:
+    """A clip's link on the Hub itself, never a mirror: these links are written into committed pages."""
+    return hub.url(f"gallery/{entry['project']}/{entry['id']}/media/{name}", revision, endpoint=hub.PUBLIC)
 
 
 def _status(entry: dict) -> str:
@@ -165,12 +173,8 @@ def index_page(projects: list[dict], entries: list[dict]) -> str:
     for project in projects:
         own = [e for e in entries if e["project"] == project["id"]]
         verified = sum(e["status"] == "verified" for e in own)
-        cover = _asset(own[0], "poster.jpg") if own else ""
-        lines.append(
-            f"| [{project['title']}]({project['id']}/README.md) | {len(own)} | {verified} | "
-            f'<img src="{cover}" width="160" alt="">'
-            " |"
-        )
+        cover = f'<img src="{_asset(own[0], "poster.jpg")}" width="160" alt="">' if own else ""
+        lines.append(f"| [{project['title']}]({project['id']}/README.md) | {len(own)} | {verified} | {cover} |")
     lines += [
         "",
         "An entry's files (its clips, and for a ported scene its meshes and references) come down with:\n",
@@ -196,7 +200,7 @@ def card(projects: list[dict], entries: list[dict]) -> str:
     """The dataset card: every entry's clips play inline on the Hub, with its source and licence."""
 
     def hub_url(entry: dict, name: str) -> str:
-        return f"https://huggingface.co/datasets/{hub.DATASET}/resolve/main/gallery/{entry['project']}/{entry['id']}/media/{name}"
+        return _asset(entry, name, "main")
 
     lines = [
         "---",
@@ -255,45 +259,70 @@ def _still(src: Path, out: Path, at: float | None = None) -> None:
     subprocess.run([*cmd, "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", str(out)], check=True)
 
 
+def _source(key: str, name: str, given: str) -> Path:
+    """A staging source, refused when it is a credential, a log, a symlink or not a file."""
+    src = Path(given).expanduser()
+    if FORBIDDEN_STAGE.search(src.name) or src.is_symlink() or not src.is_file():
+        raise SystemExit(f"{key}/{name}: refusing {src} (a credential, a log, a symlink or not a file)")
+    return src
+
+
 def stage(sources_file: Path, out: Path) -> list[Path]:
-    """Encode every source the sources file names into ``out``, laid out like the dataset."""
+    """Encode every source the sources file names into ``out``, laid out like the dataset.
+
+    Each file is written beside its target and moved into place when it is complete, and
+    ``out/.stage.json`` records which source each staged file came from, so a re-run redoes
+    exactly the files whose source changed or was re-pointed and trusts nothing half-written.
+    """
     projects, entries = load()
     sources = tomllib.loads(sources_file.read_text(encoding="utf-8"))
     wanted = {f"{e['project']}/{e['id']}": e for e in entries}
     unknown = sorted(set(sources) - set(wanted))
     if unknown:
         raise SystemExit(f"sources name entries the manifest does not have: {unknown}")
+    record_path = out / ".stage.json"
+    record = json.loads(record_path.read_text()) if record_path.is_file() else {}
     jobs = []
     for key, given in sources.items():
         entry = wanted[key]
+        stray = sorted(set(given) - set(entry["media"]) - {"poster"})
+        if stray:
+            raise SystemExit(f"{key}: sources for names the manifest does not list: {stray}")
         folder = out / "gallery" / key / "media"
         folder.mkdir(parents=True, exist_ok=True)
         for name in entry["media"]:
             if name not in given:
                 raise SystemExit(f"{key}: no source for {name}")
-            src = Path(given[name]).expanduser()
-            if FORBIDDEN_STAGE.search(src.name) or src.is_symlink() or not src.is_file():
-                raise SystemExit(f"{key}/{name}: refusing {src} (a credential, a log, a symlink or not a file)")
-            jobs.append((src, folder / name))
+            jobs.append((_source(key, name, given[name]), folder / name, None))
+        poster, first = folder / "poster.jpg", folder / entry["media"][0]
+        if "poster" in given:
+            jobs.append((_source(key, "poster", given["poster"]), poster, None))
+        else:
+            jobs.append((first, poster, "frame"))
 
-    def make(job: tuple[Path, Path]) -> Path:
-        src, target = job
-        if not target.exists() or target.stat().st_mtime < src.stat().st_mtime:
-            (_encode if target.suffix == ".mp4" else _still)(src, target)
+    def stamp(src: Path) -> str:
+        info = src.stat()
+        return f"{src.resolve()}:{info.st_size}:{info.st_mtime_ns}"
+
+    def make(job: tuple[Path, Path, str | None]) -> Path:
+        src, target, how = job
+        key = target.relative_to(out).as_posix()
+        if target.is_file() and record.get(key) == stamp(src):
+            return target
+        partial = target.with_name(f".{target.stem}.part{target.suffix}")
+        if how == "frame":
+            _still(src, partial, at=0.55 * _duration(src) if src.suffix == ".mp4" else None)
+        else:
+            (_encode if target.suffix == ".mp4" else _still)(src, partial)
+        partial.replace(target)
+        record[key] = stamp(src)
         return target
 
+    clips = [job for job in jobs if job[2] is None]
     with ThreadPoolExecutor(max_workers=6) as pool:
-        written = list(pool.map(make, jobs))
-    for key, given in sources.items():
-        folder = out / "gallery" / key / "media"
-        poster, first = folder / "poster.jpg", folder / wanted[key]["media"][0]
-        if "poster" in given:
-            _still(Path(given["poster"]).expanduser(), poster)
-        elif first.suffix == ".mp4":
-            _still(first, poster, at=0.55 * _duration(first))
-        else:
-            _still(first, poster)
-        written.append(poster)
+        written = list(pool.map(make, clips))
+    written += [make(job) for job in jobs if job[2] is not None]
+    record_path.write_text(json.dumps(record, indent=1, sort_keys=True), encoding="utf-8")
     (out / "README.md").write_text(card(projects, entries), encoding="utf-8")
     written.append(out / "README.md")
     for path in written:
@@ -306,38 +335,62 @@ def stage(sources_file: Path, out: Path) -> list[Path]:
 
 
 def upload(folder: Path, message: str) -> str:
-    """Send a staged folder to the dataset, pin ``REVISION`` to the new commit and rewrite the pages."""
+    """Send a staged folder to the dataset; pin ``REVISION`` to the new commit only if it holds every clip.
+
+    The manifest's clips and posters are checked against the new commit before anything
+    is pinned: a partial upload leaves ``REVISION`` and the pages where they were.
+    """
     from huggingface_hub import HfApi
 
     for path in folder.rglob("*"):
         rel = path.relative_to(folder).as_posix()
-        if path.is_symlink() or FORBIDDEN_STAGE.search(rel):
+        if path.is_symlink() or FORBIDDEN_STAGE.search(rel) or ".part." in path.name:
             raise SystemExit(f"refusing to upload {rel}")
     info = HfApi().upload_folder(
-        folder_path=str(folder), repo_id=hub.DATASET, repo_type="dataset", commit_message=message
+        folder_path=str(folder),
+        repo_id=hub.DATASET,
+        repo_type="dataset",
+        commit_message=message,
+        ignore_patterns=[".stage.json"],
     )
     revision = info.oid
-    source = REPO / "robosimstudio" / "hub.py"
-    text = source.read_text(encoding="utf-8")
-    source.write_text(
-        re.sub(r'^REVISION = "[^"]*"', f'REVISION = "{revision}"', text, count=1, flags=re.M), encoding="utf-8"
-    )
-    hub.REVISION = revision
     present = {f.path for f in hub.files("gallery", revision)}
     _, entries = load()
     missing = [
-        f"gallery/{e['project']}/{e['id']}/media/{n}"
+        path
         for e in entries
         for n in [*e["media"], "poster.jpg"]
-        if f"gallery/{e['project']}/{e['id']}/media/{n}" not in present
+        if (path := f"gallery/{e['project']}/{e['id']}/media/{n}") not in present
     ]
-    for path, text in pages().items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-    print(f"uploaded {folder} as {revision}; REVISION pinned; pages rewritten")
     if missing:
-        print("the manifest names files the dataset does not have:", *missing, sep="\n  ", file=sys.stderr)
+        raise SystemExit(
+            f"uploaded as {revision}, but it lacks files the manifest names; REVISION not moved:\n  "
+            + "\n  ".join(missing)
+        )
+    source = REPO / "robosimstudio" / "hub.py"
+    text, count = re.subn(
+        r'^REVISION = "[^"]*"', f'REVISION = "{revision}"', source.read_text(encoding="utf-8"), count=1, flags=re.M
+    )
+    if count != 1:
+        raise SystemExit(f"uploaded as {revision}, but found no REVISION line in {source} to pin")
+    source.write_text(text, encoding="utf-8")
+    hub.REVISION = revision
+    for path, page in pages().items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(page, encoding="utf-8")
+    print(f"uploaded {folder} as {revision}; REVISION pinned; pages rewritten")
     return revision
+
+
+def orphan_pages(root: Path = REPO) -> list[Path]:
+    """Generated project pages left behind by a project the manifest no longer has."""
+    projects, _ = load(root)
+    keep = {root / "gallery" / p["id"] / "README.md" for p in projects}
+    return [
+        page
+        for page in sorted((root / "gallery").glob("*/README.md"))
+        if page not in keep and HEADER.strip() in page.read_text(encoding="utf-8")
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -360,21 +413,27 @@ def main(argv: list[str] | None = None) -> int:
         upload(args.folder, args.message)
         return 0
     wrong = problems()
-    stale = [path for path, text in pages().items() if not path.is_file() or path.read_text(encoding="utf-8") != text]
-    if not args.check:
-        for path, text in pages().items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-        stale = []
     if not re.fullmatch(r"[0-9a-f]{40}", hub.REVISION):
         wrong.append(
             f"robosimstudio/hub.py REVISION is {hub.REVISION!r}: pin it to a dataset commit (gallery.py upload)"
         )
-    for line in wrong:
-        print(line, file=sys.stderr)
-    for path in stale:
-        print(f"{path.relative_to(REPO)} is out of date: run scripts/gallery.py", file=sys.stderr)
-    return 1 if wrong or stale else 0
+    if wrong:
+        for line in wrong:
+            print(line, file=sys.stderr)
+        return 1
+    written = pages()
+    if args.check:
+        stale = [p for p, text in written.items() if not p.is_file() or p.read_text(encoding="utf-8") != text]
+        stale += orphan_pages()
+        for path in stale:
+            print(f"{path.relative_to(REPO)} is out of date: run scripts/gallery.py", file=sys.stderr)
+        return 1 if stale else 0
+    for path, text in written.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    for path in orphan_pages():
+        path.unlink()
+    return 0
 
 
 if __name__ == "__main__":

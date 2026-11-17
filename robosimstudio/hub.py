@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -39,17 +40,20 @@ DATASET = "keplerccc/robosimstudio-agentic-real2sim"
 REVISION = "446cfdc595d4327e52b6683c7bca143360e86da9"
 """The dataset commit this checkout was written against."""
 
+PUBLIC = "https://huggingface.co"
+"""The Hub itself: what links written into pages point at, whatever mirror this machine uses."""
+
 _CHUNK = 1 << 20
 
 
 def _endpoint() -> str:
-    return os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
+    return os.environ.get("HF_ENDPOINT", PUBLIC).rstrip("/")
 
 
-def url(path: str, revision: str | None = None) -> str:
-    """The download URL of one file in the dataset."""
+def url(path: str, revision: str | None = None, *, endpoint: str | None = None) -> str:
+    """The download URL of one file in the dataset, from ``endpoint`` (default: ``HF_ENDPOINT`` or the Hub)."""
     rev = urllib.parse.quote(revision or REVISION, safe="")
-    return f"{_endpoint()}/datasets/{DATASET}/resolve/{rev}/{urllib.parse.quote(path)}"
+    return f"{(endpoint or _endpoint()).rstrip('/')}/datasets/{DATASET}/resolve/{rev}/{urllib.parse.quote(path)}"
 
 
 @dataclass(frozen=True)
@@ -96,28 +100,42 @@ def _get(address: str):
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
 
 
-def files(prefix: str, revision: str | None = None) -> list[RemoteFile]:
-    """Every file under ``prefix`` (a folder or a single file), recursively, at ``revision``."""
-    prefix = prefix.strip("/")
+def _listing(prefix: str, revision: str | None, *, recursive: bool) -> list[RemoteFile] | None:
+    """The files the Hub lists under ``prefix``, or None when it has no such folder (its 404)."""
     rev = urllib.parse.quote(revision or REVISION, safe="")
-    address: str | None = f"{_endpoint()}/api/datasets/{DATASET}/tree/{rev}/{urllib.parse.quote(prefix)}?recursive=true"
+    query = "?recursive=true" if recursive else ""
+    address: str | None = f"{_endpoint()}/api/datasets/{DATASET}/tree/{rev}/{urllib.parse.quote(prefix)}{query}"
     out: list[RemoteFile] = []
     while address:
-        with _get(address) as response:
-            entries = json.loads(response.read().decode())
-            found = _NEXT.search(response.headers.get("Link", "") or "")
+        try:
+            with _get(address) as response:
+                entries = json.loads(response.read().decode())
+                found = _NEXT.search(response.headers.get("Link", "") or "")
+        except urllib.error.HTTPError as error:
+            if error.code == 404 and not out:
+                return None
+            raise
         for entry in entries:
-            if entry.get("type") != "file":
-                continue
-            lfs = entry.get("lfs") or {}
-            out.append(RemoteFile(entry["path"], int(entry["size"]), lfs.get("oid"), entry.get("oid", "")))
+            if entry.get("type") == "file":
+                lfs = entry.get("lfs") or {}
+                out.append(RemoteFile(entry["path"], int(entry["size"]), lfs.get("oid"), entry.get("oid", "")))
         address = urllib.parse.urljoin(address, found.group(1)) if found else None
-    if not out:
-        # A prefix naming one file lists nothing under itself; list its folder and keep the file.
-        parent, _, name = prefix.rpartition("/")
-        if name and parent != prefix:
-            out = [f for f in files(parent, revision) if f.path == prefix] if parent else []
     return out
+
+
+def files(prefix: str, revision: str | None = None) -> list[RemoteFile]:
+    """Every file under ``prefix`` (a folder or a single file), recursively, at ``revision``; empty if none.
+
+    The Hub answers a listing of a single file, or of a path it does not have, with a 404, so a prefix it
+    does not list as a folder is looked up as one file in its parent folder.
+    """
+    prefix = prefix.strip("/")
+    listed = _listing(prefix, revision, recursive=True)
+    if listed is not None:
+        return listed
+    parent = prefix.rpartition("/")[0]
+    siblings = _listing(parent, revision, recursive=False) or [] if parent else []
+    return [f for f in siblings if f.path == prefix]
 
 
 def _target(dest: Path, path: str) -> Path:
@@ -127,13 +145,17 @@ def _target(dest: Path, path: str) -> Path:
     return target
 
 
-def fetch(prefix: str, dest: str | Path, revision: str | None = None, *, quiet: bool = False) -> list[Path]:
+def fetch(
+    prefix: str, dest: str | Path, revision: str | None = None, *, overwrite: bool = False, quiet: bool = False
+) -> list[Path]:
     """Download every file under ``prefix`` into ``dest``, at its dataset path; return the local paths.
 
-    A file already there with the right bytes is kept, so fetching twice costs one
-    listing. Each download is written beside its target and moved into place only
-    once its hash matches, so an interrupted or corrupted fetch leaves nothing
-    behind that a later run would trust.
+    A file already there with the right bytes is kept (it is re-read to check its
+    hash, so nothing is downloaded twice). A file there with *other* bytes is
+    refused unless ``overwrite``: it may be somebody's edit. Each download is
+    written beside its target and moved into place only once its hash matches, so
+    an interrupted or corrupted fetch leaves nothing behind that a later run
+    would trust.
     """
     dest = Path(dest)
     remote = files(prefix, revision)
@@ -145,6 +167,8 @@ def fetch(prefix: str, dest: str | Path, revision: str | None = None, *, quiet: 
         if item.matches(target):
             out.append(target)
             continue
+        if target.exists() and not overwrite:
+            raise FileExistsError(f"{target} differs from the dataset's {item.path}; pass overwrite to replace it")
         target.parent.mkdir(parents=True, exist_ok=True)
         if not quiet:
             print(f"fetch {item.path} ({item.size / 1e6:.1f} MB)", file=sys.stderr)
@@ -170,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     get = sub.add_parser("fetch", help="download a folder or file into DEST at its dataset path")
     get.add_argument("prefix")
     get.add_argument("--dest", default=".", help="where the dataset's paths start (default: here)")
+    get.add_argument("--overwrite", action="store_true", help="replace local files whose bytes differ")
     show = sub.add_parser("list", help="list the files under a folder")
     show.add_argument("prefix")
     args = parser.parse_args(argv)
@@ -177,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         for item in files(args.prefix, args.revision):
             print(f"{item.size / 1e6:9.2f} MB  {item.path}")
         return 0
-    for path in fetch(args.prefix, args.dest, args.revision):
+    for path in fetch(args.prefix, args.dest, args.revision, overwrite=args.overwrite):
         print(path)
     return 0
 

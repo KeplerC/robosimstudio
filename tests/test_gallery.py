@@ -46,8 +46,10 @@ def _tool():
     return module
 
 
-def _root(manifest: str) -> Path:
-    root = Path(tempfile.mkdtemp())
+def _root(case: unittest.TestCase, manifest: str) -> Path:
+    scratch = tempfile.TemporaryDirectory()
+    case.addCleanup(scratch.cleanup)
+    root = Path(scratch.name)
     (root / "gallery").mkdir()
     (root / "gallery" / "index.toml").write_text(manifest, encoding="utf-8")
     return root
@@ -58,29 +60,41 @@ class TestTheGallery(unittest.TestCase):
         self.assertEqual(0, _tool().main(["--check"]), "run scripts/gallery.py")
 
     def test_a_good_manifest_has_no_problems(self) -> None:
-        self.assertEqual([], _tool().problems(_root(GOOD)))
+        self.assertEqual([], _tool().problems(_root(self, GOOD)))
 
     def test_a_missing_licence_is_refused(self) -> None:
-        found = _tool().problems(_root(GOOD.replace('licence = "Apache-2.0"\n', "")))
+        found = _tool().problems(_root(self, GOOD.replace('licence = "Apache-2.0"\n', "")))
         self.assertTrue(any("no licence" in line for line in found), found)
 
     def test_an_unknown_status_is_refused(self) -> None:
-        found = _tool().problems(_root(GOOD.replace('"video"', '"done"')))
+        found = _tool().problems(_root(self, GOOD.replace('"video"', '"done"')))
         self.assertTrue(any("status" in line for line in found), found)
 
     def test_a_verified_entry_needs_its_code_and_commit(self) -> None:
-        found = _tool().problems(_root(GOOD.replace('"video"', '"verified"')))
+        found = _tool().problems(_root(self, GOOD.replace('"video"', '"verified"')))
         self.assertTrue(any("needs its code" in line for line in found), found)
         self.assertTrue(any("verified_on" in line for line in found), found)
 
+    def test_a_poster_named_as_a_clip_is_refused(self) -> None:
+        found = _tool().problems(_root(self, GOOD.replace('["clip.mp4"]', '["clip.mp4", "poster.jpg"]')))
+        self.assertTrue(any("never poster.jpg" in line for line in found), found)
+
+    def test_code_outside_its_project_folder_is_refused_whatever_the_status(self) -> None:
+        found = _tool().problems(_root(self, GOOD + 'code = "examples/live"\n'))
+        self.assertTrue(any("must live under gallery/p/" in line for line in found), found)
+
+    def test_a_trailing_newline_in_an_id_is_refused(self) -> None:
+        found = _tool().problems(_root(self, GOOD.replace('id = "e"', 'id = "e\\n"')))
+        self.assertTrue(any("unique lowercase id" in line for line in found), found)
+
     def test_a_tasks_folder_under_gallery_is_refused(self) -> None:
-        root = _root(GOOD)
+        root = _root(self, GOOD)
         (root / "gallery" / "tasks").mkdir()
         self.assertTrue(any("gallery/tasks/" in line for line in _tool().problems(root)))
 
     def test_every_project_page_links_each_entry_to_its_clip_and_poster(self) -> None:
         tool = _tool()
-        root = _root(GOOD)
+        root = _root(self, GOOD)
         page = tool.pages(root)[root / "gallery" / "p" / "README.md"]
         self.assertIn("gallery/p/e/media/clip.mp4", page)
         self.assertIn("gallery/p/e/media/poster.jpg", page)
