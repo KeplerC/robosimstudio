@@ -26,7 +26,7 @@ def main():
     over_knife = (0.0, 1.792, 1.376, -1.154, 0.0, 0.0)
     grip = rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=12.0)  # [N] per finger
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     yam = rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_knife)))
     # Standing on its edge, the handle's middle 40 mm up; the blade runs 120 mm along x from the handle.
     knife = rss.knife(name="knife", at=(blade_x - 0.105, knife_y, 0.04))

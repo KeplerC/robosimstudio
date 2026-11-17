@@ -54,7 +54,7 @@ class TestABindingKeepsTheCell(unittest.TestCase):
         from robosimstudio.specs import Binding
         from robosimstudio.specs import replace as rss_replace
 
-        yam = get_embodiment("yam_bimanual")
+        yam = get_embodiment("yam")
         self.assertTrue(yam.cross_arm_collisions, "the YAM's arms collide")
         self.assertTrue(_cross_arm_collisions(Binding(), yam))
         self.assertFalse(_cross_arm_collisions(Binding(cross_arm_collisions=False), yam))

@@ -23,7 +23,7 @@ from robosimstudio_materials.granular import GRANULAR_60HZ, Heap
 TASK = """
 (define (problem sweep_rice)
   (:language sweep the rice into the tray)
-  (:staging (:scene bench_075) (:embodiment yam_bimanual) (:physics granular_60hz@v1))
+  (:staging (:scene bench_075) (:embodiment yam) (:physics granular_60hz@v1))
   (:fixtures wall_back - wall_back wall_left - wall_left wall_right - wall_right)
   (:objects rice - rice_heap pusher - pusher)
   (:regions (tray (:ranges ((-0.14 -0.22 0.14 -0.02))) (:z-range -0.005 0.03)))

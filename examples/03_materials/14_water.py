@@ -28,7 +28,7 @@ def main():
     side, thick, tall, line = 0.06, 0.006, 0.055, 0.025  # the glass: inside, walls, height, fill line [m]
     over_cup = (0.0, 1.723, 0.642, 1.081, 0.0, 0.0)  # right arm [rad]: tool centre 155 mm over the cup, jaws across y
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     yam = rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_cup)))
     scene = rss.Scene(cell=cell, name="pour_water", physics=rss.WATER_60HZ)
     scene.add(rss.robot(yam))

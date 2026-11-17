@@ -6,7 +6,7 @@ takes a ``connect`` seam for *opening* a bus, and what it is handed here is the
 library's own :class:`~robosimstudio.robots.teleop.simulated.SimulatedBus`: a
 table of registers whose ``Present_Position`` this file sets to what a leader
 with a *known* calibration would read at each pose the tool asks for. What is
-real is the rest of the tool -- the scene it builds (``yam_bimanual`` in
+real is the rest of the tool -- the scene it builds (``yam`` in
 ``bench_075``, no task), the viser page and its ghost, the state machine behind
 the Start and Capture buttons, the torque-off it sends before it reads
 anything, the fit, and the file it writes -- so the claim is that the procedure
@@ -73,7 +73,7 @@ class _Rig:
         from robosimstudio_studio.garments import viewer_studio
 
         self.cal = _tool()
-        self.sim = self.cal.build_scene("yam_bimanual", "bench_075")
+        self.sim = self.cal.build_scene("yam", "bench_075")
         self.viewer = viewer_studio(port=PORT, share=False)
         self.viewer.set_model(self.sim.model)
         self.poser = self.cal.Poser(self.sim, self.viewer)

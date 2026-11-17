@@ -437,7 +437,7 @@ def _clause_block(value: Any) -> list[Any] | None:
 
     ``_plain`` unwraps one sub-clause, so ``(:episodes (:count 5))`` is the one
     clause ``[":count", 5]`` and two are a list of two. A value with a head of
-    its own -- ``(:embodiment yam_bimanual (:work-arm left))`` -- is not a block:
+    its own -- ``(:embodiment yam (:work-arm left))`` -- is not a block:
     its clauses belong to that head, and a variant naming another head replaces
     them with it.
     """

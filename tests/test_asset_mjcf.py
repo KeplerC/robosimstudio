@@ -3,8 +3,8 @@
 
 The robots' files are imported through Newton, which reads what it needs and
 can step past a geom whose mesh was never declared; MuJoCo's own compiler does
-not. ``yam_i2rt_arena_narrow_arms.xml`` shipped with twelve finger geoms naming
-six meshes its ``<asset>`` never declared, and ``yam_bimanual_arms.xml``
+not. An arena-hand YAM file (since retired) shipped with twelve finger geoms
+naming six meshes its ``<asset>`` never declared, and ``yam_bimanual_arms.xml``
 declared a 9 MB scenery mesh no geom drew. Both read fine to everything that
 loads them, which is why it takes a compiler to see them.
 
@@ -83,9 +83,7 @@ class TestTheYamHandsGripLikeTheRealOnes(unittest.TestCase):
     once, with 230 N*s/m a finger as the closing-speed limit at it.
     """
 
-    ARENA = ("embodiments/yam/yam_bimanual_arms.xml", "embodiments/yam_i2rt_arena/yam_i2rt_arena_narrow_arms.xml")
-    I2RT = "embodiments/yam_i2rt/yam_i2rt_arms.xml"
-    I2RT_BAKED = "embodiments/yam_i2rt/yam_i2rt_bimanual.xml"
+    ARENA = ("embodiments/yam/yam_bimanual_arms.xml",)
 
     @staticmethod
     def _tree(path: str):
@@ -106,25 +104,11 @@ class TestTheYamHandsGripLikeTheRealOnes(unittest.TestCase):
                 servo = next(d for d in root.iter("default") if d.get("class") == "finger").find("position")
                 self.assertEqual("-100 100", servo.get("forcerange"), "50 N a jaw: the equality halves it")
 
-    def test_the_i2rt_hand_has_its_blades_tied_and_capped_at_50_n(self) -> None:
-        for path in (self.I2RT, self.I2RT_BAKED):
-            with self.subTest(path=path):
-                root = self._tree(path)
-                servos = [a for a in root.find("actuator") if re.search(r"joint[78]$", a.get("joint", ""))]
-                self.assertEqual(4, len(servos))
-                self.assertTrue(all(a.get("forcerange") == "-50 50" for a in servos))
-                ties = root.find("equality").findall("joint")
-                pairs = {(t.get("joint1"), t.get("joint2"), t.get("polycoef")) for t in ties}
-                expected = {("right_joint7", "right_joint8", "0 1 0 0 0"), ("left_joint7", "left_joint8", "0 1 0 0 0")}
-                self.assertEqual(expected, pairs)
-
     def test_each_hand_servo_states_its_assets_cap_and_reaches_it_within_a_millimetre(self) -> None:
-        from robosimstudio.robots.grippers.linear_4310 import LINEAR_4310
         from robosimstudio.robots.grippers.yam_linear_arena import YAM_LINEAR_ARENA
 
         arena = next(d for d in self._tree(self.ARENA[0]).iter("default") if d.get("class") == "finger")
-        i2rt = next(a for a in self._tree(self.I2RT).find("actuator") if a.get("joint", "").endswith("joint7"))
-        for hand, servo in ((YAM_LINEAR_ARENA, arena.find("position")), (LINEAR_4310, i2rt)):
+        for hand, servo in ((YAM_LINEAR_ARENA, arena.find("position")),):
             with self.subTest(hand=hand.name):
                 cap = float(servo.get("forcerange").split()[1])
                 clamp = hand.actuation

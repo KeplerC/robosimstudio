@@ -22,7 +22,7 @@ import numpy as np
 TIER = "medium"
 """Builds scenes on a GPU."""
 
-ROBOTS = ("panda", "yam_bimanual")
+ROBOTS = ("panda", "yam")
 
 
 def _wrist(robot_name: str, at=None, cell: str = "bench_075") -> np.ndarray:

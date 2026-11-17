@@ -29,7 +29,7 @@ def main():
         collision=rss.CollisionSpec(full_surface_contact=True),
     )
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     left, right = yam.arms
     yam = rss.replace(yam, arms=(left, rss.replace(right, home_q=over_edge)))
 

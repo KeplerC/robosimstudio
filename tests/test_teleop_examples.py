@@ -6,7 +6,7 @@ hardware.** ``--simulate`` puts a table of registers where the Feetech bus would
 be and a scripted hand where the operator would be; a motor whose torque this
 code enables does not move, so the hand goes where its script says however hard
 a goal pulls. What is real is everything the examples build and drive: the
-shipped ``yam_bimanual`` with the teleoperation gains, the welded panel and the
+shipped ``yam`` with the teleoperation gains, the welded panel and the
 20 kg crate, the follower's physics, and every line of the examples' own
 wiring from a leader reading to a servo register.
 

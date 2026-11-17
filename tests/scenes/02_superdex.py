@@ -35,7 +35,7 @@ def main():
     # One entry: an exact one wins over GENERIC's fallback, so the rest stays as it was.
     engine = rss.backend("superdex", substeps=2, feedback="off")
     physics = rss.replace(rss.GENERIC, backends=(("rod", engine), *rss.GENERIC.backends))
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     yam = rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_cable)))
 
     scene = rss.Scene(cell="bench_075", physics=physics, name="cable_superdex")

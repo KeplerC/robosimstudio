@@ -185,7 +185,7 @@ class TestTheHeapBesideTheRobot(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075", name="heap_robot", physics=rss.GRANULAR_60HZ)
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         cls.heap = scene.add(rss.heap(**{**HEAP, "at": (0.0, -0.31, 0.0)}))
         cls.paddle = scene.add(rss.box(name="paddle", half=(0.03, 0.05, 0.004), at=(-0.12, -0.31, 0.004)))
         cls.sim = _quiet_build(scene, control_mode="joint_position")
@@ -288,7 +288,7 @@ class TestTheHoneyCup(unittest.TestCase):
 
         wall = 0.008
         scene = rss.Scene(cell="bench_075", name="honey_cup", physics=rss.LIQUID_120HZ)
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         scene.add(cup(name="cup", inner=(0.05, 0.05, 0.07), wall=wall, at=(0.0, -0.31, 0.0)))
         honey = scene.add(
             rss.liquid(
@@ -324,7 +324,7 @@ class TestTheDoughPress(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075", name="dough_press", physics=rss.DOUGH_60HZ)
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         cls.lump = scene.add(
             rss.dough(name="dough", shape="cylinder", size=(0.06, 0.06, 0.04), at=(0.0, -0.31, 0.0), render="surface")
         )

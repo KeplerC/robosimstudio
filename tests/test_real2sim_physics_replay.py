@@ -56,7 +56,7 @@ class Replays(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075", name="physics_replays")
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         # mu 2: a surface over the real 1 for ``built`` to cap, now that the hand's pads are at 1.
         scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.03), friction=2.0))
         with redirect_stdout(io.StringIO()):
@@ -379,9 +379,9 @@ class Replays(unittest.TestCase):
         self.assertEqual(
             facts["robot_spec"],
             {
-                "name": "yam_bimanual",
+                "name": "yam",
                 "registered": True,
-                "as": "yam_bimanual",
+                "as": "yam",
                 "file": "",
                 "arm": "",
                 "gripper": "",
@@ -391,7 +391,7 @@ class Replays(unittest.TestCase):
         )
         self.assertEqual(facts["drawn_only_mm"], {})
         scene = rss.Scene(cell="bench_075", name="physics_servo_override")
-        scene.add(rss.robot("yam_bimanual", gripper=rss.ActuationSpec(target_ke=2000, target_kd=40, effort_limit=25)))
+        scene.add(rss.robot("yam", gripper=rss.ActuationSpec(target_ke=2000, target_kd=40, effort_limit=25)))
         scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.0, 0.03)))
         with redirect_stdout(io.StringIO()):
             sim = scene.build()
@@ -406,7 +406,7 @@ class Replays(unittest.TestCase):
         self.assertFalse(np.allclose(sim.model.joint_target_ke.numpy()[rows], before), "the hand's own gains")
         from robosimstudio.robots.registry import get_embodiment, resolve_gripper
 
-        yam = get_embodiment("yam_bimanual")
+        yam = get_embodiment("yam")
         clamp = resolve_gripper(yam, yam.arms[0]).actuation
         if clamp.joint_damping is not None:
             np.testing.assert_allclose(sim.model.joint_damping.numpy()[rows], clamp.joint_damping, rtol=1e-6)

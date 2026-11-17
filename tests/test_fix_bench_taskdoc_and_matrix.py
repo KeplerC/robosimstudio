@@ -177,7 +177,7 @@ class TestStagingMergesClauseByClause(unittest.TestCase):
         self.assertEqual(doc.staging["scene"], "bench_0728")
 
     def test_a_value_with_a_head_is_replaced_whole(self):
-        suite = _suite("(define (suite s) (:staging (:embodiment yam_bimanual (:work-arm left))))")
+        suite = _suite("(define (suite s) (:staging (:embodiment yam (:work-arm left))))")
         doc = merge_suite(_problem("(define (problem v1) (:staging (:embodiment panda)))"), suite)
         self.assertEqual(doc.staging["embodiment"], "panda")
 

@@ -31,7 +31,7 @@ def main():
 
     forces = rss.coupler("one_way", contact_forces=True)  # one-way, and reading what each contact pushes
     physics = rss.replace(rss.GENERIC, coupling=forces, collision=rss.CollisionSpec(full_surface_contact=True))
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     left, right = yam.arms
     yam = rss.replace(yam, arms=(left, rss.replace(right, home_q=over_stain)))
 

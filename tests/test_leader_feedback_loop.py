@@ -6,7 +6,7 @@ hardware.** The leader is a table of registers (``SimulatedBus``) whose
 ``Present_Position`` follows a trajectory this file writes down; a motor whose
 torque this code enables does not move, so the "hand" goes where the script
 says however hard the goal pulls. What is real is everything on the other side:
-the shipped ``yam_bimanual`` with the teleoperation gains, MuJoCo contact against
+the shipped ``yam`` with the teleoperation gains, MuJoCo contact against
 welded geometry, :class:`StudioBridge` applying the leader pose and reading the
 follower back, :class:`LeaderArmLoop` deciding, and :class:`LeaderServos`
 writing registers.

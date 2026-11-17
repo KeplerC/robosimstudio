@@ -373,7 +373,7 @@ class TestTheHandHoldsTheKnifeOnACpu(unittest.TestCase):
         from tests.fixtures.grasp import go, open_session, tick
 
         over_knife = (0.0, 1.792, 1.376, -1.154, 0.0, 0.0)  # the example's right arm, over the handle
-        yam = get_embodiment("yam_bimanual")
+        yam = get_embodiment("yam")
         yam = rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_knife)))
         scene = _tofu_scene(rss, knife_at=(BLADE_X - 0.105, -0.31, 0.04), tofu=False)
         scene.add(rss.robot(yam, gripper=rss.ActuationSpec(target_ke=1500.0, target_kd=60.0, effort_limit=12.0)))

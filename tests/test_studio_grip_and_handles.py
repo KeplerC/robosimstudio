@@ -37,7 +37,7 @@ def _sim(cloth: bool = False):
     import robosimstudio as rss
 
     scene = rss.Scene(cell="void", name="shortcuts")
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     scene.add(rss.box(name="cube", half=(0.025,) * 3, at=(0.0, 0.0, 0.10)))
     if cloth:
         scene.add(rss.sheet(name="towel", size=(0.2, 0.2), cells=(8, 8), at=(-0.1, -0.1, 0.4)))

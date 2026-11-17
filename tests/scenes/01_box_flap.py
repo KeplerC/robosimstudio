@@ -35,8 +35,8 @@ def main():
     physics = rss.replace(
         rss.GENERIC, coupling=rss.coupler("one_way"), collision=rss.CollisionSpec(full_surface_contact=True)
     ).with_backend("*", rss.backend("vbd", iterations=20, rigid_body_contact_buffer_size=256))
-    left, right = get_embodiment("yam_bimanual").arms
-    yam = rss.replace(get_embodiment("yam_bimanual"), arms=(rss.replace(left, home_q=beside_flap), right))
+    left, right = get_embodiment("yam").arms
+    yam = rss.replace(get_embodiment("yam"), arms=(rss.replace(left, home_q=beside_flap), right))
 
     scene = rss.Scene(cell="bench_0728", physics=physics, name="box_flap")
     scene.add(rss.robot(yam))

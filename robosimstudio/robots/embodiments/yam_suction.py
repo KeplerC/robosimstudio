@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """The arena YAM with a vacuum cup on its right arm, and the left hand as it is.
 
-A pairing rather than a new robot: :mod:`yam_bimanual`'s spec with the right
+A pairing rather than a new robot: :mod:`yam`'s spec with the right
 arm's :attr:`~robosimstudio.specs.ArmSpec.gripper` replaced. It is registered
 under its own name because the gripper axis cannot carry it: a binding's
 ``gripper`` puts one hand on *every* arm, and ``yam_bimanual_arms.xml`` declares
 its two arms as two articulation roots, of which Newton welds a hand only onto
 the one added last. So the cup has to be named on one arm, and a task document
-stages it as ``(:embodiment yam_bimanual_suction)``.
+stages it as ``(:embodiment yam_suction)``.
 
 Three things the pairing says that the plain robot does not:
 
@@ -34,10 +34,10 @@ from __future__ import annotations
 
 from robosimstudio.specs import replace
 
-from ..registry import register_embodiment
-from .yam_bimanual import YAM_BIMANUAL
+from ..registry import EMBODIMENTS, register_embodiment
+from .yam import YAM
 
-__all__ = ["CUP_DOWN", "RIGHT_JOINTS", "SUCTION_MOUNT", "YAM_BIMANUAL_SUCTION"]
+__all__ = ["CUP_DOWN", "RIGHT_JOINTS", "SUCTION_MOUNT", "YAM_SUCTION"]
 
 RIGHT_JOINTS = tuple(f"right_joint{i}" for i in range(1, 7))
 """The right arm's six joints, named so the file's fingers are not swept in."""
@@ -48,15 +48,17 @@ SUCTION_MOUNT = (0.0, 0.0, 0.105, 0.0, 0.0, 0.0, 1.0)
 CUP_DOWN = (0.0, 1.8599, 1.6247, -1.3356, 0.0, 0.0)
 """The right arm's home [rad]: the cup's face 106 mm over ``bench_075``, pointing straight down."""
 
-_LEFT, _RIGHT = YAM_BIMANUAL.arms
+_LEFT, _RIGHT = YAM.arms
 
-YAM_BIMANUAL_SUCTION = register_embodiment(
+YAM_SUCTION = register_embodiment(
     replace(
-        YAM_BIMANUAL,
-        name="yam_bimanual_suction",
+        YAM,
+        name="yam_suction",
         arms=(
             _LEFT,
             replace(_RIGHT, joint_names=RIGHT_JOINTS, gripper="suction", gripper_mount=SUCTION_MOUNT, home_q=CUP_DOWN),
         ),
     )
 )
+
+EMBODIMENTS.alias("yam_bimanual_suction", "yam_suction")

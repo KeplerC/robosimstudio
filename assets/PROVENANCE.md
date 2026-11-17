@@ -22,7 +22,7 @@ the source of truth.
 
 ---
 
-## `embodiments/yam/` — I2RT YAM bimanual arena
+## `embodiments/yam/` — I2RT YAM bimanual arena: the one YAM, `yam`
 
 **Source:** the arena's `sim_models/` directory, in a read-only reference
 checkout of the Isaac Lab Arena YAM stage
@@ -37,7 +37,7 @@ arena-authored files; `i2rt_yam/LICENSE` is i2rt's MIT licence for the meshes.
 | File | What it is |
 | --- | --- |
 | `yam_bimanual_arms.xml` | *Generated.* The arena's two YAM arms and nothing else, at their own base origin: the scene as authored (two YAM arms, a gate, cameras, a table, seven free-jointed props) with every free-jointed body and the home keyframe removed, the cell's scenery deleted, and the arm roots moved to the origin. **What the embodiment imports.** |
-| `yam_bimanual_arm.urdf` | One arm's kinematic chain (`base_link`, `link_1`..`link_6`, joints `joint1`..`joint6`) transcribed from `yam_bimanual_arms.xml`'s bodies: each body's `pos`/`quat` as the joint origin, each joint's axis and range, in chain order. No geometry or inertia. For the PyRoKi IK solver, which checks it against the MJCF at construction and refuses drift. Named by `yam_bimanual` (`robots/embodiments/yam_bimanual.py`). |
+| `yam_bimanual_arm.urdf` | One arm's kinematic chain (`base_link`, `link_1`..`link_6`, joints `joint1`..`joint6`) transcribed from `yam_bimanual_arms.xml`'s bodies: each body's `pos`/`quat` as the joint origin, each joint's axis and range, in chain order. No geometry or inertia. For the PyRoKi IK solver, which checks it against the MJCF at construction and refuses drift. Named by `yam` (`robots/embodiments/yam.py`). |
 | `i2rt_yam/` | The meshes the MJCF names. Unmodified. Carries its own `LICENSE`. |
 | `LICENSE` | Isaac Lab Arena's `LICENSE.md` (Apache License 2.0), under which the arena distributes the files this directory derives from; fetched from `isaac-sim/IsaacLab-Arena` @ `9abd5dd0` on 2026-10-13. |
 
@@ -130,7 +130,7 @@ the suction hand stopped 7.5 mm short of its plate, the paper fold kept
 sagged 32 mm, not 28, under the 2 kg probe box. The routines were written on
 the stiffer wrist; until they are re-planned, it stays.
 
-**Arena constants**, restated in `robosimstudio/robots/embodiments/yam_bimanual.py` rather than
+**Arena constants**, restated in `robosimstudio/robots/embodiments/yam.py` rather than
 imported from the reference: table top at `z = 0.728 m`, table centred at
 `(0.6, 0.0)` with half-extents `(0.30, 0.40)`, per-arm home
 `[0, 1.047, 1.047, 0, 0, 0]`, grasp site `0.1347 m` along the wrist's `+z` with
@@ -208,122 +208,16 @@ trusted. The arm spheres need neither.
 
 ---
 
-## `embodiments/yam_i2rt/` — i2rt YAM bimanual pair with linear_4310 grippers
+## Kept on the Hugging Face Hub, not in git
 
-**Source:** `i2rt-robotics/i2rt` @ `c40b4125` (read from a mirror of that
-repository), files
-`i2rt/robot_models/arm/yam/{yam.xml,assets/*.stl}` and
-`i2rt/robot_models/gripper/linear_4310/{linear_4310.xml,assets/*.stl}`. MIT
-licensed; `LICENSE` copied beside the meshes.
+These used to be vendored here. Their files, with this file's old entries for
+them, are in the dataset `keplerccc/robosimstudio-agentic-real2sim`:
 
-**Files**
-
-| File | What it is |
-| --- | --- |
-| `yam_i2rt_bimanual.xml` | *Generated.* Two composed YAM+linear_4310 arms, `left_`/`right_` prefixed, bases baked at the reference workcell's mounts. |
-| `yam_i2rt_arms.xml` | *Generated.* The same two arms with the baked mount taken out: the arm roots moved from `(0.2525, ±0.31, 0.75)` to the origin, the ±0.31 shoulder separation kept, 0.2525 and 0.75 moved to `EmbodimentSpec.base_offset`. **What `yam_i2rt` imports.** |
-| `assets/` | The 9 STLs the MJCF references. Byte-identical copies. |
-| `LICENSE` | i2rt's MIT license. |
-| `yam_i2rt_arm.urdf` | *Generated.* One arm's chain (`base_link`, `link_1`..`link_6`, `joint1`..`joint6`) transcribed from `yam_i2rt_arms.xml`'s `right_` bodies: each body's `pos`/`quat` as the joint origin, each joint's own axis and range, in chain order; no geometry or inertia. Used by PyRoKi IK, which refuses i2rt's stock `yam.urdf` (not shipped; it lists `joint6` first and puts `joint1` at 63.1 mm where the MJCF has 67, and the check read 268.58 mm / 10.524° tool-to-TCP drift between two configurations on the crate-washing scene, measured 2026-10-03) and accepts this one on both arms; its drift check holds this file to the MJCF. Named by `yam_i2rt`; `yam_i2rt_arena_narrow` has the same chain but names no URDF (see `robots/embodiments/yam_i2rt_arena.py`). |
-
-**What changed on the way in** (all in the generator, none in the meshes):
-
-* The single-arm composition replicates the YAM builder in the original reference sims
-  (itself a re-implementation of i2rt's `combine_arm_and_gripper_xml()`):
-  fixed `base` wrap, linear_4310 mounted on `link6` with the transform from
-  i2rt's `linear_4310.yml`, `joint6` axis overridden to `0 0 -1`.
-* Actuator physics the stock MJCF omits, from that builder verbatim:
-  reflected armature `N²·I_rotor`, damping, frictionloss and true DM4340/DM4310
-  torque limits per joint; position actuators kp=300/kv=30 (arms) and
-  kp=600/kv=20 (fingers) -- the fingers' not what the library drives now,
-  below.
-* `gravcomp="1"` baked onto every body — the sims set `mujoco:gravcomp = 1.0`
-  on every robot body in code; baking it lets the importer harvest it.
-* **Both fingers actuated and the stock `joint7 == joint8` equality dropped**:
-  Newton's MJCF import applies that equality with inverted polarity
-  (`joint8 = -joint7`), which translates the jaw pair sideways instead of
-  closing it. The original reference sims carry the same fix
-  (`skip_equality_constraints=True` plus a second actuator); both fingers are
-  always commanded to the same value, so the coupling is preserved by
-  construction. (Both fingers are still actuated, but the equality is back
-  since: Newton 1.7 imports it the right way round, below.)
-* Two prefixed copies merged into one worldbody at bases
-  `(0.2525, ∓0.31, 0.75)` (right = active), per-side contact excludes kept.
-
-**Edited in the checked-in `yam_i2rt_arms.xml` and `yam_i2rt_bimanual.xml` on 2026-10-26** (the generator
-does not make these: a file regenerated from it drops them): the finger
-actuators' `forcerange` and the joints' `actuatorfrcrange` are -50..50, from
-+-80, the driver's 50 N a blade (each blade has its own actuator; sources under
-`embodiments/yam/` above); and **the `joint7 == joint8` equality is back** (`polycoef="0 1 0 0 0"`, with the stiff `solref="0.004 1"
-solimp="0.95 0.99 0.001"`). Newton 1.7 imports it with the right sign
-(`eq_data` `[0, 1, 0, 0, 0]`; both fingers commanded to 20 mm read 20.0 and
-20.0), and it is what the real hand is, one motor: two capped servos without it
-hold a part anywhere between them. Both fingers stay actuated and commanded
-alike, as before. Tip and link friction are unchanged: the file authors none,
-so MuJoCo's 1.0.
-
-The file's finger gains (kp 600, kv 20, damping 2) are not what the library
-drives: `linear_4310.CLAMP` is, as under `embodiments/yam/` above -- kp 150000,
-kv 150 and 230 N*s/m a blade (0.22 m/s at the cap). At kp 600 the squeeze grew with the part, 0.9 N a blade on a 1 mm box, 2.3 N on 6 mm,
-9.5 N on 30 mm; full open to shut took 0.08 s, now 0.20 s. After
-(`MUJOCO_500HZ`): 50 N a blade on 30 and 60 mm boxes, both held to 2 kg. A thin
-plate standing on edge is the limit of these colliders at the real force: the
-decomposed tip hulls' faces are not parallel, and at 50 N they turn a 6 mm
-plate in the pinch (83 degrees; it dropped at 0.47 kg, where the kp 600
-servo's 2.3 N held 0.55 kg). The arm's kp 300/kv 30 are the reference sims',
-not the hardware's (i2rt's `yam_v1.yml`: kp 80/80/80/10/10/10, kd
-5/5/5/1.5/1.5/1.5), and are unchanged.
-
----
-
-## `embodiments/yam_i2rt_arena/` — the composed i2rt YAM wearing the arena's hand
-
-**Source:** the two directories above. `yam_i2rt_arena_narrow_arms.xml`
-(*generated*) is `yam_i2rt/`'s links, meshes, inertias and joint physics with
-the arena's hand grafted onto the wrist unchanged: the `{side}_link_6` subtree
-of `yam/yam_bimanual_arms.xml` — wrist inertial, palm capsules, D405 body and
-its collider, both finger linkages with their `<equality>` coupling — hung
-under the composed `{side}_link6` as a fixed child, rotated by `quat 0 -1 1 0`
-and not translated. Shoulders at ±0.17 m. `assets/` holds the STLs the file
-names; `LICENSE` is i2rt's MIT licence, as for `yam_i2rt/`; the grafted hand
-comes from Isaac Lab Arena (Apache-2.0, see `embodiments/yam/` above and
-`NOTICE`). Placement rationale and measurements:
-`robosimstudio/robots/embodiments/yam_i2rt_arena.py`.
-
-**Edited in the checked-in file on 2026-10-26:** the grafted hand carries the
-same edits as `embodiments/yam/` above -- collider friction 1.0, the stiff
-finger equality and the actuator's 100 N range -- and is driven by the same
-`yam_linear_arena.CLAMP`. Measured
-the same way (`MUJOCO_500HZ`): 2, 6 and 30 mm boxes held to the probe's 2 kg,
-where the arena hand dropped them at 0.11, 0.29 and 1.31 kg. The arm keeps its
-arena gains, as `embodiments/yam/` says.
-
----
-
-## `embodiments/robotiq_2f85/` — Robotiq 2F-85, from MuJoCo Menagerie
-
-**Source:** `google-deepmind/mujoco_menagerie` @ `affef083`, folder
-`robotiq_2f85`. The commit is Newton's own `MENAGERIE_REF`, read off
-`newton._src.utils.download_assets`, and fetched by a development script not in
-this repository. The model is **BSD 2-Clause**: `LICENSE` is the file
-Menagerie ships beside it, "Copyright (c) 2013, ROS-Industrial", and the
-vendored `README.md` says the same.
-
-**Files:** Menagerie's bytes, unmodified (`2f85.xml`, `assets/*.stl`,
-`LICENSE`), and its `README.md` with the two links to files not vendored here
-(`CHANGELOG.md`, `2f85.png`) pointed at Menagerie.
-
-**At build**, `EntityEmbodiment._attach_hands` imports it with `parent_body` set
-to the arm's flange, switches its MuJoCo actuators to `JOINT_TARGET` (a live
-tendon actuator fights a joint target; Newton's composer test uses the same
-setting), and puts `right_driver_joint` / `left_driver_joint` in position mode.
-Nothing on disk changes.
-
-**Measured** on a tool-sorting scene, welded to a UR5e, closing under physics:
-pad centres 0.09793 m apart at full open and 0.01252 m at full closed, i.e.
-**0.0854 m of travel against the published 0.085 m stroke**. Closing axis
-tool-local ±x, a right angle from the `GripperSpec` default. `housing_half`
-measures 0.0424 here against the Isaac stage export's 0.0425.
+| Dataset folder | What it is | Why it left git |
+|---|---|---|
+| `robots/robotiq_2f85/` | Robotiq 2F-85, from MuJoCo Menagerie (BSD-2-Clause); the hand `panda_robotiq` wears | No example uses it. `resolve_path` finds a fetched copy under `~/.cache/robosimstudio/hub/<revision>/`, and until then names the command: `python -m robosimstudio.hub fetch robots/robotiq_2f85 --dest <that folder>`. |
+| `robots/archive/yam_i2rt/` | The composed i2rt YAM with linear_4310 blade-tip grippers (MIT), and its spec modules | Retired: RoboSimStudio has one YAM, `yam` (above). |
+| `robots/archive/yam_i2rt_arena/` | The composed i2rt YAM wearing the arena's hand, and its spec module | Retired with it. |
 
 ---
 

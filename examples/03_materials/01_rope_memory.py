@@ -29,7 +29,7 @@ def main():
 
     vbd = rss.backend("vbd", rigid_body_contact_buffer_size=256, rigid_contact_history=True)
     physics = rss.replace(rss.GENERIC.with_backend("*", vbd), collision=rss.CollisionSpec(contact_matching="sticky"))
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     yam = rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_cable)))
 
     scene = rss.Scene(cell="bench_075", physics=physics, name="cable_memory")

@@ -58,7 +58,7 @@ Source: [`01_force_feedback.py`](01_force_feedback.py)
 | Calibration | A JSON file keyed by adapter serial, written by `scripts/calibrate_leader_arms.py` to `scripts/calibration/local/yam_leader.json` (git-ignored), which is where the scripts here read it by default. `scripts/calibration/yam_leader.json` is a sample for two arms that are not yours. |
 | Browser | Reaches the machine's ports 8080 (the scene) and 8081 (calibration), directly or through an SSH tunnel. |
 
-The simulated arm is the shipped `yam_bimanual` with the teleoperation gains
+The simulated arm is the shipped `yam` with the teleoperation gains
 `YAM_TELEOP_ARM` and `YAM_TELEOP_GRIP` from `robosimstudio.robots.teleop.follower`,
 applied by the scene as an override. No task is needed: each script builds a
 bare `rss.Scene(cell="bench_075")`.
@@ -116,7 +116,7 @@ is flagged in the results list; **Redo last joint** sweeps it again.
 | --- | --- |
 | `--leader` | `<arm>:<port>` pairs. The arm names are the robot's own, `left` and `right`. |
 | `--out` | The file to write, and to resume from. |
-| `--embodiment`, `--cell` | Another registered robot or cell. The defaults are `yam_bimanual` and `bench_075`. |
+| `--embodiment`, `--cell` | Another registered robot or cell. The defaults are `yam` and `bench_075`. |
 | `--zero-only` | One capture per arm at the home pose. Rewrites every `offset_ticks` and keeps scale and sign: for a slipped horn. |
 | `--gripper-only` | The two gripper captures alone. |
 

@@ -21,7 +21,7 @@ from robosimstudio_materials.brush import BRUSH_60HZ, Brush
 TASK = """
 (define (problem scrub_patch)
   (:language scrub the marked square with the brush)
-  (:staging (:scene bench_075) (:embodiment yam_bimanual) (:physics brush_60hz@v1))
+  (:staging (:scene bench_075) (:embodiment yam) (:physics brush_60hz@v1))
   (:objects handle - brush_handle brush - dish_brush)
   (:regions (patch (:ranges ((-0.025 -0.27 0.075 -0.17))) (:z-range -0.005 0.03)))
   (:goal (>= (scrubbed brush patch) 0.5)))

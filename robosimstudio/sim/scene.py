@@ -134,7 +134,7 @@ def robot(
             arm's **base body** goes -- the body its
             :attr:`~robosimstudio.specs.ArmSpec.base_body_name` names, else
             the one its first moving joint hangs on in the robot's file (on
-            ``yam_bimanual``, ``left_arm`` and ``right_arm``: the bottom of each
+            ``yam``, ``left_arm`` and ``right_arm``: the bottom of each
             mount puck). Absolute, not relative to ``at``: a named arm stands
             there wherever ``at`` puts the robot, and an arm left out follows
             ``at`` as before. A full pose ``(x, y, z, qx, qy, qz, qw)`` sets the
@@ -146,7 +146,7 @@ def robot(
             actuators, hand and colliders with it -- and the arms' collision
             settings are the spec's, as without it::
 
-                scene.add(rss.robot("yam_bimanual", arms_at={
+                scene.add(rss.robot("yam", arms_at={
                     "left": (-0.36, 0.20, 0.06),
                     "right": (0.12, -0.36, 0.22, 0.0, 0.0, 0.7071068, 0.7071068),
                 }))

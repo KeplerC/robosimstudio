@@ -42,7 +42,7 @@ def _sim():
     import robosimstudio as rss
 
     scene = rss.Scene(cell="void", name="cable_grab")
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     scene.add(
         rss.rod(
             name="rope",

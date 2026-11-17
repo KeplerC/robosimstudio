@@ -3,8 +3,8 @@
 
 Two registries and the rules for pairing them. A hand is its own registry rather
 than a field on an embodiment, because it is the axis the shipped robots differ
-along: ``panda`` and ``panda_robotiq`` are one Franka with two hands,
-``yam_bimanual`` and ``yam_i2rt`` one YAM with two. Naming a
+along: ``panda`` and ``panda_robotiq`` are one Franka with two hands, and
+``yam`` and ``yam_suction`` one YAM with a hand or a cup on its right arm. Naming a
 :class:`~robosimstudio.specs.GripperSpec` from an
 :class:`~robosimstudio.specs.ArmSpec` is what makes that a pairing rather than a
 fifth robot with ten constants copied into it.

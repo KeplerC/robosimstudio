@@ -42,7 +42,7 @@ def arm_link_bodies(model: Any, ee_body: int) -> tuple[int, ...]:
 
     :attr:`~robosimstudio.scene.handles.ArmHandle.shapes` cannot answer this.
     It is filled for contact *exclusion*, where "belonging to this arm" means
-    the whole robot, and on ``yam_bimanual`` the left and right lists are the
+    the whole robot, and on ``yam`` the left and right lists are the
     same 112 shapes -- see :meth:`SceneIndex._shape_owners`, which resolves the
     same ambiguity for clicks by ordering rather than by topology. A *handle*
     cannot be resolved by ordering: putting a wrench on the right forearm has
@@ -208,7 +208,7 @@ class SceneIndex:
         **Both arms of a bimanual cell claim every shape the robot has.**
         ``ArmHandle.shapes`` is filled for contact *exclusion*, where "everything
         belonging to this arm" sensibly means the whole robot, and it is measured:
-        on ``yam_bimanual`` the left and right lists are the same 112 shapes.
+        on ``yam`` the left and right lists are the same 112 shapes.
         Read as identity that makes clicking any link ambiguous, and resolving it
         alphabetically would mean a click on the right hand selects the left arm
         on one robot and the right on another -- exactly the class of bug

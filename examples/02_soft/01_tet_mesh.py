@@ -40,7 +40,7 @@ def write_o_ring(path: Path, *, major: float, minor: float, around: int) -> None
 
 def main():
     cell = "void"
-    embodiment = "yam_bimanual"
+    embodiment = "yam"
     major = 0.045
     minor = 0.011
 

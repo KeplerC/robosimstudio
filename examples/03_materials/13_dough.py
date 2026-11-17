@@ -24,7 +24,7 @@ def main():
     material = "dough"
 
     scene = rss.Scene(cell=cell, name="press_dough", physics=rss.DOUGH_60HZ)
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     lump = scene.add(rss.dough(name="dough", shape="cylinder", size=puck, at=puck_at, material=material))
     sim = scene.build(control_mode="joint_position")
 

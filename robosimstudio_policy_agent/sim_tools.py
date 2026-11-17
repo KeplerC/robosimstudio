@@ -1220,7 +1220,7 @@ class Vacuum:
             on: True seals onto the part under the face (or ``object_name``) and
                 holds it; False lets go.
             arm: Which hand. Empty takes the first arm with a cup, *not* the
-                work arm: on ``yam_bimanual_suction`` the work arm is the left,
+                work arm: on ``yam_suction`` the work arm is the left,
                 which has jaws.
             object_name: The part to seal on. Empty takes whatever is under
                 the cup, which is what a real vacuum does.

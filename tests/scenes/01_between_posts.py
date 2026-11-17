@@ -29,7 +29,7 @@ def main():
     over_middle = (1.3223, 1.8782, 1.7594, -1.2485, 0.6726, -0.3199)
 
     scene = rss.Scene(cell="bench_075", name="cable_between_posts")
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     scene.add(rss.robot(rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_middle)))))
     for name, y in (("post_start", -span / 2), ("post_end", span / 2)):
         scene.add(rss.post(name=name, radius=0.02, half_height=post_height / 2, at=(x, y, post_height / 2)))

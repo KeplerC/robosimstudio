@@ -103,7 +103,7 @@ Source: [`04_brush_scored.py`](04_brush_scored.py)
 The same plate, cup and square as a task document, with a goal on the plate resting in the square: carry it over, untick **Vacuum**, lift the hand away, and the goal turns true.
 
 The plate is a `Body.from_spec` record the document places under its own
-name, the robot is `yam_bimanual_suction` and the physics the one MuJoCo
+name, the robot is `yam_suction` and the physics the one MuJoCo
 island under its task-language name, `mujoco_500hz@v1`. The square's height
 window, `(:z-range 0.0 0.01)`, counts the plate's centre only within 10 mm of
 the bench, so a plate carried over the square does not count, and

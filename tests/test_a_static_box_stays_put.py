@@ -51,7 +51,7 @@ def _yam_scene(physics, name: str):
     import robosimstudio as rss
     from robosimstudio.robots.registry import get_embodiment
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     left, right = yam.arms
     yam = rss.replace(yam, arms=(left, rss.replace(right, home_q=OVER_BRUSH)))
     scene = rss.Scene(cell="bench_075", name=name, physics=physics)

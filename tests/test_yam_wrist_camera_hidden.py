@@ -29,7 +29,7 @@ class TestYamWristCameraIsNotDrawn(unittest.TestCase):
         from robosimstudio.paths import resolve_asset
         from robosimstudio.robots.registry import get_embodiment
 
-        yam = get_embodiment("yam_bimanual")
+        yam = get_embodiment("yam")
         scene = rss.Scene(cell="bench_0728", physics=rss.GENERIC, name="yam_wrist_camera")
         scene.add(rss.robot(yam))
         cls.sim = scene.build(control_mode="joint_position")

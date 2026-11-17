@@ -32,7 +32,7 @@ def main():
 
     engine = rss.backend("superdex", substeps=2, feedback="off")  # the fingers drive it by pose
     physics = rss.replace(rss.GENERIC, backends=(("rod", engine), *rss.GENERIC.backends))
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     yam = rss.replace(yam, arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=in_front)))
 
     scene = rss.Scene(cell="bench_075", physics=physics, name="band_on_pegs")
