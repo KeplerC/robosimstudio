@@ -232,7 +232,8 @@ cache-dir = ".cache/ruff"
 line-length = 120
 indent-width = 4
 # Vendored as it was released (MIT, tabs and all): the walk-on-spheres cage cutter the cutting kind drives.
-extend-exclude = ["robosimstudio_materials/cutting/cagecut"]
+# Gallery scenes are twins a coding agent built on the live page, kept as built, like examples/live/twins.
+extend-exclude = ["robosimstudio_materials/cutting/cagecut", "gallery/robosimstudio-real2sim/*", "gallery/abc130/*"]
 
 [tool.ruff.lint]
 select = [

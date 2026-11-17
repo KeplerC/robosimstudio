@@ -102,6 +102,14 @@ class TestTheGallery(unittest.TestCase):
             self.assertIn(f"gallery/p/e/media/{name}.webp", page)
         self.assertIn("gallery/p/e/media/still.jpg", page)
 
+    def test_a_ported_scene_gets_a_page_that_says_how_to_fetch_and_run_it(self) -> None:
+        tool = _tool()
+        root = _root(self, GOOD.replace('status = "video"', 'status = "partial"\ncode = "gallery/p/e"'))
+        (root / "gallery" / "p" / "e").mkdir(parents=True)
+        page = tool.pages(root)[root / "gallery" / "p" / "e" / "README.md"]
+        self.assertIn("python -m robosimstudio.hub fetch gallery/p/e", page)
+        self.assertIn("./ctl play routine", page)
+
     def test_an_upload_must_hold_each_clip_its_preview_and_the_poster(self) -> None:
         tool = _tool()
         entry = {"project": "p", "id": "e", "media": ["clip.mp4", "still.jpg"]}

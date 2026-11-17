@@ -209,13 +209,43 @@ def index_page(projects: list[dict], entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def entry_page(entry: dict) -> str:
+    """A ported scene's own README: its clips, where it stands, and how to fetch and run it."""
+    where = f"gallery/{entry['project']}/{entry['id']}"
+    lines = [f"# {entry['title']}\n", HEADER, f"{entry['note']}\n"]
+    lines += [
+        f'<a href="{_asset(entry, name)}"><img src="{_asset(entry, preview(name))}" width="49%" alt="{Path(name).stem}"></a>'
+        for name in entry["media"]
+    ]
+    lines += [
+        "",
+        f"**Status:** {_status(entry)} · **robot:** {entry['robot']}  ",
+        f"**Source:** {entry['source']} {_links(entry)}  ".rstrip() + "  ",
+        f"**Licence:** {entry['licence']}\n",
+        "Its meshes, textures and reference photos are on the Hub; fetch them, then open the live page and play",
+        "the routine (`REPORT.md` says how the scene was built and what it measures):\n",
+        "```bash",
+        f"uv run python -m robosimstudio.hub fetch {where}",
+        f"cd {where}",
+        "uv run ./ctl up               # the live page; it prints its address",
+        "uv run ./ctl play routine --wait",
+        "uv run ./ctl check && uv run ./ctl physics",
+        "```",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def pages(root: Path = REPO) -> dict[Path, str]:
-    """Every generated page, by path, as it should read."""
+    """Every generated page, by path, as it should read: the index, each project's, each ported scene's."""
     projects, entries = load(root)
     out = {root / "gallery" / "README.md": index_page(projects, entries)}
     for project in projects:
         own = [e for e in entries if e["project"] == project["id"]]
         out[root / "gallery" / project["id"] / "README.md"] = project_page(project, own)
+    for entry in entries:
+        if entry.get("code") == f"gallery/{entry['project']}/{entry['id']}":
+            out[root / entry["code"] / "README.md"] = entry_page(entry)
     return out
 
 
