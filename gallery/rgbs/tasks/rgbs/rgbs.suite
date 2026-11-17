@@ -35,13 +35,14 @@
 ; interchangeable and nothing about sharing a table says they are. So
 ; (:physics ...) is NOT here; every document states its own.
 ;
-; AND ONE THING CHANGED THAT THE MERGE DID NOT REQUIRE. The peel variants also
-; changed robot, from yam_bimanual to the yam_i2rt the other five ran on, so
-; that the suite is one robot as well as one bench. That is a re-authoring
-; rather than a port -- a different hand, different collision geometry,
-; different finger servos -- and what it cost is recorded on
-; peel/layout.py and in graphs/peel_gt/README.md rather than glossed
-; here.
+; ONE ROBOT. The suite ran on yam_i2rt, the composed i2rt build with blade
+; fingertips; main retired that build, and every variant now stands on `yam`,
+; the arena YAM: the same arms, but a hand whose grip point is 44 mm off the
+; wrist axis, with a D405 camera on the wrist and 12 mm of fingertip past the
+; grip point against 35. Each routine records what that cost it where it was
+; measured; the peel variants were re-authored on the library's tape, whose
+; rigid pull tab a hand can hold by contact, because the old ones carried the
+; film on a particle latch.
 ;
 ; A variant beside this file inherits every clause below: its own :staging
 ; clause wins KEY BY KEY (the three peel documents restate their embodiment,
@@ -57,7 +58,7 @@
               adhesive strip off a box or a protective film off a panel, cut a
               sealed carton open and empty it, feed a cable through a closed
               conduit, polish marks off a strip against a fixed spinning bit,
-              and wipe stains off a bar with a foam sponge (YAM i2rt bimanual).")
+              and wipe stains off a bar with a foam sponge (the YAM, both arms).")
 
   (:staging
     ; The one cell every variant stands in. It was bench_0728 for the peel
