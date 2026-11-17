@@ -499,7 +499,7 @@ class RoutineBoxDecant:
             self.seed[name] = sols[k]
             prev_k, prev_q = k, sols[k]
 
-    def _across_quat(self, name, at, along: float):
+    def _across_quat(self, name, at, along: float, wrist_toward=None):
         """Top-down, with the JAWS ACROSS a bar whose long axis is at world yaw
         ``along`` [rad].
 
@@ -516,7 +516,75 @@ class RoutineBoxDecant:
         q0, _ = ik.solve_best([self.seed[name]], np.asarray(at), (0.0, 0.0, -1.0))
         _, home = ik.fk_ee(np.asarray(q0, dtype=np.float32))
         turn = _half_wrap(float(along) - _yaw_of(home))
-        return quat_multiply([0.0, 0.0, math.sin(turn / 2), math.cos(turn / 2)], home)
+        quat = quat_multiply([0.0, 0.0, math.sin(turn / 2), math.cos(turn / 2)], home)
+        if wrist_toward is None:
+            return quat
+        # Of the two holds that pinch a bar equally well, the one with the
+        # wrist on the side of ``wrist_toward``. On ``yam`` the grip point is
+        # 44 mm off the wrist axis, so the two holds put the arm in different
+        # places, and only one of them can follow the tilted draw: with the
+        # wrist on the far side the wrist roll runs into its 2.09 rad stop at
+        # the far end of the tape (24-29 mm off over the draw, measured), with
+        # it on the carton's side every station solves to 0.0 mm.
+        flipped = quat_multiply([0.0, 0.0, 1.0, 0.0], quat)
+        toward = np.asarray(wrist_toward, dtype=np.float64) - np.asarray(at, dtype=np.float64)
+        toward[2] = 0.0
+
+        def wrist_side(q) -> float:
+            offset = _rot(q) @ self._wrist_from_tcp(name)
+            offset[2] = 0.0
+            return float(np.dot(offset, toward))
+
+        return flipped if wrist_side(flipped) > wrist_side(quat) + 1.0e-6 else quat
+
+    def _wrist_from_tcp(self, name) -> np.ndarray:
+        """The wrist body's origin from the TCP, in the TCP's own frame [m]."""
+        hand = self.env.scene.embodiment.hands.get(name)
+        offset = np.asarray(hand.tcp_offset, dtype=np.float64)
+        rot = _rot(np.asarray(hand.tcp_offset_rot, dtype=np.float64))
+        return rot.T @ -offset
+
+    def _branch(self, name, targets, quat, tries: int = 24):
+        """The arm configuration from which a chain of poses solves best.
+
+        The full-pose solve is local: chained from wherever the arm stands, it
+        stays on that arm's branch, and the pick leaves the arm on one from which
+        the tilted hold cannot follow the tape to its far end (residuals of
+        20-30 mm, measured), while another branch follows all of it at 0.0 mm.
+        So the chain is tried from the current configuration and from ``tries``
+        deterministic perturbations of it, and the best start is returned with
+        its worst residual."""
+        ik = self.env.arm(name)
+        coords = list(ik.arm_coords)
+        base = np.asarray(self.seed[name], dtype=np.float64)
+        rng = np.random.default_rng(0)
+        scale = np.array([0.5, 0.5, 0.5, 1.0, 1.0, 1.0])[: len(coords)]
+        best = None
+        for k in range(tries + 1):
+            seed = base.copy()
+            if k:
+                seed[coords] = seed[coords] + rng.uniform(-math.pi, math.pi, len(coords)) * scale
+            first, worst, chained = None, 0.0, seed
+            for target in targets:
+                sol = np.asarray(ik.solve_q_full(chained, target, quat), dtype=np.float64)
+                p, r = ik.pose_errors(sol, target, quat)
+                worst = max(worst, float(p) + 0.01 * math.degrees(float(r)))
+                first = sol if first is None else first
+                chained = sol
+            if best is None or worst < best[0]:
+                best = (worst, first)
+        return best[1], best[0]
+
+    def _joint_leg(self, name, q_target, steps: int):
+        """Drive the arm to a joint configuration, linearly in joint space."""
+        ik = self.env.arm(name)
+        q0 = np.asarray(self.seed[name], dtype=np.float64)
+        q1 = np.asarray(q_target, dtype=np.float64)
+        for j in range(1, steps + 1):
+            q = q0 + (q1 - q0) * j / steps
+            self.held[name] = q[list(ik.arm_coords)]
+            yield
+        self.seed[name] = q1
 
     @staticmethod
     def _lean(quat, axis_world, angle: float, want_down) -> np.ndarray:
@@ -640,7 +708,17 @@ class RoutineBoxDecant:
         self._knife_shapes = [int(s) for s in np.flatnonzero(body == self._knife_body)]
         self._body_shapes = [s for s in self._knife_shapes if not labels[s].endswith("knife_blade")]
         self._mat_shapes = [i for i, lab in enumerate(labels) if lab.split("/")[-1] == "mat"]
-        self._tips = {name: [i for i, lab in enumerate(labels) if f"{name}_tip" in lab] for name in arm_slots(env)}
+        # The pads by the hand's own finger bodies, not by a link name: the i2rt
+        # hand calls them `{arm}_tip_*` and the arena hand `{arm}_link_*_finger`.
+        self._tips = {
+            name: [
+                int(s)
+                for s in np.flatnonzero(
+                    np.isin(body, [b for side in env.scene.embodiment.arms[name].finger_bodies for b in side])
+                )
+            ]
+            for name in arm_slots(env)
+        }
 
     # ---------------------------------------------------------- choreography
     def _choreography(self):
@@ -673,7 +751,7 @@ class RoutineBoxDecant:
         nose_world = R_k @ self._nose_local
         self.knife_yaw = math.atan2(float(nose_world[1]), float(nose_world[0]))
         self.grip_at = knife[:3] + R_k @ np.array([self.grip_x, 0.0, 0.0]) + np.array([0.0, 0.0, GRIP_DZ])
-        self.kq = self._across_quat(self.work, self.grip_at, self.knife_yaw)
+        self.kq = self._across_quat(self.work, self.grip_at, self.knife_yaw, wrist_toward=self._carton[:3])
         # The closing axis in world is the grasp frame's y; the tilt is about it,
         # whichever way sends the nose down.
         self.cq = self._lean(self.kq, _rot(self.kq)[:, 1], self.tilt, nose_world)
@@ -747,9 +825,20 @@ class RoutineBoxDecant:
         spec_off = _rot(self.cq) @ np.array([local[0], -local[1], -local[2]])
         self.notes.append(f"tip in hand {np.round(off * 1e3, 1)} mm vs the spec's {np.round(spec_off * 1e3, 1)}")
         self.phase = 2.0
-        yield from self._leg(
-            self.work, self.tape_start - off + np.array([0.0, 0.0, CARRY_LIFT]), self.cq, speed=0.08, label="carry"
-        )
+        # Onto the arm branch the whole cut solves from, before anything is
+        # chained: over the tape's start, down the draw, and up off its end.
+        carry = np.array([0.0, 0.0, CARRY_LIFT])
+        targets = [self.tape_start - off + carry]
+        targets += [self.tape_start + (self.tape_end - self.tape_start) * k / 10 - off for k in range(11)]
+        targets.append(self.tape_end - off + carry)
+        q_over, worst = self._branch(self.work, targets, self.cq)
+        self.notes.append(f"cutting branch: worst {worst * 1e3:.1f} (mm + deg/100)")
+        q_now = np.asarray(self.seed[self.work], dtype=np.float64)
+        span = float(np.max(np.abs((q_over - q_now)[list(self.env.arm(self.work).arm_coords)])))
+        if span > math.radians(5.0):
+            yield from self._joint_leg(self.work, q_over, max(60, int(span / math.radians(30.0) * 60.0)))
+            yield from self._hold(20)
+        yield from self._leg(self.work, self.tape_start - off + carry, self.cq, speed=0.08, label="carry")
         yield from self._hold(20)
 
     def _pin(self):

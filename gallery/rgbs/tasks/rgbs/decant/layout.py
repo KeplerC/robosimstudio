@@ -112,26 +112,27 @@ the entity's ``near`` flap (its local ``-y`` hinge) is the one on the arms'
 side (world ``-x``) and ``far`` is the one at the slat wall: the names the
 documents use and the routine hooks."""
 
-MAT_CENTER = (CARTON_AT[0], -0.05)
-MAT_HALF = (0.14, 0.19, 0.002)
+MAT_CENTER = (CARTON_AT[0], -0.085)
+MAT_HALF = (0.14, 0.225, 0.002)
 """The work mat: what the carton stands on, the surface it slides across, what
 the knife lies on and -- in `decant` -- what the contents are set down on.
 
-Longer toward -y than the carton needs because the knife lies there and the
-set-down goes there too; both bands are on the working arm's side, which is the
+Longer toward -y than the carton needs because the knife lies there (out to
+y = -0.31 since the knife moved for the YAM's wrist camera) and the set-down
+goes there too; both bands are on the working arm's side, which is the
 one that can reach them top-down. Under the path tracer it wears the bench's
 own 25 mm grid and disappears into it, which is what the clip shows -- a carton
 on the mat, no pad."""
 
-KNIFE_AT = (CARTON_AT[0] + 0.05, -0.165)
+KNIFE_AT = (CARTON_AT[0] + 0.05, -0.235)
 """Where the cutter lies, in the surface frame.
 
 To the right (-y) of the carton and a little beyond it (+x), as the clip has
-it: the inset puts the tool about two grid squares past the carton's corner.
-Its body runs from y = -0.215 to -0.115, 15 mm clear of the carton's end wall;
-closer than the clip's ~230 mm because the rig's overhead is aimed at the tape
-and a landmark 200 mm off the aim fills 0.7 of that camera's half-frame against
-the framing ledger's 0.60 (``tests/test_rgbs.py``)."""
+it. Its body runs from y = -0.285 to -0.185, 85 mm clear of the carton's end
+wall. It lay 15 mm clear on ``yam_i2rt``; on ``yam`` the hold that can follow
+the draw has the wrist toward the carton, 44 mm off the grip point with a D405
+camera 80 mm further out, and 15 mm of clearance put that camera on the far
+flap 38 mm before the jaws reached the knife."""
 
 KNIFE_YAW = -0.5 * math.pi
 """The cutter's yaw [rad]: its long axis along world y with the NOSE toward the
