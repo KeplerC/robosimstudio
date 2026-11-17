@@ -34,7 +34,7 @@ def main() -> None:
     knife_y, tofu_y, blade_x = -0.31, -0.16, 0.04  # as in 03_materials/10_cutting [m]
     over_knife = (0.0, 1.792, 1.376, -1.154, 0.0, 0.0)  # the right arm's home, as in 03_materials/10_cutting [rad]
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     with contextlib.suppress(ValueError):  # registered by an earlier run in this process
         register_embodiment(
             rss.replace(yam, name="yam_knife", arms=(yam.arms[0], rss.replace(yam.arms[1], home_q=over_knife)))

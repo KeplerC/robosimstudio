@@ -36,7 +36,7 @@ def main():
     wall, height = 0.01, 0.015  # half-thickness (20 mm, five voxels) and half-height (30 mm) of a wall [m]
 
     scene = rss.Scene(cell=cell, name="sweep_rice", physics=rss.GRANULAR_60HZ)
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     rice = scene.add(
         rss.heap(
             name="rice", size=heap_size, at=heap_at, material="rice", containers=("pusher",), container_margin=0.004

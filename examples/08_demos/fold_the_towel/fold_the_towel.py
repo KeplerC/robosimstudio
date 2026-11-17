@@ -226,7 +226,7 @@ def build():
         collision=rss.CollisionSpec(soft_contact_margin=0.010, full_surface_contact=True),
     )
     scene = rss.Scene(cell=CELL, physics=physics, name="fold_the_towel")
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     scene.add(
         rss.sheet(
             name="towel",

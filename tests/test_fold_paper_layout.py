@@ -84,7 +84,7 @@ class TestTheFoldIsLaidOutForTwoHands(unittest.TestCase):
     def test_the_arms_collide_with_each_other(self) -> None:
         from robosimstudio.robots.registry import get_embodiment
 
-        self.assertTrue(get_embodiment("yam_bimanual").cross_arm_collisions, "the YAM's own setting")
+        self.assertTrue(get_embodiment("yam").cross_arm_collisions, "the YAM's own setting")
         self.assertNotIn("cross_arm_collisions=False", self.source)
 
     def test_the_grip_is_capped_and_feels_the_sheet(self) -> None:

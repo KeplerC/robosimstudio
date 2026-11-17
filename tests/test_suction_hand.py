@@ -3,8 +3,8 @@
 
 :mod:`tests.test_suction_pick` shows the cup picking a plate up; this holds the
 parts that are arithmetic. The hand is registered as an attachable hand with no
-fingers and a span of 0; ``yam_bimanual_suction`` puts it on the right arm only,
-with the left arm exactly ``yam_bimanual``'s; the gripper axis refuses the cup
+fingers and a span of 0; ``yam_suction`` puts it on the right arm only,
+with the left arm exactly ``yam``'s; the gripper axis refuses the cup
 for the whole two-root robot with the reason. :func:`face_on_box` reads gap,
 tilt and cover off synthetic poses, :meth:`Suction.seal` turns them into the
 sentences the page shows (its **Seal** readout looking without overwriting
@@ -75,7 +75,7 @@ class TestThePairing(unittest.TestCase):
     def test_the_cup_is_on_the_right_arm_and_the_left_is_untouched(self) -> None:
         from robosimstudio.robots.registry import get_embodiment, hands_of
 
-        plain, cup = get_embodiment("yam_bimanual"), get_embodiment("yam_bimanual_suction")
+        plain, cup = get_embodiment("yam"), get_embodiment("yam_suction")
         self.assertEqual(plain.arms[0], cup.arms[0], "the left arm changed")
         right = cup.arms[1]
         self.assertEqual(("right", "suction"), (right.name, right.gripper))
@@ -87,7 +87,7 @@ class TestThePairing(unittest.TestCase):
     def test_the_gripper_axis_refuses_a_cup_for_both_arms_and_says_how(self) -> None:
         from robosimstudio.robots.registry import _admits_gripper, get_embodiment
 
-        ok, why = _admits_gripper(get_embodiment("yam_bimanual"), "suction")
+        ok, why = _admits_gripper(get_embodiment("yam"), "suction")
         self.assertFalse(ok)
         self.assertIn("ArmSpec.gripper", why)
         self.assertEqual((True, ""), _admits_gripper(get_embodiment("panda"), "suction"))
@@ -98,13 +98,13 @@ class TestThePairing(unittest.TestCase):
 
         for gripper in ("suction", "yam_linear_arena"):
             with self.subTest(gripper):
-                ok, why = _admits_gripper(get_embodiment("yam_bimanual_suction"), gripper)
+                ok, why = _admits_gripper(get_embodiment("yam_suction"), gripper)
                 self.assertFalse(ok)
                 self.assertIn("ArmSpec.gripper", why)
-        self.assertEqual((True, ""), _admits_gripper(get_embodiment("yam_bimanual"), "yam_linear_arena"))
+        self.assertEqual((True, ""), _admits_gripper(get_embodiment("yam"), "yam_linear_arena"))
 
     def _built_spec(self, gripper: str):
-        """The robot spec the compiler would build ``yam_bimanual_suction`` from under a binding naming ``gripper``.
+        """The robot spec the compiler would build ``yam_suction`` from under a binding naming ``gripper``.
 
         The compiler is stopped where it builds the robot.
         """
@@ -125,8 +125,8 @@ class TestThePairing(unittest.TestCase):
 
         real = compiler._resolve_entity
         request = BuildRequest(
-            embodiment="yam_bimanual_suction",
-            binding=Binding(embodiment="yam_bimanual_suction", gripper=gripper),
+            embodiment="yam_suction",
+            binding=Binding(embodiment="yam_suction", gripper=gripper),
         )
         with mock.patch.object(
             compiler, "_resolve_entity", lambda path: robot if path == compiler._EMBODIMENT_ENTITY else real(path)
@@ -145,12 +145,12 @@ class TestThePairing(unittest.TestCase):
 
         spec = self._built_spec("yam_linear_arena")
         self.assertEqual("yam_linear_arena", spec.gripper)
-        self.assertEqual(get_embodiment("yam_bimanual_suction").arms[0], spec.arms[0])
+        self.assertEqual(get_embodiment("yam_suction").arms[0], spec.arms[0])
         self.assertEqual(("", None), (spec.arms[1].gripper, spec.arms[1].gripper_mount))
 
     def test_an_arm_that_already_carries_the_named_hand_keeps_its_mount(self) -> None:
         """Naming the cup the right arm carries leaves that arm as it is, so the cup is not bolted at the flange."""
-        from robosimstudio.robots.embodiments.yam_bimanual_suction import SUCTION_MOUNT
+        from robosimstudio.robots.embodiments.yam_suction import SUCTION_MOUNT
 
         spec = self._built_spec("suction")
         self.assertEqual("suction", spec.gripper)
@@ -256,8 +256,8 @@ class TestOnlyACupKeepsARobotToOneWorld(unittest.TestCase):
         from robosimstudio.robots.registry import get_embodiment
         from robosimstudio.scene.compiler import _adds_substep_kernels
 
-        self.assertFalse(_adds_substep_kernels(EntityEmbodiment(get_embodiment("yam_bimanual"))))
-        self.assertTrue(_adds_substep_kernels(EntityEmbodiment(get_embodiment("yam_bimanual_suction"))))
+        self.assertFalse(_adds_substep_kernels(EntityEmbodiment(get_embodiment("yam"))))
+        self.assertTrue(_adds_substep_kernels(EntityEmbodiment(get_embodiment("yam_suction"))))
 
 
 class TestTheSealGeometry(unittest.TestCase):

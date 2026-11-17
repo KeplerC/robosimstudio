@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from robosimstudio.specs import ActuationSpec, GripperSpec
 
-from ..registry import register_gripper
+from ..registry import GRIPPERS, register_gripper
 
 __all__ = ["CLAMP", "FINGER_OPEN", "GRASP_SITE_OFFSET", "GRASP_SITE_QUAT_XYZW", "YAM_LINEAR_ARENA"]
 
@@ -143,4 +143,10 @@ YAM_LINEAR_ARENA = register_gripper(
         open_axis_signs=(1.0, -1.0),
         actuation=CLAMP,
     )
+)
+
+GRIPPERS.retire(
+    "linear_4310",
+    "the composed i2rt YAM's blade-tip hand, retired with that robot: the one YAM, 'yam', wears this hand "
+    "('yam_linear_arena'); its files are archived on the Hub under robots/archive/yam_i2rt/",
 )

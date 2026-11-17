@@ -76,7 +76,7 @@ def _arm_base(arm: ArmSpec, arm_j: Sequence[int], joint_parent, joint_types, bod
     ``base_body`` and by :meth:`EntityEmbodiment._place_arms` for the body
     ``arms_at`` places, so the two are the same body wherever the base survives
     the import as a body. A collapse folds a welded base into the world, and the
-    handle then reads -1 (``yam_bimanual``): the arm still stands where it was
+    handle then reads -1 (``yam``): the arm still stands where it was
     placed, and IK measures its frame off the model. -1 is the world, or no
     moving joint at all.
     """
@@ -641,7 +641,7 @@ class EntityEmbodiment(Entity):
         on a robot whose file declares two arms the second arm's hand attaches
         and the first arm's would raise. Both YAM cells are that shape. A hand
         named on the last arm's own :attr:`~robosimstudio.specs.ArmSpec.gripper`
-        is welded (``yam_bimanual_suction``'s cup); a hand for any other arm is
+        is welded (``yam_suction``'s cup); a hand for any other arm is
         refused here with that reason, and ``registry.admits`` refuses a hand
         named for the whole robot before the compiler gets this far.
         """
@@ -856,7 +856,7 @@ class EntityEmbodiment(Entity):
         Runs on the import as the file declares it, before any fixed joint is
         collapsed, because that is where an arm's base is still a body: the one
         :attr:`~robosimstudio.specs.ArmSpec.base_body_name` names, else the body
-        the arm's first moving joint hangs on -- on ``yam_bimanual``, ``left_arm``
+        the arm's first moving joint hangs on -- on ``yam``, ``left_arm``
         and ``right_arm``; first in the tree, which an importer numbers depth
         first, whatever order ``joint_names`` lists them in. A mount of three
         numbers is a position: the base goes there and keeps the heading the
@@ -1263,7 +1263,7 @@ class EntityEmbodiment(Entity):
         ``mujoco:actuator_ctrlrange`` attribute while newton reads the MJCF. By
         the time actuation is applied the copy is already taken, so the solver
         goes on clamping the **target** at the old bound however wide the
-        joint's own limit has become -- measured on ``yam_bimanual``, a joint
+        joint's own limit has become -- measured on ``yam``, a joint
         commanded to 115 degrees sat at 90.0 with the joint limit alone
         widened and reached 115.0 with this.
 

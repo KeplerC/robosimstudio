@@ -166,9 +166,9 @@ a ``METAL`` bar in the ``objects`` role is still metal."""
 def register_color_finish(color: Vec3, finish: Finish) -> None:
     """Key a finish to a colour, for a module that owns a colour outside the palette.
 
-    The YAM's white shells are the case: ``yam_look`` states the colour, and
-    stating "and it is glossy" beside it is one registration rather than a
-    dependency from this module on a robot.
+    A robot whose shell colour is not a palette colour is the case: the module
+    that states the colour states "and it is glossy" beside it, one registration
+    rather than a dependency from this module on a robot.
     """
     key = tuple(float(v) for v in color)
     for i, (existing, _) in enumerate(_BY_COLOR):

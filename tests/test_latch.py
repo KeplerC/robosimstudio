@@ -40,7 +40,7 @@ def _scene():
     import robosimstudio as rss
 
     scene = rss.Scene(cell="bench_075", name="latch")
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     scene.add(rss.rod(name="rope", length=0.4, radius=0.011, at=(0.0, -0.20, 0.011), segments=20))
     sim = scene.build()
     sim.run(30).sync()  # let it settle onto the bench first

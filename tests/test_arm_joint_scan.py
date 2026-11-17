@@ -35,7 +35,7 @@ class TestAFreeJointIsNeverAnArmJoint(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075")
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         for i, name in enumerate(names):
             scene.add(rss.box(name=name, half=(0.02,) * 3, at=(0.0, 0.15 - 0.15 * i, 0.10)))
         sim = scene.build()
@@ -68,7 +68,7 @@ class TestAFreeJointIsNeverAnArmJoint(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell="bench_075")
-        scene.add(rss.robot("yam_bimanual"))
+        scene.add(rss.robot("yam"))
         scene.add(rss.box(name="left_cube", half=(0.02,) * 3, at=(0.0, 0.15, 0.10)))
         sim = scene.build()
         sim.run(30).sync()

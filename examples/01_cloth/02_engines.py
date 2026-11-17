@@ -18,7 +18,7 @@ def main():
     engine = "newton"  # or "superdex", "genesis"
 
     cell = "bench_075"
-    embodiment = "yam_bimanual"
+    embodiment = "yam"
     size = 0.3
     cells = 20
 

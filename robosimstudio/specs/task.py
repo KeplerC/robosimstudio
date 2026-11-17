@@ -726,7 +726,7 @@ class TaskSpec:
         copies of one line and four chances to edit ``bindings[1]`` by mistake.
 
         Only the native row is touched. A foreign pairing declared for the matrix
-        -- a cable-routing variant's ``yam_bimanual`` row, which compiles and has
+        -- a cable-routing variant's ``yam`` row, which compiles and has
         no policy -- is a claim about a robot this task was never authored
         against, and quietly changing its physics too would make that claim
         about something nobody measured.

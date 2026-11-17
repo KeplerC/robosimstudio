@@ -52,7 +52,7 @@ Source: [`01_new_kind.py`](01_new_kind.py)
 A plate lying flat under the right hand's suction cup and a square 200 mm toward the middle of the bench: drag the hand down onto the plate, tick **Vacuum** in the right arm's panel, lift, carry it over the square and untick.
 
 The plate is 150 by 150 by 6 mm and 0.3 kg, flat on the bench, so a parallel
-jaw has nothing to close across; `yam_bimanual_suction` carries a vacuum cup
+jaw has nothing to close across; `yam_suction` carries a vacuum cup
 on its right arm instead, its face 100 mm over the plate and pointing down at
 home, and keeps the left hand's jaws. The cup seals when its face is within
 2 mm of the plate and square to it within 15 degrees, and the arm's **Seal**

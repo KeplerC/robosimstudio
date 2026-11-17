@@ -12,7 +12,7 @@ hand.
 
 What would break it is one embodiment module importing another by name, or
 anything in the library importing either at module scope. The first is a real
-relationship in one place -- the two composed YAMs share ``yam_look`` -- which
+relationship in one place -- ``yam_suction`` is the ``yam`` with a cup -- which
 is why the modules left out are named here rather than "any one of them".
 
 Run in a subprocess over a copy of the package's directory with the files
@@ -93,7 +93,7 @@ class TestARobotModuleMayBeAbsent(unittest.TestCase):
         self.assertIsNotNone(self.got, f"the probe printed nothing:\n{self.result.stdout[-2000:]}")
 
     def test_the_rest_are_listed_and_the_absent_are_not(self) -> None:
-        for name in ("panda", "panda_robotiq", "yam_bimanual", "yam_i2rt"):
+        for name in ("panda", "panda_robotiq", "yam", "yam_suction"):
             self.assertIn(name, self.got["robots"])
         for name in LEFT_OUT:
             self.assertNotIn(name, self.got["robots"])

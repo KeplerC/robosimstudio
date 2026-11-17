@@ -17,15 +17,17 @@ import numpy as np
 import robosimstudio as rss
 from robosimstudio_studio.routine import grip, hand, reach, wait
 
-LOW = 0.0115
-"""Where the tool centre is sent to pinch [m over the bench]. The i2rt fingertips reach
-10.5 mm past it and a YAM at rest sits ~2.5 mm over its target, so the tips stop on the
-bench with the whole 7 mm cable between the pads."""
+LOW = 0.0135
+"""Where the tool centre is sent to pinch [m over the bench]. The YAM's fingertips reach
+12.1 mm past it and a YAM at rest sits ~2.5 mm over its target, so the tips stop just over
+the bench with the whole 7 mm cable between the pads."""
 CARRY, SPEED = 0.03, 0.05
 """Carry height [m] and speed [m/s]. With the tool centre 30 mm up the pinched capsule rides
 17 mm over the bench; at 20 mm it slid out of the pads in a sideways drag (77 mm, measured)."""
-LOADED = 0.02
-"""How far a hand dragging the cable may stop from its target [m]: the cable pulls it back."""
+LOADED = 0.03
+"""How far a hand dragging the cable may stop from its target [m]: the cable pulls it back. The
+YAM's hand clamps like the real driver, 50 N a jaw, so the cable stays pinched and drags the
+hand up to ~25 mm behind on the long carries (stopped 21-23 mm short at 0.02)."""
 
 
 def world(point) -> np.ndarray:
@@ -190,13 +192,8 @@ def main():
         ),
         collision=rss.CollisionSpec(contact_matching="sticky"),
     )
-    # A cable dragged across the jaws pries them open. At the i2rt fingers' own 600 N/m it
-    # slid out of 3 drags of 7; at 2000 N/m the carry round the second spool still pried
-    # them 5 mm apart and lost the cable in 3 runs of 26. At 6000 N/m: 16 of 16, 1-9 mm.
-    fingers = rss.ActuationSpec(target_ke=6000.0, target_kd=120.0)
-
     scene = rss.Scene(cell=board.CELL, physics=physics, name="route_the_cable")
-    scene.add(rss.robot("yam_i2rt", gripper=fingers))
+    scene.add(rss.robot("yam"))  # its own hand: 50 N a jaw holds a dragged cable, 1-3 mm of slip a grasp
     for part in board.scenery():
         scene.add(part)
     scene.add(board.cable())

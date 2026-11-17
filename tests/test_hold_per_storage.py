@@ -35,7 +35,7 @@ def _superdex_rod_scene():
         backends=(("articulated", backend("mujoco")), ("rod", backend("superdex", substeps=2)), ("*", backend("vbd"))),
     )
     scene = rss.Scene(cell="bench_075", name="hold", physics=physics)
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     scene.add(rss.rod(name="rope", length=0.4, radius=0.011, at=(0.0, -0.20, 0.011), segments=20))
     sim = scene.build()
     sim.run(30).sync()

@@ -23,7 +23,7 @@ def main():
     left_q = (-0.8756, 1.7574, 0.7021, 1.0552, -1.3992, 0.0)  # its mirror; both by ``sim.arm(...).solve_q_full``
     vbd = rss.backend("vbd", rigid_body_contact_buffer_size=256, rigid_contact_history=True)
     physics = rss.replace(rss.GENERIC.with_backend("*", vbd), collision=rss.CollisionSpec(contact_matching="sticky"))
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     yam = rss.replace(yam, arms=(rss.replace(yam.arms[0], home_q=left_q), rss.replace(yam.arms[1], home_q=right_q)))
     scene = rss.Scene(cell="bench_075", physics=physics, name="cable_twist")
     scene.add(rss.robot(yam))

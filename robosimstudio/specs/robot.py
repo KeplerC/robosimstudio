@@ -823,8 +823,8 @@ class EmbodimentSpec:
             link, the parts that should differ cannot be named, only cut out.
             So this runs last and repaints the few shapes that a single colour
             gets wrong.
-            :func:`~robosimstudio.robots.embodiments.yam_look.split_yam_white_tubes`
-            is the one that exists.
+            The composed i2rt YAM's white-tube split was the one that existed;
+            it was retired with that robot, so no shipped embodiment sets one.
 
             It may add visual-only shapes and hide originals; it must not touch
             collision geometry or inertia. Returning 0 means nothing matched,

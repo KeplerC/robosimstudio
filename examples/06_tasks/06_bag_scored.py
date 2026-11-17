@@ -21,7 +21,7 @@ from robosimstudio_materials.bag import Bag
 TASK = """
 (define (problem open_a_bag)
   (:language open the bag)
-  (:staging (:scene bench_0728) (:embodiment yam_bimanual) (:physics bag_60hz@v1)
+  (:staging (:scene bench_0728) (:embodiment yam) (:physics bag_60hz@v1)
             (:gripper-actuation (:ke 1500) (:kd 60)))
   (:objects bag - canvas_bag)
   (:goal (>= (mouth_opening bag) 0.03)))

@@ -23,7 +23,7 @@ from robosimstudio_materials.water import Water
 TASK = """
 (define (problem pour_water)
   (:language pour the water into the glass up to the line)
-  (:staging (:scene bench_075) (:embodiment yam_bimanual) (:physics water_60hz@v1))
+  (:staging (:scene bench_075) (:embodiment yam) (:physics water_60hz@v1))
   (:fixtures glass_near - glass_near glass_far - glass_far glass_right - glass_right glass_left - glass_left
              line - fill_line)
   (:objects cup - water_cup water - cup_of_water)

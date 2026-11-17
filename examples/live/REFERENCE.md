@@ -67,7 +67,7 @@ The one requirement: when the file has run, `scene` is an `rss.Scene`.
 import robosimstudio as rss
 
 scene = rss.Scene(cell="bench_075", name="lid")
-scene.add(rss.robot("yam_bimanual"))  # a scene needs something that moves before it will build
+scene.add(rss.robot("yam"))  # a scene needs something that moves before it will build
 ```
 
 - The server builds it with `scene.build(control_mode="joint_position")`. Bind

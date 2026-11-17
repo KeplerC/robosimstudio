@@ -34,7 +34,7 @@ def main():
     # jaws open across y. Solved with ``sim.arm("right").solve_q_full``.
     over_cup = (0.0, 1.723, 0.642, 1.081, 0.0, 0.0)
 
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     left, right = yam.arms
     yam = rss.replace(yam, arms=(left, rss.replace(right, home_q=over_cup)))
 

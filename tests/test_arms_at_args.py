@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """``rss.robot(arms_at=...)``: the argument, its way to the compiler, and the placement on a builder.
 
-The GPU half (``test_arms_at``) measures a built ``yam_bimanual``; this half
+The GPU half (``test_arms_at``) measures a built ``yam``; this half
 holds the plumbing and every refusal, none of which needs a device:
 
 * ``arms_at`` is spelled as ``at`` is, per arm, and reaches the binding in world
@@ -35,42 +35,42 @@ class TestTheArgument(unittest.TestCase):
         """Not filled out to a pose: a position keeps the base's heading, which only the build knows."""
         import robosimstudio as rss
 
-        placed = rss.robot("yam_bimanual", arms_at={"left": LEFT, "right": RIGHT})
+        placed = rss.robot("yam", arms_at={"left": LEFT, "right": RIGHT})
         self.assertEqual((("left", LEFT), ("right", RIGHT)), placed.arms_at)
 
     def test_a_placement_built_directly_reads_the_same_and_hashes(self) -> None:
         import robosimstudio as rss
 
-        direct = rss.Robot(name="yam_bimanual", arms_at={"left": list(LEFT)})
+        direct = rss.Robot(name="yam", arms_at={"left": list(LEFT)})
         self.assertEqual((("left", LEFT),), direct.arms_at)
         hash(direct)
 
     def test_unstated_is_empty(self) -> None:
         import robosimstudio as rss
 
-        self.assertEqual((), rss.robot("yam_bimanual").arms_at)
+        self.assertEqual((), rss.robot("yam").arms_at)
 
     def test_a_bad_pose_names_the_arm(self) -> None:
         import robosimstudio as rss
 
         with self.assertRaisesRegex(ValueError, r"arms_at\['left'\] is a position"):
-            rss.robot("yam_bimanual", arms_at={"left": (0.1, 0.2)})
+            rss.robot("yam", arms_at={"left": (0.1, 0.2)})
         with self.assertRaisesRegex(TypeError, r"arms_at\['left'\] is None"):
-            rss.robot("yam_bimanual", arms_at={"left": None})
+            rss.robot("yam", arms_at={"left": None})
 
     def test_a_zero_rotation_is_refused_before_the_frame_hides_it(self) -> None:
         import robosimstudio as rss
 
         with self.assertRaisesRegex(ValueError, r"arms_at\['right'\] has a zero quaternion"):
-            rss.robot("yam_bimanual", arms_at={"right": (0.1, -0.3, 0.2, 0.0, 0.0, 0.0, 0.0)})
+            rss.robot("yam", arms_at={"right": (0.1, -0.3, 0.2, 0.0, 0.0, 0.0, 0.0)})
 
     def test_not_a_mapping_of_names_is_refused(self) -> None:
         import robosimstudio as rss
 
         with self.assertRaisesRegex(TypeError, "maps an arm's name"):
-            rss.robot("yam_bimanual", arms_at=[LEFT])
+            rss.robot("yam", arms_at=[LEFT])
         with self.assertRaisesRegex(TypeError, "maps an arm's name"):
-            rss.robot("yam_bimanual", arms_at=LEFT)  # spelled like at= by mistake
+            rss.robot("yam", arms_at=LEFT)  # spelled like at= by mistake
 
 
 class TestTheBinding(unittest.TestCase):
@@ -78,7 +78,7 @@ class TestTheBinding(unittest.TestCase):
         import robosimstudio as rss
 
         scene = rss.Scene(cell=cell)
-        scene.add(rss.robot("yam_bimanual", **robot))
+        scene.add(rss.robot("yam", **robot))
         return scene.request.binding
 
     def test_arms_at_reaches_the_binding_in_world(self) -> None:
@@ -109,9 +109,9 @@ class TestTheBinding(unittest.TestCase):
         import robosimstudio as rss
         from robosimstudio.specs import Binding
 
-        binding = Binding(scene="bench_075", embodiment="yam_bimanual", arm_mounts=(("left", (0, 0, 1, 0, 0, 0, 1)),))
+        binding = Binding(scene="bench_075", embodiment="yam", arm_mounts=(("left", (0, 0, 1, 0, 0, 0, 1)),))
         scene = rss.Scene(cell="bench_075", binding=binding)
-        scene.add(rss.robot("yam_bimanual", arms_at={"left": LEFT}))
+        scene.add(rss.robot("yam", arms_at={"left": LEFT}))
         with self.assertRaisesRegex(ValueError, "both say where the arms stand"):
             _ = scene.request
 
@@ -128,13 +128,13 @@ class TestTheNames(unittest.TestCase):
         return _arm_mounts(request, request.binding_for(), get_embodiment(robot))
 
     def test_the_robots_own_arms_pass_through_in_world(self) -> None:
-        mounts = self._mounts("yam_bimanual", left=LEFT, right=RIGHT)
+        mounts = self._mounts("yam", left=LEFT, right=RIGHT)
         self.assertEqual(["left", "right"], sorted(mounts))
         self.assertEqual(7, len(mounts["right"]))
 
     def test_an_arm_the_robot_does_not_have_is_refused_with_its_arms(self) -> None:
         with self.assertRaisesRegex(ValueError, r"arm 'middle'.*has arms \['left', 'right'\]"):
-            self._mounts("yam_bimanual", middle=LEFT)
+            self._mounts("yam", middle=LEFT)
 
     def test_a_one_armed_robot_takes_its_one_name(self) -> None:
         self.assertEqual(["right"], sorted(self._mounts("panda", right=LEFT)))

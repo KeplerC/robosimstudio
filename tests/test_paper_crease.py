@@ -393,7 +393,7 @@ class TestTheCoupledSolverReadsTheSameArray(unittest.TestCase):
         for label, physics in (("proxy", rss.GENERIC), ("one_way", one_way)):
             with self.subTest(coupler=label):
                 scene = rss.Scene(cell="bench_0728", physics=physics, name=f"paper_{label}")
-                scene.add(rss.robot(get_embodiment("yam_bimanual")))
+                scene.add(rss.robot(get_embodiment("yam")))
                 scene.add(rss.paper(name="sheet", size=(0.1, 0.1), cells=(10, 10), at=(-0.05, -0.2, 0.01)))
                 sim = scene.build(control_mode="joint_position")
                 entity = sim.scene.by_name["sheet"]

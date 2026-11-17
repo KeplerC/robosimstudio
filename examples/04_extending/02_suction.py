@@ -4,7 +4,7 @@
 A plate lying flat under the right hand's suction cup and a square 200 mm toward the middle of the bench: drag the hand down onto the plate, tick **Vacuum** in the right arm's panel, lift, carry it over the square and untick.
 
 The plate is 150 by 150 by 6 mm and 0.3 kg, flat on the bench, so a parallel
-jaw has nothing to close across; ``yam_bimanual_suction`` carries a vacuum cup
+jaw has nothing to close across; ``yam_suction`` carries a vacuum cup
 on its right arm instead, its face 100 mm over the plate and pointing down at
 home, and keeps the left hand's jaws. The cup seals when its face is within
 2 mm of the plate and square to it within 15 degrees, and the arm's **Seal**
@@ -33,7 +33,7 @@ def main():
     square = (-0.11, -0.22, 0.11, 0.0)  # x0, y0, x1, y1 [m]: 220 mm across, its centre 200 mm from the plate's
 
     scene = rss.Scene(cell=cell, name="pick_a_plate", physics=rss.MUJOCO_500HZ)
-    scene.add(rss.robot("yam_bimanual_suction"))
+    scene.add(rss.robot("yam_suction"))
     scene.add(rss.box(name="plate", half=plate_half, at=plate_at, mass=plate_mass, color=(0.88, 0.88, 0.85)))
     # The square, with a 10 mm height window: the plate counts as in it resting, not carried over it.
     scene.add(rss.RegionSpec(name="square", frame="", xy_ranges=square, z_range=(0.0, 0.01)))

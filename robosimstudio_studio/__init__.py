@@ -7,7 +7,7 @@ click a thing and drag it, drive the arms, record what you drove, film it.
     import robosimstudio as rss
 
     scene = rss.Scene(cell="void")
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     scene.add(rss.box(name="cube", half=(0.025,) * 3, at=(0.0, 0.0, 0.2)))
     rss.view(scene.build())
 

@@ -33,7 +33,7 @@ def main():
     layers = {"particle_self_contact_radius": 1.0e-3, "particle_self_contact_margin": 1.0e-3}
     physics = physics.with_backend("*", rss.backend("vbd", **vbd, **layers))
     # The arms collide (the YAM's own). A hand's motor pushes its driven finger 10 N at most; the other follows.
-    yam = get_embodiment("yam_bimanual")
+    yam = get_embodiment("yam")
     hands = rss.ActuationSpec(target_ke=1.0e5, target_kd=20.0, effort_limit=10.0, joint_damping=100.0)  # 200 a pair
 
     scene = rss.Scene(cell="bench_0728", physics=physics, name="paper")

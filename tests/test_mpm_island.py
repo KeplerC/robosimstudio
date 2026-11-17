@@ -170,7 +170,7 @@ def _build(*, num_worlds: int = 1, **spec):
 
     _register()
     scene = rss.Scene(cell="void", name="mpm_island", physics=_physics())
-    scene.add(rss.robot("yam_bimanual"))
+    scene.add(rss.robot("yam"))
     heap = scene.add(HeapProbeSpec(**spec))
     sim = scene.build(control_mode="joint_position", num_worlds=num_worlds)
     return sim, heap

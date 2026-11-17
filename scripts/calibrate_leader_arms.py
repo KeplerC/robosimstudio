@@ -47,7 +47,7 @@ button; and a running list of every joint already calibrated, with its
 offset. The terminal only takes the bootstrap arguments below and reports
 where the file landed at the end.
 
-The simulated arm is a bare scene -- ``yam_bimanual`` in an empty ``bench_075``
+The simulated arm is a bare scene -- ``yam`` in an empty ``bench_075``
 cell unless ``--embodiment`` and ``--cell`` say otherwise. No task is involved;
 the calibration is between a leader and a robot, and the robot is the same one
 ``examples/09_teleop/`` drives.
@@ -858,7 +858,7 @@ def create_parser() -> argparse.ArgumentParser:
         help="<arm>:<port>[,...], e.g. left:/dev/ch340-<left-serial>,right:/dev/ch340-<right-serial>",
     )
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="calibration JSON to write (and resume from)")
-    parser.add_argument("--embodiment", default="yam_bimanual", help="the registered robot the leader drives")
+    parser.add_argument("--embodiment", default="yam", help="the registered robot the leader drives")
     parser.add_argument("--cell", default="bench_075", help="the cell to stand it in")
     partial = parser.add_mutually_exclusive_group()
     partial.add_argument(

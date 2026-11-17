@@ -89,7 +89,7 @@ if WITH_SPONGE:
     out["sponge"] = {"particles": len(q), "lowest_over_bench": float(q[:, 2].min()) - bench_top}
 
 scene = rss.Scene(cell="bench_075", name="everything")
-scene.add(rss.robot("yam_bimanual"))
+scene.add(rss.robot("yam"))
 scene.add(rss.post(name="post", radius=0.015, half_height=0.05, at=(0.15, 0.20, 0.05)))
 cube = scene.add(rss.box(name="cube", half=(0.02,) * 3, at=(0.0, 0.20, 0.10)))
 scene.add(rss.sheet(name="towel", size=(0.16, 0.16), cells=(10, 10), at=(0.0, -0.20, 0.05)))
@@ -152,7 +152,7 @@ class TestScenesBuildWithoutTheRodPack(unittest.TestCase):
 
     def test_a_robot_shares_one_scene_with_all_of_them(self) -> None:
         everything = self.got["everything"]
-        self.assertEqual("yam_bimanual", everything["robot"])
+        self.assertEqual("yam", everything["robot"])
         self.assertEqual(2, everything["arms"])
         expected = {"cube", "post", "towel"} | ({"sponge"} if HAS_SUPERDEX else set())
         self.assertLessEqual(expected, set(everything["entities"]))
