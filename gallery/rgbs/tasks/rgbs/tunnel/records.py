@@ -17,13 +17,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from robosimstudio_materials.rod.declare import Rod
-
 from robosimstudio.assetlib.record import AssetRecord
 from robosimstudio.assetlib.registry import register_asset
 from robosimstudio.assetlib.semantics.features import FeatureSpec
 from robosimstudio.assetlib.semantics.published import PublishedState
 from robosimstudio.assetlib.semantics.states import StateSpec
+from robosimstudio_materials.rod.declare import Rod
 
 from .box import BORE, BOX_DEPTH, BOX_HEIGHT, BOX_LENGTH, ROOF, RUN, WALL, box_frame
 from .layout import BOX_SIM, cable_box, tunnel_cable

@@ -77,6 +77,15 @@
     ; 5900. The ceiling is set above what the script needs rather than against
     ; it, because what a POLICY needs is not what a script needs.
     (:max-steps 8000)
+    ; THE FINGER SERVO, stated, because the YAM's own clamp crushes this rod. The
+    ; real driver holds a blocked jaw at 50 N, and the rod's proxy contact gives
+    ; way under that: closed on the cable at the YAM's clamp, the arena hand's
+    ; pads went through the 10 mm capsule and crossed to -8.9 mm, still carried
+    ; the cable through one stroke, and then could not open off it -- the next
+    ; release dragged the tip back out of the bore. A spring of 1500 N/m capped
+    ; at 12 N, as the tape examples state it, squeezes in proportion to the
+    ; interference the routine asks for (PINCH_ENGAGE, HOLD_ENGAGE).
+    (:gripper-actuation (:ke 1500) (:kd 240) (:effort-limit 12))
   )
 
   ; Placed by their records: the box where the reach solve and the rod's tail
@@ -247,6 +256,10 @@
   ; trend: a run whose straightness falls while the reward stalls has folded
   ; outside the mouth; one that stalls with it steady is jammed on friction.
   ; Those are different failures and the reward alone cannot tell them apart.
+  ;
+  ; `held` and `anchor-held` are the rod's grasp latch, which this cable is built
+  ; without (tunnel/layout.py, allow_grasp_latch): both read 0 for the whole
+  ; episode, so whatever moves the cable moves it through the pads' contact.
   (:observe
     (once (>= (containment cable.end_b beyond_exit) 1.0))
     (containment cable inside_bore)
@@ -254,6 +267,8 @@
     (straightness cable)
     (speed cable)
     (speed box)
+    (held cable)
+    (anchor-held cable)
   )
 
 

@@ -65,7 +65,7 @@ from robosimstudio.core.math import quat_to_mat, transform_matrix
 from robosimstudio.core.render.visual import shape_geometry
 from robosimstudio.robots.embodiments import top_down_grasp_site_quat, work_gripper
 
-from .tunnel.box import BORE, FLARE, ROOF, RUN, WALL
+from .tunnel.box import BORE, BOX_HEIGHT, FLARE, ROOF, RUN, WALL
 from .tunnel.plug import PLUG_W
 from .tunnel.rod import RADIUS
 
@@ -108,9 +108,17 @@ the take had it 17 mm along the run and 17 mm across it from there by the
 second stroke, so a push aimed at the layout's mouth was a push aimed 17 mm to
 one side of the real one. False reproduces the shipped behaviour."""
 
-PINCH_UNDER = 0.010
+PINCH_UNDER = 0.016
 """How far below the cable's centre the pad tips reach when the feeding hand
 pinches it [m].
+
+**Sixteen on ``yam``.** The arena hand's pads are parallel faces 37 mm tall,
+not a V, so nothing below argues for a shallow pinch on it, and a capsule held
+10 mm over the tips was pushed out under them when the stroke carried the
+cable up a steep hang. Sixteen keeps the capsule in the middle of the faces
+and the tips :data:`TIP_CLEAR` off the bench (see
+:meth:`RoutineTunnel._pinch_capsule`). The i2rt reasoning below is kept for
+the blades it was measured on.
 
 **Ten, and not deeper, because the closed blades are a V.** Read off the
 finger colliders in 10 mm bands at a closed pinch
@@ -146,8 +154,13 @@ The first move after the grip opens, and :meth:`RoutineTunnel._free_jaws` only
 makes it when a finger is actually still shut on something -- a hand that
 opened cleanly has nothing to get off."""
 
-RELEASE_UNLOAD = 0.015
+RELEASE_UNLOAD = 0.005
 """How far the still-closed hand backs off along its push line before it opens [m].
+
+**Five on ``yam``**, whose pads end a push 15 mm off the flare and never touch
+the box (the contact table reads 0.0 N there): fifteen only drew the cable
+back, 11 mm of the first stroke's 48. The i2rt reasoning below is what the 15
+was for.
 
 Read off the MuJoCo contact table: at the end of a push the finger carriage
 stands on the flare (:data:`CARRIAGE_REACH`), pressing the box with 9 N,
@@ -282,14 +295,15 @@ never from body origins. ``rgbs/scripts/rgbs_tunnel_bench.py grip`` reports coll
 clearance for that reason."""
 
 
-HAND_HALF_Y = 0.027
-"""How far the closed hand's PADS reach along the run from its own grasp site [m].
+HAND_HALF_Y = 0.010
+"""How far the closed hand reaches along the run, toward the box, from its own grasp site [m].
 
-Measured off the finger colliders in the grasp the routine takes: within 30 mm
-of the pad tips the blades reach 25-27 mm along the run past the site. It was
-20, "conservative rather than measured", and it is used where only the pads
-are near anything -- the plug grab, where the carriage rides 50 mm above a
-23 mm lid. Where the carriage matters, see :data:`CARRIAGE_REACH`."""
+Measured off ``yam``'s colliders in the grasp the routine takes (wrist away from
+the box, :data:`WRIST_AWAY`): the fingers span 32 mm behind the site and 7 mm
+ahead of it, and nothing of the hand within 120 mm above the site reaches more
+than 10 mm ahead. The i2rt hand's blades reached 25-27 mm, which is what this
+was. Used where only the pads are near anything -- the end of a push and the
+plug grab."""
 
 CARRIAGE_REACH = 0.045
 """How far the finger CARRIAGE reaches along the run from the grasp site [m],
@@ -316,8 +330,10 @@ PUSH_CLEAR = 0.005
 """Air between the pads' reach and the flare's outer lip [m]. The arm settles
 within 3 mm of a commanded point at this reach (measured)."""
 
-STROKE = 0.055
-"""The most one push may travel along the cable [m] -- and, with
+STROKE = 0.080
+"""The most one push may travel along the cable [m]. 80 on ``yam``, where a push
+runs from the riser to the bore's line (see :data:`PINCH_OUT_MIN`); it was 55.
+And, with
 :data:`FEED_PAST_EXIT`, what keeps the feed alone from reaching the exit
 region (``tests/test_rgbs_tunnel.py``). A 55 mm push along the 45-degree line from
 :data:`PINCH_OUT` advances the hand 39 mm along the run, to the pads'
@@ -353,6 +369,23 @@ Read live off the rod's last capsule before every stroke. Enough that the plug
 second hand to take, and, with one more :data:`STROKE` at full yield, still
 short of ``beyond_exit`` 80 mm out: the feed alone must not satisfy the goal,
 and this plus a whole stroke is 75."""
+
+PINCH_OUT_MIN = 0.045
+"""The nearest behind the entry the feeding hand pinches the cable [m].
+
+The far end of the window :meth:`RoutineTunnel._pinch_capsule` searches, with
+:data:`PINCH_OUT` the near one. **Why a window and not a place**: the feed draws
+the slack in, and the hang the first stroke pinches 90 mm out becomes a riser
+standing 40-60 mm off the entry within two strokes, with the cable at 90 mm
+lying on the table. Pinched there, a push compresses the riser like a spring:
+measured, the third stroke moved the pinched capsule 35 mm and the tip 9, and
+stalled. Pinched on the riser, the column is the riser itself. 45 mm keeps the
+pads (which reach :data:`HAND_HALF_Y` ahead of the site) 15 mm off the flare's
+outer lip."""
+
+TIP_CLEAR = 0.004
+"""How far above the bench the pad tips must stay at a pinch [m]: what tells a
+capsule on the hang from one lying on the table."""
 
 PINCH_OUT = 0.090
 """How far behind the entry face the feeding hand pinches the cable [m].
@@ -414,15 +447,18 @@ HEAD_DESCENT_CLEAR = 0.014
 half-width plus this, so the back pad is over the slot rather than the mat.
 See :data:`PAD_INBOARD` for why 14 and not 4."""
 
-PAD_INBOARD = 0.0094
+PAD_INBOARD = 0.0
 """How far inboard of the finger's travel coordinate the pad's contact face
 sits, in the top-down grasp [m].
 
-**Measured off the built colliders with the lid pinch closed**, not off the
-gripper module's blade-tip gap: with the fingers stalled at q 24.6 mm the pads'
-lowest 15 mm of collider stood at -15.2 and +15.2 mm off the bore axis, on a lid
-33 mm wide (half-width 16.5) -- so a face is ``q`` less 9.4 mm, and it had
-pressed 1.3 mm into the lid.
+**Measured off ``yam``'s finger colliders in the TCP frame**, finger by finger
+against the commanded coordinate: on the arena hand a pad's face stands at the
+finger's own ``q`` from the grasp axis, to within a millimetre over its lowest
+30 mm (``q - 0.7`` mm at the nubs, ``q + 0.1`` at the tips), so nothing is
+inboard. It was 9.4 mm on the i2rt hand this suite was first written for, whose
+blades stood 9.4 mm inside their coordinate; asked for that hand's widths, the
+arena hand's pads closed 9.4 mm wide of every one of them -- 26.5 mm of travel
+around a 16.5 mm half-lid, a hold that touched nothing.
 
 **Every width this module commands goes through it, and that is a repair.** The
 gripper channel takes finger travel, and this routine read "half the cable, less
@@ -451,38 +487,17 @@ wrist straight down (``rgbs/scripts/rgbs_tunnel_bench.py reach``); 30 mm solves.
 approach is a free leg either way, but a free leg that lands short comes down
 diagonally onto the lid with the jaws set 4 mm wider than it."""
 
-GRIP_CLOSE_AXIS = np.array([-0.048, 0.090, 0.0]) / np.linalg.norm(np.array([-0.048, 0.090, 0.0]))
-"""The axis this hand actually closes along, in its own frame.
+WRIST_AWAY = 0.02
+"""How much grasp score [unitless] a hold may give up to stand its wrist away
+from the box.
 
-``yam_arm.py``'s **pre-measurement** closing axis, read off the tip body origins,
-and ~85 degrees from the measured pad axis the connector suites corrected to.
-``cable_route`` carries the same constant, with the warning that decides this
-task: grasping a rod with the *measured* axis "closes the jaws along the rod
-instead of across it ... a pinch that shuts on air while the rod lies beside it".
-
-**Restated here rather than imported, because two tasks may not reach each other
--- and confirmed here rather than taken on trust**, since taking it on trust is
-not what happened. What settles it is the only readout that cannot be faked: the
-number of finger-versus-rod rows the proxy pipeline reports while a hand is
-closed on the cable.
-
-    closing axis   yaw   finger-vs-rod   total contacts
-    measured         0        0          frozen at 196
-    legacy           0        0          frozen at 196
-    legacy          90       33          175..228, live
-
-Zero means the hand passes through the cable, which is ``cable_route``'s own
-phrase for it. For scale, ``cable_route/port_easy`` -- the same rod, the same hand,
-a suite that grips and succeeds -- reports 38 rows at the equivalent moment, so
-33 is a grasp and not a graze.
-
-**There are no grasp-yaw constants here, and that is the finding.** Three fixed
-answers were tried and each was wrong in a way nothing raised: the yaw
-``top_down_grasp_site_quat``'s wording implies, the yaw a rod-displacement probe
-rewards (which cannot tell a grasp from a shove), and this closing axis at a
-fixed yaw. Each was right for one pose and wrong at the pose this routine's own
-leg chain actually reaches, because the chain picks the wrist basin and the
-basin picks the roll. :meth:`RoutineTunnel._grasp_quat` measures instead."""
+``yam``'s grasp point is 44 mm off the wrist axis and the wrist carries a D405
+camera 80 mm further out the same way, so the two holds that pinch a rod across
+equally well differ by where the hand's bulk stands. Turned toward the box, the
+feeding hand landed on it 15 mm behind the cable and stopped 69 mm over the
+pinch, pressing the box with 49 N; turned away, it reaches the cable. On the
+i2rt hand, whose grasp point is on the wrist axis, the two tie exactly and
+this changes nothing."""
 
 PULL = 0.070
 """How far the support hand draws the connector along the ledge [m].
@@ -524,14 +539,10 @@ MAX_POS, MAX_ROT = 0.006, math.radians(50.0)
 An unreachable waypoint comes back as a solution tens of millimetres out with
 nothing raised, and streaming one with a rod in the jaws is a whip. **Position is
 the gate that means something here; the rotation term is a backstop against a
-wild flip and nothing finer**, and it is loose for a measured reason rather than
-a shrug: :data:`GRIP_CLOSE_AXIS` deliberately asks for an orientation this wrist
-cannot hold, so every leg that grips the rod carries a standing rotation
-residual -- measured on the conduit at 35-39 degrees with zero position error.
-Gated at 8 degrees the feed leg was refused on every stroke and the cable
-advanced 4 mm instead of 21. 50 degrees clears the working legs and still
-catches a basin flip. Re-measure it whenever the closing axis or the arm roles
-change."""
+wild flip and nothing finer**. It was loose for the i2rt hand, whose grasp was
+chosen against a legacy closing axis that wrist could not hold (a standing 35-39
+degrees); ``yam``'s holds solve to zero rotation, and 50 degrees still catches a
+basin flip."""
 
 VERBOSE = True
 """Whether the routine narrates each phase to stdout.
@@ -925,10 +936,17 @@ class RoutineTunnel:
         because the chain picks the wrist basin and the basin picks the roll.
 
         So the routine asks the arm. For each candidate it solves the grasp pose,
-        runs the arm's own FK, and measures the line between the two jaw groups:
-        wanted is a large separation in **x**, across a rod that runs in y, and a
-        small one along it. The residual is scored alongside, because an
-        orientation the wrist cannot hold arrives somewhere else entirely.
+        runs the arm's own FK, and reads where the jaws close in the pose the arm
+        actually reached: the hand's declared closing axis (its TCP's y, measured
+        off the pads in the gripper module) carried into the world, wanted along
+        **x**, across a rod that runs in y, and not along it. The residual is
+        scored alongside, because an orientation the wrist cannot hold arrives
+        somewhere else entirely. It used to read the line between the two jaw
+        groups' body origins, which on ``yam``'s arena hand do not move with the
+        pads (they stand 83 mm apart open and 108 shut).
+
+        Of the holds that score within :data:`WRIST_AWAY` of the best, the one
+        whose wrist stands away from the box's middle is taken.
 
         The same orientation serves the support hand: it pinches the lid across
         x, exactly as the work hand pinches the rod.
@@ -942,34 +960,46 @@ class RoutineTunnel:
         env = self.env
         ik = env.arm(name)
         hand = env.scene.embodiment.hands.get(name) or work_gripper(env)
-        groups = env.handles.arms[name].finger_groups[:2]
         target = np.asarray(at if at is not None else self._grasp_target(name), dtype=np.float64)
+        rot_site = quat_to_mat(np.asarray(hand.tcp_offset_rot, dtype=np.float64))
+        close_site = rot_site.T @ np.asarray(hand.close_axis, dtype=np.float64)
 
-        best, best_score = None, -1.0
+        # Which way the wrist should stand off the grip point: away from the
+        # box's middle, along the run. See WRIST_AWAY.
+        _, y_mid, _ = self._layout()
+        away = np.array([0.0, float(np.sign(target[1] - y_mid) or 1.0), 0.0])
+        wrist_local = self._wrist_from_tcp(name)
+
+        candidates = []
         with ik.host_fk():
-            for axis in (GRIP_CLOSE_AXIS, None):
-                for yaw in range(0, 360, 15):
-                    quat = np.asarray(top_down_grasp_site_quat(hand, float(yaw), close_axis=axis), dtype=np.float64)
-                    solution = ik.solve_q_full(self.home_seed, target, quat)
-                    _, rot = ik.pose_errors(solution, target, quat)
-                    ik._eval_fk(np.asarray(solution, dtype=np.float64))
-                    body_q = ik._fk_state.body_q.numpy()
-                    centres = [np.mean([body_q[int(b)][:3] for b, _ in side], axis=0) for side in groups]
-                    line = np.asarray(centres[0]) - np.asarray(centres[1])
-                    norm = float(np.linalg.norm(line))
-                    if norm < 1e-6:
-                        continue
-                    # Across the run and level: a pair that separates vertically
-                    # closes above and below a rod rather than onto it.
-                    across = abs(float(line[0])) / norm
-                    along = abs(float(line[1])) / norm
-                    score = across - along - 0.5 * float(rot)
-                    if score > best_score:
-                        best_score, best = score, (quat, across, along, float(rot), float(yaw))
+            for yaw in range(0, 360, 15):
+                quat = np.asarray(top_down_grasp_site_quat(hand, float(yaw)), dtype=np.float64)
+                solution = ik.solve_q_full(self.home_seed, target, quat)
+                _, rot = ik.pose_errors(solution, target, quat)
+                _, reached = ik.fk_ee(np.asarray(solution, dtype=np.float32))
+                line = quat_to_mat(np.asarray(reached, dtype=np.float64)) @ close_site
+                norm = float(np.linalg.norm(line))
+                if norm < 1e-6:
+                    continue
+                # Across the run and level: a pair that separates vertically
+                # closes above and below a rod rather than onto it.
+                across = abs(float(line[0])) / norm
+                along = abs(float(line[1])) / norm
+                score = across - along - 0.5 * float(rot)
+                side = float(np.dot(quat_to_mat(quat) @ wrist_local, away))
+                candidates.append((score, side, (quat, across, along, float(rot), float(yaw))))
+        top = max(c[0] for c in candidates)
+        _, _, best = max((c for c in candidates if c[0] >= top - WRIST_AWAY), key=lambda c: (c[1], c[0]))
         quat, across, along, rot, yaw = best
         self._quat_report[name] = (across, along, math.degrees(rot), yaw)
         self._quat_cache[name] = quat
         return quat
+
+    def _wrist_from_tcp(self, name: str) -> np.ndarray:
+        """The wrist body's origin from the TCP, in the TCP's own frame [m]."""
+        hand = self.env.scene.embodiment.hands.get(name) or work_gripper(self.env)
+        offset = np.asarray(hand.tcp_offset, dtype=np.float64)
+        return quat_to_mat(np.asarray(hand.tcp_offset_rot, dtype=np.float64)).T @ -offset
 
     def _layout(self):
         """The layout's own constants, through the package the routine lives in."""
@@ -1061,6 +1091,24 @@ class RoutineTunnel:
         pose = self.env.state.body_q.numpy()[bodies][:, :3]
         return np.asarray(pose[int(np.argmin(np.abs(pose[:, 1] - float(y))))], dtype=np.float64)
 
+    def _pinch_capsule(self, entry_y: float, bench_z: float) -> int:
+        """The capsule body the feeding hand pinches this stroke.
+
+        The one furthest from the mouth inside the window :data:`PINCH_OUT_MIN`
+        to :data:`PINCH_OUT` behind the entry whose pinch keeps the pad tips
+        :data:`TIP_CLEAR` off the bench -- so on the hang, never on the table.
+        The first stroke finds it at :data:`PINCH_OUT`, as it always did; once
+        the feed has drawn the slack in and the hang has become a riser beside
+        the box, it finds it on the riser."""
+        bodies = list(self.env.handles.entity("cable").bodies)
+        pose = np.asarray(self.env.state.body_q.numpy()[bodies][:, :3], dtype=np.float64)
+        lo, hi = entry_y - PINCH_OUT, entry_y - PINCH_OUT_MIN
+        ok = (pose[:, 1] >= lo) & (pose[:, 1] <= hi) & (pose[:, 2] - PINCH_UNDER >= bench_z + TIP_CLEAR)
+        if not ok.any():
+            return int(bodies[int(np.argmin(np.abs(pose[:, 1] - (entry_y - PINCH_OUT))))])
+        rows = np.flatnonzero(ok)
+        return int(bodies[int(rows[int(np.argmin(pose[rows, 1]))])])
+
     def _settled_offset(self, name: str, commanded) -> np.ndarray:
         """How far the hand actually sits from where it was sent [m, world xy].
 
@@ -1097,7 +1145,7 @@ class RoutineTunnel:
         load on it. Gives up after :data:`OPEN_WAIT` and lets the caller's
         :meth:`_free_jaws` deal with what is left.
         """
-        open_q = np.asarray(self.env.handles.arms[name].gripper_open_q, dtype=np.float64)
+        open_q = self._finger_open_q(name)
         for step in range(OPEN_WAIT):
             q = self._finger_q(name)
             if q.size and float(np.min(q / np.maximum(open_q[: q.size], 1e-9))) >= OPEN_ENOUGH:
@@ -1107,9 +1155,19 @@ class RoutineTunnel:
         self.open_waits.append(OPEN_WAIT)
 
     def _finger_q(self, name: str) -> np.ndarray:
-        """The finger joints' live coordinates [m], 0 shut."""
+        """Each finger's live coordinate [m], 0 shut, one per jaw.
+
+        A hand whose second jaw is carried by an equality (``yam_bimanual``'s
+        arena hand drives one finger joint) reports its one driven coordinate
+        for both jaws: the equality is what the other one reads."""
         coords = list(self.env.handles.arms[name].gripper_coords)
-        return np.asarray(self.env.state.joint_q.numpy(), dtype=np.float64)[coords]
+        q = np.asarray(self.env.state.joint_q.numpy(), dtype=np.float64)[coords]
+        return np.repeat(q, 2) if q.size == 1 else q
+
+    def _finger_open_q(self, name: str) -> np.ndarray:
+        """Each jaw's fully open coordinate [m], one per jaw as :meth:`_finger_q` reports them."""
+        q = np.asarray(self.env.handles.arms[name].gripper_open_q, dtype=np.float64)
+        return np.repeat(q, 2) if q.size == 1 else q
 
     def _free_jaws(self, name: str, at, quat):
         """After an open command, get the pad that is still on the cable off it.
@@ -1125,7 +1183,7 @@ class RoutineTunnel:
         away from the cable, which stays -- and the finger is free to open.
         Nothing to do when both fingers report open.
         """
-        open_q = np.asarray(self.env.handles.arms[name].gripper_open_q, dtype=np.float64)
+        open_q = self._finger_open_q(name)
         q = self._finger_q(name)
         stuck = [i for i in range(min(2, len(q))) if q[i] < 0.85 * open_q[i]]
         if not stuck:
@@ -1468,6 +1526,9 @@ class RoutineTunnel:
                 axis_z = float(lip[2])
                 push_to = entry_y - FLARE - HAND_HALF_Y - PUSH_CLEAR
                 push_from = entry_y - PINCH_OUT
+            # Where the cable rises, read live. See PINCH_OUT_MIN.
+            pinched = self._pinch_capsule(entry_y, float(self._box_origin()[2]) - BOX_HEIGHT)
+            push_from = float(self.env.state.body_q.numpy()[pinched][1])
             yield from self._leg(
                 self.work,
                 [x_bore, push_from, carry_z],
@@ -1480,7 +1541,7 @@ class RoutineTunnel:
             yield from self._hold(15)
             # Where the cable is, not where the axis is: it hangs. And where
             # the hand actually settled, not where it was sent.
-            rod = self._rod_at(push_from)
+            rod = np.asarray(self.env.state.body_q.numpy()[pinched][:3], dtype=np.float64)
             off = self._settled_offset(self.work, [x_bore, push_from])
             grasp_z = min(float(rod[2]) + pinch_above, axis_z + pinch_above)
             pinch = np.array([float(rod[0]) - off[0], float(rod[1]) - off[1], grasp_z])
@@ -1518,12 +1579,16 @@ class RoutineTunnel:
             # than a closer one. A straight lift and a level push were tried
             # instead and the pads carried nothing: this hand's pinch drags a
             # cable along its own line and cannot lift it off it.
-            mouth = np.array([x_bore, entry_y, axis_z + pinch_above])
-            direction = mouth - np.array([float(rod[0]), float(rod[1]), grasp_z])
+            #
+            # It aims at the push's end level with the bore, clear of the flare
+            # (`push_to`), rather than at the mouth: the cable pinched low on
+            # the riser is carried up it and stops on the bore's own line, so
+            # the rod ahead of the pads ends straight rather than bent into the
+            # mouth from below.
+            aim = np.array([x_bore, push_to, axis_z + pinch_above])
+            direction = aim - np.array([float(rod[0]), float(rod[1]), grasp_z])
+            reach = min(STROKE, float(np.linalg.norm(direction)))
             direction /= max(float(np.linalg.norm(direction)), 1e-6)
-            reach = STROKE
-            if direction[1] > 1e-6:
-                reach = min(reach, (push_to - float(rod[1])) / float(direction[1]))
             end = pinch + max(reach, 0.0) * direction
             # Driven waypoint by waypoint rather than streamed, so the push can
             # STOP when the cable stops taking it -- see STALL_ADVANCE. Breaking
@@ -1531,15 +1596,7 @@ class RoutineTunnel:
             # which is exactly what a person does when a cable will not go in.
             history: list[float] = [self._tip_y()]
             box_at_push = self._box_origin()[:2].copy()
-            grip_body = int(
-                np.argmin(
-                    np.abs(
-                        self.env.state.body_q.numpy()[list(self.env.handles.entity("cable").bodies)][:, 1]
-                        - float(rod[1])
-                    )
-                )
-            )
-            grip_body = list(self.env.handles.entity("cable").bodies)[grip_body]
+            grip_body = pinched
             cap0 = self.env.state.body_q.numpy()[grip_body][:3].copy()
             site0, _ = self.env.arm(self.work).ee_pose(self.env.state)
             site0 = np.asarray(site0, dtype=np.float64).copy()

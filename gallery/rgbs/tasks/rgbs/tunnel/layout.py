@@ -450,6 +450,9 @@ def tunnel_cable() -> RodSpec:
         bend_kd=bend_kd,
         mu_surface=MU_SURFACE,
         surface_labels=("table", *shape_labels(BOX_NAME)),
+        # No grasp latch: the hands move this cable by their pads' contact and
+        # nothing else, and a rod built without the latch cannot be held by one.
+        allow_grasp_latch=False,
     )
 
 

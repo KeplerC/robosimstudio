@@ -40,10 +40,10 @@ from __future__ import annotations
 
 import newton
 import warp as wp
-from robosimstudio_materials.rod import EntityCable
 
 from robosimstudio.core.render.finish import SATIN
 from robosimstudio.scene.registry import register_entity
+from robosimstudio_materials.rod import EntityCable
 
 from ..look import BLACK
 from .rod import RADIUS
