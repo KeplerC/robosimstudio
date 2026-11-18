@@ -23,8 +23,8 @@ about = "Tasks from the VABAR benchmark (Variational Automation Benchmark for Ag
 
 [[project]]
 id = "rgbs"
-title = "Bench tasks"
-about = "Contact-rich bench tasks with deformable materials: wiping, polishing, tape and film peeling, cutting carton tape and threading a cable through a conduit. Ported to current main on the YAM, where the robot moves things only by finger contact, and re-filmed path traced in November 2026."
+title = "RGBS bench videos"
+about = "Five real two-arm bench chores from the RGBS robot videos (cable routing, box decanting, filing, protector film peeling and surface preparing), each rebuilt in RoboSimStudio by a coding agent on the live page from its clip, and accepted by a reviewer agent that judged it against the clip. The robot is the catalog YAM and moves things only by finger contact. The real videos are not published here: every clip is the simulation. One bench task with no video, the tape-strip peel, runs on the older benchmark code in tasks/."
 
 [[entry]]
 project = "robosimstudio-real2sim"
@@ -812,58 +812,72 @@ note = "One YAM arm mates a double-scale USB-C plug into a bulkhead receptacle t
 
 [[entry]]
 project = "rgbs"
-id = "bar-wipe-with-sponge"
-title = "Bar wiping with a foam sponge"
-status = "verified"
-verified_on = "de6340a"
-code = "gallery/rgbs/tasks/rgbs"
-robot = "YAM"
-media = ["bar-wipe-with-sponge.mp4"]
-source = "RoboSimStudio bench task"
-links = []
-licence = "Apache-2.0"
-note = "A YAM arm picks a foam sponge up already leaning 35 degrees along a grab bar, presses it lightly onto the bar and wipes a marker stripe off in one stroke while the other arm steadies the bar at its far elbow, then puts the sponge back; only the jaws' squeeze holds the sponge. On current main: cleaned fraction 1.00 against the 0.95 gate, 5 of 5 in about 1,970 of 12,000 control steps."
-
-[[entry]]
-project = "rgbs"
-id = "strip-polishing"
-title = "Polishing marks off a strip"
-status = "verified"
-code = "gallery/rgbs/tasks/rgbs"
-verified_on = "6e45297"
-robot = "YAM"
-media = ["strip-polishing.mp4"]
-source = "RoboSimStudio bench task"
-links = []
-licence = "Apache-2.0"
-note = "Two YAM arms lift a plastic strip off the mat by their fingertips' grip alone, hold it against a fixed spinning bit and rub its three blue marks off, then set it back on its rest. On current main: polished fraction 1.00 against the 0.95 gate, in 5879 of 12000 control steps, the strip still on its rest and the hands 142 mm clear."
-
-[[entry]]
-project = "rgbs"
-id = "carton-tape-cutting"
-title = "Cutting a carton's sealing tape"
-status = "verified"
-verified_on = "de6340a"
-code = "gallery/rgbs/tasks/rgbs"
-robot = "YAM"
-media = ["carton-tape-cutting.mp4"]
-source = "RoboSimStudio bench task"
-links = []
-licence = "Apache-2.0"
-note = "A YAM arm picks a box cutter off the mat, draws it along a carton's sealing tape until both halves part, sets it back down and lifts the far flap open with a fingertip. On current main: cut 1.00 against the 0.95 gate and the far flap past 69 degrees, 5 of 5 in about 4,400 of 8,000 control steps. The other arm stays home; the carton slides about 20 mm as the flap is pushed."
-
-[[entry]]
-project = "rgbs"
-id = "cable-through-conduit"
-title = "Threading a cable through a conduit"
+id = "cable-routing"
+title = "Task 1: Cable Routing"
 status = "partial"
-code = "gallery/rgbs/tasks/rgbs"
+code = "gallery/rgbs/cable-routing"
 robot = "YAM"
-media = ["cable-through-conduit.mp4"]
-source = "RoboSimStudio bench task"
+media = ["cable-routing.mp4", "cable-routing-photo.mp4"]
+source = "Twin of a real RGBS bench video (not published), built by Codex on the live page and accepted by a reviewer agent"
 links = []
 licence = "Apache-2.0"
-note = "YAM arms feed a USB-C cable through a closed conduit by pinching it behind the mouth, stroke by stroke, while the other hand holds the conduit's lid. Partial on current main: in two of three runs the cable is fed 197 mm and its tip comes out past the exit, but the second hand's grab for the plug lands 50 mm short of it, so the goal's 'plug beyond the exit' clause reads 0 against 1.0. In the third run the cable stalled on the third stroke and the solver blew up."
+note = "The left YAM hand presses down the lid strip of a cable box while the right hand picks up a power strip's cord and feeds it into the channel under the lid in short strokes; then the left hand lets go, catches the cord's end where it comes out at the far end and pulls it through, at the clip's pace. When it completes, the cord fills 100% of the channel, 387 mm of tail stays on the mat and the box moves under 1 mm; check passes. Partial because it is not yet reliable on current main: it completed 4 of 5 runs on freshly started pages, and one of two physics passes failed its written replay; every miss is the left hand's catch of the emerging end, which leaves the connector on the mat. The mouth of the channel has a small lead-in the clip's box does not, and the feed uses more, shorter strokes than the real arm. The cord is a SuperDex rod: it needs the superdex extra (uv sync --extra superdex)."
+
+[[entry]]
+project = "rgbs"
+id = "box-decanting"
+title = "Task 2: Box Decanting"
+status = "verified"
+code = "gallery/rgbs/box-decanting"
+verified_on = "2cc9c0c"
+robot = "YAM"
+media = ["box-decanting.mp4", "box-decanting-photo.mp4"]
+source = "Twin of a real RGBS bench video (not published), built by Codex on the live page and accepted by a reviewer agent"
+links = []
+licence = "Apache-2.0"
+note = "A YAM picks a safety cutter up while its other hand braces the carton's corner, draws the blade along the yellow-taped seam, sets the cutter down, then the two hands lift the two top flaps open, each phase within about 2 s of the clip. On current main the tape is 100% cut, both flaps stand at 95 degrees, the carton slides at most 8.9 mm and the cutter ends released on the mat. The tape is this twin's own material law, since the library has no cuttable seal: it parts only where the held blade presses while drawn, and its hold on the flaps fades with the uncut tape. The inner flaps hang down where the clip's lie flat, the seam gap is 12 mm and the flap catches come in pitched 40 degrees. Check and the physics replays pass; on one of two passes the replay with the cutter and carton twice as heavy missed the routine's own goal check (a note). The main clip is a crop of the photo camera's take."
+
+[[entry]]
+project = "rgbs"
+id = "filing"
+title = "Task 3: Filing"
+status = "verified"
+code = "gallery/rgbs/filing"
+verified_on = "2cc9c0c"
+robot = "YAM"
+media = ["filing.mp4", "filing-photo.mp4"]
+source = "Twin of a real RGBS bench video (not published), built by Codex on the live page and accepted by a reviewer agent"
+links = []
+licence = "Apache-2.0"
+note = "Two YAM hands pick a wooden strip off the mat by its ends, press its marked face up against a rotary sanding drum that spins on its own motor and work it back and forth until the blue mark is filed away, then set it back down, over the clip's 99 s and within about 1 s of each of its phases. On current main 98.8% of the mark is cleared, only where the strip pressed on the spinning drum; check and every physics replay pass. The main clip is a 2x crop of the wide camera, because the YAM's jaws hide the 80 mm strip from the clip's own viewpoint; the stock YAM's elbows ride higher than the real arms'."
+
+[[entry]]
+project = "rgbs"
+id = "protector-film-peeling"
+title = "Task 4: Protector Film Peeling"
+status = "verified"
+code = "gallery/rgbs/protector-film-peeling"
+verified_on = "2cc9c0c"
+robot = "YAM"
+media = ["protector-film-peeling.mp4", "protector-film-peeling-wide.mp4"]
+source = "Twin of a real RGBS bench video (not published), built by Codex on the live page and accepted by a reviewer agent"
+links = []
+licence = "Apache-2.0"
+note = "The left YAM hand holds a phone at its corner in a small cradle while the right hand pinches the protector film's handle and peels the film back across the glass until it comes away; the film is the library's tape, stuck by its own adhesion, and comes off only through the pinch's pull. On current main the film is 100% peeled, none of it before the pull starts, and the phone moves at most 0.6 mm; check and the physics replays pass (heavy and drop do not apply to a film). The film's handle is a 62 x 8 x 24 mm bar the YAM's pads can hold, so the peel runs straight across rather than as the clip's corner arc. The clips show the measured peel live."
+
+[[entry]]
+project = "rgbs"
+id = "surface-preparing"
+title = "Task 5: Surface Preparing"
+status = "verified"
+code = "gallery/rgbs/surface-preparing"
+verified_on = "2cc9c0c"
+robot = "YAM"
+media = ["surface-preparing.mp4", "surface-preparing-wide.mp4"]
+source = "Twin of a real RGBS bench video (not published), built by Codex on the live page and accepted by a reviewer agent"
+links = []
+licence = "Apache-2.0"
+note = "A YAM picks up a white ridged foam sponge, presses it over a steel grab bar so the foam wraps it, wipes the bar from right to left in five strokes that lift where the clip's do, and puts the sponge back on the mat. On current main the blue marker stripe along the bar's top is 100% wiped, read only off pressed, sliding contact, the foam wraps up to 134 degrees of the bar and the bar does not move; check and the physics replays pass (heavy and drop do not apply to a soft sponge). The foam drapes less deeply over the bar than the real one. The sponge is a SuperDex soft body: it needs the superdex extra (uv sync --extra superdex)."
 
 [[entry]]
 project = "rgbs"
@@ -879,16 +893,3 @@ links = []
 licence = "Apache-2.0"
 note = "A YAM arm closes its pads on the rigid pull tab of a 140 mm tape strip and peels the strip off a box, with nothing but finger contact holding the tab. Re-authored on the library's tape for current main: peeled fraction 0.952 against the 0.95 gate, in 972 control steps."
 
-[[entry]]
-project = "rgbs"
-id = "protective-film-peel"
-title = "Peeling protective film off a panel"
-status = "verified"
-code = "gallery/rgbs/tasks/rgbs"
-verified_on = "6e45297"
-robot = "YAM"
-media = ["protective-film-peel.mp4"]
-source = "RoboSimStudio bench task"
-links = []
-licence = "Apache-2.0"
-note = "A YAM arm closes its pads on the pull tab of a phone's protective film and peels the film off the phone, which lies on a stand. Re-authored on the library's tape for current main: peeled fraction 0.955 against the 0.95 gate, in 839 control steps; the gentle variant, which also keeps the phone on its stand, passes too."

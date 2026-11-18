@@ -11,7 +11,7 @@ Usage, from the repository root::
 
     uv run python scripts/gallery.py                    # rewrite gallery/README.md and each project's page
     uv run python scripts/gallery.py --check            # exit 1 if a page is stale or the manifest is wrong
-    uv run python -m robosimstudio.hub fetch gallery/rgbs/strip-polishing   # one entry's files, here
+    uv run python -m robosimstudio.hub fetch gallery/rgbs/filing   # one entry's files, here
 
 Every clip is kept twice on the Hub: the mp4, and a short looping WebP of it that
 GitHub draws inline, so a page shows every clip playing and each links to its mp4.
