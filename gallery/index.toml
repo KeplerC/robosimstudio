@@ -106,25 +106,29 @@ note = "Two YAM arms tie an overhand knot in a straight cable. The knot is tied 
 project = "robosimstudio-real2sim"
 id = "anthurium"
 title = "Anthurium: water the plant"
-status = "video"
+status = "verified"
+code = "gallery/robosimstudio-real2sim/anthurium"
+verified_on = "3f3970f"
 robot = "YAM"
 media = ["water.mp4"]
-source = "Twin built by a coding agent from an Unsplash photo"
+source = "Twin built by a coding agent from an Unsplash photo; ported to current main by Codex and accepted by a reviewer agent"
 links = ["https://unsplash.com/photos/eyR5MNVAMQw"]
 licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
-note = "A YAM waters a potted anthurium, whose leaves and flowers bend under the stream. Filmed in October 2026 on older code; not yet ported to current main."
+note = "A YAM picks up a cup of water by its rim in the room rebuilt from the photo, pours a stream onto the anthurium's large outer leaf, which swings under it and springs back, then pours the rest into the pot and turns the cup upright again. On current main 85% of the water ends in the pot and 15% on the table, none below it; the stream off the leaf runs onto the table, not into the pot. Check passes and the physics replays show no FAIL, but with the cup twice as heavy its pour pose is out of reach."
 
 [[entry]]
 project = "robosimstudio-real2sim"
 id = "plant"
-title = "Alocasia on a sideboard"
-status = "scene"
-robot = "none yet"
-media = ["still.jpg"]
-source = "Twin built by a coding agent from an Unsplash photo"
+title = "Alocasia: water the plant from a cup"
+status = "verified"
+code = "gallery/robosimstudio-real2sim/plant"
+verified_on = "3f3970f"
+robot = "YAM"
+media = ["water.mp4", "wide.mp4"]
+source = "Twin built by a coding agent from an Unsplash photo; ported to current main by Codex and accepted by a reviewer agent"
 links = ["https://unsplash.com/photos/Mfjb8E7LjWQ"]
 licence = "Photo: Unsplash licence. Clips and simulation: Apache-2.0."
-note = "A rendered still of the twin. No robot task in it is filmed yet."
+note = "A YAM picks up a cup of water by its rim, pours it into the alocasia's pot and sets the cup back upright, in the dining room rebuilt from the photo; the leaves bend under the stream and spring back. On current main 88% of the water lands in the pot (about 83% below the rim in the filmed takes; bar 80%) and none goes through the table or soil. Check and the physics replays pass; with the robot frozen the water still drifts 2 mm as it settles."
 
 [[entry]]
 project = "robosimstudio-real2sim"
@@ -182,13 +186,15 @@ note = "Two YAM arms take turns lifting six stoneware plates out of drying racks
 project = "robosimstudio-real2sim"
 id = "label"
 title = "Box: stick an RSS shipping label on it"
-status = "video"
+status = "verified"
+code = "gallery/robosimstudio-real2sim/label"
+verified_on = "3f3970f"
 robot = "YAM"
-media = ["label.mp4", "close.mp4"]
-source = "Designed scene, no reference photo"
+media = ["label.mp4", "wide.mp4"]
+source = "Designed scene, no reference photo; ported to current main by Codex and accepted by a reviewer agent"
 links = []
 licence = "Apache-2.0"
-note = "A YAM peels an RSS shipping label off its backing and presses it onto a box; the label is tape. Filmed in October 2026 on older code; not yet ported to current main."
+note = "A YAM picks an RSS shipping label up by its pull tab, lays it inside the dashed outline on a parcel in a workshop and presses it down in nine strokes; the label is tape and its own adhesive makes the bond. On current main it ends 100% bonded, 1.3 mm off centre and 2.3 degrees off square, with the parcel moved 1.3 mm. Clips play at 4x. Check and the physics replays pass, except that the unwatched replay loses the tab at the pickup (a contact-buffer overflow there), so the pickup does not always repeat."
 
 [[entry]]
 project = "robosimstudio-real2sim"

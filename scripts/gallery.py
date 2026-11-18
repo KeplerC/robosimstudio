@@ -20,8 +20,8 @@ Maintainers publish new clips in two steps. ``stage`` encodes them from a local
 sources file (outside the repository: it names paths on one machine) into a
 folder laid out like the dataset, with a WebP per clip, a poster per entry and
 the dataset card; ``upload`` sends that folder, moves ``REVISION`` to the new
-commit and rewrites the pages (``--prune`` also deletes what the manifest no
-longer names)::
+commit and rewrites the pages (``--prune`` also deletes the clips, previews and
+posters the manifest no longer names; a ported twin's assets are never pruned)::
 
     uv run python scripts/gallery.py stage SOURCES.toml OUT/
     uv run --with huggingface_hub python scripts/gallery.py upload OUT/ [--prune]
@@ -422,7 +422,8 @@ def upload(folder: Path, message: str, *, prune: bool = False) -> str:
 
     The manifest's clips, previews and posters are checked against the new commit before anything
     is pinned: a partial upload leaves ``REVISION`` and the pages where they were. ``prune`` first
-    deletes, in the same commit, every file under ``gallery/`` that the manifest no longer names.
+    deletes, in the same commit, every file in an entry's ``media/`` folder that the manifest no longer
+    names. Only media: the manifest does not list a twin's assets, so it cannot say which are stale.
     """
     from huggingface_hub import HfApi
 
@@ -433,7 +434,8 @@ def upload(folder: Path, message: str, *, prune: bool = False) -> str:
     _, entries = load()
     want = needed(entries)
     staged = {p.relative_to(folder).as_posix() for p in (folder / "gallery").rglob("*") if p.is_file()}
-    stale = sorted(f.path for f in hub.files("gallery") if f.path not in want and f.path not in staged) if prune else []
+    media = (f.path for f in hub.files("gallery") if f.path.split("/")[3:4] == ["media"])
+    stale = sorted(p for p in media if p not in want and p not in staged) if prune else []
     info = HfApi().upload_folder(
         folder_path=str(folder),
         repo_id=hub.DATASET,
@@ -489,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
     sending.add_argument("folder", type=Path)
     sending.add_argument("-m", "--message", default="gallery: clips and posters")
     sending.add_argument(
-        "--prune", action="store_true", help="also delete files under gallery/ the manifest no longer names"
+        "--prune", action="store_true", help="also delete clips, previews and posters the manifest no longer names"
     )
     args = parser.parse_args(argv)
     if args.command == "stage":
