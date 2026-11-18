@@ -808,14 +808,15 @@ note = "One YAM arm mates a double-scale USB-C plug into a bulkhead receptacle t
 project = "rgbs"
 id = "bar-wipe-with-sponge"
 title = "Bar wiping with a foam sponge"
-status = "partial"
+status = "verified"
+verified_on = "de6340a"
 code = "gallery/rgbs/tasks/rgbs"
 robot = "YAM"
 media = ["bar-wipe-with-sponge.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "A YAM arm picks a foam sponge up in its jaws and wipes a marker stripe off a grab bar while the other arm steadies the bar. Partial on current main: it cleans 0.71 of the stripe against the 0.95 gate. Held by the jaws' squeeze alone (the old task pinned the foam to the hand), the sponge creeps and turns in the jaws during a stroke; main's wipe-the-bar demo measures the same 0.69 to 0.76 without its latch."
+note = "A YAM arm picks a foam sponge up already leaning 35 degrees along a grab bar, presses it lightly onto the bar and wipes a marker stripe off in one stroke while the other arm steadies the bar at its far elbow, then puts the sponge back; only the jaws' squeeze holds the sponge. On current main: cleaned fraction 1.00 against the 0.95 gate, 5 of 5 in about 1,970 of 12,000 control steps."
 
 [[entry]]
 project = "rgbs"
@@ -835,14 +836,15 @@ note = "Two YAM arms lift a plastic strip off the mat by their fingertips' grip 
 project = "rgbs"
 id = "carton-tape-cutting"
 title = "Cutting a carton's sealing tape"
-status = "partial"
+status = "verified"
+verified_on = "de6340a"
 code = "gallery/rgbs/tasks/rgbs"
 robot = "YAM"
 media = ["carton-tape-cutting.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "A YAM arm picks a box cutter off the mat and draws it along a carton's sealing tape while the other arm pins the carton. Partial on current main: it parts 0.60 to 0.67 of the tape's cells against the 0.95 gate. On the YAM the blade crosses the seam on a slant, so near each end of the tape it parts only one of the two strips, and the fingertip hook that should then lift the far flap does not open it and shoves the carton."
+note = "A YAM arm picks a box cutter off the mat, draws it along a carton's sealing tape until both halves part, sets it back down and lifts the far flap open with a fingertip. On current main: cut 1.00 against the 0.95 gate and the far flap past 69 degrees, 5 of 5 in about 4,400 of 8,000 control steps. The other arm stays home; the carton slides about 20 mm as the flap is pushed."
 
 [[entry]]
 project = "rgbs"
@@ -855,7 +857,7 @@ media = ["cable-through-conduit.mp4"]
 source = "RoboSimStudio bench task"
 links = []
 licence = "Apache-2.0"
-note = "YAM arms feed a USB-C cable through a closed conduit by pinching it behind the mouth, stroke by stroke, while the other hand holds the conduit's lid. Partial on current main: the cable is fed 196 mm and its tip comes out past the exit, but the second hand's grab for the plug lands 50 mm short of it, so the draw pulls the conduit instead of the plug and the goal's 'plug beyond the exit' clause reads 0 against 1.0."
+note = "YAM arms feed a USB-C cable through a closed conduit by pinching it behind the mouth, stroke by stroke, while the other hand holds the conduit's lid. Partial on current main: in two of three runs the cable is fed 197 mm and its tip comes out past the exit, but the second hand's grab for the plug lands 50 mm short of it, so the goal's 'plug beyond the exit' clause reads 0 against 1.0. In the third run the cable stalled on the third stroke and the solver blew up."
 
 [[entry]]
 project = "rgbs"
