@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A scripted solution: pick the cutter, pin the carton, seat the blade, draw the tape, put the cutter down, hook the far flap open.
+"""A scripted solution: pick the cutter, seat the blade, draw the tape, put the cutter down, hook the far flap open.
 
 The order is the clip's (``sample_videos/box_decanting.mp4``): the right arm
-takes the cutter off the mat; the left arm comes in and pins the carton's far
-(+y) end; the right arm seats the blade at the right (-y) end of the tape and
-draws it toward the left arm, one way per pass; the cutter goes back down on
-the mat where it was; then the right arm puts a fingertip into the join near
-the right end and lifts the FAR flap up and over; the left hand lets go.
+takes the cutter off the mat; seats the blade at the right (-y) end of the tape
+and draws it toward the left arm, one way per pass, the tip servoed onto the
+seam; the cutter goes back down on the mat where it was; then the right arm
+puts a fingertip into the join past the tape's right end and lifts the FAR
+flap. The clip's left hand steadies the carton; here the left arm stays home,
+because on the arm that pin cost the cut (``seam.task`` has the numbers) and
+the unpinned carton moved under 2 mm through the whole draw.
 
 **Five things this cost measurements to get right**, all of them invisible from
 the code that appears to control them:
@@ -158,15 +160,28 @@ band still reaches 5 mm past the strip) and the near one costs the first
 10 mm, which :meth:`RoutineBoxDecant._cut` picks up with a short backward
 draw."""
 
-DRAW_BACK = 0.006
+DRAW_END = 0.003
+"""How far inside the strip's FAR end the forward stroke stops its tip [m].
+
+The stroke used to stop at :data:`DRAW_INSET`, and the last cells were reached
+only by the window's lead: read by WORLD position rather than by the field's
+station index (``cut_run`` pairs a near cell with the far cell at the mirrored
+place -- the far flap's frame is turned half round), the episodes the earlier
+notes call "a slant" had both rows parted over the same 64 mm and both intact
+over the last 26 mm toward the support arm."""
+
+DRAW_BACK = 0.008
 """How far back over the strip's near end each pass draws before it draws
 forward [m].
 
-Six, not the whole ten-millimetre inset: the first cell station sits 4 mm from
-the strip's end and the law's window reaches 15 mm forward of the tip, so a tip
-6 mm back from the seat covers it with 2 mm to spare -- while a tip that backs
-up the full inset runs OFF the strip, where the blade reads nothing and a
-force-following stroke reads nothing as "press harder"."""
+Eight, not the whole ten-millimetre inset: the edge's window runs from the tip
+toward the tool's body, about a millimetre behind the tip and ten ahead of it
+at this hold, so the first cell, 4 mm from the strip's end, is in it only
+while the tip is within about 1.2 mm of it or past it. Backed up six, a pass
+gave that cell 1.2 mm of travel and it survived four passes part-cut; backed
+up eight it gets 3 mm each way. The full ten runs the tip OFF the strip, where
+the blade reads nothing and a force-following stroke reads nothing as "press
+harder"."""
 
 DRAW_POLL = 6
 """How often the draw reads the blade's force and corrects its height, in
@@ -197,6 +212,28 @@ drag is not what moves the box, the flap hook is, and the high presses are
 what cut the tape. The ceiling is a guard against the tool's nose landing, and
 :data:`BODY_TOUCH` is the real one."""
 
+TIP_SIDE = -0.0005
+"""Where across the seam the stroke holds the blade's TIP [m], measured from the
+seam's centreline toward the NEAR flap (so negative is toward the far one).
+
+Half a millimetre toward the far row on purpose: the far flap is the one that
+gets hooked open, and its hinge hold is what is left of the far row -- so the
+far row has to part ALL the way, while the goal leaves the near row two cells
+of slack."""
+
+SIDE_GAIN = 0.6
+"""How much of the measured sideways error the stroke takes out per reading.
+
+**The tip is servoed across the seam, not aimed once.** Measured on the arm:
+aimed in the air with the tip offset read the pass before, the pressed blade
+drew the whole first pass 8.2 mm toward the near flap -- the near row parted
+end to end and the far row not at all. The arm at this reach gives sideways
+under the press; the knife's own pose says by how much, so each reading moves
+the stroke that much back."""
+
+SIDE_LIMIT = 0.015
+"""The most the sideways correction may move the stroke [m]."""
+
 DRAW_SINK = 0.003
 """How far below the seat a stroke's correction may sink [m].
 
@@ -205,23 +242,6 @@ three millimetres more is not chasing the arm's sag -- it has lost the tape
 altogether, and the reading it is chasing is a zero. Unclamped, a stroke that
 ran off the strip's end drove itself to the floor of its range and started the
 next one ten millimetres deep."""
-
-PIN_FORCE = 12.0
-"""What the pin hand presses the near flap down with [N], found by descending
-a millimetre at a time and reading its own pads against the carton.
-
-The pin is a DOWN-force and what it buys is friction: ``mu * (weight + pin)``
-on a 0.6 mat, so 12 N buys 7.2 N of lateral hold on top of the 0.9 N the
-carton's own 160 g is worth. Against it: a draw drag of 2-5 N, and the flap
-hook leaning sideways on the box afterwards. Six newtons was not enough --
-measured, the carton finished a whole episode 30 mm adrift -- and the bench's
-shove table is what says an unpinned one walks 96 mm at the very press that
-opens the tape."""
-
-PIN_INBOARD = 0.011
-"""Where across the near flap the pin sits [m]: this far in from the hinge,
-so the support hand's carriage stays 25 mm clear in x of the knife's nose at
-the seam and of the working hand's carriage over it."""
 
 FINGERTIP_BLADE = 0.007
 """A YAM fingertip pad's thickness [m]: the carton's gap is sized against it
@@ -241,78 +261,83 @@ the edge, and the recorded lift touched the flap for one waypoint out of
 twenty-four (``flap_far_open`` 0.036, then back to 0.000 as the hand climbed
 away from it)."""
 
-HOOK_DEPTH = 0.012
-"""How far below the far flap's UNDERSIDE the fingertip's end is put before it
-goes under the flap [m]. The carton's cavity is open under the flaps, so the
-only clearance that matters is the 12 mm join the pad descends through."""
+HOOK_BELOW = 0.008
+"""How far under the far flap's free-edge corner the fingertip's end is held
+[m]: the edge then meets the pad's outer FACE, not its end, at every angle the
+climb aims at -- including the :data:`HOOK_LEAD` it runs ahead by."""
 
-HOOK_UNDER = 0.022
-"""How far past the far flap's free edge the fingertip's outer face is driven,
-at depth, before the hand rises [m]: enough that the pad's END -- a horizontal
-face, so its contact normal is VERTICAL -- is under the board rather than
-against its edge, and enough that the board does not slide off it as the arc lifts.
-Five bought 3-7 mm of purchase and the flap slid off within two waypoints;
-this is the pad's own 7 mm thickness clear of the edge again on both sides.
+HOOK_PRESS = 1.2
+"""What the far flap's edge has to push back on the fingertip with [N] before
+the climb starts, and what the climb holds.
 
-**The edge face is what the first version pushed on, and that is why nothing
-opened.** With the hand leaned 22 degrees about the seam so the pad presented
-an inclined face under the edge, the recorded contact was a single point on
-``carton_flap_far`` through a whole 110-degree arc with ``flap_far_open`` at
-exactly 0.000: an inclined face against the flap's 3 mm free-edge face has a
-near-HORIZONTAL normal, which pushes the flap toward its own hinge and makes
-no opening moment at all. The hand is top-down and unleaned now, and it goes
-UNDER."""
+**Not less, and that is measured.** At 0.5 N the drag carried the edge up
+5.8 degrees and stopped there for 300 control steps. It is close to the
+1.6 N the carton's mat friction holds, and the carton does slide: 18-23 mm
+along +x over the hook in the scored episodes."""
+
+HOOK_LEAD = 10.0
+"""How far ahead of the flap's MEASURED angle the climb aims across [deg]."""
+
+HOOK_PULL = 0.006
+"""How far above its riding height the climb pulls the pad [m]: what the
+servo's spring stretches to drag the edge up by friction."""
+
+HOOK_UNDER_AT = 25.0
+"""The flap angle past which the climb stops dragging and pushes [deg]: by
+then the free edge is 27 mm over the join, and a push across it has a lever of
+``w sin(theta)`` about the hinge."""
+
+HOOK_SLOW = 0.015
+"""How fast the pad pushes the raised board until it is past 45 degrees
+[m/s]. Slow because the hinge's damping is paid at the edge and the lever is
+still short there -- an estimate; the speed was not tested on its own."""
+
+HOOK_RADIUS = 0.056
+"""How far out from the hinge the push is AIMED [m], 9 mm in from the free
+edge. The contact it gets is the edge itself: read off the contact table at
+10, 30, 60 and 69 degrees, one fingertip collider on the far board, pushing
+it +x at 0.8-1.6 N."""
+
+HOOK_DONE = 98.0
+"""The angle at which the flap is past vertical and gravity has it [deg]."""
+
+HOOK_END = 104.0
+"""The furthest the climb aims [deg] -- short of the 110-degree stop."""
 
 HOOK_LEAN = 25.0
-"""How far the hooking hand leans about the seam's axis [deg], and WHICH WAY.
+"""How far the hooking hand leans about the seam, the +x pad's end leading
+[deg] -- and why it must.
 
-The fingertip is a tapered blade, not a parallel one: measured off its mesh
-with the jaws open, its outer surface stands at TCP + 48 mm at a shut flap's
-own height and at TCP + 43 mm at the pad's bottom, 12 mm lower -- a 16-degree
-inward taper. So a VERTICAL finger cannot get its bottom under the flap's free
-edge at all: driven in until the bottom is under, its own side is already
-jammed against the 3 mm edge face, and the recorded result was the flap (and
-the carton with it) shoved 20 mm along +x with ``flap_far_open`` at 0.000
-throughout.
+The fingertip is a tapered blade: its outer face stands 5 mm further in at
+the pad's end than 12 mm up it, a 16-degree inward taper, so an UNLEANED pad
+pressed on the free edge pushes it along a normal 16 degrees below
+horizontal. About the hinge that is ``w N sin(theta - 16)``: it CLOSES the
+flap until the flap is past 16 degrees, and only friction lifts it --
+measured, the unleaned drag stalled at 5.8, 9 and 29 degrees and once, with
+the press raised, slid the carton 5 mm instead. Leaned 25 degrees, with the
+press found by touch and the pull on, every run reached the angle where the
+pad goes under the board. The lean alone does not open it: pressed across
+with no pull, leaned, the flap stayed shut and the carton slid 6.5 mm."""
 
-Leaning the hand so its approach axis tips toward +x puts the pad's bottom
-corner AHEAD of everything above it, which is what lets it pass under the
-board -- and that is the rotation which sends world +x UP, so the vector handed
-to :meth:`RoutineBoxDecant._lean` is ``-far``. Leaned the other way, tried and
-measured, the bottom goes away from the flap and the finger's upper body into
-its edge: the flap and the carton with it are shoved 20 mm along +x and
-``flap_far_open`` never leaves 0.000.
+HOOK_TOUCH = 0.3
+"""What counts as the pad touching a flap on the way down the join [N]."""
 
-Once the bottom IS under, a little interference at the flap's own level is the
-mechanism rather than a fault: the overlap is 12 mm horizontally and the 3 mm
-board vertically, so the least-penetration axis is vertical and the board is
-pushed UP. With the bottom short, the only overlap is at the flap's level, the
-normal is horizontal, and the flap is pushed sideways -- which is exactly the
-pair of recordings above.
+HOOK_SHORT = 0.0015
+"""How far short of the far edge the pad's outer end corner goes down the
+join [m], before the press closes the rest."""
 
-The lean is given back over the lift: at 25 degrees the wrist cannot hold the
-top of the flap's arc (measured 68 mm of residual at 150 mm over the mat
-against 0.0 mm unleaned), and it does not need to -- a flap already up 30
-degrees is pushed by a straight finger. So the hand straightens as it rises."""
+HOOK_STEPS = 400
+"""Climb steps per attempt; each is a reading and a short leg."""
+
+HOOK_OUT = 0.024
+"""How far past the tape's end, along the seam, the fingertip goes into the
+join [m]: clear of the far strip's end on one side and of the end wall under
+the join on the other."""
 
 HOOK_TRIES = 2
-"""How many times the fingertip goes back under the board if the lift left the
-flap shut. The board slides off a part-lifted fingertip easily, and the box has
-usually moved a little by then, so a second attempt is a fresh reading rather
-than the same one repeated."""
-
-HOOK_LIFT = 55.0
-"""How far round the hinge the fingertip carries the far flap [deg].
-
-Not to the stop: a flat pad end under a plate inclined much past 60 degrees is
-a corner contact that slides off it. 55 is where the flap is high enough to be
-pushed over from the other side, which is what the flip does."""
-
-FLIP_FROM = 0.030
-"""Where the flip's fingertip lands on the raised flap, measured from its free
-edge down the flap [m]. The hand comes over the raised flap's -x face and
-drives +x, carrying it past vertical; past 90 degrees gravity takes it to its
-110-degree stop and it stays there."""
+"""How many times the fingertip goes back into the join if the flap is not
+over. The edge can slip off a climbing pad and the box moves a little, so a
+second attempt re-reads both."""
 
 MAX_POS, MAX_ROT = 0.004, math.radians(6.0)
 """What a planned leg may be off by before it is refused."""
@@ -374,7 +399,6 @@ class RoutineBoxDecant:
         del kwargs
         self.env = env
         self.work = env.handles.work_arm or arm_slots(env)[0]
-        self.support = env.handles.support_arm
         self.dof = len(env.idle_action(self.MODE)) // len(arm_slots(env))
         self.passes = int(solution_param(env, "draw-passes", PASSES))
         self.grip_x = float(solution_param(env, "grasp-station", GRIP_X))
@@ -394,6 +418,8 @@ class RoutineBoxDecant:
         self.flap_lifted = 0.0
         self.flap_flipped = 0.0
         self.phase = 0.0
+        self.side_trim = 0.0
+        self._seat_side = 0.0
         self._steps = self._choreography()
 
     def _q(self, name):
@@ -654,6 +680,19 @@ class RoutineBoxDecant:
         tip = pose[:3] + _rot(pose[3:7]) @ self._tip_local
         return np.asarray(tip, dtype=np.float64) - np.asarray(tcp, dtype=np.float64)
 
+    def _tip_side(self) -> float:
+        """How far the blade's tip stands off the seam's centreline right now,
+        toward the near flap [m], from the knife's and the carton's live poses."""
+        q = self.env.state.body_q.numpy()
+        pose = np.asarray(q[self._knife_body], dtype=np.float64)
+        tip = pose[:3] + _rot(pose[3:7]) @ self._tip_local
+        return float((tip - self.seam_mid) @ self._side())
+
+    def _side(self) -> np.ndarray:
+        """The horizontal unit vector across the seam, toward the near flap."""
+        side = np.cross(np.array([0.0, 0.0, 1.0]), self.draw)
+        return side / np.linalg.norm(side)
+
     def _pad_end(self, quat) -> np.ndarray:
         """World offset from the TCP to the END of the OUTER FACE of whichever
         fingertip stands at +x, jaws open, for a hand held at ``quat``.
@@ -702,6 +741,8 @@ class RoutineBoxDecant:
             i for i, lab in enumerate(list(model.body_label)) if lab.endswith(("carton_flap_near", "carton_flap_far"))
         ]
         self._flaps = [int(s) for s in np.flatnonzero(np.isin(body, flap_bodies))]
+        self._far_flap = [i for i, lab in enumerate(labels) if lab.endswith("carton_flap_far")]
+        self._near_flap = [i for i, lab in enumerate(labels) if lab.endswith("carton_flap_near")]
         self._knife_body = knife.body
         self._carton_body = env.handles.entity("carton").body
         self._carton_shapes = [int(s) for s in np.flatnonzero(np.isin(body, [self._carton_body, *flap_bodies]))]
@@ -726,12 +767,10 @@ class RoutineBoxDecant:
         so a harness can drive one of them alone against a prepared scene."""
         self._survey()
         yield from self._pick()
-        yield from self._pin()
         yield from self._carry()
         yield from self._cut()
         yield from self._stow()
         yield from self._hook_far()
-        yield from self._release()
         yield from self._hold(120)
         self.phase = 8.0
 
@@ -755,7 +794,6 @@ class RoutineBoxDecant:
         # The closing axis in world is the grasp frame's y; the tilt is about it,
         # whichever way sends the nose down.
         self.cq = self._lean(self.kq, _rot(self.kq)[:, 1], self.tilt, nose_world)
-        self.pq = None
 
     def _read_carton(self) -> None:
         """Where the seam, the tape and the far flap are RIGHT NOW, from the
@@ -841,76 +879,6 @@ class RoutineBoxDecant:
         yield from self._leg(self.work, self.tape_start - off + carry, self.cq, speed=0.08, label="carry")
         yield from self._hold(20)
 
-    def _pin(self):
-        """The support hand's closed jaws pressed onto the near flap, 15 mm in
-        from the +y end wall and 11 mm in from the hinge.
-
-        Pick, THEN pin, THEN carry and draw. The pin goes on before the knife
-        comes over the tape, and it goes on the near flap's OUTBOARD band rather
-        than beside the seam, because the hand that carries the tilted knife
-        stands over the tape's middle with its carriage reaching 70 mm toward
-        +y and 25 mm toward -x of the seam: a pin planned at the seam's x and
-        the flap's end put the support hand's carriage 45 mm into that space,
-        and the first thing it did was knock the knife level in the jaws.
-        Inboard of the hinge the two carriages are 25 mm apart in x and the
-        pinned hand's top is 48 mm under the working hand's fingertips at the
-        seat.
-
-        The descent is FORCE-CHECKED, in millimetre steps, because the support
-        arm at this reach sags ~10 mm under its own weight at the 1600 gain: a
-        pin commanded 4 mm through the flap's top stopped 5 mm above it and held
-        nothing."""
-        if not self.support:
-            return
-        f = self._frame
-        pin_local = np.array(
-            [-0.5 * float(f["seam_len"]) + 0.015, -(float(f["hinge_y"]) - PIN_INBOARD), float(f["seam_z"])]
-        )
-        pin = self._carton[:3] + self._R_c @ pin_local
-        touch_z = float(pin[2]) + 0.0105  # the pads' ends on the flap's top face
-        self.pq = self._across_quat(self.support, pin + np.array([0.0, 0.0, 0.06]), math.pi / 2.0)
-        self.phase = 3.0
-        yield from self._leg(
-            self.support,
-            np.array([pin[0], pin[1], touch_z + 0.08]),
-            self.pq,
-            grip=SHUT,
-            gate=False,
-            speed=0.16,
-            label="over the far end",
-        )
-        yield from self._hold(15)
-        yield from self._leg(
-            self.support,
-            np.array([pin[0], pin[1], touch_z + 0.006]),
-            self.pq,
-            speed=0.04,
-            gate=False,
-            label="down to the flap",
-        )
-        yield from self._hold(10)
-        self.pin_n = yield from self._press_down(
-            self.support, pin[:2], touch_z + 0.006, self.pq, target_n=PIN_FORCE, max_travel=0.030, label="pin"
-        )
-        yield from self._hold(15)
-
-    def _press_down(self, name, xy, z_start: float, quat, *, target_n: float, max_travel: float, label: str):
-        """Descend in millimetre steps until the hand's pads read ``target_n``
-        of contact against the carton, or ``max_travel`` is spent. Returns the
-        force it stopped at. surface_cleaning's ``_press``, for the same reason:
-        a commanded depth is not a commanded force when the arm sags."""
-        z, spent, force = float(z_start), 0.0, 0.0
-        while spent < max_travel:
-            z -= 0.001
-            spent += 0.001
-            yield from self._leg(name, [xy[0], xy[1], z], quat, speed=0.02, label="", gate=False)
-            yield from self._hold(10)
-            force = self._hand_force(name)
-            if force >= target_n:
-                break
-        self.notes.append(f"{label}: {force:.1f} N at {spent * 1e3:.0f} mm down")
-        return force
-
     def _knife_on_mat(self) -> float:
         """The cutter against the mat [N], for the set-down."""
         probe = self.env.contacts
@@ -918,16 +886,6 @@ class RoutineBoxDecant:
             return 0.0
         probe.update(step=None)
         return float(np.linalg.norm(probe.pairwise_force(self._knife_shapes, self._mat_shapes)))
-
-    def _hand_force(self, name) -> float:
-        """The named hand's fingertips against the carton (base and flaps), as
-        a magnitude. A closed pair of pads pressing straight down has both
-        forces pointing the same way, so the net vector is the press."""
-        probe = self.env.contacts
-        if probe is None:
-            return 0.0
-        probe.update(step=None)
-        return float(np.linalg.norm(probe.pairwise_force(self._tips[name], self._carton_shapes)))
 
     def _cut(self):
         """Seat, and draw one way at a time.
@@ -955,7 +913,14 @@ class RoutineBoxDecant:
                     f"grasp: tip moved {np.round(drift * 1e3, 1)} mm in the jaws (now {np.round(off * 1e3, 1)})"
                 )
                 return
-            seat = self.tape_start + DRAW_INSET * draw - off + np.array([0.0, 0.0, SEAT_CLEAR])
+            seat = (
+                self.tape_start
+                + DRAW_INSET * draw
+                - off
+                + self._side() * (TIP_SIDE + self.side_trim)
+                + np.array([0.0, 0.0, SEAT_CLEAR])
+            )
+            self._seat_side = self.side_trim
             yield from self._leg(self.work, seat, cq, speed=0.03, label="seat the blade")
             yield from self._hold(15)
             # The press, by force: down a millimetre at a time until the BLADE
@@ -1003,10 +968,21 @@ class RoutineBoxDecant:
             # Backing up from the seat covers them, and the tape there is still
             # whole so the blade has something to read.
             start = np.array([seat[0], seat[1], z])
-            run = self.tape_len - 2.0 * DRAW_INSET
+            run = self.tape_len - DRAW_INSET - DRAW_END
             trim = yield from self._stroke(ik, start, -draw, DRAW_BACK, cq, 0.0)
             back = start - draw * DRAW_BACK
             trim = yield from self._stroke(ik, back, draw, run + DRAW_BACK, cq, trim)
+            # Up out of the cut BEFORE going anywhere: the blade sits a
+            # millimetre into the strips, and the old lift-clear dragged it
+            # forward and up at once -- measured, the knife slid 4-5 mm out of
+            # the jaws on every one, and the fourth pass was refused for it.
+            here = (
+                back
+                + draw * (run + DRAW_BACK)
+                + np.array([0.0, 0.0, trim])
+                + self._side() * (self.side_trim - self._seat_side)
+            )
+            yield from self._leg(self.work, here + np.array([0.0, 0.0, 0.02]), cq, speed=0.02, gate=False, label="")
             yield from self._leg(self.work, self.tape_end - off + carry, cq, speed=0.06, label="lift clear")
             yield from self._hold(15)
             yield from self._leg(self.work, self.tape_start - off + carry, cq, speed=0.10, label="back to the start")
@@ -1023,14 +999,22 @@ class RoutineBoxDecant:
         """
         worst, best = 99.0, 0.0
         n = max(2, int(length / DRAW_SPEED * 60.0))
+        side = self._side()
+        # `frm` already carries the side trim the seat was aimed with; only
+        # what the strokes learn on top of it moves the line.
+        trim0 = self._seat_side
+        errs = []
         for k in range(n):
-            p = frm + direction * length * (k + 1) / n + np.array([0.0, 0.0, trim])
+            p = frm + direction * length * (k + 1) / n + np.array([0.0, 0.0, trim]) + side * (self.side_trim - trim0)
             sol = ik.solve_q_full(self.seed[self.work], p, quat)
             self.seed[self.work] = sol
             self.held[self.work] = np.asarray(sol)[ik.arm_coords]
             yield
             if k % DRAW_POLL:
                 continue
+            err = self._tip_side() - TIP_SIDE
+            errs.append(err)
+            self.side_trim = float(np.clip(self.side_trim - SIDE_GAIN * err, -SIDE_LIMIT, SIDE_LIMIT))
             force, body = self._blade_force(), self._body_force()
             worst, best = min(worst, force), max(best, force)
             if body > BODY_TOUCH or force > DRAW_CEILING * SEAT_FORCE:
@@ -1039,7 +1023,10 @@ class RoutineBoxDecant:
                 trim -= DRAW_STEP
             trim = float(np.clip(trim, -DRAW_SINK, 0.006))
         self.press_n = max(self.press_n, float(best))
-        self.notes.append(f"stroke {length * 1e3:.0f} mm: {worst:.1f}-{best:.1f} N, trim {trim * 1e3:+.1f} mm")
+        self.notes.append(
+            f"stroke {length * 1e3:.0f} mm: {worst:.1f}-{best:.1f} N, trim {trim * 1e3:+.1f} mm, "
+            f"tip off the line {np.mean(np.abs(errs or [0.0])) * 1e3:.1f} mm mean (side trim {self.side_trim * 1e3:+.1f})"
+        )
         return trim
 
     def _stow(self):
@@ -1071,156 +1058,189 @@ class RoutineBoxDecant:
         yield from self._hold(10)
 
     def _hook_far(self):
-        """Hook the far flap up with a fingertip, then flip it past vertical.
+        """Lift the far flap open in two holds: drag its free edge up from the
+        join, then push the raised board round its hinge from underneath.
 
-        Jaws open and closing along the flaps' axis, so the +x fingertip is a
-        7 mm blade that fits the 12 mm join. Top-down and UNLEANED, so its end
-        is a horizontal face whose contact normal is vertical -- see
-        :data:`HOOK_UNDER` for the leaned version that pushed on the flap's own
-        edge face for a whole arc and opened nothing.
+        **Not by driving a fingertip under the shut board.** The join is 12 mm
+        and the pad 7, so a pad whose body is still in the join reaches at most
+        a millimetre under either flap -- and the shipped hook, driven 22 mm
+        "under the board" at a fixed depth, pushed the far flap's edge instead
+        and walked the carton 15 mm along +x before the lift began (measured,
+        with the seam cut through and the flap holding nothing).
 
-        Four legs and then three: down the join to below the board, +x under
-        it, up along the flap's own arc to :data:`HOOK_LIFT`, withdraw; then
-        over the raised flap's -x face and a drive +x that carries it past
-        vertical onto its stop.
+        What a cut flap needs is far less: with the far row parted the tape's
+        hold is gone and the flap weighs 10 g, 0.003 N*m about its hinge.
+
+        1. **Down the join by touch**, leaned (:data:`HOOK_LEAN`), stepping
+           away from whichever flap the pad meets.
+        2. **Press** the pad's outer face on the far edge until the board reads
+           :data:`HOOK_PRESS`.
+        3. **Drag**: the servo pulls the pad :data:`HOOK_PULL` above where it
+           rides, so friction (pad mu 1.0) carries the edge up. A push across
+           alone goes along the board, through the hinge: measured, it slid
+           the carton 6.5 mm with the flap still shut.
+        4. **Push across**: past :data:`HOOK_UNDER_AT` the hand is aimed round
+           the arc, :data:`HOOK_RADIUS` out from the hinge and
+           :data:`HOOK_LEAD` ahead of the measured angle, giving the lean back
+           as it goes. The pad stays on the raised edge and pushes it +x, which
+           the edge's height turns into an opening moment. Dragging at the
+           edge alone stalled at 29 degrees.
+
+        Each step aims at the flap's MEASURED angle, never past it, so a pad
+        that loses the board waits for it rather than climbing away. The press
+        still nudges the carton, 18-23 mm along +x in the scored episodes. The
+        goal latches as the flap passes 69 degrees under the finger; run on
+        past that, this climb took it to 82 and it stood at 79 after the hand
+        withdrew -- open, not on its stop.
         """
         self._read_carton()
-        far, seam_mid = self.far, self.seam_mid
         f = self._frame
         self.phase = 6.0
-        # 20 mm outside the taped run: the join is open board there, no strip.
-        gap_y = float(self.tape_start[1]) - 0.020
-        rim_z = float(self._carton[2]) + float(f["rim_z"])
-        edge_x = float(seam_mid[0]) + 0.5 * float(f["seam_gap"])
-        up = np.array([0.0, 0.0, 1.0])
-        hq0 = self._across_quat(self.work, np.array([float(seam_mid[0]), gap_y, rim_z + 0.10]), math.pi / 2.0)
-        # Leaned so the pad's BOTTOM corner leads in +x -- see HOOK_LEAN, and
-        # note which way: the world +x vector is the one sent downward.
-        hq = self._lean(hq0, np.array([0.0, 1.0, 0.0]), math.radians(HOOK_LEAN), -far)
-        end0, end = self._pad_end(hq0), self._pad_end(hq)
-        over = np.array([float(seam_mid[0]), gap_y, rim_z + 0.09])
-        into = np.array([float(seam_mid[0]), gap_y, rim_z - HOOK_DEPTH])
-        under = np.array([edge_x + HOOK_UNDER, gap_y, rim_z - HOOK_DEPTH])
-        yield from self._leg(self.work, over - end0, hq0, grip=OPEN, gate=False, speed=0.12, label="over the join")
-        yield from self._hold(15)
-        yield from self._leg(self.work, over - end, hq, gate=False, speed=0.08, label="lean")
-        yield from self._hold(10)
-        yield from self._leg(self.work, into - end, hq, speed=0.03, label="into the join")
-        yield from self._hold(15)
-        yield from self._leg(self.work, under - end, hq, speed=0.02, label="under the board")
-        yield from self._hold(15)
-        # The lift: the pad's bottom corner follows the point of the flap it is
-        # under, round the flap's own hinge, while the wrist gives its lean back.
-        r = self.flap_w - HOOK_UNDER
+        far, up = self.far, np.array([0.0, 0.0, 1.0])
+        # Outside the taped run, where the join is open board: the fingertip is
+        # some 40 mm across along the seam, and 20 mm out its body stood on the
+        # far strip's end (measured: 9.6 N straight down on it).
+        gap_y = float(self.tape_start[1]) - HOOK_OUT
+        hq0 = self._across_quat(self.work, np.array([float(self.seam_mid[0]), gap_y, 0.95]), math.pi / 2.0)
+
+        def leaned(deg: float) -> np.ndarray:
+            # About the seam, the +x pad's end leading: see HOOK_LEAN.
+            return self._lean(hq0, self.draw, math.radians(deg), -far)
+
+        hq = leaned(HOOK_LEAN)
+        end = self._pad_end(hq)
         for attempt in range(HOOK_TRIES):
-            if attempt:
-                # The board can slip off a fingertip part way up, and the box
-                # may have moved under it. Re-read, go back down and try again
-                # rather than flipping a flap that is still shut.
-                self._read_carton()
-                far, seam_mid = self.far, self.seam_mid
-                edge_x = float(seam_mid[0]) + 0.5 * float(f["seam_gap"])
-                rim_z = float(self._carton[2]) + float(f["rim_z"])
-                yield from self._leg(
-                    self.work,
-                    np.array([float(seam_mid[0]), gap_y, rim_z + 0.06]) - end0,
-                    hq0,
-                    gate=False,
-                    speed=0.12,
-                    label="back over the join",
-                )
-                yield from self._leg(
-                    self.work,
-                    np.array([float(seam_mid[0]), gap_y, rim_z - HOOK_DEPTH]) - end,
-                    hq,
-                    speed=0.03,
-                    gate=False,
-                    label="into the join again",
-                )
-                yield from self._leg(
-                    self.work,
-                    np.array([edge_x + HOOK_UNDER, gap_y, rim_z - HOOK_DEPTH]) - end,
-                    hq,
-                    speed=0.02,
-                    gate=False,
-                    label="under the board again",
-                )
-                yield from self._hold(10)
-            for th in np.linspace(0.0, math.radians(HOOK_LIFT), 16):
-                f_th = float(th) / math.radians(HOOK_LIFT)
-                q_th = self._lean(hq0, np.array([0.0, 1.0, 0.0]), math.radians(HOOK_LEAN) * (1.0 - f_th), -far)
-                c = self.hinge_far + r * (-math.cos(th) * far + math.sin(th) * up)
-                yield from self._leg(
-                    self.work,
-                    np.array([float(c[0]), gap_y, float(c[2])]) - self._pad_end(q_th),
-                    q_th,
-                    speed=0.04,
-                    label="lift the flap",
-                    stride=1,
-                    max_pos=0.008,
-                    max_rot=math.radians(12.0),
-                )
+            self._read_carton()
+            far = self.far
+            rim_z = float(self._carton[2]) + float(f["rim_z"])
+            edge = self.seam_mid + far * 0.5 * float(f["seam_gap"])
+            edge[2] = rim_z
+            # The pad's outer bottom corner over the join, 2 mm short of the
+            # far edge, then down until it is HOOK_BELOW under the board.
+            over = edge - far * HOOK_SHORT + up * 0.06
+            over[1] = gap_y
+            into = edge - far * HOOK_SHORT - up * HOOK_BELOW
+            into[1] = gap_y
+            yield from self._leg(self.work, over - end, hq, grip=OPEN, gate=False, speed=0.12, label="over the join")
+            yield from self._hold(10)
+            # Down the join by touch: a millimetre at a time from 6 mm over the
+            # board, stepping away from whichever flap the pad meets. Where the
+            # leaned pad's faces are is the hand's mesh, not this arithmetic,
+            # and a descent planned on the arithmetic alone drove it into the
+            # far board at 87 N.
+            z = float(edge[2]) + 0.006
+            while z > float(into[2]):
+                z = max(float(into[2]), z - 0.001)
+                for _ in range(6):
+                    target = into.copy()
+                    target[2] = z
+                    yield from self._leg(self.work, target - end, hq, gate=False, speed=0.02, label="")
+                    yield from self._hold(3)
+                    far_n, near_n = self._far_flap_force(), self._near_flap_force()
+                    if far_n > HOOK_TOUCH:
+                        into -= far * 0.0007
+                    elif near_n > HOOK_TOUCH:
+                        into += far * 0.0007
+                    else:
+                        break
+            # Toward the far flap a half millimetre at a time until its edge
+            # pushes back: the press is found, not commanded.
+            reach, force = 0.0, 0.0
+            while reach < 0.012:
+                reach += 0.0005
+                yield from self._leg(self.work, into + far * reach - end, hq, gate=False, speed=0.02, label="")
+                yield from self._hold(4)
+                force = self._far_flap_force()
+                if force >= HOOK_PRESS:
+                    break
+            self.notes.append(f"hook {attempt}: {force:.2f} N on the far edge at {reach * 1e3:.1f} mm")
+            # Where the pad met the edge, as an offset along `far` from the
+            # edge's own corner: the climb holds the pad that far in.
+            face = float((into + far * reach - edge) @ far)
+            under = False
+            for _ in range(HOOK_STEPS):
+                measured = self._flap_far() * float(self._frame_travel)
+                ahead = min(math.radians(HOOK_END), measured + math.radians(HOOK_LEAD))
+                if measured >= math.radians(HOOK_UNDER_AT):
+                    if not under:
+                        # The hinge where it is NOW, once: the press has
+                        # nudged the carton some 10 mm by here, and a push
+                        # aimed at the hinge read before the approach ran that
+                        # far behind the board. Once only -- re-read every
+                        # step, the hand chased a carton it was itself pushing
+                        # and walked it 44 mm.
+                        self._read_carton()
+                        far, under = self.far, True
+                    # The edge is up: aim round the arc, HOOK_RADIUS out from
+                    # the hinge, giving the lean back; the pad pushes the
+                    # raised edge across.
+                    give = min(1.0, (measured - math.radians(HOOK_UNDER_AT)) / math.radians(30.0))
+                    q = leaned(HOOK_LEAN * (1.0 - give))
+                    point = self.hinge_far + HOOK_RADIUS * (-math.cos(ahead) * far + math.sin(ahead) * up)
+                    point[1] = gap_y
+                    # Slowly while the lever is short (see HOOK_SLOW).
+                    slow = HOOK_SLOW if measured < math.radians(45.0) else 0.04
+                    yield from self._leg(self.work, point - self._pad_end(q), q, gate=False, speed=slow, label="")
+                    if measured > math.radians(HOOK_DONE):
+                        break
+                    continue
+                w = float(self.flap_w)
+                # Across: the edge where it is about to be, held in by the
+                # press. Up: a pull HOOK_PULL above where the pad rides now,
+                # so the servo is always drawing the pad up the edge and
+                # friction drags the edge with it -- aimed at the flap's
+                # measured angle, never past it, so the pad cannot climb off
+                # the board. Measured without the pull: the press alone pushed
+                # along the board, through the hinge, and slid the carton
+                # 6.5 mm with the flap still shut.
+                corner = self.hinge_far + w * (-math.cos(ahead) * far + math.sin(ahead) * up)
+                lift = float(self.hinge_far[2]) + w * math.sin(measured) - HOOK_BELOW + HOOK_PULL
+                force = self._far_flap_force()
+                if force < HOOK_PRESS:
+                    face += 0.0003
+                elif force > 4.0 * HOOK_PRESS:
+                    face -= 0.0006
+                face = float(np.clip(face, -0.006, 0.008))
+                target = corner + far * face
+                target[1], target[2] = gap_y, lift
+                yield from self._leg(self.work, target - end, hq, gate=False, speed=0.04, label="")
+                if measured > math.radians(HOOK_DONE):
+                    break
             self.flap_lifted = self._flap_far()
             self.notes.append(f"lift {attempt}: flap_far_open {self.flap_lifted:.3f}")
-            if self.flap_lifted > 0.15:
+            if self.flap_lifted * float(self._frame_travel) > math.radians(5.0):
+                # Over, or part way: going back into the join would drop it.
                 break
         yield from self._hold(20)
+        pos, _ = self.env.arm(self.work).ee_pose(self.env.state)
         yield from self._leg(
             self.work,
-            np.array([float(seam_mid[0]) - 0.05, gap_y, rim_z + 0.12]) - end0,
-            hq0,
-            speed=0.10,
-            gate=False,
-            label="withdraw",
-        )
-        yield from self._hold(15)
-
-        # The flip: onto the raised flap's -x face, then drive +x past vertical.
-        def on_flap(deg: float) -> np.ndarray:
-            t = math.radians(deg)
-            c = self.hinge_far + (self.flap_w - FLIP_FROM) * (-math.cos(t) * far + math.sin(t) * up)
-            return np.array([float(c[0]), gap_y, float(c[2])])
-
-        # Where the flap ACTUALLY is, not where the arc asked it to be: the
-        # fingertip can slip out from under a board it has lifted part way, and
-        # a flip aimed at 55 degrees when the flap is at 12 pushes air.
-        lifted = max(12.0, math.degrees(self._flap_far() * float(self._frame_travel)))
-        self.notes.append(f"flip from {lifted:.0f} deg")
-        push = on_flap(lifted)
-        yield from self._leg(
-            self.work,
-            push - end0 + np.array([-0.06, 0.0, 0.06]),
-            hq0,
-            gate=False,
-            speed=0.12,
-            label="over the raised flap",
-        )
-        yield from self._hold(10)
-        yield from self._leg(
-            self.work, push - end0 + np.array([-0.014, 0.0, 0.0]), hq0, speed=0.05, gate=False, label="behind the flap"
-        )
-        yield from self._hold(10)
-        for k in range(1, 13):
-            yield from self._leg(
-                self.work,
-                on_flap(lifted + k * (105.0 - lifted) / 12.0) - end0,
-                hq0,
-                speed=0.05,
-                gate=False,
-                label="flip it over",
-                stride=1,
-            )
-        self.flap_flipped = self._flap_far()
-        self.notes.append(f"flipped: flap_far_open {self.flap_flipped:.3f}")
-        yield from self._hold(20)
-        yield from self._leg(
-            self.work,
-            np.array([float(seam_mid[0]) - 0.07, gap_y, rim_z + 0.14]) - end0,
-            hq0,
-            speed=0.12,
+            np.asarray(pos, dtype=np.float64) - far * 0.04 + up * 0.08,
+            hq,
+            speed=0.08,
             gate=False,
             label="retreat",
         )
+        yield from self._hold(30)
+        self.flap_flipped = self._flap_far()
+        self.notes.append(f"flap left at: flap_far_open {self.flap_flipped:.3f}")
+
+    def _near_flap_force(self) -> float:
+        """The work hand's fingertips against the near flap's board [N]."""
+        probe = self.env.contacts
+        if probe is None:
+            return 0.0
+        probe.update(step=None)
+        return float(np.linalg.norm(probe.pairwise_force(self._tips[self.work], self._near_flap)))
+
+    def _far_flap_force(self) -> float:
+        """The work hand's fingertips against the far flap's BOARD [N] -- not
+        its strip, which a pad standing on it reads as a press on the edge."""
+        probe = self.env.contacts
+        if probe is None:
+            return 0.0
+        probe.update(step=None)
+        return float(np.linalg.norm(probe.pairwise_force(self._tips[self.work], self._far_flap)))
 
     def _flap_far(self) -> float:
         """How far open the far flap is, as a fraction of its travel -- the
@@ -1229,19 +1249,3 @@ class RoutineBoxDecant:
         if seam is None:
             return 0.0
         return float(seam._carton_states(self.env.state.body_q.numpy()).get("flap_far_open", 0.0))
-
-    def _release(self):
-        """The support hand lets go and lifts away."""
-        env = self.env
-        self.phase = 7.0
-        if self.support and self.pq is not None:
-            pos, _ = env.arm(self.support).ee_pose(env.state)
-            yield from self._leg(
-                self.support,
-                np.array([pos[0], pos[1], pos[2] + 0.12]),
-                self.pq,
-                grip=OPEN,
-                gate=False,
-                speed=0.10,
-                label="support retreat",
-            )

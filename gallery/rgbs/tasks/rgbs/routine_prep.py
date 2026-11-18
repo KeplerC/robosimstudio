@@ -4,8 +4,8 @@
 The half of this suite that answers the task rather than states it: the measured
 surface a policy is given (:class:`ToolsSurfacePrep`) and the take itself
 (:class:`Wiper`) -- the support hand steadying the bar at its far elbow, the
-work hand taking the sponge, leaning 35 degrees along the bar, pressing to a
-force, stroking the stripe, and putting the sponge back, once per stroke. :class:`Wiper` is
+work hand taking the sponge already leaning 35 degrees along the bar, pressing
+to a force, stroking the stripe until it is clean, and putting the sponge back. :class:`Wiper` is
 one generator that both the benchmark's scripted policy
 (:class:`RoutineSurfacePrep`, which yields actions into ``Env.step``) and the
 live page (``rgbs/scripts/surface_cleaning.py``, which steps the sim itself)
@@ -47,13 +47,23 @@ see :data:`PAD_CONTACT_OFFSET`.
 
 **Nothing holds the sponge but the jaws.** The October build pinned the foam
 under the pads to the hand (a SuperDex node pin re-aimed every step), which is a
-latch and is gone. Held by the pads' squeeze and friction alone -- 14 N a finger,
-firm foam with SuperDex's stickiest regularised friction -- the block carries
-fine and creeps and turns in the jaws through a stroke, and is out of them by
-the second. So the take puts it back on the mat after every stroke and takes it
-up again, re-centred. ``examples/08_demos/wipe_the_bar`` measured the same
-friction-only grasp at 0.69-0.76 of its stripe over three takes, with the foam
-sliding 69-226 mm in the hand.
+latch and is gone. The block is held by the pads' squeeze and friction alone:
+7 N a pad (the one finger actuator's 14 N cap, split by the finger equality, read
+off the pads' own contact records) on firm foam with SuperDex's stickiest
+regularised friction. What that grasp does not hold is a TURN about the jaw
+axis: a moment the bar puts on the block about that axis turns it. Logged in the
+tool frame every step, the November take (picked upright, wiped leaning
+35 degrees, 3 N) turned the block 4 degrees about the jaw axis during the press
+and 54 by the end of the one stroke, while its centre moved under 10 mm: the
+leaning block touched the crown at its low trailing edge, a hand's width behind
+the pads, so the press and the drag turned it the same way.
+
+So the take is built to put no moment on that axis it can avoid (:class:`Wiper`):
+the hand takes the block already leaning, so it hangs LEVEL when the hand leans
+for the wipe; it presses lightly and backs off an over-press fast; it strokes
+one way, slowly. Measured on the bench: the block turns 3-4 degrees and moves
+about a millimetre in the hand over a whole stroke, and one stroke clears the
+stripe (1.000 in three of three episodes, 2026-11-17).
 
 **``sim.attach`` will lie to you.** It registers against this sponge (the entity
 carries particles), reports ``attached: true``, and does nothing: it appends a
@@ -72,7 +82,7 @@ from typing import Any
 import numpy as np
 
 from robosimstudio.arms import arm_slot, arm_slots
-from robosimstudio.core.math import quat_multiply
+from robosimstudio.core.math import quat_multiply, quat_to_mat
 
 from .prep.layout import LAYOUT, Layout
 
@@ -157,47 +167,63 @@ layout. 40 mm lifts the foam clear of the crown, which is all a crossing needs,
 and the force loop's travel budget is this plus 30 mm."""
 
 GRIP_DEPTH = 0.006
-"""How far below the block's centre the pads close [m]: the drag of a stroke acts
-at the foam's underside, and every millimetre the pads sit nearer it is a shorter
-lever turning the block in the jaws."""
+"""How far below the block's centre the pads are aimed [m]: the drag of a stroke
+acts at the foam's underside, and every millimetre the pads sit nearer it is a
+shorter lever turning the block in the jaws. The fingertips reach the mat first,
+so this asks for lower than the hand gets; it is what makes the hand go down
+until they do."""
 
 TILT_DEG = 35.0
-"""How far the working hand leans along the bar for the wipe [deg].
+"""How far the working hand leans along the bar, for the pick, the carry and the wipe [deg].
 
-The real hand comes in leaning along the bar. Measured on the page, 35-50
-degrees is the band the arm holds through a whole stroke at the -90 degree jaw
-roll; upright (0) the wrist runs out of orientation at the far end of the stripe.
-The lean lifts the sponge's far edge, so the contact patch trails the held
-centre by about a third of the block -- which is why the strokes overrun the
-stripe (:data:`OVERRUN_FAR`)."""
+Reach decides it. Solved along the stroke at the -90 degree jaw roll, 35 is the
+only lean of 0, 10, 20 and 35 that holds the whole stroke (0.0 mm everywhere);
+20 misses the far end by 20 mm and upright by 54. The pick solves at 35 too, to
+0.0 mm at and below the block.
 
-PRESS_N = 3.0
+The hand takes the block at this lean rather than upright, and that is what
+keeps it in the jaws. Taken upright and then leaned, the block leaned with the
+hand, touched the crown at its low trailing edge a hand's width behind the pads,
+and turned 54 degrees in the jaws in one stroke. Taken leaning, it hangs level
+and touches along its length."""
+
+PRESS_N = 1.0
 """What the force loop presses to, read off the taint field [N].
 
-A newton clears the crown under the 22 mm calibration (the ±40 deg stations
-needed ~1 N and 3 mm of overdrive). 3 N rather than the latched build's 4: held
-by friction alone the block's drag is what turns it in the jaws, and the first
-stroke cleaned 0.54 at 3 N against 0.04 at 4 (one take each)."""
+Light, because the level block touches the crown along its whole length: a
+newton spread along 75 mm of a 4 mm stripe is well over the field's 300 Pa
+floor, and one stroke at it clears the stripe. The drag that turns the block in
+the jaws grows with the press, and at 3 N the block pitched over its leading
+edge in the first second of the stroke and rolled out of the jaws."""
 
-STROKE_SPEED = 0.06
+STROKE_SPEED = 0.03
 """Along the bar, during a stroke [m/s]. Removal is pressure times sliding
-speed, so a stationary press removes nothing; 60 mm/s is what the clip's hand
-does and what keeps a segment's IK inside the gate."""
+speed, so what one pass removes does not depend on the speed -- only how hard
+the press is. Half the clip's 60 mm/s: at 60 the first stroke held (4 degrees of
+turn in the jaws) but a second dug in to 8.4 N and turned the block 63 degrees;
+at 30 eight strokes on one grasp turned it 7 degrees in all."""
 
-STROKE_CYCLES = 3
-"""Strokes, each on a fresh grasp, before the take stops (main's wipe_the_bar, with
-the foam latched: 0.91, 0.94, 0.95 and 0.95-0.96 of the stripe after each of four).
-Three, because without the latch a re-taken block has come back out of the jaws
-before a third press in every take so far."""
+STROKE_CYCLES = 8
+"""Strokes a take may spend before it stops. One clears the stripe on the shipped
+scene; the rest are the budget for a take whose first stroke leaves some blue,
+each aimed at what is left (:meth:`Wiper._missed`)."""
 
-OVERRUN_NEAR = 0.025
+OVERRUN_NEAR = 0.0825
 OVERRUN_FAR = 0.045
-"""How far a stroke's ends run past the stripe's, near and far [m].
+"""How far a stroke's ends run past the stripe's, near and far, for a block of
+the sponge's half-length centred on the hand [m].
 
-Both ends overrun the stripe: measured on the page, the end tenths of the stripe
-were what stayed blue (38 % and 8 % cleared) when the strokes turned at the
-block's own edge. The far end runs further because the leaning hand's contact
-patch trails the held centre toward the near end."""
+The near end runs a long way past, because the press runs AHEAD of the hand: in
+a forward stroke the block's back half lifts off the crown and its front half
+carries the press. Started with the hand at -120 mm, every stroke left the
+stripe's first 20-25 mm blue in all three of its columns (0.889 cleaned after
+one stroke, 0.947 after eight); started at -145, one stroke clears all of it.
+The far end is held back by the steadying hand (:data:`HAND_CLEAR`), and the
+front half reaches it anyway."""
+
+NEAR_KEEP = 0.025
+"""How far inside the near elbow's tangent point a stroke may start, hand on [m]:
+the block's back half hangs over the elbow, which drops away from it."""
 
 HAND_CLEAR = 0.025
 """A stroke never comes within this of the steadying hand's pads [m] -- a
@@ -207,10 +233,16 @@ that hand off the bar."""
 TRIM_BOUNDS = (-0.015, 0.008)
 """How far a stroke's press-following may take the hand from its seat [m]. See :meth:`Wiper._follow`."""
 
-FOLLOW_GAIN, FOLLOW_RATE = 4.0e-5, 0.004
+FOLLOW_GAIN, FOLLOW_RATE = 2.0e-4, 0.020
 """How a stroke holds its press (:meth:`Wiper._follow`): the hand goes down (or up)
-0.04 mm a control step per newton short (or over), at most 4 mm/s [m/N, m/s].
-examples/08_demos/wipe_the_bar's numbers, measured on this scene."""
+0.2 mm a control step per newton short (or over), at most 20 mm/s [m/N, m/s].
+
+Fast, and it has to be. With wipe_the_bar's 0.04 mm and 4 mm/s the press went
+from 1 N to 7 N within half a second of the stroke starting -- the drag tips
+the block's leading edge into the crown, the deeper edge drags harder, and the
+hand could not rise fast enough to stop it -- and the block rolled out of the
+jaws at every target tried (0.6, 1.0 and 1.6 N). At these numbers the press
+holds 1.0 N through the stroke."""
 
 PATCH_CLEARED = 0.96
 """When the take stops stroking. Over the document's 0.95 gate, so an exit
@@ -235,6 +267,28 @@ SUPPORT_GRIP_EXTRA = 0.004
 """The steadying hold: approach the far elbow from 50 mm above, come down so
 the pads straddle the tube with the TCP 4 mm over its axis, and close to the
 tube's diameter plus 4 mm -- a steadying hand, not a clamp on a welded bar."""
+
+PICK_STANDOFF = 0.10
+"""How far over the sponge the hand comes in, and goes back to with it [m]."""
+
+PRESS_FROM = 0.008
+"""How far above where the underside meets the crown the force loop starts [m]."""
+
+PRESS_STEP, PRESS_DWELL = 0.001, 6
+"""The force loop's millimetre and how many control steps it holds each one."""
+
+PRESS_TRAVEL = 0.025
+"""How far the force loop goes down looking for the press before it gives up [m]."""
+
+MAX_GRASPS = 3
+"""Grasps a take may spend: the first, and a fresh one each time the sponge slips."""
+
+DRIFT_DEG, DRIFT_MM = 10.0, 6.0
+"""How far the sponge may turn and move in the hand, off the shape the jaws left
+it in, before the take sets it down and takes it again."""
+
+MIN_STROKE = 0.06
+"""The shortest stroke the take aims at what is still blue [m]."""
 
 TAIL = 150
 """Settled control steps after both hands have retreated: the goal's
@@ -285,7 +339,7 @@ def stroke_span(layout: Layout, sponge_half: float) -> tuple[float, float]:
     ``sponge_half`` half-length: the stripe overrun at both ends, kept on the
     straight run at the near end and a jaw's width clear of the steadying hand
     at the far one."""
-    near = max(-layout.stripe_half + sponge_half - OVERRUN_NEAR, -layout.straight_half + sponge_half + 0.005)
+    near = max(-layout.stripe_half + sponge_half - OVERRUN_NEAR, -layout.straight_half + NEAR_KEEP)
     far = min(layout.stripe_half - sponge_half + OVERRUN_FAR, layout.support_u - sponge_half - HAND_CLEAR)
     return float(near), float(far)
 
@@ -452,7 +506,7 @@ class ToolsSurfacePrep:
             (
                 "sim.grip_sponge",
                 self.grip_sponge,
-                "Close on the sponge and carry it: jaws for friction, pins for the hold.",
+                "Close on the sponge and carry it by the jaws' squeeze alone.",
             ),
             ("sim.release_sponge", self.release_sponge, "Let the sponge go and open the jaws."),
             ("sim.set_grip", self.set_grip, "Command a pad separation in metres, or 'open'. Ramped."),
@@ -891,18 +945,27 @@ class Wiper:
     * The support hand steadies the bar at the far elbow's tangent point,
       approached from :data:`SUPPORT_STANDOFF` above; low approaches swept the
       elbow. Skipped, with a note, if its IK misses by over 5 mm or 15 deg.
-    * Per stroke, the work hand picks the sponge top-down at the -90 deg jaw
-      roll (:data:`JAW_ROLL_DEG`), so the 75 mm axis lies along the bar, and
-      holds it by the pads' contact alone.
-    * It carries it up, past a gate short of the near block and over the
-      stripe leaning :data:`TILT_DEG` along the bar, and presses BY FORCE -- a
-      millimetre at a time until the field reads :data:`PRESS_N`.
-    * One stroke runs between :func:`stroke_span`'s ends, one way, the low edge
-      trailing, the hand following the press every control step
-      (:meth:`_follow`).
-    * The sponge goes back where it came from, upright, and is taken up again
-      for the next stroke; both hands retreat; :data:`TAIL` settled steps make
-      the goal's two-second hold happen inside the take.
+    * The work hand picks the sponge at the -90 deg jaw roll
+      (:data:`JAW_ROLL_DEG`), so the 75 mm axis lies along the bar, ALREADY
+      leaning :data:`TILT_DEG` along the bar: the lean is a turn about the jaw
+      axis, so the pads land on the same faces and the block, lying flat on the
+      mat as it is taken, hangs level whenever the hand leans. It holds it by
+      the pads' contact alone.
+    * It carries it straight up, then over the near end of the stripe at the
+      crossing height, and presses BY FORCE -- a millimetre at a time until the
+      field reads :data:`PRESS_N`.
+    * A stroke runs between :func:`stroke_span`'s ends, away from the arm, the
+      hand following the press every control step (:meth:`_follow`). One way
+      only: stroked back toward the arm, the level block dug in to 12 N and
+      turned 83 degrees in the jaws. After it the
+      take reads the stripe and the grasp: clean, it stops; the block turned or
+      moved in the hand past :data:`DRIFT_DEG` / :data:`DRIFT_MM`, it puts it
+      down and takes it again; otherwise it strokes again over what is still
+      blue, at most :data:`STROKE_CYCLES` strokes in all.
+    * The sponge goes back the way it came -- along the bar at the crossing
+      height, then over the mat -- and down where it was taken; both hands
+      retreat; :data:`TAIL` settled steps make the goal's two-second hold
+      happen inside the take.
 
     The live page's twin of the clip (``rgbs/scripts/surface_cleaning.py``)
     plays exactly this on exactly this scene.
@@ -955,6 +1018,11 @@ class Wiper:
         self.slide = 0.0
         self.steadied = False
         self.phase = "idle"
+        self.taken = 0
+        self.pick: np.ndarray | None = None
+        """Where the pads took the sponge [world], and where it goes back."""
+        self.grasp_ref: np.ndarray | None = None
+        """The sponge's nodes in the tool frame as the jaws left them, for :meth:`drift`."""
 
     # ------------------------------------------------------------- helpers
     def _q(self, name: str) -> np.ndarray:
@@ -1135,26 +1203,62 @@ class Wiper:
         self.slide = float(field["slide_speed"])
         return field
 
+    def _in_hand(self) -> np.ndarray:
+        """The sponge's nodes in the work hand's tool frame [m]."""
+        pos, quat = self.sim.arm(self.work).ee_pose(self.sim.state)
+        rot = quat_to_mat(np.asarray(quat, dtype=np.float64))
+        return (self.sim.pipeline.state_0.particle_q.numpy()[self._sponge_nodes()] - pos) @ rot
+
+    def drift(self) -> tuple[float, float]:
+        """How far the sponge has turned [deg] and moved [mm] in the hand since the grasp.
+
+        A rigid fit of the nodes in the tool frame against the shape the jaws
+        left them in, so the foam's own squash does not read as slip."""
+        if self.grasp_ref is None:
+            return 0.0, 0.0
+        now = self._in_hand()
+        ref = self.grasp_ref
+        h = (ref - ref.mean(axis=0)).T @ (now - now.mean(axis=0))
+        u, _, vt = np.linalg.svd(h)
+        d = float(np.sign(np.linalg.det(vt.T @ u.T)))
+        rot = vt.T @ np.diag([1.0, 1.0, d]) @ u.T
+        angle = math.degrees(math.acos(max(-1.0, min(1.0, (float(np.trace(rot)) - 1.0) / 2.0))))
+        return angle, float(np.linalg.norm(now.mean(axis=0) - ref.mean(axis=0))) * 1e3
+
+    def _aim(self, target, quat, dwell: int):
+        """Put the work hand's target at ``target`` and hold it ``dwell`` control steps.
+
+        For the press's millimetre moves: one solve and a fixed dwell. A leg sizes
+        itself by the turn between where the hand IS and where it is told to be, and
+        with the foam jammed on the bar that read as a half turn -- 180 steps for
+        each millimetre, which is how one take spent 8000 steps in a single press."""
+        ik = self.sim.arm(self.work)
+        self.seed[self.work] = np.asarray(
+            ik.solve_q_full(self.seed[self.work], np.asarray(target, dtype=np.float64), quat), dtype=np.float64
+        )
+        self.held[self.work] = self.seed[self.work][list(ik.arm_coords)]
+        yield from self._hold_steps(dwell)
+
     def _press(self, xy, z_start: float, quat, *, target_n: float, max_travel: float, label: str = "press"):
         """Descend in millimetre steps until the marker field reads ``target_n`` of
-        press, or ``max_travel`` is spent. Returns the seat height.
+        press, or ``max_travel`` is spent. Returns the seat height, or ``None`` when
+        nothing pressed: the sponge is not where the hand thinks it is.
 
-        A force loop rather than a geometric depth: the hand leans along the
-        bar, so the sponge's lowest point is not where a flat-grasp measurement
-        put it, and free-hanging foam sags and creeps besides.
-        """
+        A force loop rather than a geometric depth: the foam squashes in the jaws
+        and the arm sags differently along the bar, so where the underside meets
+        the crown is read, not predicted."""
         z, spent, force = float(z_start), 0.0, 0.0
-        while spent < max_travel:
-            z -= 0.001
-            spent += 0.001
-            yield from self._leg(self.work, [xy[0], xy[1], z], quat, speed=0.02, label="", gate=False)
-            yield from self._hold_steps(4)
+        while spent < max_travel - 1e-9:
+            z -= PRESS_STEP
+            spent += PRESS_STEP
+            yield from self._aim([xy[0], xy[1], z], quat, PRESS_DWELL)
             field = self._field()
             force = float(field["wipe_force"]) if field["touching"] else 0.0
             if force >= target_n:
-                break
-        self._say(f"{label}: seated {spent * 1e3:.0f} mm down at {force:.2f} N")
-        return z
+                self._say(f"{label}: seated {spent * 1e3:.0f} mm down at {force:.2f} N")
+                return z
+        self._say(f"{label}: {spent * 1e3:.0f} mm down and {force:.2f} N; the sponge is not under the hand")
+        return None
 
     def _follow(self, a, b, quat, label: str):
         """Slide from ``a`` to ``b`` at :data:`STROKE_SPEED`, nudging the hand down or
@@ -1186,15 +1290,80 @@ class Wiper:
             self.held[self.work] = np.asarray(seed, dtype=np.float64)[list(ik.arm_coords)]
             yield from self._tick()
         self.seed[self.work] = np.asarray(seed, dtype=np.float64)
+        self.trim = z - seat
         self._field()
-        self._say(f"{label}: cleaned {self.cleaned:.2f}, press {self.press_n:.2f} N")
+        turned, moved = self.drift()
+        self._say(
+            f"{label}: cleaned {self.cleaned:.3f}, press {self.press_n:.2f} N, "
+            f"sponge {turned:.1f} deg / {moved:.1f} mm off its grasp"
+        )
+
+    def _missed(self, margin: float) -> tuple[float, float] | None:
+        """The axial span [m, from the bar's centre] of the stripe still blue, widened
+        by ``margin`` each way, or ``None`` when every cell is clear."""
+        taint = self.sim.scene.by_name["taint"]
+        field = self._field()
+        dirty = np.asarray(field["intensity"]) > float(taint.spec.cleared_below)
+        if not dirty.any():
+            return None
+        u = taint.cells_ut[dirty, 0]
+        return float(u.min()) - margin, float(u.max()) + margin
+
+    def _pick(self, quat):
+        """Take the sponge where it lies, the hand already at the wipe's lean.
+
+        The PADS onto the block's centroid, not the TCP: a 7 mm trim on this hand."""
+        self.phase = "pick"
+        centroid = self.sim.pipeline.state_0.particle_q.numpy()[self._sponge_nodes()].mean(axis=0)
+        pick = centroid - _qrot(quat, np.asarray(PAD_CONTACT_OFFSET, dtype=np.float64))
+        pick[2] -= GRIP_DEPTH
+        self.pick = pick
+        yield from self._leg(
+            self.work, pick + np.array([0.0, 0.0, PICK_STANDOFF]), quat, speed=0.20, label="over the sponge", gate=False
+        )
+        yield from self._hold_steps(20)
+        yield from self._leg(self.work, pick, quat, speed=0.05, label="down onto the sponge", gate=False)
+        yield from self._hold_steps(20)
+        yield from self._ramp_grip(self.work, self.grip_gap, steps=60)
+        yield from self._hold_steps(SETTLE)
+        self._take_hold()
+        self.taken += 1
+        yield from self._hold_steps(SETTLE)
+
+    def _put_back(self, quat, above_start):
+        """Back along the bar at the crossing height, over the mat, down, and open.
+
+        The way it came, reversed. The straight line from the far end of the stripe
+        to the mat crosses the near elbow below the crown, and the first take that
+        flew it dragged the foam through the elbow at 8-10 N and out of the jaws."""
+        self.phase = "return"
+        yield from self._leg(
+            self.work, above_start, quat, speed=0.10, label="back along the bar", max_rot=CARRY_MAX_ROT
+        )
+        up = self.pick + np.array([0.0, 0.0, PICK_STANDOFF])
+        yield from self._leg(self.work, up, quat, speed=0.10, label="back over the mat", max_rot=CARRY_MAX_ROT)
+        yield from self._hold_steps(10)
+        yield from self._leg(
+            self.work,
+            [self.pick[0], self.pick[1], self.pick[2] + 0.002],
+            quat,
+            speed=0.05,
+            label="set the sponge down",
+            max_rot=CARRY_MAX_ROT,
+            gate=False,
+        )
+        yield from self._hold_steps(10)
+        self._let_go()
+        self.grasp_ref = None
+        yield from self._ramp_grip(self.work, "open", steps=30)
+        yield from self._hold_steps(15)
+        yield from self._leg(self.work, up, quat, speed=0.10, label="", gate=False)
 
     # ------------------------------------------------------------- the take
     def steps(self):
         """The whole take, without stepping: one yield per control step."""
         sim, L = self.sim, self.layout
-        wq = wipe_quat(self.tilt, JAW_ROLL_DEG)  # the wipe: leaning along the bar
-        pq = wipe_quat(0.0, JAW_ROLL_DEG)  # the pick and the set-down: top-down
+        wq = wipe_quat(self.tilt, JAW_ROLL_DEG)  # the pick, the carry, the wipe and the set-down
         bar_body = int(sim.handles.entity("bar").body)
         pose = sim.pipeline.state_0.body_q.numpy()[bar_body]
         bar = np.asarray(pose[:3], dtype=np.float64)
@@ -1234,113 +1403,85 @@ class Wiper:
                 yield from self._ramp_grip(self.support, tube + SUPPORT_GRIP_EXTRA, steps=40)
                 yield from self._hold_steps(SETTLE)
 
-        # --- pick, wipe once, put it down; again ----------------------------------
-        # Held by friction alone, the block creeps and turns in the jaws through
-        # a stroke and is out of them by the second (cleaned 0.35 and 0.55 in
-        # two takes, both losing it on stroke 1). So every stroke gets a fresh
-        # grasp: the sponge goes back to the mat after each one and is taken up
-        # again where it lies, the pads re-centred on it.
-        L_half = 0.5 * L.sponge_size[1]
-        u0, u1 = stroke_span(L, L_half)
-        before_block = bar + along * -(L.leg_u + L.block_inset[1] + L.block_half[1] + 0.020)
-        start = bar + along * u0
-        far = bar + along * u1
-        self.taken = 0
-        pick = None
-        for cycle in range(self.cycles):
-            # --- the pick ------------------------------------------------------
-            # The PADS onto the block, not the TCP: a 7 mm trim on this hand.
-            self.phase = "pick"
-            centroid = self.sponge_points().mean(axis=0)
-            pick = centroid - _qrot(pq, np.asarray(PAD_CONTACT_OFFSET, dtype=np.float64))
-            pick[2] -= GRIP_DEPTH
-            yield from self._leg(
-                self.work, pick + np.array([0.0, 0.0, 0.10]), pq, speed=0.20, label="over the sponge", gate=False
-            )
-            yield from self._hold_steps(20)
-            yield from self._leg(self.work, pick, pq, speed=0.05, label="down onto the sponge", gate=False)
-            yield from self._hold_steps(20)
-            yield from self._ramp_grip(self.work, self.grip_gap, steps=60)
-            yield from self._hold_steps(SETTLE)
-            self._take_hold()
-            self.taken += 1
-            yield from self._hold_steps(SETTLE)
-
-            # --- to the bar ----------------------------------------------------
-            # Main's wipe_the_bar path, measured on this scene: straight up off
-            # the mat, upright, then to a gate short of the near block at the
-            # crossing height, then over the stripe, leaning. A straight line
-            # from the lift to the stripe swept the foam into the near elbow.
-            self.phase = "carry"
+        # --- take it, wipe until the stripe is clean, put it back -----------------
+        u0, u1 = stroke_span(L, 0.5 * L.sponge_size[1])
+        self.taken, strokes = 0, 0
+        clean = False
+        while not clean and strokes < self.cycles and self.taken < MAX_GRASPS:
+            yield from self._pick(wq)
             clear_z = crown + self.drop + self.clearance
-            gate = np.array([0.5 * (pick[0] + bar[0]), before_block[1], clear_z])
-            up = pick + np.array([0.0, 0.0, 0.10])
-            yield from self._leg(self.work, up, pq, speed=0.10, label="up off the mat", max_rot=CARRY_MAX_ROT)
-            way = self._reachable(self.work, [(gate, wq, "to the gate, leaning"), (gate, pq, "to the gate, upright")])
-            if way is not None:
-                yield from self._leg(self.work, way[0], way[1], speed=0.10, label=way[2], max_rot=CARRY_MAX_ROT)
+            seat_hint = crown + self.drop + PRESS_FROM
+
+            # Up, then over the near end of the stripe at the crossing height,
+            # leaning as it was picked: the block hangs level under the pads.
+            self.phase = "carry"
             yield from self._leg(
                 self.work,
-                [start[0], start[1], clear_z],
+                self.pick + np.array([0.0, 0.0, PICK_STANDOFF]),
                 wq,
                 speed=0.10,
-                label="over the near end of the stripe, leaning",
+                label="up off the mat",
                 max_rot=CARRY_MAX_ROT,
+            )
+            # The slip check's reference: the block as it hangs, not as it lay
+            # on the mat under the pads -- lifting lets it settle 6 mm down the
+            # pads, which is not slip and must not read as it.
+            self.grasp_ref = self._in_hand()
+            span = (u0, u1)
+            above = bar + along * span[0]
+            above_start = np.array([above[0], above[1], clear_z])
+            yield from self._leg(
+                self.work, above_start, wq, speed=0.10, label="over the near end of the stripe", max_rot=CARRY_MAX_ROT
             )
             yield from self._hold_steps(12)
 
-            # --- one stroke ----------------------------------------------------
-            # One way only, the low edge trailing: stroked back with the hand
-            # still leaning, the low edge leads and digs into the crown (main
-            # measured the press going 0.6 -> 7.6 N in two thirds of a second).
-            self.phase = "wipe"
-            seat_z = yield from self._press(
-                (start[0], start[1]),
-                clear_z,
-                wq,
-                target_n=self.press_n_target,
-                max_travel=self.clearance + 0.015,
-                label=f"press {cycle}",
-            )
-            if self.press_n >= 0.5 * self.press_n_target:
-                yield from self._follow(
-                    np.array([start[0], start[1], seat_z]), np.array([far[0], far[1], seat_z]), wq, f"stroke {cycle}"
+            # Strokes on this grasp until the stripe is clean, the grasp has
+            # slipped, or a press finds nothing under the hand.
+            while strokes < self.cycles:
+                self.phase = "wipe"
+                a, b = bar + along * span[0], bar + along * span[1]
+                yield from self._leg(
+                    self.work, [a[0], a[1], clear_z], wq, speed=0.10, label="", max_rot=CARRY_MAX_ROT, gate=False
                 )
-            else:
-                self._say(f"cycle {cycle}: nothing pressing at the end of the travel; the sponge is out of the jaws")
-            pos, _ = sim.arm(self.work).ee_pose(sim.state)
-            yield from self._leg(
-                self.work, [pos[0], pos[1], clear_z], wq, speed=0.06, label="", max_rot=CARRY_MAX_ROT, gate=False
-            )
-            yield from self._hold_steps(10)
+                yield from self._leg(self.work, [a[0], a[1], seat_hint], wq, speed=0.05, label="", gate=False)
+                seat_z = yield from self._press(
+                    (a[0], a[1]),
+                    seat_hint,
+                    wq,
+                    target_n=self.press_n_target,
+                    max_travel=PRESS_TRAVEL,
+                    label=f"press {strokes}",
+                )
+                if seat_z is None:
+                    break
+                yield from self._follow(
+                    np.array([a[0], a[1], seat_z]), np.array([b[0], b[1], seat_z]), wq, f"stroke {strokes}"
+                )
+                strokes += 1
+                seat_hint = seat_z + PRESS_FROM - 0.004
+                pos, _ = sim.arm(self.work).ee_pose(sim.state)
+                yield from self._leg(
+                    self.work, [pos[0], pos[1], clear_z], wq, speed=0.06, label="", max_rot=CARRY_MAX_ROT, gate=False
+                )
+                if self.cleaned >= PATCH_CLEARED:
+                    clean = True
+                    break
+                turned, moved = self.drift()
+                if turned > DRIFT_DEG or moved > DRIFT_MM:
+                    self._say(f"re-grasp: the sponge has turned {turned:.1f} deg and moved {moved:.1f} mm in the hand")
+                    break
+                # The next stroke covers what is still blue, from the field.
+                missed = self._missed(0.5 * L.sponge_size[1])
+                if missed is None:
+                    clean = True
+                    break
+                span = (max(u0, min(missed[0], u1 - MIN_STROKE)), min(u1, max(missed[1], u0 + MIN_STROKE)))
+                self._say(
+                    f"still blue: the next stroke runs {span[0] * 1e3:.0f} to {span[1] * 1e3:.0f} mm along the bar"
+                )
 
-            # --- put it back -------------------------------------------------------
-            # Where it came from, upright, which is what the clip does.
-            self.phase = "return"
-            way = self._reachable(
-                self.work, [(gate, wq, "back to the gate, leaning"), (gate, pq, "back to the gate, upright")]
-            )
-            if way is not None:
-                yield from self._leg(self.work, way[0], way[1], speed=0.10, label=way[2], max_rot=CARRY_MAX_ROT)
-            yield from self._leg(self.work, up, pq, speed=0.10, label="back over the mat", max_rot=CARRY_MAX_ROT)
-            yield from self._hold_steps(10)
-            yield from self._leg(
-                self.work,
-                [pick[0], pick[1], pick[2] + 0.002],
-                pq,
-                speed=0.05,
-                label="set the sponge down, upright",
-                max_rot=CARRY_MAX_ROT,
-            )
-            yield from self._hold_steps(10)
-            self._let_go()
-            yield from self._ramp_grip(self.work, "open", steps=30)
-            yield from self._hold_steps(15)
-            self._field()
-            if self.cleaned >= PATCH_CLEARED:
-                break
-            yield from self._leg(self.work, up, pq, speed=0.10, label="", gate=False)
-        yield from self._leg(self.work, [pick[0], pick[1], pick[2] + 0.16], pq, speed=0.10, label="retreat", gate=False)
+            yield from self._put_back(wq, above_start)
+
         if self.steadied:
             yield from self._ramp_grip(self.support, "open", steps=30)
             yield from self._hold_steps(10)
@@ -1355,7 +1496,10 @@ class Wiper:
             )
         self._field()
         self.phase = "done"
-        self._say(f"done: cleaned {self.cleaned:.3f}; {len(self.refused)} legs refused")
+        self._say(
+            f"done: cleaned {self.cleaned:.3f} in {strokes} strokes on {self.taken} grasps; "
+            f"{len(self.refused)} legs refused"
+        )
         # Two settled seconds is what the goal's `hold-for` needs, and the
         # episode is scored on the world standing still rather than on the last
         # motion having happened.

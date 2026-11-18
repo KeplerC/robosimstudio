@@ -66,11 +66,11 @@
     ; past its block at this aim (the blocks sit at 0.77 of its half-frame, the
     ; sponge past the edge); the top, photo and inset views hold everything.
     (:cameras prep.layout:WIPE_VIEWS)
-    ; Multi-phase: steady the bar, take the sponge, press and three out-and-
-    ; back stroke cycles with a re-seat at the far end, set it back down,
-    ; retreat both hands, and a two second settled hold. Generous on purpose:
-    ; the shipped routine finishes well inside this, and the budget is sized
-    ; for the strokes a lighter-pressing or worse-aimed one needs. ; CAL
+    ; Multi-phase: steady the bar, take the sponge, press, stroke until the
+    ; stripe is clean, set it back down, retreat both hands, and a two second
+    ; settled hold. Generous on purpose: the shipped routine's one stroke
+    ; scores in under 2000 steps, and the budget is sized for the strokes and
+    ; re-grasps a lighter-pressing or worse-aimed one needs. ; CAL
     (:max-steps 12000)
     ; polish's and box_decant's stiffened servos, for the same reason:
     ; pressing a part against a compliant tool at a commanded force is
@@ -79,10 +79,10 @@
     ; force loop works in.
     (:arm-actuation (:ke 1600) (:kd 70))
     ; The jaws close no faster than 80 mm/s (undamped they shut through the
-    ; sponge, wipe_the_bar's measurement) and squeeze the foam with 14 N a
-    ; finger: nothing but that squeeze holds it. At wipe_the_bar's 8 N (and a
-    ; 4 N press) the first stroke cleaned 0.04 of the stripe; at 14 N and 3 N,
-    ; 0.54 (one take each).
+    ; sponge, wipe_the_bar's measurement) and squeeze the foam with 7 N a pad:
+    ; the 14 N cap is the one driven finger's, and the finger equality splits
+    ; it between the two jaws (read off the pads' own contact records, 7.0 N
+    ; each). Nothing but that squeeze holds the sponge.
     (:gripper-actuation (:ke 20000) (:kd 20) (:effort-limit 14) (:joint-damping 100))
   )
 
@@ -244,10 +244,12 @@
             unlike polish there is no stated nominal patch for k_p to be
             fitted against and drift from. The shipped routine presses by
             force -- descending a millimetre at a time until the field reads
-            4 N -- because the leaning hand puts the sponge's lowest point
-            somewhere no flat-grasp measurement predicts, and trims the seat
-            height between stroke segments because the arm sags differently
-            along the bar and the pinned foam creeps in the jaws. CAL-tagged
+            1 N -- because the foam squashes in the jaws and the arm sags
+            differently along the bar, and follows the press through the
+            stroke for the same reason. It takes the sponge with the hand
+            already leaning, so the block hangs level and touches the crown
+            along its length: held by friction alone, a block that leaned
+            with the hand turned in the jaws through every stroke. CAL-tagged
             thresholds are re-measured against the shipped policy before
             sign-off.")
   )
