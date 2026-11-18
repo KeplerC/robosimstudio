@@ -4,8 +4,8 @@
 
 A YAM picks up the scrubbing brush by its handle, scrubs a patch of the paving (84% of it scrubbed, bar 80%) and stands the brush back within 1.8 mm, in the workshop rebuilt from the photos. Check and the physics replays pass on current main.
 
-<a href="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/workshop/media/scrub.mp4"><img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/workshop/media/scrub.webp" width="49%" alt="scrub"></a>
-<a href="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/workshop/media/wide.mp4"><img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/workshop/media/wide.webp" width="49%" alt="wide"></a>
+<a href="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/workshop/media/scrub.mp4"><img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/workshop/media/scrub.webp" width="49%" alt="scrub"></a>
+<a href="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/workshop/media/wide.mp4"><img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/workshop/media/wide.webp" width="49%" alt="wide"></a>
 
 **Status:** verified on main (0bd56ef) · **robot:** YAM  
 **Source:** Twin built by a coding agent from two Unsplash photos; ported to current main by Codex and accepted by a reviewer agent [1](https://unsplash.com/photos/mHdaRVIBq0g) [2](https://unsplash.com/photos/4v0mqRgdzVI)  

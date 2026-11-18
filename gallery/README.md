@@ -15,10 +15,10 @@ and each links to its full-length video.
 
 | Project | Entries | Verified | |
 |---|---|---|---|
-| [Real to sim](robosimstudio-real2sim/README.md) | 14 | 5 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/kitchen/media/sweep.webp" width="240" alt=""> |
-| [ABC-130k twins](abc130/README.md) | 8 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/abc130/load-the-cups-into-the-dish-rack/media/sim.webp" width="240" alt=""> |
-| [VABAR](vabar/README.md) | 42 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/vabar/tool-sorting-hammer/media/tool-sorting-hammer.webp" width="240" alt=""> |
-| [Bench tasks](rgbs/README.md) | 6 | 5 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/rgbs/bar-wipe-with-sponge/media/bar-wipe-with-sponge.webp" width="240" alt=""> |
+| [Real to sim](robosimstudio-real2sim/README.md) | 14 | 8 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/kitchen/media/sweep.webp" width="240" alt=""> |
+| [ABC-130k twins](abc130/README.md) | 8 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/abc130/load-the-cups-into-the-dish-rack/media/sim.webp" width="240" alt=""> |
+| [VABAR](vabar/README.md) | 42 | 0 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/vabar/tool-sorting-hammer/media/tool-sorting-hammer.webp" width="240" alt=""> |
+| [Bench tasks](rgbs/README.md) | 6 | 5 | <img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/rgbs/bar-wipe-with-sponge/media/bar-wipe-with-sponge.webp" width="240" alt=""> |
 
 An entry's files (its clips, and for a ported scene its meshes and references) come down with:
 

@@ -4,8 +4,8 @@
 
 A YAM picks a bristle brush up off its rest by contact, writes RSS in a 1 mm layer of dust (IoU 0.843 against the letters, every letter above 0.82) and sets the brush back on its rest within 0.4 mm, in a textured workshop. Check and all seven physics replays pass on current main.
 
-<a href="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/brush-rss/media/brush.mp4"><img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/brush-rss/media/brush.webp" width="49%" alt="brush"></a>
-<a href="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/brush-rss/media/close.mp4"><img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/398299814f196172e4c02c137711e5cbb9517d18/gallery/robosimstudio-real2sim/brush-rss/media/close.webp" width="49%" alt="close"></a>
+<a href="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/brush-rss/media/brush.mp4"><img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/brush-rss/media/brush.webp" width="49%" alt="brush"></a>
+<a href="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/brush-rss/media/close.mp4"><img src="https://huggingface.co/datasets/keplerccc/robosimstudio-agentic-real2sim/resolve/3ca1d941efb520209f4bdd9106d4407ce1b8b0de/gallery/robosimstudio-real2sim/brush-rss/media/close.webp" width="49%" alt="close"></a>
 
 **Status:** verified on main (3c20d49) · **robot:** YAM  
 **Source:** Designed scene, no reference photo; ported to current main by Codex and accepted by a reviewer agent  
